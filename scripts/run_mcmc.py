@@ -83,7 +83,10 @@ from astrogwb.paper.runtime import add_runtime_arguments, configure_runtime
 
 if TYPE_CHECKING:
     from astrogwb.paper.inference import AmplitudeMarginalization
-    from astrogwb.simulators.polarization_power import PolarizationPowerCatalog
+    from astrogwb.simulators.polarization_power import (
+        CatalogMetadata,
+        PolarizationPowerData,
+    )
 
 logger = logging.getLogger("run_mcmc")
 
@@ -155,8 +158,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 # --------------------------------------------------------------------------- #
 def run(
     config: RunConfig,
-    injection_catalog: PolarizationPowerCatalog,
-    proposal_catalog: PolarizationPowerCatalog,
+    injection: tuple[PolarizationPowerData, CatalogMetadata],
+    proposal: tuple[PolarizationPowerData, CatalogMetadata],
     jax,
     chain_method: str,
 ):
@@ -180,8 +183,8 @@ def run(
         config.analysis.detectors
     )
     inputs = prepare_inference_inputs(
-        injection_catalog,
-        proposal_catalog,
+        *injection,
+        *proposal,
         observation_time=config.analysis.observation_time,
         minimum_redshift=config.analysis.population.model_kwargs["minimum_redshift"],
         maximum_redshift=config.analysis.population.model_kwargs["maximum_redshift"],
@@ -274,7 +277,7 @@ def save(
     mcmc,
     config: RunConfig,
     *,
-    proposal: PolarizationPowerCatalog | None = None,
+    proposal: tuple[PolarizationPowerData, CatalogMetadata] | None = None,
     timestamp: str | None = None,
     force: bool = False,
     marginalization: AmplitudeMarginalization | None = None,
@@ -302,14 +305,15 @@ def save(
     # population record -- narrowed to this run's analysis window -- keeps the
     # chain the complete, self-describing record of what was sampled.
     if proposal is not None:
+        _, proposal_metadata = proposal
         idata.posterior.attrs["proposal"] = json.dumps(
             {
                 # The record itself, not a field-by-field restatement of it:
                 # one spelling, so a field added to PopulationMetadata reaches
                 # the chain without an edit here.
-                "population": proposal.population.model_dump(mode="json"),
-                "params": dict(proposal.fiducials),
-                "num_samples": proposal.num_samples,
+                "population": proposal_metadata.population.model_dump(mode="json"),
+                "params": dict(proposal_metadata.fiducials),
+                "num_samples": proposal_metadata.num_samples,
             },
             sort_keys=True,
         )
@@ -408,7 +412,9 @@ def main(argv: list[str] | None = None) -> None:
 
     from astrogwb.paper.catalogs import ensure_catalog
 
-    def catalog(role: str, *, generate: bool) -> PolarizationPowerCatalog:
+    def catalog(
+        role: str, *, generate: bool
+    ) -> tuple[PolarizationPowerData, CatalogMetadata]:
         metadata, seed = config.catalog_request(role)
         return ensure_catalog(metadata, seed, catalog_dir, generate=generate)
 
@@ -418,7 +424,7 @@ def main(argv: list[str] | None = None) -> None:
     # generated below -- after the runtime is configured, because drawing a
     # catalog initializes the XLA backend.
     catalog_dir = args.catalog_dir.resolve()
-    catalogs: dict[str, PolarizationPowerCatalog] = {}
+    catalogs: dict[str, tuple[PolarizationPowerData, CatalogMetadata]] = {}
     for role in CATALOG_ROLES:
         try:
             catalogs[role] = catalog(role, generate=False)
@@ -437,25 +443,25 @@ def main(argv: list[str] | None = None) -> None:
         if role not in catalogs:
             catalogs[role] = catalog(role, generate=True)
 
-    proposal_catalog = catalogs["proposal"]
+    _, proposal_metadata = catalogs["proposal"]
     logger.info(
         "Proposal density from %s: model=%s kwargs=%s params=%s",
         config.catalog_stem("proposal"),
-        proposal_catalog.population_model_name,
-        dict(proposal_catalog.population_model_kwargs),
-        dict(proposal_catalog.fiducials),
+        proposal_metadata.population.model_name,
+        dict(proposal_metadata.population.model_kwargs),
+        dict(proposal_metadata.fiducials),
     )
     mcmc, marginalization, inputs = run(
         config,
         catalogs["injection"],
-        proposal_catalog,
+        catalogs["proposal"],
         jax,
         chain_method,
     )
     save(
         mcmc,
         config,
-        proposal=inputs.proposal,
+        proposal=(inputs.proposal_data, inputs.proposal_metadata),
         timestamp=timestamp,
         force=args.force,
         marginalization=marginalization,

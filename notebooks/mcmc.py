@@ -243,7 +243,7 @@ fixed_params = {k: v for k, v in fiducials.items() if k not in sampled_params}
 # - `frequencies` — shape `(nfreq,)`, the FFT frequency grid (Hz).
 # - `polarization_power` — shape `(nfreq, nsamples)`, the on-disk
 #   $|\tilde{h}_+|^2 + |\tilde{h}_\times|^2$ power;
-# - source parameters, exposed as `catalog.source_parameters`.
+# - source parameters, exposed as `data["source_parameters"]`.
 
 # %%
 # The two catalogs come from a run's own config layers, merged here the same
@@ -277,8 +277,8 @@ target = build_population("bns_md_modified_propagation", **target_kwargs)
 # proposal catalog's own recorded density. Nothing here restates the proposal:
 # the file carries it.
 inputs = prepare_inference_inputs(
-    injection_catalog,
-    proposal_catalog,
+    *injection_catalog,
+    *proposal_catalog,
     observation_time=observation_time,
     minimum_redshift=minimum_redshift,
     maximum_redshift=maximum_redshift,
@@ -290,14 +290,14 @@ inputs = prepare_inference_inputs(
     density_sites=DEFAULT_DENSITY_SITES,
 )
 observation = inputs.observation
-proposal = inputs.proposal
+proposal = inputs.proposal_data
 spectral_density_fn = inputs.spectral_density_fn
 
 frequencies = observation.frequencies
 mask = observation.frequency_mask
 effective_psd_arr = inputs.effective_psd
-samples = {name: jnp.asarray(v) for name, v in proposal.source_parameters.items()}
-n_freq, n_samples = proposal.polarization_power.shape
+samples = {name: jnp.asarray(v) for name, v in proposal["source_parameters"].items()}
+n_freq, n_samples = proposal["polarization_power"].shape
 print(f"loaded proposal: n_frequency_bins={n_freq} n_proposal_samples={n_samples}")
 print("band bins:", int(jnp.sum(mask)), "of", frequencies.shape[0])
 

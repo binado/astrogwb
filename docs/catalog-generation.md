@@ -279,19 +279,15 @@ From Python the same node sits behind the same cache:
 import numpy as np
 
 from astrogwb.paper.catalogs import run_catalog
-from astrogwb.simulators.polarization_power import (
-    PolarizationPowerCatalog,
-    polarization_power,
-)
+from astrogwb.simulators.polarization_power import polarization_power
 
 # a committed run's catalog: resolved from its config, generated on a miss
-proposal = run_catalog("variable-proposal-guard", "eps1e-2", "proposal")
+data, metadata = run_catalog("variable-proposal-guard", "eps1e-2", "proposal")
 
 # or any CatalogMetadata at any seed, against any cache directory
-outputs = polarization_power(
+data = polarization_power(
     {"seed": np.uint64(41)}, metadata, cache_dir="outputs/catalogs"
 )
-catalog = PolarizationPowerCatalog.from_arrays(outputs, metadata)
 ```
 
 A hit is read and checked against the metadata it was asked for; a miss is
@@ -312,14 +308,14 @@ The JSON record nests `waveform` and `population`, and includes `fiducials`,
 validates the attribute with `CatalogMetadata.model_validate_json()`; Pydantic
 handles the serialization and validation without a field-by-field HDF5 codec.
 
-What is *not* stored is a callable: `PolarizationPowerCatalog.get_population()`
+What is *not* stored is a callable: `metadata.population.build()`
 looks the name up in the registry and binds the recorded settings, returning
 both callables at once (they hash by identity, so two getters would force a
 recompile on every call).
 
 That is enough to reconstruct the exact map from hyperparameters to source
 density. With the version, it is the file's whole `CatalogMetadata` --
-`PolarizationPowerCatalog.metadata` -- which is what `run_mcmc` checks each
+the `metadata` half of the `(data, metadata)` pair -- which is what `run_mcmc` checks each
 catalog against before sampling.
 
 The density factors are deliberately *not* part of the record. They change no
@@ -348,9 +344,8 @@ For a catalog, `outputs/` holds `frequencies` `(F,)`, `polarization_power`
 format names or version files: the path says which node, metadata and inputs a
 file answers, and `read(path)` returns `(inputs, outputs, metadata_json)` to a
 caller that was handed a file by path.
-`PolarizationPowerCatalog.from_arrays(outputs, metadata)` validates the arrays
-(shapes, a finite increasing grid, a `redshift` column) and
-`get_population()` rebuilds the recorded population from the registry: an
+The arrays are used as read (the writer is the only source of files, so they
+are not re-validated), and `metadata.population.build()` rebuilds the recorded population from the registry: an
 unknown name raises `KeyError` listing what is registered, and a construction
 setting the population does not take raises `TypeError`. Bin widths are not
 stored; they are derived from `frequencies`.
@@ -362,7 +357,7 @@ wraps a simulator function `fn(inputs, metadata, **settings)`:
 
 | | node | metadata | inputs | outputs wrap as |
 | --- | --- | --- | --- | --- |
-| catalogs | `polarization_power` | `CatalogMetadata` | `{"seed": uint64 scalar}` | `PolarizationPowerCatalog.from_arrays` |
+| catalogs | `polarization_power` | `CatalogMetadata` | `{"seed": uint64 scalar}` | `(data, metadata)` as is |
 | spectra | `spectra` | `SpectraMetadata` | `{"seeds": uint64 array}` | `SpectralDensityCatalog.from_arrays` |
 
 A node's result lives at
@@ -394,8 +389,8 @@ the spectra record, hence its keys, but no catalog draw, so it did not bump.
 The waveform metadata records `frequency_spacing`, `frequency_resolution` and
 `turnover_frequency` -- what was *requested* of the generating backend -- while
 the bin widths used in every integral are derived from the `frequency` dataset
-itself (`astrogwb.frequency.bin_widths`, exposed as
-`PolarizationPowerCatalog.bin_widths`); the backend chooses the actual grid, so
+itself (`astrogwb.frequency.bin_widths`, used directly on
+`data["frequencies"]`); the backend chooses the actual grid, so
 the two can differ. The grid need only be strictly increasing: each bin's width
 is half the distance between its neighbours, which is the grid spacing on a
 uniform grid and grows with frequency above the turn of a `"loglinear"` one.
@@ -657,8 +652,8 @@ in the shared `[analysis]` table — so the per-sample log density cannot be
 baked into the catalog: it depends on a truncation the run chooses, not on
 anything generation knows.
 
-`PolarizationPowerCatalog.restrict_redshift(minimum_redshift, maximum_redshift)` narrows both halves
-together, and that is the whole reason it is one method. Dropping samples without narrowing
+`restrict_redshift(data, metadata, minimum_redshift, maximum_redshift)` narrows both halves
+together, and that is the whole reason it is one function. Dropping samples without narrowing
 the recorded model would leave the density normalized over a window the samples
 no longer span, and every importance weight would be off by that
 normalization. Draws truncated to a sub-window follow the same law as draws

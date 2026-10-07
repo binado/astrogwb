@@ -8,7 +8,7 @@ a miss. Either way the density its samples follow comes back off the file's
 own population record rather than being reassembled from the run config.
 
 What used to live here has mostly moved to where it belongs:
-:meth:`~astrogwb.simulators.polarization_power.PolarizationPowerCatalog.restrict_redshift`
+:func:`~astrogwb.simulators.polarization_power.restrict_redshift`
 narrows the samples and the recorded population together, and the proposal density is evaluated by
 :func:`~astrogwb.importance.spectral.build_importance_spectrum` directly from
 the catalog's own source model. Fiducial GW propagation is gone
@@ -20,6 +20,7 @@ construction instead of being patched up at the call site.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -29,7 +30,7 @@ from astrogwb.paper.config.runs import CATALOGS_ROOT, assemble_run
 from astrogwb.simulators.core import batch_keys, load, write
 from astrogwb.simulators.polarization_power import (
     CatalogMetadata,
-    PolarizationPowerCatalog,
+    PolarizationPowerData,
     PolarizationPowerSimulator,
     catalog_stem,
 )
@@ -40,8 +41,8 @@ def load_run_catalog(
     *,
     label: str,
     request: tuple[CatalogMetadata, np.uint64] | None = None,
-) -> PolarizationPowerCatalog:
-    """Load one catalog file, validating its format and its population record.
+) -> tuple[PolarizationPowerData, CatalogMetadata]:
+    """Load one catalog file, validating its population record.
 
     ``label`` is the role -- ``"injection"`` or ``"proposal"`` -- and is what
     identifies the catalog in error messages. Given a ``request``, the file
@@ -56,20 +57,19 @@ def load_run_catalog(
     if not path.is_file():
         raise FileNotFoundError(f"{label} catalog not found: {path}")
     try:
-        outputs, recorded, attrs = load(path, CatalogMetadata)
-        catalog = PolarizationPowerCatalog.from_arrays(outputs, recorded)
+        data, recorded, attrs = load(path, CatalogMetadata)
         if request is not None:
             metadata, seed = request
-            if catalog.metadata.key() != metadata.key() or attrs.get("seed") != seed:
+            if recorded.key() != metadata.key() or attrs.get("seed") != seed:
                 raise ValueError(
-                    f"records {catalog.metadata.key()} at seed {attrs.get('seed')}, "
+                    f"records {recorded.key()} at seed {attrs.get('seed')}, "
                     f"not the requested {metadata.key()} at seed {seed}:\n"
-                    f"  recorded:  {catalog.metadata.model_dump_json()}\n"
+                    f"  recorded:  {recorded.model_dump_json()}\n"
                     f"  requested: {metadata.model_dump_json()}"
                 )
     except ValueError as error:
         raise ValueError(f"{label} catalog {path}: {error}") from error
-    return catalog
+    return cast(PolarizationPowerData, data), recorded
 
 
 def catalog_path(
@@ -81,15 +81,15 @@ def catalog_path(
 
 def generate_catalog(
     metadata: CatalogMetadata, seed: int | np.integer, path: Path | str
-) -> PolarizationPowerCatalog:
+) -> tuple[PolarizationPowerData, CatalogMetadata]:
     """Draw the catalog of ``metadata`` at ``seed`` and write it to ``path``.
 
     The seed becomes the draw's key through :func:`~astrogwb.simulators.core.batch_keys`
     (key 0 of the seed's batch). Generation reaches JAX.
     """
-    outputs = PolarizationPowerSimulator(metadata)(batch_keys(seed, 1)[0])
-    write(path, outputs, metadata, seed=int(seed))
-    return PolarizationPowerCatalog.from_arrays(outputs, metadata)
+    data = PolarizationPowerSimulator(metadata)(batch_keys(seed, 1)[0])
+    write(path, data, metadata, seed=int(seed))
+    return data, metadata
 
 
 def ensure_catalog(
@@ -98,7 +98,7 @@ def ensure_catalog(
     directory: Path | str,
     *,
     generate: bool = True,
-) -> PolarizationPowerCatalog:
+) -> tuple[PolarizationPowerData, CatalogMetadata]:
     """The catalog of ``metadata`` at ``seed`` in ``directory``, drawn on a miss.
 
     A hit is checked against the request. ``generate=False`` makes a miss raise
@@ -121,7 +121,7 @@ def run_catalog(
     *,
     cache_dir: Path | str = CATALOGS_ROOT,
     root: Path | None = None,
-) -> PolarizationPowerCatalog:
+) -> tuple[PolarizationPowerData, CatalogMetadata]:
     """The catalog one role of a committed run samples against.
 
     Resolves the run's config into its catalog metadata and returns the cached file

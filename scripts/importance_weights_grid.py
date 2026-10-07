@@ -45,6 +45,7 @@ from astrogwb.paper.plotting import (
     use_paper_style,
 )
 from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
+from astrogwb.simulators.polarization_power import restrict_redshift
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes.
 # Restore the standard projection for consistent plotting.
@@ -211,10 +212,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     # The proposal density comes from the catalog's own population record,
     # exactly as scripts/run_mcmc.py builds it -- so this figure reweights
     # against the same denominator the chains did, with nothing restated here.
-    catalog = load_run_catalog(catalog_path, label="proposal").restrict_redshift(
-        Z_MIN, Z_MAX
+    data, metadata = restrict_redshift(
+        *load_run_catalog(catalog_path, label="proposal"), Z_MIN, Z_MAX
     )
-    n_samples = catalog.num_samples
+    n_samples = metadata.num_samples
     print(f"loaded catalog samples: n_proposal_samples={n_samples}")
 
     grid_kwargs = {
@@ -224,7 +225,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     }
     target = build_population("bns_md_modified_propagation", **grid_kwargs)
     log_weights_fn = build_importance_spectrum(
-        catalog,
+        data,
+        metadata,
         source_model=target.source_model,
         merger_rate_fn=target.merger_rate_fn,
         density_sites=DEFAULT_DENSITY_SITES,

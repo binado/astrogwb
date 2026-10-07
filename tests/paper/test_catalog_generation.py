@@ -26,7 +26,7 @@ from astrogwb.paper.catalogs import generate_catalog as draw_to
 from astrogwb.simulators.core import batch_keys, load
 from astrogwb.simulators.polarization_power import (
     CatalogMetadata,
-    PolarizationPowerCatalog,
+    PolarizationPowerData,
     PolarizationPowerSimulator,
 )
 
@@ -35,10 +35,11 @@ RequestFactory = Callable[..., CatalogMetadata]
 SEED = np.uint64(41)
 
 
-def _draw(request: CatalogMetadata, seed: np.uint64 = SEED) -> PolarizationPowerCatalog:
-    """The catalog ``request`` gives at ``seed``, generated in memory."""
-    outputs = PolarizationPowerSimulator(request)(batch_keys(seed, 1)[0])
-    return PolarizationPowerCatalog.from_arrays(outputs, request)
+def _draw(
+    request: CatalogMetadata, seed: np.uint64 = SEED
+) -> tuple[PolarizationPowerData, CatalogMetadata]:
+    """The draw ``request`` gives at ``seed``, generated in memory."""
+    return PolarizationPowerSimulator(request)(batch_keys(seed, 1)[0]), request
 
 
 @pytest.fixture(scope="module")
@@ -106,7 +107,7 @@ def test_generator_with_ripple_request_records_the_request(
 ) -> None:
     request = make_request()
     path = catalog_path(request, SEED, tmp_path)
-    generated = draw_to(request, SEED, path)
+    _, generated = draw_to(request, SEED, path)
     _, recorded, attrs = load(path, CatalogMetadata)
 
     assert recorded.key() == request.key()
@@ -118,10 +119,12 @@ def test_generator_with_ripple_request_records_the_request(
 def test_generator_with_same_request_is_reproducible(
     make_request: RequestFactory,
 ) -> None:
-    first = _draw(make_request())
-    second = _draw(make_request())
+    first, _ = _draw(make_request())
+    second, _ = _draw(make_request())
 
-    np.testing.assert_array_equal(first.polarization_power, second.polarization_power)
+    np.testing.assert_array_equal(
+        first["polarization_power"], second["polarization_power"]
+    )
 
 
 @pytest.mark.integration
@@ -129,28 +132,28 @@ def test_generator_with_guard_mixture_records_its_fraction(
     make_request: RequestFactory,
 ) -> None:
     """The eps in the config is the eps the file records and reweights by."""
-    catalog = _draw(
+    _, metadata = _draw(
         make_request(
             "bns_md_uniform_mixture", extra_kwargs={"uniform_mixing_fraction": 0.1}
         )
     )
 
-    assert catalog.population_model_kwargs["uniform_mixing_fraction"] == 0.1
+    assert metadata.population.model_kwargs["uniform_mixing_fraction"] == 0.1
 
 
 @pytest.mark.integration
 def test_generator_with_gaussian_mass_model_records_its_fiducials(
     make_request: RequestFactory,
 ) -> None:
-    catalog = _draw(
+    _, metadata = _draw(
         make_request(
             "bns_md_gaussian_cosmological",
             extra_fiducials={"mass_mean": 1.33, "mass_sigma": 0.09},
         )
     )
 
-    assert catalog.population_model_name == "bns_md_gaussian_cosmological"
-    assert catalog.fiducials["mass_mean"] == pytest.approx(1.33)
+    assert metadata.population.model_name == "bns_md_gaussian_cosmological"
+    assert metadata.fiducials["mass_mean"] == pytest.approx(1.33)
 
 
 def test_cli_with_unregistered_model_fails_before_generating(

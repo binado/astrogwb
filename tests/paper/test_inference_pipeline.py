@@ -54,7 +54,11 @@ from astrogwb.paper.inference import (
 )
 from astrogwb.paper.utils import load_mapping
 from astrogwb.populations import DEFAULT_DENSITY_SITES
-from astrogwb.simulators.polarization_power import PolarizationPowerCatalog
+from astrogwb.simulators.polarization_power import (
+    CatalogMetadata,
+    PolarizationPowerData,
+    restrict_redshift,
+)
 from astrogwb.utils import years_to_seconds
 
 pytestmark = pytest.mark.integration
@@ -84,6 +88,10 @@ GENERATION_KWARGS: dict[str, float | int] = {
 GUARD_FRACTION = 0.3
 
 
+#: A loaded catalog: the draw and the metadata that describes its density.
+Catalog = tuple[PolarizationPowerData, CatalogMetadata]
+
+
 def _write_catalog(
     path: Path,
     *,
@@ -108,14 +116,14 @@ def _write_catalog(
 
 
 @pytest.fixture
-def injection_catalog(tmp_path: Path) -> PolarizationPowerCatalog:
+def injection_catalog(tmp_path: Path) -> Catalog:
     return load_run_catalog(
         _write_catalog(tmp_path / "injection.h5", seed=0), label="injection"
     )
 
 
 @pytest.fixture
-def proposal_catalog(tmp_path: Path) -> PolarizationPowerCatalog:
+def proposal_catalog(tmp_path: Path) -> Catalog:
     return load_run_catalog(
         _write_catalog(tmp_path / "proposal.h5", seed=1), label="proposal"
     )
@@ -164,16 +172,16 @@ def _analysis_bounds(config: RunConfig) -> AnalysisBounds:
 
 
 def _prepare(
-    injection: PolarizationPowerCatalog,
-    proposal: PolarizationPowerCatalog,
+    injection: Catalog,
+    proposal: Catalog,
     config: RunConfig,
 ):
     detectors, sensitivities = config.detector_registry.build_detectors(
         config.analysis.detectors
     )
     return prepare_inference_inputs(
-        injection,
-        proposal,
+        *injection,
+        *proposal,
         observation_time=config.analysis.observation_time,
         **_analysis_bounds(config),
         detectors=detectors,
@@ -187,11 +195,11 @@ def _prepare(
 # prepare_observation / prepare_inference_inputs
 # --------------------------------------------------------------------------- #
 def test_prepare_observation_keeps_arrays_unmasked(
-    injection_catalog: PolarizationPowerCatalog,
+    injection_catalog: Catalog,
 ) -> None:
     config = _config()
 
-    observation = prepare_observation(injection_catalog, **_analysis_bounds(config))
+    observation = prepare_observation(*injection_catalog, **_analysis_bounds(config))
 
     assert observation.frequencies.shape == FREQUENCIES.shape
     assert observation.spectral_density.shape == FREQUENCIES.shape
@@ -207,26 +215,26 @@ def test_prepare_observation_keeps_arrays_unmasked(
 
 
 def test_the_observed_rate_comes_from_the_injection_catalogs_own_population(
-    injection_catalog: PolarizationPowerCatalog,
+    injection_catalog: Catalog,
 ) -> None:
     """Nothing is cross-checked against the run config any more, so nothing may
     be *read* from it either: the file records what was injected."""
     from reference_population import reference_merger_rate_distance_and_logprob
 
     config = _config()
-    observation = prepare_observation(injection_catalog, **_analysis_bounds(config))
+    observation = prepare_observation(*injection_catalog, **_analysis_bounds(config))
 
     bounds = _analysis_bounds(config)
-    restricted = injection_catalog.restrict_redshift(
-        bounds["minimum_redshift"], bounds["maximum_redshift"]
+    restricted, restricted_metadata = restrict_redshift(
+        *injection_catalog, bounds["minimum_redshift"], bounds["maximum_redshift"]
     )
     expected_rate, _, _ = reference_merger_rate_distance_and_logprob(
         PAPER_POPULATION_PARAMS,
-        jnp.asarray(restricted.source_parameters["redshift"]),
+        jnp.asarray(restricted["source_parameters"]["redshift"]),
         redshift_grid=jnp.linspace(
             bounds["minimum_redshift"],
             bounds["maximum_redshift"],
-            int(restricted.population_model_kwargs["n_grid"]),
+            int(restricted_metadata.population.model_kwargs["n_grid"]),
         ),
     )
     np.testing.assert_allclose(
@@ -237,7 +245,8 @@ def test_the_observed_rate_comes_from_the_injection_catalogs_own_population(
     # already included by the sampled-orientation population.
     np.testing.assert_allclose(
         np.asarray(observation.spectral_density),
-        float(expected_rate) * np.asarray(restricted.polarization_power).mean(axis=1),
+        float(expected_rate)
+        * np.asarray(restricted["polarization_power"]).mean(axis=1),
         rtol=1e-12,
     )
 
@@ -248,8 +257,8 @@ def _bound(inputs: Any) -> dict[str, Any]:
 
 
 def test_prepared_spectrum_keeps_the_full_grid_and_all_samples(
-    injection_catalog: PolarizationPowerCatalog,
-    proposal_catalog: PolarizationPowerCatalog,
+    injection_catalog: Catalog,
+    proposal_catalog: Catalog,
 ) -> None:
     """Nothing is compressed: the band is a mask over the catalog's own grid.
 
@@ -288,30 +297,31 @@ def test_prepared_spectrum_keeps_the_full_grid_and_all_samples(
 
 
 def test_restriction_narrows_the_proposals_recorded_population_too(
-    injection_catalog: PolarizationPowerCatalog,
-    proposal_catalog: PolarizationPowerCatalog,
+    injection_catalog: Catalog,
+    proposal_catalog: Catalog,
 ) -> None:
     """Dropping samples without narrowing the density would misnormalize it."""
     config = _config()
 
     inputs = _prepare(injection_catalog, proposal_catalog, config)
 
-    assert inputs.proposal.num_samples == N_RETAINED
+    narrowed = inputs.proposal_metadata
+    assert narrowed.num_samples == N_RETAINED
     assert (
-        inputs.proposal.population_model_kwargs["minimum_redshift"]
+        narrowed.population.model_kwargs["minimum_redshift"]
         == (config.analysis.population.model_kwargs["minimum_redshift"])
     )
     assert (
-        inputs.proposal.population_model_kwargs["maximum_redshift"]
+        narrowed.population.model_kwargs["maximum_redshift"]
         == (config.analysis.population.model_kwargs["maximum_redshift"])
     )
     # The file on disk is untouched.
-    assert proposal_catalog.population_model_kwargs["minimum_redshift"] == 0.0
+    assert proposal_catalog[1].population.model_kwargs["minimum_redshift"] == 0.0
 
 
 def test_model_kwargs_scale_is_the_full_grid_gaussian_bin_scale(
-    injection_catalog: PolarizationPowerCatalog,
-    proposal_catalog: PolarizationPowerCatalog,
+    injection_catalog: Catalog,
+    proposal_catalog: Catalog,
 ) -> None:
     """The scale is prepared here, not derived inside the inference model."""
     config = _config()
@@ -334,7 +344,7 @@ def test_model_kwargs_scale_is_the_full_grid_gaussian_bin_scale(
 
 
 def test_mismatched_frequency_grids_are_rejected(
-    injection_catalog: PolarizationPowerCatalog, tmp_path: Path
+    injection_catalog: Catalog, tmp_path: Path
 ) -> None:
     shifted = _write_catalog(
         tmp_path / "shifted.h5", seed=2, frequencies=FREQUENCIES + 10.0
@@ -347,8 +357,8 @@ def test_mismatched_frequency_grids_are_rejected(
 
 @pytest.mark.parametrize("uncovered", [0.0, np.inf])
 def test_bins_without_network_coverage_narrow_the_band(
-    injection_catalog: PolarizationPowerCatalog,
-    proposal_catalog: PolarizationPowerCatalog,
+    injection_catalog: Catalog,
+    proposal_catalog: Catalog,
     monkeypatch: pytest.MonkeyPatch,
     uncovered: float,
 ) -> None:
@@ -390,8 +400,8 @@ def test_bins_without_network_coverage_narrow_the_band(
 
 
 def test_a_band_with_fewer_than_two_usable_bins_is_rejected(
-    injection_catalog: PolarizationPowerCatalog,
-    proposal_catalog: PolarizationPowerCatalog,
+    injection_catalog: Catalog,
+    proposal_catalog: Catalog,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _config()
@@ -407,8 +417,8 @@ def test_a_band_with_fewer_than_two_usable_bins_is_rejected(
 
 
 def test_a_sub_band_narrows_the_mask_without_changing_any_shape(
-    injection_catalog: PolarizationPowerCatalog,
-    proposal_catalog: PolarizationPowerCatalog,
+    injection_catalog: Catalog,
+    proposal_catalog: Catalog,
 ) -> None:
     """The whole point: a second band is a new mask value, not a new shape."""
     config = _config()
@@ -431,8 +441,8 @@ def test_a_sub_band_narrows_the_mask_without_changing_any_shape(
 
 
 def test_a_sub_band_is_intersected_with_the_runs_own_band(
-    injection_catalog: PolarizationPowerCatalog,
-    proposal_catalog: PolarizationPowerCatalog,
+    injection_catalog: Catalog,
+    proposal_catalog: Catalog,
 ) -> None:
     """Bounds widen nothing: bins the run already excluded stay excluded."""
     config = _config()
@@ -447,8 +457,8 @@ def test_a_sub_band_is_intersected_with_the_runs_own_band(
 
 
 def test_a_sub_band_with_fewer_than_two_usable_bins_is_rejected(
-    injection_catalog: PolarizationPowerCatalog,
-    proposal_catalog: PolarizationPowerCatalog,
+    injection_catalog: Catalog,
+    proposal_catalog: Catalog,
 ) -> None:
     config = _config()
 
@@ -459,8 +469,8 @@ def test_a_sub_band_with_fewer_than_two_usable_bins_is_rejected(
 
 
 def test_the_marginalized_likelihood_reads_the_band_off_the_mask_too(
-    injection_catalog: PolarizationPowerCatalog,
-    proposal_catalog: PolarizationPowerCatalog,
+    injection_catalog: Catalog,
+    proposal_catalog: Catalog,
 ) -> None:
     """The other production likelihood, end to end through ``build_model``.
 
@@ -497,7 +507,8 @@ def test_the_marginalized_likelihood_reads_the_band_off_the_mask_too(
     compressed_model, _ = build_model(
         config,
         spectral_density_fn=build_importance_spectrum(
-            inputs.proposal,
+            inputs.proposal_data,
+            inputs.proposal_metadata,
             source_model=target.source_model,
             merger_rate_fn=target.merger_rate_fn,
             density_sites=DEFAULT_DENSITY_SITES,
@@ -520,7 +531,7 @@ def test_the_marginalized_likelihood_reads_the_band_off_the_mask_too(
 
 
 def test_a_catalog_may_serve_as_both_roles(
-    injection_catalog: PolarizationPowerCatalog,
+    injection_catalog: Catalog,
 ) -> None:
     """Injection versus proposal is two filenames in a TOML, nothing more."""
     config = _config()
@@ -553,13 +564,15 @@ def _non_gr_config(**overrides: Any) -> RunConfig:
 
 
 def test_the_reference_distance_is_the_stored_distance_of_the_stored_power(
-    injection_catalog: PolarizationPowerCatalog,
-    proposal_catalog: PolarizationPowerCatalog,
+    injection_catalog: Catalog,
+    proposal_catalog: Catalog,
 ) -> None:
     config = _non_gr_config()
 
     inputs = _prepare(injection_catalog, proposal_catalog, config)
-    stored = np.asarray(inputs.proposal.source_parameters["luminosity_distance"])
+    stored = np.asarray(
+        inputs.proposal_data["source_parameters"]["luminosity_distance"]
+    )
 
     np.testing.assert_array_equal(
         np.asarray(_bound(inputs)["log_reference_distance"]), np.log(stored)
@@ -570,7 +583,7 @@ def test_the_reference_distance_is_the_stored_distance_of_the_stored_power(
         np.asarray(_bound(inputs)["log_reference_distance"])
         + np.asarray(
             log_gw_em_ratio(
-                inputs.proposal.source_parameters["redshift"],
+                inputs.proposal_data["source_parameters"]["redshift"],
                 config.fiducials["xi_0"],
                 config.fiducials["xi_n"],
             )
@@ -579,30 +592,32 @@ def test_the_reference_distance_is_the_stored_distance_of_the_stored_power(
     assert not np.allclose(target_distance, stored)
 
 
-def _proposal_log_prob(catalog: PolarizationPowerCatalog) -> jax.Array:
+def _proposal_log_prob(
+    data: PolarizationPowerData, metadata: CatalogMetadata
+) -> jax.Array:
     """The proposal density, restated from the grid formula the file implies."""
     from reference_population import reference_merger_rate_distance_and_logprob
 
-    kwargs = catalog.population_model_kwargs
+    kwargs = metadata.population.model_kwargs
     grid = jnp.linspace(
         float(kwargs["minimum_redshift"]),
         float(kwargs["maximum_redshift"]),
         int(kwargs["n_grid"]),
     )
-    redshift = jnp.asarray(catalog.source_parameters["redshift"])
+    redshift = jnp.asarray(data["source_parameters"]["redshift"])
     _, _, md_logprob = reference_merger_rate_distance_and_logprob(
-        catalog.fiducials,
+        metadata.fiducials,
         redshift,
         redshift_grid=grid,
-        source_frame_mass_1=catalog.source_parameters["source_frame_mass_1"],
-        source_frame_mass_2=catalog.source_parameters["source_frame_mass_2"],
+        source_frame_mass_1=data["source_parameters"]["source_frame_mass_1"],
+        source_frame_mass_2=data["source_parameters"]["source_frame_mass_2"],
     )
-    if catalog.population_model_name != "bns_md_uniform_mixture":
+    if metadata.population.model_name != "bns_md_uniform_mixture":
         return md_logprob
     # The mixture acts only on redshift; add the ordered-pair factor after
     # mixing rather than weighting it as if the uniform component included masses.
     _, _, redshift_logprob = reference_merger_rate_distance_and_logprob(
-        catalog.fiducials, redshift, redshift_grid=grid
+        metadata.fiducials, redshift, redshift_grid=grid
     )
     mass_logprob = md_logprob - redshift_logprob
     epsilon = float(kwargs["uniform_mixing_fraction"])
@@ -628,11 +643,11 @@ def _grid_formula_spectrum(inputs: Any, config: RunConfig, params: dict) -> jax.
     """
     from reference_population import reference_merger_rate_distance_and_logprob
 
-    catalog = inputs.proposal
+    data = inputs.proposal_data
     # The bound spectrum is on the catalog's full grid; the band is applied by
     # the likelihood's mask, not by compressing the power.
-    power = jnp.asarray(catalog.polarization_power)
-    redshift = jnp.asarray(catalog.source_parameters["redshift"])
+    power = jnp.asarray(data["polarization_power"])
+    redshift = jnp.asarray(data["source_parameters"]["redshift"])
     population_kwargs = config.analysis.population.model_kwargs
 
     rate, distance, logprob = reference_merger_rate_distance_and_logprob(
@@ -643,32 +658,32 @@ def _grid_formula_spectrum(inputs: Any, config: RunConfig, params: dict) -> jax.
             float(population_kwargs["maximum_redshift"]),
             int(population_kwargs["n_grid"]),
         ),
-        source_frame_mass_1=catalog.source_parameters["source_frame_mass_1"],
-        source_frame_mass_2=catalog.source_parameters["source_frame_mass_2"],
+        source_frame_mass_1=data["source_parameters"]["source_frame_mass_1"],
+        source_frame_mass_2=data["source_parameters"]["source_frame_mass_2"],
     )
     log_target_distance = jnp.log(distance) + log_gw_em_ratio(
         redshift, params["xi_0"], params["xi_n"]
     )
     log_reference_distance = jnp.log(
-        jnp.asarray(catalog.source_parameters["luminosity_distance"])
+        jnp.asarray(data["source_parameters"]["luminosity_distance"])
     )
     log_weights = (
         logprob
-        - _proposal_log_prob(catalog)
+        - _proposal_log_prob(data, inputs.proposal_metadata)
         - 2.0 * (log_target_distance - log_reference_distance)
     )
     return spectral_density(
         power,
         jnp.exp(log_weights),
         rate,
-        source_parameters=catalog.source_parameters,
+        source_parameters=data["source_parameters"],
     )
 
 
 @pytest.mark.parametrize("guarded", [False, True], ids=["ordinary", "guard-mixture"])
 @pytest.mark.parametrize("offset", [0.0, 0.13], ids=["fiducial", "off-fiducial"])
 def test_prepared_spectrum_reproduces_the_grid_formula(
-    injection_catalog: PolarizationPowerCatalog,
+    injection_catalog: Catalog,
     tmp_path: Path,
     guarded: bool,
     offset: float,
@@ -724,7 +739,7 @@ def test_prepared_spectrum_reproduces_the_grid_formula(
 
 
 def test_a_catalog_reweighted_to_its_own_population_has_exactly_zero_log_weights(
-    proposal_catalog: PolarizationPowerCatalog,
+    proposal_catalog: Catalog,
 ) -> None:
     """The sanity check the whole importance scheme is legible through.
 
@@ -733,20 +748,20 @@ def test_a_catalog_reweighted_to_its_own_population_has_exactly_zero_log_weights
     same cosmology on two grids is exactly what stops the weights being
     identically one.
     """
-    population = proposal_catalog.get_population()
+    population = proposal_catalog[1].population.build()
     assert population.merger_rate_fn is not None
     log_weights_fn = build_importance_spectrum(
-        proposal_catalog,
+        *proposal_catalog,
         source_model=population.source_model,
         merger_rate_fn=population.merger_rate_fn,
         density_sites=DEFAULT_DENSITY_SITES,
     )[1]
-    log_weights = log_weights_fn(proposal_catalog.fiducials)
+    log_weights = log_weights_fn(proposal_catalog[1].fiducials)
     np.testing.assert_array_equal(np.asarray(log_weights), np.zeros(N_SOURCES))
 
 
 def test_the_requested_density_factors_reach_the_bound_weights_unchanged(
-    injection_catalog: PolarizationPowerCatalog,
+    injection_catalog: Catalog,
 ) -> None:
     """``prepare_inference_inputs`` threads its factor set to *both* densities.
 
@@ -773,23 +788,23 @@ def test_the_requested_density_factors_reach_the_bound_weights_unchanged(
             "maximum_redshift": bounds["maximum_redshift"],
         },
     )
-    restricted = narrow.restrict_redshift(
-        bounds["minimum_redshift"], bounds["maximum_redshift"]
+    _, restricted_metadata = restrict_redshift(
+        *narrow, bounds["minimum_redshift"], bounds["maximum_redshift"]
     )
 
     inputs = prepare_inference_inputs(
-        injection_catalog,
-        narrow,
+        *injection_catalog,
+        *narrow,
         observation_time=config.analysis.observation_time,
         **bounds,
         detectors=config.analysis.detectors,
-        target=restricted.get_population(),
+        target=restricted_metadata.population.build(),
         density_sites=("redshift",),
     )
 
     assert _bound(inputs)["density_sites"] == ("redshift",)
     np.testing.assert_array_equal(
-        np.asarray(inputs.log_weights_fn(inputs.proposal.fiducials)),
+        np.asarray(inputs.log_weights_fn(inputs.proposal_metadata.fiducials)),
         np.zeros(N_RETAINED),
     )
 
@@ -812,9 +827,10 @@ def test_a_guard_mixture_catalog_cannot_supply_an_observed_rate() -> None:
         model_kwargs={**GENERATION_KWARGS, "uniform_mixing_fraction": 0.1},
     )
 
-    assert guard.get_population().merger_rate_fn is None
+    _, guard_metadata = guard
+    assert guard_metadata.population.build().merger_rate_fn is None
     with pytest.raises(ValueError, match="declares no merger rate"):
-        catalog_total_merger_rate(guard)
+        catalog_total_merger_rate(guard_metadata)
 
 
 def test_the_repository_ships_no_proposal_density_config() -> None:

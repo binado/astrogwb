@@ -62,7 +62,10 @@ from astrogwb.inference import (
     gwb_spectral_density_model,
 )
 from astrogwb.populations import DEFAULT_DENSITY_SITES
-from astrogwb.simulators.polarization_power import PolarizationPowerCatalog
+from astrogwb.simulators.polarization_power import (
+    CatalogMetadata,
+    PolarizationPowerData,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -126,7 +129,8 @@ class MarginalizedResult(NamedTuple):
 
 
 def _build_analysis_inputs(
-    catalog: PolarizationPowerCatalog,
+    data: PolarizationPowerData,
+    metadata: CatalogMetadata,
     *,
     target_snr: float = TARGET_SNR,
 ) -> AnalysisInputs:
@@ -136,9 +140,9 @@ def _build_analysis_inputs(
     population, contract with unit weights, load the network effective PSD,
     and mask out-of-band and non-finite bins.
     """
-    frequencies = jnp.asarray(catalog.frequencies)
-    polarization_power = jnp.asarray(catalog.polarization_power)
-    samples = catalog_samples(catalog)
+    frequencies = jnp.asarray(data["frequencies"])
+    polarization_power = jnp.asarray(data["polarization_power"])
+    samples = catalog_samples(data)
     num_sources = polarization_power.shape[1]
 
     # The injection rate comes from the catalog's own recorded population, at
@@ -205,7 +209,8 @@ def _build_analysis_inputs(
     # band mask reaches the power and nothing else -- masking the sources would
     # silently truncate the population.
     estimator = build_importance_spectrum(
-        catalog,
+        data,
+        metadata,
         source_model=pinned_target,
         merger_rate_fn=pinned_rate,
         density_sites=DEFAULT_DENSITY_SITES,
@@ -302,7 +307,7 @@ def _reconstruct_h0(posterior: dict) -> dict:
 @pytest.fixture(scope="module")
 def analysis_inputs(mock_catalog_factory) -> AnalysisInputs:
     """Build the deterministic masked catalog inputs once for this module."""
-    return _build_analysis_inputs(mock_catalog_factory())
+    return _build_analysis_inputs(*mock_catalog_factory())
 
 
 @pytest.fixture(scope="module")

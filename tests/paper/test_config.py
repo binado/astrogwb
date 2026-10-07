@@ -151,7 +151,7 @@ def test_run_config_carries_no_proposal_density() -> None:
 
     Window equality with the analysis population support used to need a
     validator; it now holds by construction, because
-    `PolarizationPowerCatalog.restrict_redshift` is handed the run's own window
+    `restrict_redshift` is handed the run's own window
     and moves the samples and the recorded density together.
     """
     config = build_run_config(example_raw())

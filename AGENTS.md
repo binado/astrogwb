@@ -78,7 +78,10 @@ seed, directory)` (notebooks via `run_catalog`), which loads a hit, checks it
 against the request, and on a miss draws it with `PolarizationPowerSimulator`
 at `batch_keys(seed, 1)[0]` -- unless `generate=False`, which the workflow's
 `run_mcmc --cached-only` uses so a job never generates.
-`PolarizationPowerCatalog.from_arrays(data, metadata)` wraps the arrays. There is
+`ensure_catalog` and `run_catalog` return the `(data, metadata)` pair as is; there
+is no catalog wrapper class, and `restrict_redshift(data, metadata, zmin, zmax)`
+(`astrogwb.simulators.polarization_power`) narrows samples and recorded
+population window together. There is
 no `config/catalogs/` and no catalog name. The version is part of the key, so
 **bump `version` in `pyproject.toml` whenever a change alters what a population
 draw or a waveform generator produces**, or stale catalogs keep being served.

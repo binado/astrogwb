@@ -18,7 +18,6 @@ from astrogwb.populations import PopulationMetadata
 from astrogwb.simulators.core import Arrays, batch_keys, load, write
 from astrogwb.simulators.polarization_power import (
     CatalogMetadata,
-    PolarizationPowerCatalog,
     PolarizationPowerSimulator,
 )
 from astrogwb.simulators.population import PopulationSimulator
@@ -94,8 +93,6 @@ def test_polarization_power_round_trips_through_a_file(tmp_path: Path) -> None:
     _same(dict(fresh), data)  # ty: ignore[invalid-argument-type]
     assert metadata == CATALOG
     assert attrs["seed"] == 41
-    catalog = PolarizationPowerCatalog.from_arrays(data, metadata)
-    assert catalog.num_samples == CATALOG.num_samples
 
 
 @pytest.mark.integration

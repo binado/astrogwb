@@ -3,9 +3,8 @@
 :class:`PolarizationPowerSimulator` draws the population a
 :class:`~astrogwb.simulators.polarization_power.CatalogMetadata` names at its
 fiducials, generates the waveform power of every source, and returns the
-:class:`PolarizationPowerData` that :meth:`PolarizationPowerCatalog.from_arrays
-<astrogwb.simulators.polarization_power.PolarizationPowerCatalog.from_arrays>`
-wraps. The key is an input, so one metadata record serves any number of
+:class:`PolarizationPowerData`; its metadata travels beside it, and
+:func:`~astrogwb.simulators.polarization_power.restrict_redshift` narrows the pair. The key is an input, so one metadata record serves any number of
 independent realizations.
 """
 

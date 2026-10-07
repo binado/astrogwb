@@ -108,15 +108,15 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     if args.force:
         output_path.unlink(missing_ok=True)
-    catalog = ensure_catalog(metadata, args.seed, directory)
+    data, _ = ensure_catalog(metadata, args.seed, directory)
 
     logger.info(
         "Catalog %s: %d events, %d frequencies (%.2f-%.2f Hz), approximant=%s",
         metadata.key(),
-        catalog.num_samples,
-        catalog.frequencies.size,
-        catalog.frequencies[0].item(),
-        catalog.frequencies[-1].item(),
+        metadata.num_samples,
+        data["frequencies"].size,
+        data["frequencies"][0].item(),
+        data["frequencies"][-1].item(),
         metadata.waveform.approximant,
     )
     logger.info("Catalog at %s", output_path)

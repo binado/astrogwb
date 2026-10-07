@@ -25,7 +25,10 @@ from astrogwb.inference import (
     spectral_density_jacobian,
 )
 from astrogwb.populations import DEFAULT_DENSITY_SITES
-from astrogwb.simulators.polarization_power import PolarizationPowerCatalog
+from astrogwb.simulators.polarization_power import (
+    CatalogMetadata,
+    PolarizationPowerData,
+)
 
 
 @pytest.fixture
@@ -161,10 +164,10 @@ def test_masked_bins_contribute_zero_even_with_infinite_scale(
 
 
 def test_importance_jacobian_matches_finite_differences(
-    mock_catalog_factory: Callable[..., PolarizationPowerCatalog],
+    mock_catalog_factory: Callable[..., tuple[PolarizationPowerData, CatalogMetadata]],
 ) -> None:
     spectrum, _ = build_importance_spectrum(
-        mock_catalog_factory(num_sources=256),
+        *mock_catalog_factory(num_sources=256),
         source_model=mock_target_model(),
         merger_rate_fn=mock_merger_rate_fn(),
         density_sites=DEFAULT_DENSITY_SITES,

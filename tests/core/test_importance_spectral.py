@@ -45,7 +45,7 @@ from astrogwb.populations.bns_madau_dickinson import bns_md_cosmological
 from astrogwb.simulators.polarization_power import (
     REDSHIFT_SITE,
     CatalogMetadata,
-    PolarizationPowerCatalog,
+    PolarizationPowerData,
 )
 from astrogwb.waveform import WaveformMetadata
 
@@ -119,36 +119,37 @@ def _catalog(
     *,
     params: Mapping[str, float] = OFF_POPULATION_PARAMS,
     power: jax.Array = POWER,
-) -> PolarizationPowerCatalog:
-    return PolarizationPowerCatalog(
+) -> tuple[PolarizationPowerData, CatalogMetadata]:
+    data = PolarizationPowerData(
+        frequencies=10.0 + 2.0 * np.arange(power.shape[0], dtype=np.float64),
+        polarization_power=np.asarray(power),
         source_parameters={
             name: np.asarray(values)
             for name, values in _source_parameters(params).items()
         },
-        polarization_power=np.asarray(power),
-        frequencies=10.0 + 2.0 * np.arange(power.shape[0]),
-        _metadata=CatalogMetadata(
-            waveform=_waveform_metadata(power.shape[0]),
-            population=PopulationMetadata(
-                model_name="bns_md_cosmological",
-                model_kwargs=MODEL_KWARGS,
-            ),
-            fiducials={name: float(value) for name, value in params.items()},
-            num_samples=int(power.shape[1]),
-        ),
     )
+    metadata = CatalogMetadata(
+        waveform=_waveform_metadata(power.shape[0]),
+        population=PopulationMetadata(
+            model_name="bns_md_cosmological",
+            model_kwargs=MODEL_KWARGS,
+        ),
+        fiducials={name: float(value) for name, value in params.items()},
+        num_samples=int(power.shape[1]),
+    )
+    return data, metadata
 
 
 def _importance(
     *,
-    catalog: PolarizationPowerCatalog | None = None,
+    catalog: tuple[PolarizationPowerData, CatalogMetadata] | None = None,
     source_model: SourceFn | None = None,
     frequency_mask: ArrayLike | None = None,
     density_sites: tuple[str, ...] = DEFAULT_DENSITY_SITES,
 ) -> dict[str, Any]:
     """Every keyword of ``importance_spectral_density``, prepared from a catalog."""
     spectrum = build_importance_spectrum(
-        _catalog() if catalog is None else catalog,
+        *(_catalog() if catalog is None else catalog),
         source_model=mock_target_model() if source_model is None else source_model,
         merger_rate_fn=mock_merger_rate_fn(),
         density_sites=density_sites,
@@ -246,12 +247,12 @@ def test_a_target_without_a_distance_output_is_rejected() -> None:
 # --------------------------------------------------------------------------- #
 def _spectrum(
     *,
-    catalog: PolarizationPowerCatalog | None = None,
+    catalog: tuple[PolarizationPowerData, CatalogMetadata] | None = None,
     frequency_mask: ArrayLike | None = None,
     density_sites: tuple[str, ...] = DEFAULT_DENSITY_SITES,
 ):
     return build_importance_spectrum(
-        _catalog() if catalog is None else catalog,
+        *(_catalog() if catalog is None else catalog),
         source_model=mock_target_model(),
         merger_rate_fn=mock_merger_rate_fn(),
         density_sites=density_sites,

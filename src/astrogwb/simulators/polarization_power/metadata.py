@@ -21,8 +21,8 @@ class CatalogMetadata(BaseModel):
     It is both the request and the provenance, as
     :class:`~astrogwb.simulators.spectra.SpectraMetadata` is for spectra: the
     :class:`~astrogwb.simulators.polarization_power.PolarizationPowerSimulator`
-    turns it and a key into a catalog, the catalog carries it as
-    :attr:`~astrogwb.simulators.polarization_power.PolarizationPowerCatalog.metadata`,
+    turns it and a key into a catalog, the draw is stored beside it
+    (:func:`~astrogwb.simulators.core.write`),
     and :meth:`key` is the middle part of the file name by convention
     (:func:`catalog_stem`). The seed is not part of it: it picks one realization of the
     density this record describes.

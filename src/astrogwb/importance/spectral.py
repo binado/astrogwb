@@ -62,7 +62,10 @@ from astrogwb.populations.registry import MergerRateFn, SourceFn
 
 if TYPE_CHECKING:
     from astrogwb.inference.protocol import SpectralDensityFn
-    from astrogwb.simulators.polarization_power import PolarizationPowerCatalog
+    from astrogwb.simulators.polarization_power import (
+        CatalogMetadata,
+        PolarizationPowerData,
+    )
 
 __all__ = [
     "LogWeightsFn",
@@ -156,14 +159,15 @@ type LogWeightsFn = Callable[[Mapping[str, ArrayLike]], jax.Array]
 
 
 def build_importance_spectrum(
-    catalog: PolarizationPowerCatalog,
+    data: PolarizationPowerData,
+    metadata: CatalogMetadata,
     *,
     source_model: SourceFn,
     merger_rate_fn: MergerRateFn,
     density_sites: Sequence[str],
     frequency_mask: ArrayLike | None = None,
 ) -> tuple[SpectralDensityFn, LogWeightsFn]:
-    """Prepare one catalog and bind it to a target, as both callables at once.
+    """Prepare one catalog draw and bind it to a target, as both callables at once.
 
     Call outside JAX transformations. The proposal density is the catalog's
     *own* recorded source model, evaluated at the parameters it was drawn at,
@@ -182,7 +186,7 @@ def build_importance_spectrum(
     reused, since the returned partials hash by identity and a fresh,
     equal-but-not-identical rebuild forces a jit recompile. The rate is the
     *target's*, never the proposal's, so it is never ``None``: a proposal is a
-    density, and a guard mixture declares no rate at all. ``catalog`` must
+    density, and a guard mixture declares no rate at all. ``data`` and ``metadata`` must
     already be restricted to the analysis redshift window.
 
     One preparation pass feeds both returned callables from a single keyword
@@ -199,12 +203,12 @@ def build_importance_spectrum(
     weights bound to the same arrays and target.
     """
     source_parameters = {
-        name: jnp.asarray(value) for name, value in catalog.source_parameters.items()
+        name: jnp.asarray(value) for name, value in data["source_parameters"].items()
     }
     sites = tuple(density_sites)
     proposal_log_prob, _ = evaluate_sources(
-        catalog.get_population().source_model,
-        catalog.fiducials,
+        metadata.population.build().source_model,
+        metadata.fiducials,
         source_parameters,
         density_sites=sites,
     )
@@ -223,7 +227,7 @@ def build_importance_spectrum(
             "power was generated at"
         )
 
-    power = jnp.asarray(catalog.polarization_power)
+    power = jnp.asarray(data["polarization_power"])
     if frequency_mask is not None:
         power = power[jnp.asarray(frequency_mask), :]
     num_samples = reference_distance.shape[0]

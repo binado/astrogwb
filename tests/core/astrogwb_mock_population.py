@@ -39,7 +39,7 @@ from astrogwb.populations import (
 from astrogwb.populations.evaluation import evaluate_sources, sample_sources
 from astrogwb.simulators.polarization_power import (
     CatalogMetadata,
-    PolarizationPowerCatalog,
+    PolarizationPowerData,
 )
 from astrogwb.waveform import AnalyticInspiralGenerator, WaveformMetadata
 
@@ -168,30 +168,31 @@ def mock_catalog(
     source_parameters: dict[str, np.ndarray],
     *,
     generator: AnalyticInspiralGenerator,
-) -> PolarizationPowerCatalog:
-    """Wrap a mock draw in a catalog carrying the population that produced it."""
+) -> tuple[PolarizationPowerData, CatalogMetadata]:
+    """Pair a mock draw with the metadata of the population that produced it."""
     power = np.asarray(jax.jit(generator.generate_batch)(source_parameters))
-    return PolarizationPowerCatalog(
+    data = PolarizationPowerData(
+        frequencies=np.asarray(generator.frequencies),
+        polarization_power=power,
         source_parameters={
             name: np.asarray(values) for name, values in source_parameters.items()
         },
-        polarization_power=power,
-        frequencies=np.asarray(generator.frequencies),
-        _metadata=CatalogMetadata(
-            waveform=generator.metadata,
-            population=PopulationMetadata(
-                model_name="bns_md_cosmological",
-                model_kwargs={
-                    "minimum_redshift": Z_MIN,
-                    "maximum_redshift": Z_MAX,
-                    "n_grid": N_GRID,
-                    "sample_inclination": False,
-                },
-            ),
-            fiducials={name: float(value) for name, value in POPULATION_PARAMS.items()},
-            num_samples=int(power.shape[-1]),
-        ),
     )
+    metadata = CatalogMetadata(
+        waveform=generator.metadata,
+        population=PopulationMetadata(
+            model_name="bns_md_cosmological",
+            model_kwargs={
+                "minimum_redshift": Z_MIN,
+                "maximum_redshift": Z_MAX,
+                "n_grid": N_GRID,
+                "sample_inclination": False,
+            },
+        ),
+        fiducials={name: float(value) for name, value in POPULATION_PARAMS.items()},
+        num_samples=int(power.shape[-1]),
+    )
+    return data, metadata
 
 
 def build_mock_catalog(
@@ -201,16 +202,13 @@ def build_mock_catalog(
     f_min: float = 2.0,
     f_max: float = 4096.0,
     frequency_resolution: float = 8.0,
-) -> PolarizationPowerCatalog:
-    """Build a real ``PolarizationPowerCatalog`` from the mock population draw.
+) -> tuple[PolarizationPowerData, CatalogMetadata]:
+    """Build a ``(data, metadata)`` pair from the mock population draw.
 
     The polarization power comes from
     :class:`~astrogwb.waveform.AnalyticInspiralGenerator`, so the catalog is
     a genuine closed-form inspiral bank -- no Ripple backend, no persisted
-    file -- and
-    :meth:`~astrogwb.simulators.polarization_power.PolarizationPowerCatalog.from_generator`
-    self-validates,
-    so a malformed mock fails at construction rather than deep inside a model.
+    file.
 
     ``inclination`` is absent from the face-on population. That is deliberate:
     the missing column selects the
@@ -242,16 +240,15 @@ def build_mock_catalog(
     )
 
 
-def catalog_samples(catalog: PolarizationPowerCatalog) -> dict[str, jax.Array]:
-    """The catalog's source parameters as JAX arrays, keyed by name.
+def catalog_samples(data: PolarizationPowerData) -> dict[str, jax.Array]:
+    """The draw's source parameters as JAX arrays, keyed by name.
 
-    ``PolarizationPowerCatalog.source_parameters`` is already a
-    ``Mapping[str, NDArray]`` keyed by
-    name, so this only crosses into JAX -- which every model in the suite wants
-    and no test should have to restate.
+    ``data["source_parameters"]`` is already a ``Mapping[str, NDArray]`` keyed
+    by name, so this only crosses into JAX -- which every model in the suite
+    wants and no test should have to restate.
     """
     return {
-        name: jnp.asarray(values) for name, values in catalog.source_parameters.items()
+        name: jnp.asarray(values) for name, values in data["source_parameters"].items()
     }
 
 
@@ -318,9 +315,8 @@ def build_synthetic_importance(
     samples = synthetic_source_parameters(n_samples)
     if polarization_power is None:
         polarization_power = jnp.ones((1, n_samples))
-    # A descriptor sized to whatever power the caller supplied: a catalog
-    # checks the two against each other, and the frequencies themselves are
-    # never used by anything reweighting this catalog.
+    # A descriptor sized to whatever power the caller supplied; the frequencies
+    # themselves are never used by anything reweighting this catalog.
     num_frequencies = int(jnp.shape(polarization_power)[0])
     generator = AnalyticInspiralGenerator(
         WaveformMetadata(
@@ -333,29 +329,30 @@ def build_synthetic_importance(
             frequency_resolution=F_MIN,
         )
     )
-    catalog = PolarizationPowerCatalog(
+    data = PolarizationPowerData(
+        frequencies=np.asarray(generator.frequencies),
+        polarization_power=np.asarray(polarization_power),
         source_parameters={
             name: np.asarray(values) for name, values in samples.items()
         },
-        polarization_power=np.asarray(polarization_power),
-        frequencies=np.asarray(generator.frequencies),
-        _metadata=CatalogMetadata(
-            waveform=generator.metadata,
-            population=PopulationMetadata(
-                model_name="bns_md_cosmological",
-                model_kwargs={
-                    "minimum_redshift": Z_MIN,
-                    "maximum_redshift": Z_MAX,
-                    "n_grid": N_GRID,
-                    "sample_inclination": False,
-                },
-            ),
-            fiducials={name: float(value) for name, value in POPULATION_PARAMS.items()},
-            num_samples=int(np.shape(polarization_power)[1]),
+    )
+    metadata = CatalogMetadata(
+        waveform=generator.metadata,
+        population=PopulationMetadata(
+            model_name="bns_md_cosmological",
+            model_kwargs={
+                "minimum_redshift": Z_MIN,
+                "maximum_redshift": Z_MAX,
+                "n_grid": N_GRID,
+                "sample_inclination": False,
+            },
         ),
+        fiducials={name: float(value) for name, value in POPULATION_PARAMS.items()},
+        num_samples=int(np.shape(polarization_power)[1]),
     )
     spectrum = build_importance_spectrum(
-        catalog,
+        data,
+        metadata,
         source_model=mock_target_model() if source_model is None else source_model,
         merger_rate_fn=mock_merger_rate_fn(),
         density_sites=DEFAULT_DENSITY_SITES,

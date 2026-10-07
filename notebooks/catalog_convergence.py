@@ -13,7 +13,7 @@
 # ---
 
 # %% [markdown]
-# # PolarizationPowerCatalog convergence: Monte-Carlo size and frequency resolution
+# # Polarization-power catalog convergence: Monte-Carlo size and frequency resolution
 #
 # A catalog-based stochastic background carries two discretization errors, and
 # they are different kinds of thing:
@@ -86,7 +86,7 @@ from astrogwb.paper.config import (
 from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
 from astrogwb.simulators.polarization_power import (
     CatalogMetadata,
-    PolarizationPowerCatalog,
+    PolarizationPowerData,
 )
 from astrogwb.waveform import WaveformMetadata
 
@@ -283,7 +283,9 @@ def make_redshift_grid() -> jax.Array:
 
 
 # %%
-def load_or_build_catalog(*, df: float, f_max: float) -> PolarizationPowerCatalog:
+def load_or_build_catalog(
+    *, df: float, f_max: float
+) -> tuple[PolarizationPowerData, CatalogMetadata]:
     """Serve the catalog on the `[F_MIN, f_max]` grid, drawing it on a miss.
 
     Both grids are the same `POPULATION_SEED` draw, so they hold the *same*
@@ -313,44 +315,48 @@ def load_or_build_catalog(*, df: float, f_max: float) -> PolarizationPowerCatalo
     return ensure_catalog(metadata, POPULATION_SEED, CATALOG_DIR)
 
 
-def describe(catalog: PolarizationPowerCatalog) -> pd.Series:
+def describe(
+    catalog: tuple[PolarizationPowerData, CatalogMetadata],
+) -> pd.Series:
     """A one-glance summary of what a catalog file holds."""
-    waveform = catalog.waveform_metadata
+    data, metadata = catalog
+    waveform = metadata.waveform
     return pd.Series(
         {
-            "population": catalog.population_model_name,
+            "population": metadata.population.model_name,
             "seed": POPULATION_SEED,
-            "num_sources": catalog.num_samples,
-            "num_frequencies": catalog.frequencies.size,
-            "df_hz": float(np.median(catalog.bin_widths)),
+            "num_sources": metadata.num_samples,
+            "num_frequencies": data["frequencies"].size,
+            "df_hz": float(np.median(bin_widths(data["frequencies"]))),
             "f_min_hz": waveform.minimum_frequency,
             "f_max_hz": waveform.maximum_frequency,
-            "total_merger_rate_per_s": float(catalog_merger_rate(catalog)),
+            "total_merger_rate_per_s": float(catalog_merger_rate(metadata)),
         }
     )
 
 
-def catalog_merger_rate(catalog: PolarizationPowerCatalog) -> jax.Array:
+def catalog_merger_rate(metadata: CatalogMetadata) -> jax.Array:
     """The observer-frame rate this catalog's own population implies."""
-    merger_rate_fn = catalog.get_population().merger_rate_fn
+    merger_rate_fn = metadata.population.build().merger_rate_fn
     if merger_rate_fn is None:
         raise ValueError(
-            f"catalog population {catalog.population_model_name!r} declares no "
+            f"catalog population {metadata.population.model_name!r} declares no "
             "merger rate, so it cannot supply an observed total rate"
         )
-    return jnp.asarray(merger_rate_fn(catalog.fiducials))
+    return jnp.asarray(merger_rate_fn(metadata.fiducials))
 
 
 def unpack(
-    catalog: PolarizationPowerCatalog,
+    catalog: tuple[PolarizationPowerData, CatalogMetadata],
 ) -> tuple[np.ndarray, np.ndarray, dict[str, jax.Array], jax.Array]:
     """The four things every section wants out of a catalog."""
-    frequencies = np.asarray(catalog.frequencies)
-    power = np.asarray(catalog.polarization_power)
+    data, metadata = catalog
+    frequencies = np.asarray(data["frequencies"])
+    power = np.asarray(data["polarization_power"])
     catalog_samples = {
-        name: jnp.asarray(values) for name, values in catalog.source_parameters.items()
+        name: jnp.asarray(values) for name, values in data["source_parameters"].items()
     }
-    return frequencies, power, catalog_samples, catalog_merger_rate(catalog)
+    return frequencies, power, catalog_samples, catalog_merger_rate(metadata)
 
 
 # The wide, coarse grid: the Omega_gw comparison and the Monte-Carlo
@@ -514,7 +520,7 @@ axes[0].loglog(
 )
 axes[0].set_ylabel(r"$\Omega_{\rm gw}(f)$")
 axes[0].set_title(
-    r"PolarizationPowerCatalog contraction against the analytic $\Omega_{\rm gw}$"
+    r"Polarization-power catalog contraction against the analytic $\Omega_{\rm gw}$"
 )
 # Both curves fall off a cliff at the cutoff; without a floor the decades of
 # empty axis below it squash the part worth looking at into a sliver.
@@ -963,7 +969,7 @@ pd.DataFrame(
 scan_target = target_population_fn()
 scan_merger_rate = scan_target.merger_rate_fn
 scan_log_weights = build_importance_spectrum(
-    catalog,
+    *catalog,
     source_model=scan_target.source_model,
     merger_rate_fn=scan_merger_rate,
     density_sites=DEFAULT_DENSITY_SITES,
