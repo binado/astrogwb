@@ -1,13 +1,13 @@
 """Draw forward-model spectra from config layers and save them under their key.
 
-The draws are determined by a :class:`~astrogwb.simulators.spectra.SpectraMetadata`
+The draws are determined by a :class:`~astrogwb.simulators.spectra.BackgroundSpectralDensityMetadata`
 -- waveform, population, each hyperparameter's fixed value or prior,
 observation time, count mode and fixed source count -- declared as the
 ``[spectra]`` table of the ``--config`` layers, merged in process exactly as
 ``run_mcmc`` merges a run, and by the seeds the sibling ``[draws]`` table names
 (``seed`` expanded into ``num_draws`` keys by
 :func:`~astrogwb.simulators.core.batch_keys`). This script runs a
-:class:`~astrogwb.simulators.spectra.SpectraSimulator` on them and writes
+:class:`~astrogwb.simulators.spectra.BackgroundSpectralDensitySimulator` on them and writes
 ``<output-dir>/spectra-<key>-<seed>-<num_draws>.h5``. It writes ``(draws, F)`` spectra
 only; no ``(F, N)`` catalog power is ever materialized. A second invocation
 with the same layers reuses the file.
@@ -34,7 +34,7 @@ import argparse
 import logging
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic import ValidationError
 
@@ -45,9 +45,9 @@ from astrogwb.paper.config.runs import (
 )
 from astrogwb.simulators.core import batch_keys, load, write
 from astrogwb.simulators.spectra import (
-    SpectralDensityCatalog,
-    SpectraMetadata,
-    SpectraSimulator,
+    BackgroundSpectralDensityData,
+    BackgroundSpectralDensityMetadata,
+    BackgroundSpectralDensitySimulator,
     stack_spectra,
 )
 
@@ -70,7 +70,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "One config layer file, in merge order; repeat once per layer (the "
             "four shared config/*.toml layers, then a "
             "config/simulations/spectrum/<name>.toml). Its [spectra] table is "
-            "the SpectraMetadata."
+            "the BackgroundSpectralDensityMetadata."
         ),
     )
     cache_dir = default_cache_dir() / "spectra"
@@ -101,8 +101,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def spectra_metadata(config: dict[str, Any]) -> SpectraMetadata:
-    """Validate the merged config's ``[spectra]`` table as a ``SpectraMetadata``.
+def spectra_metadata(config: dict[str, Any]) -> BackgroundSpectralDensityMetadata:
+    """Build ``BackgroundSpectralDensityMetadata`` from the ``[spectra]`` table.
 
     The whole merge is not the record: it also carries ``[analysis]``,
     ``[fiducials]``, ``[priors]`` and the rest, which the model forbids.
@@ -113,7 +113,7 @@ def spectra_metadata(config: dict[str, Any]) -> SpectraMetadata:
             "config/simulations/spectrum/<name>.toml layer"
         )
     try:
-        return SpectraMetadata.model_validate(config["spectra"])
+        return BackgroundSpectralDensityMetadata.model_validate(config["spectra"])
     except ValidationError as error:
         raise ValueError(f"invalid [spectra] table: {error}") from None
 
@@ -148,11 +148,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     hit = output.exists()
 
     if hit:
-        outputs, recorded, _ = load(output, SpectraMetadata)
+        cached, recorded, _ = load(output, BackgroundSpectralDensityMetadata)
         if recorded.key() != metadata.key():
             raise ValueError(f"{output} records {recorded.key()}, not {metadata.key()}")
+        outputs = cast(BackgroundSpectralDensityData, cached)
     else:
-        simulator = SpectraSimulator(
+        simulator = BackgroundSpectralDensitySimulator(
             metadata,
             chunk_size=args.chunk_size,
             source_chunk_size=args.source_chunk_size,
@@ -163,15 +164,14 @@ def main(argv: Sequence[str] | None = None) -> None:
             logger.info("Drew spectrum %d/%d", draw, num_draws)
         outputs = stack_spectra(parts)
         write(output, outputs, metadata, seed=seed)
-    catalog = SpectralDensityCatalog.from_arrays(outputs, metadata)
     logger.info(
         "%s spectra %s: count=%s num_events=%s, %d draws, %d frequencies, at %s",
         "Reused" if hit else "Saved",
         metadata.key(),
         metadata.count,
         metadata.num_events,
-        catalog.num_draws,
-        catalog.frequencies.size,
+        outputs["spectral_density"].shape[0],
+        outputs["frequencies"].size,
         output,
     )
 

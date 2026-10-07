@@ -47,7 +47,10 @@ with app.setup(hide_code=True):
         use_paper_style,
     )
     from astrogwb.simulators.core import batch_keys
-    from astrogwb.simulators.spectra import SpectraMetadata, SpectraSimulator
+    from astrogwb.simulators.spectra import (
+        BackgroundSpectralDensityMetadata,
+        BackgroundSpectralDensitySimulator,
+    )
     from astrogwb.utils import years_to_seconds
 
 
@@ -378,10 +381,8 @@ def _(
     observation_time,
     seed,
 ):
-    # The draw is a record: the same settings are served from
-    # outputs/spectra/spectra-<key>-<digest>.h5 instead of being redrawn, so moving a slider
-    # back to a value already seen is a cache hit.
-    _metadata = SpectraMetadata(
+    # Metadata describes the density; one key selects a realization of it.
+    _metadata = BackgroundSpectralDensityMetadata(
         waveform=waveform_metadata(
             root=ROOT_DIR,
             approximant=approximant,
@@ -400,12 +401,12 @@ def _(
         hyperparameters=FIDUCIALS,
         observation_time=observation_time,
     )
-    _spectrum = SpectraSimulator(_metadata, chunk_size=chunk_size)(
+    _spectrum = BackgroundSpectralDensitySimulator(_metadata, chunk_size=chunk_size)(
         batch_keys(seed, 1)[0]
     )
     frequencies = jnp.asarray(_spectrum["frequencies"])
-    spectral_density = jnp.asarray(_spectrum["spectral_density"])
-    _n_events = int(_spectrum["n_events"])
+    spectral_density = jnp.asarray(_spectrum["spectral_density"][0])
+    _n_events = int(_spectrum["n_events"][0])
 
     {"Number of events": _n_events}
     return frequencies, spectral_density

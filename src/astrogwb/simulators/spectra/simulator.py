@@ -4,15 +4,15 @@ A spectrum is a population draw reduced through a waveform. The population half
 -- hyperparameters, exact count, sources -- is
 :class:`~astrogwb.simulators.population.PopulationSimulator`; the waveform half
 is :class:`~astrogwb.simulators.spectra.forward.ChunkedPowerSum`, which sums the
-draw's events chunk by chunk. :class:`SpectraSimulator` owns both, built once
-from a :class:`~astrogwb.simulators.spectra.SpectraMetadata`, so a loop that
-calls it again reuses every compilation.
+draw's events chunk by chunk. :class:`BackgroundSpectralDensitySimulator` owns
+both, built once from a :class:`BackgroundSpectralDensityMetadata`, so a loop
+that calls it again reuses every compilation.
 
 One key is one draw, hyperparameters and sources alike, so the spectrum at key
 ``k`` is the same whether it is asked for first or last in a loop.
-:func:`stack_spectra` joins the per-draw :class:`Spectrum` results into the
-draw-first :class:`SpectraData` layout the files and
-:class:`~astrogwb.simulators.spectra.SpectralDensityCatalog` use.
+:class:`BackgroundSpectralDensityData` always has a leading draw axis, including
+for one draw. :func:`stack_spectra` concatenates results along that axis; the
+same layout is used in memory and in files, with metadata kept separately.
 """
 
 from __future__ import annotations
@@ -34,18 +34,22 @@ from astrogwb.simulators.spectra.forward import (
     normalize_spectra,
     validate_source_model,
 )
-from astrogwb.simulators.spectra.metadata import SpectraMetadata
+from astrogwb.simulators.spectra.metadata import BackgroundSpectralDensityMetadata
 
-__all__ = ["SpectraData", "SpectraSimulator", "Spectrum", "stack_spectra"]
+__all__ = [
+    "BackgroundSpectralDensityData",
+    "BackgroundSpectralDensitySimulator",
+    "stack_spectra",
+]
 
 
-class SpectraData(TypedDict):
-    """Spectra of a batch of draws; draws first.
+class BackgroundSpectralDensityData(TypedDict):
+    """Background spectral-density draws, with a leading draw axis.
 
     ``frequencies`` is ``(F,)`` and shared by the batch. ``spectral_density`` is
     ``(D, F)``; ``n_events``, ``total_merger_rate`` and every ``hyperparameters``
-    column are ``(D,)``. :func:`stack_spectra` builds it from per-draw
-    :class:`Spectrum` results.
+    column are ``(D,)``. A simulator call or reduction has ``D=1``;
+    :func:`stack_spectra` concatenates draws without adding another axis.
     """
 
     frequencies: NDArray[np.float64]
@@ -55,24 +59,11 @@ class SpectraData(TypedDict):
     hyperparameters: dict[str, NDArray[np.float64]]
 
 
-class Spectrum(TypedDict):
-    """The spectrum of one draw.
+class BackgroundSpectralDensitySimulator:
+    """Draws spectra from :class:`BackgroundSpectralDensityMetadata`.
 
-    ``frequencies`` and ``spectral_density`` are ``(F,)``; ``n_events``,
-    ``total_merger_rate`` and every ``hyperparameters`` value are 0-d.
-    """
-
-    frequencies: NDArray[np.float64]
-    spectral_density: NDArray[np.float64]
-    n_events: NDArray[np.int64]
-    total_merger_rate: NDArray[np.float64]
-    hyperparameters: dict[str, NDArray[np.float64]]
-
-
-class SpectraSimulator:
-    """Draws spectra for one :class:`SpectraMetadata`; build once, call often.
-
-    ``simulator(key)`` is the :class:`Spectrum` of one draw; loop over
+    Build once and call often. ``simulator(key)`` returns
+    :class:`BackgroundSpectralDensityData` with one row; loop over
     :func:`~astrogwb.simulators.core.batch_keys` and join with
     :func:`stack_spectra` for several. ``reduce(population)`` is the transform
     half: it pushes an already-drawn
@@ -100,7 +91,7 @@ class SpectraSimulator:
 
     def __init__(
         self,
-        metadata: SpectraMetadata,
+        metadata: BackgroundSpectralDensityMetadata,
         *,
         chunk_size: int = 128,
         source_chunk_size: int | None = None,
@@ -140,11 +131,11 @@ class SpectraSimulator:
             )
 
     @property
-    def metadata(self) -> SpectraMetadata:
+    def metadata(self) -> BackgroundSpectralDensityMetadata:
         """The record this simulator draws."""
         return self._metadata
 
-    def reduce(self, population: PopulationData) -> Spectrum:
+    def reduce(self, population: PopulationData) -> BackgroundSpectralDensityData:
         """The spectrum of ``population``, which may come from a population simulator."""
         sources = dict(population["source_parameters"])
         count = int(population["count"])
@@ -157,30 +148,34 @@ class SpectraSimulator:
             observation_seconds=self._population.observation_seconds,
             num_events=self._metadata.num_events,
         )
-        hyperparameters: dict[str, Any] = dict(population["hyperparameters"])
         return {
             "frequencies": np.asarray(self._generator.frequencies),
-            "spectral_density": density,
-            "n_events": np.asarray(count, dtype=np.int64),
-            "total_merger_rate": rate,
-            "hyperparameters": hyperparameters,
+            "spectral_density": density[np.newaxis, :],
+            "n_events": np.asarray([count], dtype=np.int64),
+            "total_merger_rate": rate[np.newaxis],
+            "hyperparameters": {
+                name: np.asarray(value)[np.newaxis]
+                for name, value in population["hyperparameters"].items()
+            },
         }
 
-    def __call__(self, key: jax.Array) -> Spectrum:
+    def __call__(self, key: jax.Array) -> BackgroundSpectralDensityData:
         """The spectrum of the draw at ``key``."""
         return self.reduce(self._population(key))
 
 
-def stack_spectra(parts: Sequence[Spectrum]) -> SpectraData:
-    """Join per-draw spectra along a new leading draw axis.
+def stack_spectra(
+    parts: Sequence[BackgroundSpectralDensityData],
+) -> BackgroundSpectralDensityData:
+    """Concatenate spectra along their existing leading draw axis.
 
-    Every part must share one frequency grid, which the result keeps once.
+    The non-empty sequence must share one frequency grid and hyperparameter
+    names. Construction guarantees matching column shapes; the result keeps
+    the first grid once, without re-validating the data.
     """
-    if not parts:
-        raise ValueError("parts must be a non-empty sequence of spectra")
 
     def stack(name: str) -> NDArray[Any]:
-        return np.stack([np.asarray(part[name]) for part in parts])  # ty: ignore[invalid-key]
+        return np.concatenate([part[name] for part in parts], axis=0)  # ty: ignore[invalid-key]
 
     return {
         "frequencies": parts[0]["frequencies"],
@@ -188,8 +183,8 @@ def stack_spectra(parts: Sequence[Spectrum]) -> SpectraData:
         "n_events": stack("n_events"),
         "total_merger_rate": stack("total_merger_rate"),
         "hyperparameters": {
-            name: np.stack(
-                [np.asarray(part["hyperparameters"][name]) for part in parts]
+            name: np.concatenate(
+                [part["hyperparameters"][name] for part in parts], axis=0
             )
             for name in parts[0]["hyperparameters"]
         },
