@@ -8,6 +8,7 @@ with app.setup(hide_code=True):
     from collections.abc import Callable, Mapping, Sequence
     from dataclasses import dataclass
     from pathlib import Path
+    from typing import cast
 
     from astrogwb.paper.runtime import configure_runtime
 
@@ -55,9 +56,9 @@ with app.setup(hide_code=True):
     from astrogwb.paper.plotting import save_figures, use_paper_style
     from astrogwb.simulators.core import batch_keys, load, write
     from astrogwb.simulators.spectra import (
-        SpectralDensityCatalog,
-        SpectraMetadata,
-        SpectraSimulator,
+        BackgroundSpectralDensityData,
+        BackgroundSpectralDensityMetadata,
+        BackgroundSpectralDensitySimulator,
         stack_spectra,
     )
     from astrogwb.utils import years_to_seconds
@@ -226,7 +227,7 @@ def _():
         write_figures = False
 
     # Read the shared draw's waveform rather than copying its scientific settings.
-    base_metadata = SpectraMetadata(
+    base_metadata = BackgroundSpectralDensityMetadata(
         count="fixed",
         num_events=grid_counts[-1],
         observation_time=observation_time,
@@ -239,7 +240,7 @@ def _():
         ),
     )
     # Poisson forward-model ensemble: the count follows rate * observation_time.
-    poisson_metadata = SpectraMetadata.model_validate(
+    poisson_metadata = BackgroundSpectralDensityMetadata.model_validate(
         {
             **base_metadata.model_dump(),
             "count": "fixed" if SMOKE else "poisson",
@@ -331,11 +332,11 @@ class AnalysisSettings:
 class SNRCase:
     """Compact analysis results; spectra remain in the checked HDF5 cache."""
 
-    metadata: SpectraMetadata
+    metadata: BackgroundSpectralDensityMetadata
     snrs: NDArray[np.float64]
     sigma_h0: NDArray[np.float64]
     summary: dict[str, int | float]
-    catalog: SpectralDensityCatalog
+    data: BackgroundSpectralDensityData
 
 
 @app.class_definition(hide_code=True)
@@ -391,7 +392,8 @@ class Reference:
     """The common spectrum that every template is fitted to."""
 
     kind: str
-    catalog: SpectralDensityCatalog
+    data: BackgroundSpectralDensityData
+    metadata: BackgroundSpectralDensityMetadata
     spectrum: NDArray[np.float64]
     snr: float
     averaged_draws: int
@@ -401,9 +403,9 @@ class Reference:
         """Describe the reference for a table."""
         return {
             "reference": self.kind,
-            "source_key": self.catalog.metadata.key(),
-            "count": self.catalog.metadata.count,
-            "num_events": int(self.catalog.n_events[0]),
+            "source_key": self.metadata.key(),
+            "count": self.metadata.count,
+            "num_events": int(self.data["n_events"][0]),
             "averaged_draws": self.averaged_draws,
             "snr": self.snr,
             "seed": self.seed,
@@ -486,11 +488,13 @@ def network_noise(settings: AnalysisSettings, frequencies: jax.Array) -> jax.Arr
 
 @app.function(hide_code=True)
 def compute_spectrum_snrs(
-    catalog: SpectralDensityCatalog, settings: AnalysisSettings
+    data: BackgroundSpectralDensityData,
+    metadata: BackgroundSpectralDensityMetadata,
+    settings: AnalysisSettings,
 ) -> tuple[NDArray[np.float64], float]:
     """Return per-realization SNRs and the mean spectrum's SNR for one network.
 
-    The observing time comes from the artifact, in years. Both calculations
+    The observing time comes from the metadata, in years. Both calculations
     use the full frequency grid and mask afterwards, preserving the widths
     of bins at the analysis band's edges and all within-row correlations.
     No source sampling or waveform generation is performed here.
@@ -501,16 +505,16 @@ def compute_spectrum_snrs(
         and 0.0 <= settings.minimum_frequency < settings.maximum_frequency
     ):
         raise ValueError("frequency bounds must be finite and 0 <= minimum < maximum")
-    if not np.isfinite(catalog.observation_time) or catalog.observation_time <= 0:
+    if not np.isfinite(metadata.observation_time) or metadata.observation_time <= 0:
         raise ValueError("observation_time must be finite and positive")
-    if catalog.frequencies.size < 2:
+    if data["frequencies"].size < 2:
         raise ValueError("SNR calculation requires at least two frequency bins")
 
-    frequencies = jnp.asarray(catalog.frequencies)
+    frequencies = jnp.asarray(data["frequencies"])
     band = analysis_band(settings, frequencies)
     noise = network_noise(settings, frequencies)
-    spectra = jnp.asarray(catalog.spectral_density)
-    seconds = years_to_seconds(catalog.observation_time)
+    spectra = jnp.asarray(data["spectral_density"])
+    seconds = years_to_seconds(metadata.observation_time)
     snrs = np.asarray(
         spectral_snr(spectra, noise, seconds, frequencies, frequency_mask=band),
         dtype=np.float64,
@@ -561,30 +565,37 @@ def summarize_spectrum_snrs(
 
 
 @app.function(hide_code=True)
-def draw_catalog(
-    metadata: SpectraMetadata,
+def draw_spectra(
+    metadata: BackgroundSpectralDensityMetadata,
     seed: int,
     num_draws: int,
     settings: AnalysisSettings,
-) -> SpectralDensityCatalog:
+) -> tuple[BackgroundSpectralDensityData, BackgroundSpectralDensityMetadata]:
     """Serve or generate the spectra ``metadata`` gives at ``batch_keys(seed, num_draws)``."""
     path = settings.cache_dir / f"spectra-{metadata.key()}-{seed}-{num_draws}.h5"
     if path.is_file():
-        outputs, _, _ = load(path, SpectraMetadata)
+        cached, recorded, _ = load(path, BackgroundSpectralDensityMetadata)
+        if recorded.key() != metadata.key():
+            raise ValueError(f"{path} records {recorded.key()}, not {metadata.key()}")
+        return cast(BackgroundSpectralDensityData, cached), recorded
     elif settings.cache_only:
         raise FileNotFoundError(f"no cached spectra at {path}")
     else:
-        simulator = SpectraSimulator(metadata, chunk_size=settings.chunk_size)
+        simulator = BackgroundSpectralDensitySimulator(
+            metadata, chunk_size=settings.chunk_size
+        )
         outputs = stack_spectra([simulator(key) for key in batch_keys(seed, num_draws)])
         write(path, outputs, metadata, seed=seed)
-    return SpectralDensityCatalog.from_arrays(outputs, metadata)
+    return outputs, metadata
 
 
 @app.function(hide_code=True)
-def analyze_metadata(metadata: SpectraMetadata, settings: AnalysisSettings) -> SNRCase:
+def analyze_metadata(
+    metadata: BackgroundSpectralDensityMetadata, settings: AnalysisSettings
+) -> SNRCase:
     """Serve or generate one spectrum ensemble and summarize its SNRs."""
-    catalog = draw_catalog(metadata, settings.seed, settings.num_draws, settings)
-    snrs, mean_spectrum_snr = compute_spectrum_snrs(catalog, settings)
+    data, metadata = draw_spectra(metadata, settings.seed, settings.num_draws, settings)
+    snrs, mean_spectrum_snr = compute_spectrum_snrs(data, metadata, settings)
     if np.any(snrs <= 0):
         raise ValueError("sigma(H0) requires strictly positive SNR draws")
     sigma_h0 = np.asarray(metadata.fixed["H0"] / snrs, dtype=np.float64)
@@ -595,13 +606,13 @@ def analyze_metadata(metadata: SpectraMetadata, settings: AnalysisSettings) -> S
         snrs=snrs,
         sigma_h0=sigma_h0,
         summary=summarize_spectrum_snrs(snrs, mean_spectrum_snr=mean_spectrum_snr),
-        catalog=catalog,
+        data=data,
     )
 
 
 @app.function(hide_code=True)
 def analyze_case(
-    base_metadata: SpectraMetadata,
+    base_metadata: BackgroundSpectralDensityMetadata,
     num_events: int,
     minimum_redshift: float,
     settings: AnalysisSettings,
@@ -611,7 +622,7 @@ def analyze_case(
         minimum_redshift=minimum_redshift
     )
     return analyze_metadata(
-        SpectraMetadata.model_validate(
+        BackgroundSpectralDensityMetadata.model_validate(
             {
                 **base_metadata.model_dump(),
                 "num_events": num_events,
@@ -624,7 +635,7 @@ def analyze_case(
 
 @app.function(hide_code=True)
 def build_grid(
-    base_metadata: SpectraMetadata,
+    base_metadata: BackgroundSpectralDensityMetadata,
     counts: Sequence[int],
     redshifts: Sequence[float],
     settings: AnalysisSettings,
@@ -661,7 +672,7 @@ def select_reference(
     kind: str,
     settings: AnalysisSettings,
     *,
-    poisson_metadata: SpectraMetadata | None = None,
+    poisson_metadata: BackgroundSpectralDensityMetadata | None = None,
 ) -> Reference:
     """Pick the common spectrum that every template is fitted to.
 
@@ -680,21 +691,23 @@ def select_reference(
         case = cases[max(cases)]
         return Reference(
             kind=kind,
-            catalog=case.catalog,
-            spectrum=np.mean(case.catalog.spectral_density, axis=0, dtype=np.float64),
+            data=case.data,
+            metadata=case.metadata,
+            spectrum=np.mean(case.data["spectral_density"], axis=0, dtype=np.float64),
             snr=float(case.summary["mean_spectrum_snr"]),
-            averaged_draws=case.catalog.num_draws,
+            averaged_draws=case.data["spectral_density"].shape[0],
             seed=settings.seed,
         )
     if kind == "poisson":
         if poisson_metadata is None:
             raise ValueError("the poisson reference needs its metadata")
-        catalog = draw_catalog(poisson_metadata, settings.data_seed, 1, settings)
-        snrs, _ = compute_spectrum_snrs(catalog, settings)
+        data, metadata = draw_spectra(poisson_metadata, settings.data_seed, 1, settings)
+        snrs, _ = compute_spectrum_snrs(data, metadata, settings)
         return Reference(
             kind=kind,
-            catalog=catalog,
-            spectrum=np.asarray(catalog.spectral_density[0], dtype=np.float64),
+            data=data,
+            metadata=metadata,
+            spectrum=np.asarray(data["spectral_density"][0], dtype=np.float64),
             snr=float(snrs[0]),
             averaged_draws=1,
             seed=settings.data_seed,
@@ -888,18 +901,18 @@ def fit_templates(
     case: SNRCase, reference: Reference, settings: AnalysisSettings
 ) -> H0FisherPrediction:
     """Fit every template in ``case`` to the reference spectrum."""
-    catalog = case.catalog
-    if not np.array_equal(catalog.frequencies, reference.catalog.frequencies):
+    data = case.data
+    if not np.array_equal(data["frequencies"], reference.data["frequencies"]):
         raise ValueError("data and templates must use the same frequency grid")
-    frequencies = jnp.asarray(catalog.frequencies)
+    frequencies = jnp.asarray(data["frequencies"])
     scale = gaussian_bin_scale(
         network_noise(settings, frequencies),
-        catalog.observation_time,
+        case.metadata.observation_time,
         frequencies,
     )
     fiducial_h0 = case.metadata.fixed["H0"]
     amplitudes, snrs = template_amplitude_statistics(
-        catalog.spectral_density,
+        data["spectral_density"],
         reference.spectrum,
         scale,
         analysis_band(settings, frequencies),
@@ -1142,13 +1155,13 @@ def verdict_text(table: pd.DataFrame, *, tolerance: float) -> str:
 
 
 @app.function(hide_code=True)
-def check_common_grid(catalogs: Sequence[SpectralDensityCatalog]) -> None:
-    """Require one frequency grid and observation time across catalogs."""
-    first = catalogs[0]
+def check_common_grid(cases: Sequence[SNRCase]) -> None:
+    """Require one frequency grid and observation time across cases."""
+    first = cases[0]
     if any(
-        not np.array_equal(catalog.frequencies, first.frequencies)
-        or catalog.observation_time != first.observation_time
-        for catalog in catalogs
+        not np.array_equal(case.data["frequencies"], first.data["frequencies"])
+        or case.metadata.observation_time != first.metadata.observation_time
+        for case in cases
     ):
         raise ValueError(
             "spectrum comparisons require the same grid and observation time"
@@ -1195,11 +1208,12 @@ def plot_fisher_h0_mixtures(
 
 @app.function(hide_code=True)
 def compute_spectrum_statistics(
-    catalog: SpectralDensityCatalog,
+    data: BackgroundSpectralDensityData,
+    metadata: BackgroundSpectralDensityMetadata,
 ) -> SpectrumStatistics:
     """Compute unbiased pointwise statistics along the realization axis."""
-    spectra = np.asarray(catalog.spectral_density, dtype=np.float64)
-    if catalog.metadata.sampled:
+    spectra = np.asarray(data["spectral_density"], dtype=np.float64)
+    if metadata.sampled:
         raise ValueError("spectrum scatter requires fixed hyperparameters")
     if spectra.shape[0] < 2:
         raise ValueError("spectrum scatter requires at least two realizations")
@@ -1212,7 +1226,7 @@ def compute_spectrum_statistics(
     residuals = spectra[:, positive] / mean[positive] - 1
     relative_variance[positive] = np.var(residuals, axis=0, ddof=1)
     return SpectrumStatistics(
-        np.asarray(catalog.frequencies, dtype=np.float64),
+        np.asarray(data["frequencies"], dtype=np.float64),
         mean,
         variance,
         np.sqrt(variance),
@@ -1222,24 +1236,27 @@ def compute_spectrum_statistics(
 
 @app.function(hide_code=True)
 def compute_network_sensitivity(
-    catalog: SpectralDensityCatalog, settings: AnalysisSettings
+    data: BackgroundSpectralDensityData,
+    metadata: BackgroundSpectralDensityMetadata,
+    settings: AnalysisSettings,
 ) -> NetworkSensitivity:
     """Evaluate both scales on the full grid; selection never changes widths."""
-    frequencies = jnp.asarray(catalog.frequencies)
+    frequencies = jnp.asarray(data["frequencies"])
     band = np.asarray(analysis_band(settings, frequencies))
     noise = network_noise(settings, frequencies)
     return NetworkSensitivity(
         band,
-        np.asarray(gaussian_bin_scale(noise, catalog.observation_time, frequencies)),
+        np.asarray(gaussian_bin_scale(noise, metadata.observation_time, frequencies)),
         np.asarray(
-            log_frequency_noise_scale(noise, frequencies, catalog.observation_time)
+            log_frequency_noise_scale(noise, frequencies, metadata.observation_time)
         ),
     )
 
 
 @app.function(hide_code=True)
 def compute_frequency_correlation(
-    catalog: SpectralDensityCatalog,
+    data: BackgroundSpectralDensityData,
+    metadata: BackgroundSpectralDensityMetadata,
     *,
     minimum_frequency: float,
     maximum_frequency: float,
@@ -1250,7 +1267,7 @@ def compute_frequency_correlation(
     Positive per-frequency normalization preserves Pearson correlations,
     while dimensionless residuals avoid squaring tiny spectral densities.
     """
-    statistics = compute_spectrum_statistics(catalog)
+    statistics = compute_spectrum_statistics(data, metadata)
     if max_bins < 2:
         raise ValueError("max_bins must be at least two")
     if not (0 < minimum_frequency < maximum_frequency < np.inf):
@@ -1267,7 +1284,7 @@ def compute_frequency_correlation(
         nearest = np.unique(np.abs(frequencies[:, None] - targets).argmin(axis=0))
         indices = indices[nearest]
         frequencies = statistics.frequencies[indices]
-    rows = np.asarray(catalog.spectral_density[:, indices], dtype=np.float64)
+    rows = np.asarray(data["spectral_density"][:, indices], dtype=np.float64)
     mean = statistics.mean[indices]
     residuals = np.full(rows.shape, np.nan)
     np.divide(rows, mean, out=residuals, where=mean > 0)
@@ -1459,7 +1476,7 @@ def plot_shot_noise_vs_detector(
 
 @app.function(hide_code=True)
 def plot_frequency_correlations(
-    cases: Mapping[str, SpectralDensityCatalog],
+    cases: Mapping[str, SNRCase],
     *,
     minimum_frequency: float,
     maximum_frequency: float,
@@ -1473,9 +1490,10 @@ def plot_frequency_correlations(
         squeeze=False,
         subplot_kw={"axes_class": Axes},
     )
-    for axis, (label, catalog) in zip(axes[0], cases.items(), strict=True):
+    for axis, (label, case) in zip(axes[0], cases.items(), strict=True):
         frequencies, correlation = compute_frequency_correlation(
-            catalog,
+            case.data,
+            case.metadata,
             minimum_frequency=minimum_frequency,
             maximum_frequency=maximum_frequency,
         )
@@ -1693,7 +1711,7 @@ def _(poisson_metadata, settings):
         [
             {
                 "count": poisson_case.metadata.count,
-                "mean_num_events": float(np.mean(poisson_case.catalog.n_events)),
+                "mean_num_events": float(np.mean(poisson_case.data["n_events"])),
                 **poisson_case.summary,
             }
         ]
@@ -1751,7 +1769,7 @@ def _():
     uncertainty with which the detector network can measure each bin,
     $\sigma_i=S_{\mathrm{eff},i}/\sqrt{2T\Delta f_i}$. Where the shot-noise
     standard deviation lies below $\sigma_i$, the detector cannot see the
-    catalog's Monte Carlo scatter in that bin.
+    data's Monte Carlo scatter in that bin.
 
     **Figure A1** shows that comparison for the paper's source counts.
     Variances use all independent realizations with $\mathrm{ddof}=1$.
@@ -1779,30 +1797,29 @@ def _(
     spectrum_case_groups = {
         "Source count": {
             **{
-                count_label(_count): num_events_cases[_count].catalog
-                for _count in paper_counts
+                count_label(_count): num_events_cases[_count] for _count in paper_counts
             },
-            "Poisson": poisson_case.catalog,
+            "Poisson": poisson_case,
         },
         "Minimum redshift": {
-            redshift_label(_z): grid[_z][recommended_num_events].catalog
+            redshift_label(_z): grid[_z][recommended_num_events]
             for _z in minimum_redshift
         },
     }
-    _catalogs = [
-        _catalog
-        for _cases in spectrum_case_groups.values()
-        for _catalog in _cases.values()
+    _all_cases = [
+        _case for _cases in spectrum_case_groups.values() for _case in _cases.values()
     ]
-    check_common_grid(_catalogs)
+    check_common_grid(_all_cases)
     spectrum_statistics = {
         _title: {
-            _label: compute_spectrum_statistics(_catalog)
-            for _label, _catalog in _cases.items()
+            _label: compute_spectrum_statistics(_case.data, _case.metadata)
+            for _label, _case in _cases.items()
         }
         for _title, _cases in spectrum_case_groups.items()
     }
-    spectrum_sensitivity = compute_network_sensitivity(_catalogs[0], settings)
+    spectrum_sensitivity = compute_network_sensitivity(
+        _all_cases[0].data, _all_cases[0].metadata, settings
+    )
     return (
         spectrum_case_groups,
         spectrum_sensitivity,
@@ -1974,7 +1991,7 @@ def _(
     )
     # The count of a Poisson ensemble is random; place it at its mean.
     poisson_offsets = analyze_offsets(
-        {round(float(np.mean(poisson_case.catalog.n_events))): poisson_case},
+        {round(float(np.mean(poisson_case.data["n_events"]))): poisson_case},
         reference,
         settings,
         n_bootstrap=n_bootstrap,

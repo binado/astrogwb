@@ -56,9 +56,9 @@ from astrogwb.paper.plotting import save_figures, use_paper_style
 from astrogwb.simulators.core import batch_keys
 from astrogwb.simulators.population import PopulationSimulator
 from astrogwb.simulators.spectra import (
-    SpectraMetadata,
-    SpectraSimulator,
-    Spectrum,
+    BackgroundSpectralDensityData,
+    BackgroundSpectralDensityMetadata,
+    BackgroundSpectralDensitySimulator,
     stack_spectra,
 )
 
@@ -145,9 +145,9 @@ generators = {
 # %%
 
 
-def spectra_metadata(approximant: str) -> SpectraMetadata:
+def spectra_metadata(approximant: str) -> BackgroundSpectralDensityMetadata:
     """The record of one approximant's spectra; the population part is shared."""
-    return SpectraMetadata(
+    return BackgroundSpectralDensityMetadata(
         waveform=waveform_metadata(root=ROOT_DIR, approximant=approximant),
         population=population_metadata(root=ROOT_DIR, **CONFIG.model_kwargs),
         hyperparameters=CONFIG.hyperparameters,
@@ -159,19 +159,21 @@ reference_metadata = spectra_metadata(REFERENCE_APPROXIMANT)
 population_simulator = PopulationSimulator(
     reference_metadata.sources, chunk_size=CONFIG.chunk_size
 )
-simulators: dict[str, SpectraSimulator] = {}
+simulators: dict[str, BackgroundSpectralDensitySimulator] = {}
 for approximant in APPROXIMANTS:
     metadata = spectra_metadata(approximant)
     assert metadata.sources == reference_metadata.sources
     # The check that a population fits an approximant is off on purpose: the
     # tidal population goes through non-tidal approximants, which ignore the
     # deformabilities, so the comparison isolates the waveform.
-    simulators[approximant] = SpectraSimulator(
+    simulators[approximant] = BackgroundSpectralDensitySimulator(
         metadata, chunk_size=CONFIG.chunk_size, validate_sources=False
     )
 
 # One population per key, reduced through every approximant, so the draws pair.
-reduced_draws: dict[str, list[Spectrum]] = {name: [] for name in simulators}
+reduced_draws: dict[str, list[BackgroundSpectralDensityData]] = {
+    name: [] for name in simulators
+}
 for key in batch_keys(CONFIG.seed, CONFIG.draw_count):
     population = population_simulator(key)
     for approximant, simulator in simulators.items():

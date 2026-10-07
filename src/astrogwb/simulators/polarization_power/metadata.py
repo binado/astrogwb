@@ -19,7 +19,7 @@ class CatalogMetadata(BaseModel):
     """Everything that determines a polarization-power catalog's contents.
 
     It is both the request and the provenance, as
-    :class:`~astrogwb.simulators.spectra.SpectraMetadata` is for spectra: the
+    :class:`~astrogwb.simulators.spectra.BackgroundSpectralDensityMetadata` is for spectra: the
     :class:`~astrogwb.simulators.polarization_power.PolarizationPowerSimulator`
     turns it and a key into a catalog, the draw is stored beside it
     (:func:`~astrogwb.simulators.core.write`),

@@ -22,9 +22,8 @@ from astrogwb.simulators.polarization_power import (
 )
 from astrogwb.simulators.population import PopulationSimulator
 from astrogwb.simulators.spectra import (
-    SpectralDensityCatalog,
-    SpectraMetadata,
-    SpectraSimulator,
+    BackgroundSpectralDensityMetadata,
+    BackgroundSpectralDensitySimulator,
     stack_spectra,
 )
 from astrogwb.waveform import WaveformMetadata
@@ -54,7 +53,7 @@ POPULATION = PopulationMetadata(
 CATALOG = CatalogMetadata(
     waveform=WAVEFORM, population=POPULATION, fiducials=FIDUCIALS, num_samples=6
 )
-SPECTRA = SpectraMetadata(
+SPECTRA = BackgroundSpectralDensityMetadata(
     waveform=WAVEFORM,
     population=POPULATION,
     hyperparameters={
@@ -109,23 +108,25 @@ def test_polarization_power_key_picks_the_realization() -> None:
 
 
 @pytest.mark.integration
-def test_spectra_round_trip_through_a_file(tmp_path: Path) -> None:
-    simulator = SpectraSimulator(SPECTRA, chunk_size=4)
-    fresh = stack_spectra([simulator(key) for key in batch_keys(41, 3)])
+@pytest.mark.parametrize("num_draws", [1, 3])
+def test_spectra_round_trip_through_a_file(tmp_path: Path, num_draws: int) -> None:
+    simulator = BackgroundSpectralDensitySimulator(SPECTRA, chunk_size=4)
+    parts = [simulator(key) for key in batch_keys(41, num_draws)]
+    fresh = parts[0] if num_draws == 1 else stack_spectra(parts)
     path = write(tmp_path / "spectra.h5", fresh, SPECTRA, seed=41)
 
-    data, metadata, attrs = load(path, SpectraMetadata)
+    data, metadata, attrs = load(path, BackgroundSpectralDensityMetadata)
 
     _same(dict(fresh), data)  # ty: ignore[invalid-argument-type]
+    assert metadata == SPECTRA
     assert attrs["seed"] == 41
-    catalog = SpectralDensityCatalog.from_arrays(data, metadata)
-    assert catalog.num_draws == 3
-    assert np.all(catalog.n_events == 4)
+    assert fresh["spectral_density"].shape == (num_draws, fresh["frequencies"].size)
+    assert np.all(fresh["n_events"] == 4)
 
 
 @pytest.mark.integration
 def test_a_key_picks_the_spectrum() -> None:
-    simulator = SpectraSimulator(SPECTRA, chunk_size=4)
+    simulator = BackgroundSpectralDensitySimulator(SPECTRA, chunk_size=4)
     keys = batch_keys(41, 3)
 
     one = simulator(keys[1])
@@ -133,7 +134,9 @@ def test_a_key_picks_the_spectrum() -> None:
     other = simulator(keys[2])
 
     np.testing.assert_array_equal(one["spectral_density"], again["spectral_density"])
-    assert one["spectral_density"].shape == one["frequencies"].shape
+    assert one["spectral_density"].shape == (1, one["frequencies"].size)
+    assert one["n_events"].shape == one["total_merger_rate"].shape == (1,)
+    assert all(value.shape == (1,) for value in one["hyperparameters"].values())
     assert not np.array_equal(one["spectral_density"], other["spectral_density"])
     assert not np.array_equal(
         one["hyperparameters"]["local_merger_rate"],
@@ -143,7 +146,7 @@ def test_a_key_picks_the_spectrum() -> None:
 
 @pytest.mark.integration
 def test_stacking_a_loop_equals_the_single_calls() -> None:
-    simulator = SpectraSimulator(SPECTRA, chunk_size=4)
+    simulator = BackgroundSpectralDensitySimulator(SPECTRA, chunk_size=4)
     singles = [simulator(key) for key in batch_keys(41, 3)]
 
     stacked = stack_spectra(singles)
@@ -151,19 +154,20 @@ def test_stacking_a_loop_equals_the_single_calls() -> None:
     assert stacked["spectral_density"].shape == (3, stacked["frequencies"].size)
     for draw, single in enumerate(singles):
         np.testing.assert_array_equal(
-            stacked["spectral_density"][draw], single["spectral_density"]
+            stacked["spectral_density"][draw], single["spectral_density"][0]
         )
-        assert stacked["n_events"][draw] == single["n_events"]
+        assert stacked["n_events"][draw] == single["n_events"][0]
+        assert stacked["total_merger_rate"][draw] == single["total_merger_rate"][0]
         assert (
             stacked["hyperparameters"]["local_merger_rate"][draw]
-            == single["hyperparameters"]["local_merger_rate"]
+            == single["hyperparameters"]["local_merger_rate"][0]
         )
 
 
 @pytest.mark.integration
 def test_spectra_chunk_size_changes_cost_not_the_draws() -> None:
-    small = SpectraSimulator(SPECTRA, chunk_size=1)
-    large = SpectraSimulator(SPECTRA, chunk_size=64)
+    small = BackgroundSpectralDensitySimulator(SPECTRA, chunk_size=1)
+    large = BackgroundSpectralDensitySimulator(SPECTRA, chunk_size=64)
 
     for key in batch_keys(41, 2):
         np.testing.assert_allclose(
@@ -205,16 +209,13 @@ def test_poisson_population_draw_does_not_depend_on_chunk_size() -> None:
 @pytest.mark.integration
 def test_reducing_a_population_equals_the_spectrum_simulator() -> None:
     key = batch_keys(41, 1)[0]
-    simulator = SpectraSimulator(SPECTRA, chunk_size=4)
+    simulator = BackgroundSpectralDensitySimulator(SPECTRA, chunk_size=4)
     population = PopulationSimulator(SPECTRA.sources, chunk_size=4)(key)
 
     reduced = simulator.reduce(population)
     direct = simulator(key)
 
-    np.testing.assert_array_equal(
-        reduced["spectral_density"], direct["spectral_density"]
-    )
-    assert reduced["n_events"] == direct["n_events"]
+    _same(dict(reduced), dict(direct))  # ty: ignore[invalid-argument-type]
 
 
 def test_population_simulator_takes_one_key() -> None:

@@ -1,4 +1,4 @@
-# Poisson forward-model spectra, shaped like astrogwb.simulators.spectra.SpectraMetadata.
+# Poisson forward-model spectra, shaped like astrogwb.simulators.spectra.BackgroundSpectralDensityMetadata.
 # It is merged over the four shared layers (config/defaults.toml,
 # waveforms.toml, populations.toml, detectors.toml) and read by
 # scripts/simulate_spectra.py from the [spectra] and [draws] tables -- it is not a run

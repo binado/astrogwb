@@ -215,7 +215,7 @@ def waveform_metadata(root: Path | None = None, **kwargs: Any) -> WaveformMetada
     """The waveform the default draw, ``[catalog]``, uses, as a record.
 
     What :func:`waveform_generator` builds, before it is built: the form a
-    :class:`~astrogwb.simulators.spectra.SpectraMetadata` or a catalog request carries.
+    :class:`~astrogwb.simulators.spectra.BackgroundSpectralDensityMetadata` or a catalog request carries.
     Keyword arguments override the file and are validated, not trusted.
     Touches no JAX, so it is safe before ``configure_runtime``.
     """

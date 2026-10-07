@@ -329,20 +329,20 @@ that one value into both callables it returns.
 
 ### The file format
 
-Every cached node writes the same layout, through
-`astrogwb.simulators.core.cache`:
+Every simulator's data uses the same layout, through
+`astrogwb.simulators.core.write`:
 
 | Where | What |
 | --- | --- |
 | root attribute `metadata` | the metadata's `model_dump_json()` |
-| root attributes `node`, `version`, `created`, `host` | which function, which `astrogwb`, when and where |
-| group `inputs/` | the node's inputs (the seed) |
-| group `outputs/` | the node's outputs: a nested dict maps to subgroups, an array to a dataset |
+| root attributes `version`, `created`, `host` | which `astrogwb`, when and where |
+| optional root attributes `seed`, `batch_size` | the caller's draw settings |
+| root datasets and groups | the data: a nested dict maps to subgroups, an array to a dataset |
 
-For a catalog, `outputs/` holds `frequencies` `(F,)`, `polarization_power`
+For a catalog, the root holds `frequencies` `(F,)`, `polarization_power`
 `(F, N)` and a `source_parameters/` group of `(N,)` columns. There are no
 format names or version files: the path says which node, metadata and inputs a
-file answers, and `read(path)` returns `(inputs, outputs, metadata_json)` to a
+file answers, and `load(path, MetadataType)` returns `(data, metadata, attrs)` to a
 caller that was handed a file by path.
 The arrays are used as read (the writer is the only source of files, so they
 are not re-validated), and `metadata.population.build()` rebuilds the recorded population from the registry: an
@@ -352,30 +352,26 @@ stored; they are derived from `frequencies`.
 
 ## The cache
 
-Catalogs and spectra share one cache, `astrogwb.simulators.core.cached`, which
-wraps a simulator function `fn(inputs, metadata, **settings)`:
+Persistence and cache locations belong to the callers. The core `write` and
+`load` functions neither generate draws nor choose paths:
 
-| | node | metadata | inputs | outputs wrap as |
+| | simulator | metadata | input | data |
 | --- | --- | --- | --- | --- |
-| catalogs | `polarization_power` | `CatalogMetadata` | `{"seed": uint64 scalar}` | `(data, metadata)` as is |
-| spectra | `spectra` | `SpectraMetadata` | `{"seeds": uint64 array}` | `SpectralDensityCatalog.from_arrays` |
+| catalogs | `PolarizationPowerSimulator` | `CatalogMetadata` | one JAX key | `PolarizationPowerData` |
+| spectra | `BackgroundSpectralDensitySimulator` | `BackgroundSpectralDensityMetadata` | one JAX key | `BackgroundSpectralDensityData` |
 
-A node's result lives at
-`<cache_dir>/<fn.__name__>-<metadata.key()>-<digest(inputs)>.h5`, where
-`digest` hashes the inputs' paths, dtypes, shapes and bytes. A miss runs the
-body and writes atomically; a hit is read and its recorded metadata compared
-with the request. `generate=False` serves hits only and raises
-`FileNotFoundError` on a miss; `run_mcmc` fetches its catalogs this way under
-`--cached-only`, so a chain job never generates one. Settings such as
-`chunk_size` are passed to the body and kept out of the path. Cached nodes need
-concrete inputs, so a traced input raises a clear `TypeError`; call the
-undecorated body (`node.__wrapped__`) inside a transformation instead.
+Catalog files are `polarization_power-<key>-<seed>.h5`; spectra files are
+`spectra-<key>-<seed>-<num_draws>.h5`. A miss generates data and writes atomically;
+a hit is loaded and its recorded metadata compared with the request.
+`ensure_catalog(..., generate=False)` serves hits only and raises
+`FileNotFoundError` on a miss; `run_mcmc` uses this under `--cached-only`.
+The SNR notebook similarly supports `cache_only`. Settings such as
+`chunk_size` are bound in the simulator and kept out of the path.
 
 Seeds are inputs because they pick a realization rather than describe a
-distribution: `split_seed(seed, n)` derives `n` prefix-stable child seeds
-(`SeedSequence(seed, spawn_key=(i,))`) without JAX, and
-`astrogwb.simulators._keys.seed_key` is the one place a 64-bit seed becomes a
-JAX key.
+distribution: `batch_keys(seed, n)` folds the draw indices into a JAX key,
+producing prefix-stable draw keys. Build a simulator once and call it for each
+key so its compiled stages are reused.
 
 The version is in the key so that code changes invalidate the cache -- but
 only if it is bumped. Bump `version` in `pyproject.toml` whenever a change
@@ -461,16 +457,16 @@ A follow-up notebook will compare sampled and analytically averaged ensemble
 means, variance and frequency covariance at fixed hyperparameters in both count
 modes. Detector noise, shot-noise likelihoods and SNR studies are separate work.
 
-## The population node
+## The population simulator
 
 A spectrum is a population draw reduced through a waveform, and the first half
-is a node of its own: `astrogwb.simulators.population.population`.
+is a simulator of its own: `astrogwb.simulators.population.PopulationSimulator`.
 
 - **metadata** -- a `PopulationDrawMetadata`: the population, each
   hyperparameter's fixed value or prior, `observation_time`, `count`,
   `num_events` and the version. No waveform, so two waveforms' spectra records
-  share one population key (`SpectraMetadata.sources.key()`).
-- **inputs** -- `{"seeds": ...}`, as for spectra.
+  share one population key (`BackgroundSpectralDensityMetadata.sources.key()`).
+- **input** -- one JAX key per draw, from `batch_keys(seed, n)`.
 - **outputs** -- one draw per call: `count`, `total_merger_rate` and
   `hyperparameters/<name>` are 0-d and each `source_parameters/<name>` column
   is `(count,)` (`PopulationData`).
@@ -480,7 +476,7 @@ differences are the waveform's alone:
 
 ```python
 population = PopulationSimulator(metadata.sources)
-simulator_a, simulator_b = SpectraSimulator(metadata_a), SpectraSimulator(metadata_b)
+simulator_a, simulator_b = BackgroundSpectralDensitySimulator(metadata_a), BackgroundSpectralDensitySimulator(metadata_b)
 parts_a, parts_b = [], []
 for key in batch_keys(seed, n):
     draw = population(key)
@@ -490,25 +486,25 @@ spectra_a, spectra_b = stack_spectra(parts_a), stack_spectra(parts_b)
 ```
 
 Persisting a population pays when it is reused like this; a simulation loop
-calls `SpectraSimulator(...)(key)` per draw and keeps nothing.
+calls `BackgroundSpectralDensitySimulator(...)(key)` per draw and keeps nothing.
 
-## The spectral-density node
+## The background spectral-density simulator
 
-The sibling artifact is a `SpectralDensityCatalog`. It holds the forward
+The sibling data is `BackgroundSpectralDensityData`. It holds the forward
 model's *contraction* rather than the power it contracts, so a run that only
 needs predicted spectra never materializes `(F, N)` waveforms.
 
-It is produced by the cached node `astrogwb.simulators.spectra.spectra`:
+It is produced by `astrogwb.simulators.spectra.BackgroundSpectralDensitySimulator`:
 
-- **metadata** -- a `SpectraMetadata`: the waveform, the population, each
+- **metadata** -- a `BackgroundSpectralDensityMetadata`: the waveform, the population, each
   hyperparameter's fixed value *or* prior, `observation_time`, `count`,
   `num_events`, and the `astrogwb` version. It extends the waveform-free
-  `PopulationDrawMetadata` (see [the population node](#the-population-node)); its
+  `PopulationDrawMetadata` (see [the population simulator](#the-population-simulator)); its
   `.sources` is that part. No seed and no draw count.
-- **inputs** -- `{"seeds": ...}`, a 1-d `uint64` array with no duplicates, one
-  seed per draw, usually `split_seed(seed, num_draws)`. Each seed is one draw
+- **input** -- one JAX key, usually from `batch_keys(seed, num_draws)`.
+  Each key is one draw
   (hyperparameters and sources alike), so a draw depends on its own seed alone,
-  not on its batchmates, and the same seed gives the same spectrum in any call.
+  not on its batchmates, and the same key gives the same spectrum in any call.
 - **settings** -- `chunk_size` chunks the waveform reduction;
   `source_chunk_size` (default `chunk_size`) sets the size of the pieces
   Poisson-count sources are drawn in. Neither consumes randomness, so neither is in the
@@ -517,26 +513,35 @@ It is produced by the cached node `astrogwb.simulators.spectra.spectra`:
 ```python
 from astrogwb.paper.cache import default_cache_dir
 from astrogwb.paper.config import fiducials, population_metadata, waveform_metadata
-from astrogwb.simulators.core import split_seed
-from astrogwb.simulators.spectra import SpectraMetadata, SpectralDensityCatalog, spectra
+from astrogwb.distributions.config import DistributionConfig
+from astrogwb.simulators.core import batch_keys, load, write
+from astrogwb.simulators.spectra import (
+    BackgroundSpectralDensityMetadata,
+    BackgroundSpectralDensitySimulator,
+    stack_spectra,
+)
 
-metadata = SpectraMetadata(
+metadata = BackgroundSpectralDensityMetadata(
     waveform=waveform_metadata(),
     population=population_metadata(),
     hyperparameters={
         **fiducials(),
-        "local_merger_rate": {"dist": "Normal", "kwargs": {"loc": 770.0, "scale": 7.7}},
+        "local_merger_rate": DistributionConfig(
+            dist="Normal", kwargs={"loc": 770.0, "scale": 7.7}
+        ),
     },
     observation_time=1.0,
     count="poisson",
 )
-outputs = spectra(
-    {"seeds": split_seed(41, 64)},
-    metadata,
-    cache_dir=default_cache_dir() / "spectra",
-    chunk_size=1024,
+simulator = BackgroundSpectralDensitySimulator(metadata, chunk_size=1024)
+seed, num_draws = 41, 64
+data = stack_spectra([simulator(key) for key in batch_keys(seed, num_draws)])
+path = (
+    default_cache_dir() / "spectra"
+    / f"spectra-{metadata.key()}-{seed}-{num_draws}.h5"
 )
-catalog = SpectralDensityCatalog.from_arrays(outputs, metadata)
+write(path, data, metadata, seed=seed)
+data, metadata, attrs = load(path, BackgroundSpectralDensityMetadata)
 ```
 
 A hyperparameter is a number to fix it for every draw, or a
@@ -552,12 +557,16 @@ A draw's events are reduced chunk by chunk (`ChunkedPowerSum`): chunks of
 `chunk_size` sources run through the waveform and are added into one `(F,)`
 sum, with a mask on the tail of the last chunk, so one compilation serves any
 count and a prior that spreads the merger rate several-fold costs no more
-waveforms than the counts need. A simulator call is one draw; `stack_spectra`
-joins a loop over `batch_keys` into the draw-first layout below.
-`SpectraSimulator` owns the built population, generator and jitted stages and is
-memoized per record, so a loop that calls `spectra` again does not recompile.
+waveforms than the counts need. A simulator call or `.reduce(population)`
+returns `BackgroundSpectralDensityData` with one row: `(1, F)` spectral density
+and `(1,)` event counts, rates and hyperparameter columns. `stack_spectra`
+concatenates a non-empty sequence along that existing draw axis. Its inputs
+must share a frequency grid and hyperparameter names; it keeps the first grid
+without re-validating the arrays. A single spectrum is `data["spectral_density"][0]`.
+`BackgroundSpectralDensitySimulator` owns the built population, generator and
+jitted stages, so reusing one instance in a loop reuses its compilations.
 
-`count="poisson"` (the default) uses `poisson_counts_forward_model`: it draws
+`count="poisson"` (the default) draws
 `N ~ Poisson(R * T)` and forms `S_h = A_inc * sum(P_i) / T`, with `T` in
 seconds and the observer-frame rate `R` in mergers per second, from the
 realized sources of that exact count. `num_events` must be omitted.
@@ -571,7 +580,7 @@ per-draw count and the normalization factor -- and the inclination convention:
 model omits inclination, and is one when inclination is supplied.
 
 `num_events` is the source count within each fixed realization; the length of
-`seeds` is the number of independent realizations. `observation_time` remains positive
+the key sequence is the number of independent realizations. `observation_time` remains positive
 in both modes and is recorded in the key. It controls Poisson counts and
 cancels from fixed-count normalization.
 
@@ -581,13 +590,13 @@ generation under the new keys. There is no key migration. Polarization-power
 catalog draws and waveform algorithms are unchanged, so this does not bump the
 package version or invalidate polarization-power catalog caches.
 
-`scripts/simulate_spectra.py` is the same node from a shell. It takes
+`scripts/simulate_spectra.py` runs the same simulator from a shell. It takes
 config layers like `run_mcmc` does -- the four shared `config/*.toml` layers,
 then `config/simulations/spectrum/<name>.toml` -- and validates the merged
-`[spectra]` table as the `SpectraMetadata`. In that table a hyperparameter is a
+`[spectra]` table as the `BackgroundSpectralDensityMetadata`. In that table a hyperparameter is a
 `"${fiducials.X}"` reference (fixed) or a `"${priors.X}"` one (sampled). The
 sibling `[draws]` table (`seed`, `num_draws`) names the seeds, through
-`split_seed`. The output is `<--output-dir>/spectra-<key>-<digest>.h5`. The default is
+`batch_keys`. The output is `<--output-dir>/spectra-<key>-<seed>-<num_draws>.h5`. The default is
 `default_cache_dir() / "spectra"`, shared with the SNR analysis script across
 worktrees: `~/Library/Caches/astrogwb/spectra` on macOS or
 `~/.cache/astrogwb/spectra` on Linux, with `XDG_CACHE_HOME` taking precedence
@@ -616,11 +625,10 @@ uv run --extra paper python scripts/simulate_spectra.py \
 The spectrum layers are not run layers: no chain reads `[spectra]`. Callers
 using custom source-model compositions can still build a
 `PopulationSimulator` from a registered population and reduce its draws with
-`ChunkedPowerSum` (or `SpectraSimulator.reduce`). Sampled inclination is already part of the
+`ChunkedPowerSum` (or `BackgroundSpectralDensitySimulator.reduce`). Sampled inclination is already part of the
 registered BNS population and needs no custom composition.
 
-The `outputs/`
-group of a spectra file holds:
+The root of a spectra file holds:
 
 | Dataset | Shape | Meaning |
 | --- | --- | --- |
@@ -630,8 +638,8 @@ group of a spectra file holds:
 | `total_merger_rate` | `(draws,)` | that draw's observer-frame total rate |
 | `hyperparameters/<name>` | `(draws,)` | the value each row was drawn at, one dataset per name |
 
-The root `metadata` attribute is the complete `SpectraMetadata.model_dump_json()`
-record; `inputs/seeds` holds the seeds the draws were made at.
+The root `metadata` attribute is the complete `BackgroundSpectralDensityMetadata.model_dump_json()`
+record; the root `seed` attribute records the seed passed to `batch_keys`.
 
 The two artifacts differ in what a row is, and that is the whole difference. A
 power catalog's sample axis indexes *sources* drawn once at one set of
@@ -641,8 +649,15 @@ so its hyperparameters are a column per name. A fixed hyperparameter's column
 must repeat its value; a sampled one's holds each row's draw. In fixed mode,
 every `n_events` entry must match the metadata's `num_events`.
 
-`SpectralDensityCatalog.from_arrays` validates the same way its sibling does:
-shapes and that every column agrees on the draw count.
+Construction guarantees this layout. Consumers use the data dictionary and
+metadata separately, without a catalog wrapper or a data-validation layer.
+Observation time and population construction come directly from metadata;
+draw count is `data["spectral_density"].shape[0]`, and bin widths are derived
+from `data["frequencies"]` using `astrogwb.frequency.bin_widths`.
+
+The `BackgroundSpectralDensity*` names and unified single-draw layout preserve
+metadata JSON, content keys and existing batch files. The package version
+remains unchanged because the scientific draws and waveform values are unchanged.
 
 ## What is *not* in the file: the analysis window
 

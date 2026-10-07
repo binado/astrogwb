@@ -8,10 +8,10 @@ from astrogwb.simulators.population.metadata import (
 )
 from astrogwb.waveform.metadata import WaveformMetadata
 
-__all__ = ["Hyperparameter", "SpectraMetadata"]
+__all__ = ["BackgroundSpectralDensityMetadata", "Hyperparameter"]
 
 
-class SpectraMetadata(PopulationDrawMetadata):
+class BackgroundSpectralDensityMetadata(PopulationDrawMetadata):
     """The record a spectral-density artifact is generated from and cached under.
 
     A spectrum is a population draw reduced through a waveform, so this is a
