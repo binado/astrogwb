@@ -72,6 +72,7 @@ convert-notebooks:
     uv run --group jupyter jupytext --to notebook \
         notebooks/catalog_convergence.py \
         notebooks/mcmc.py \
+        notebooks/spectrum_snrs.py \
         notebooks/waveform_approximant_spectra.py
 
 run-notebook notebook:

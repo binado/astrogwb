@@ -2,7 +2,7 @@
 
 Workflows in this directory are stored as plain `.py` files. Most are [Jupytext](https://jupytext.readthedocs.io/) **py:percent** notebooks — a way to represent Jupyter notebooks as Python source instead of `.ipynb` JSON. That keeps diffs readable and lets normal Python tooling (Ruff, `ty`) work on notebook code. The `.py` is the source of truth; `*.ipynb` is gitignored.
 
-[`fiducial_spectrum.py`](fiducial_spectrum.py) and [`spectrum_snrs.py`](spectrum_snrs.py) are [marimo](https://docs.marimo.io/) notebooks: plain `.py` files whose cells form a reactive graph.
+[`fiducial_spectrum.py`](fiducial_spectrum.py) is a [marimo](https://docs.marimo.io/) notebook: a plain `.py` file whose cells form a reactive graph.
 
 ## Two kinds, one directory
 
@@ -51,7 +51,7 @@ repository root as the working directory.
 - **`fiducial_spectrum.py`** — marimo notebook. One seeded forward-model draw
   of the fiducial $S_h$ / $\Omega_{\mathrm{GW}}$, network $S_{\mathrm{eff}}$,
   $\sigma$, and per-network SNR. No catalog file.
-- **`spectrum_snrs.py`** — marimo notebook for the appendix's shot-noise
+- **`spectrum_snrs.py`** — percent notebook for the appendix's shot-noise
   argument. A physics-first walkthrough of how catalog shot noise scales with
   the number of injections $N$ and the minimum redshift $z_{\min}$, judged
   against the expected $\sigma(H_0)$. It fits every template to a common
@@ -59,7 +59,15 @@ repository root as the working directory.
   $\sigma_{\mathrm{ref}}$ with bootstrap errors, and ends with a pass/fail
   verdict against a tolerance on $\mathrm{sd}(r)$. Uses the checked spectrum
   cache and writes three paper figures (A1-A3) and eleven supporting
-  figures. Smoke test:
+  figures. Cells run top to bottom, so execute it from the repository root.
+  Smoke test:
+
+  ```bash
+  ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group jupyter \
+      jupytext --to notebook --execute notebooks/spectrum_snrs.py
+  ```
+
+  It also runs as a plain script:
   `ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/spectrum_snrs.py`.
 
 The paper notebooks merge a run's config layers with
@@ -80,13 +88,13 @@ fixed-count ensembles for one selected network. Neither requires a waveform
 catalog under `outputs/catalogs/`; their spectra are served or generated through
 `simulate`.
 
-Open either notebook from the repository root:
+Open the marimo notebook from the repository root:
 
 ```bash
 uv run --extra notebook --group jupyter marimo edit notebooks/fiducial_spectrum.py
-# Or open the SNR distribution sweeps:
-uv run --extra notebook --group jupyter marimo edit notebooks/spectrum_snrs.py
 ```
+
+`spectrum_snrs.py` is a percent notebook; convert it as under "Opening in Jupyter".
 
 For the shared scientific values on their own, without standing in for a
 particular run, read them from the package rather than retyping them:
@@ -142,7 +150,7 @@ ASTROGWB_NOTEBOOK_SMOKE=1 just test-notebooks
 
 ## Opening in Jupyter
 
-The percent notebooks open in the classic notebook UI after a conversion to `.ipynb`. The two marimo notebooks open in marimo, as above.
+The percent notebooks open in the classic notebook UI after a conversion to `.ipynb`. The marimo notebook (`fiducial_spectrum.py`) opens in marimo, as above.
 
 To convert a percent notebook:
 
