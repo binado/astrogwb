@@ -113,6 +113,10 @@ default-groups = ["dev"]
 # paper ...` -- and a checkout is set up once with
 # `uv sync --extra notebook --group dev`.
 
+[tool.marimo.formatting]
+# Match ruff's default so marimo's saves do not reformat notebooks.
+line_length = 88
+
 [tool.ruff]
 extend-exclude = [".antigravitycli", ".cache", ".claude", ".cursor"]
 include = [
