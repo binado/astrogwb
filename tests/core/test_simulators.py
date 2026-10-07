@@ -113,6 +113,22 @@ def test_polarization_power_key_picks_the_realization() -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("chunk_size", [1, 4, 6, 100])
+def test_polarization_power_is_independent_of_chunk_size(chunk_size: int) -> None:
+    key = batch_keys(41, 1)[0]
+    whole = PolarizationPowerSimulator(CATALOG, chunk_size=None)(key)
+    chunked = PolarizationPowerSimulator(CATALOG, chunk_size=chunk_size)(key)
+
+    # Sources are drawn before chunking, so they are exact. The power is the
+    # same elementwise computation, but XLA may fuse a differently shaped chunk
+    # differently, which moves the last bit.
+    _same(whole["source_parameters"], chunked["source_parameters"])  # ty: ignore[invalid-argument-type]
+    np.testing.assert_allclose(
+        chunked["polarization_power"], whole["polarization_power"], rtol=1e-12, atol=0
+    )
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize("num_draws", [1, 3])
 def test_spectra_round_trip_through_a_file(tmp_path: Path, num_draws: int) -> None:
     simulator = BackgroundSpectralDensitySimulator(SPECTRA, chunk_size=4)
