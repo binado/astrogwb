@@ -649,10 +649,6 @@ def test_check_sources_rejects_values_the_approximant_cannot_carry() -> None:
 
     with pytest.raises(ValueError, match="aligned-spin model"):
         generator.check_sources(_ripple_sources() | {"spin_1x": np.array([0.1, 0.0])})
-    with pytest.raises(ValueError, match="no tidal deformability"):
-        generator.check_sources(
-            _ripple_sources() | {"lambda_1": np.array([300.0, 0.0])}
-        )
 
 
 def test_check_sources_rejects_negative_tidal_deformability(

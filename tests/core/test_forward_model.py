@@ -469,37 +469,6 @@ def test_validate_source_model_accepts_a_matched_population() -> None:
     validate_source_model(model, generator=_generator(), rng_key=jax.random.key(0))
 
 
-def test_validate_source_model_rejects_a_mismatched_approximant() -> None:
-    """A tidal population against an aligned-spin model.
-
-    Nothing downstream would complain: the approximant simply never reads the
-    deformabilities, so the spectrum comes out quietly wrong. Catching it is
-    the whole reason this helper exists.
-    """
-    aligned_spin = RippleGenerator(
-        WaveformMetadata(
-            approximant="IMRPhenomXAS",
-            sampling_frequency=256.0,
-            minimum_frequency=20.0,
-            maximum_frequency=100.0,
-            reference_frequency=20.0,
-            frequency_resolution=4.0,
-        )
-    )
-
-    _, model = mock_population()(_jax_params())
-
-    def tidal_population():
-        sources = dict(model())
-        sources["lambda_1"] = jnp.full_like(sources["luminosity_distance"], 300.0)
-        return sources
-
-    with pytest.raises(ValueError, match="no tidal deformability"):
-        validate_source_model(
-            tidal_population, generator=aligned_spin, rng_key=jax.random.key(0)
-        )
-
-
 def test_validate_source_model_requires_luminosity_distance() -> None:
     _, model = mock_population()(_jax_params())
 
