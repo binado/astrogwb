@@ -156,6 +156,7 @@ extend-select = ["TID"]
 "notebooks/fiducial_spectrum.py" = ["F811", "F401", "PLR1711"]
 "notebooks/spectrum_snrs.py" = ["F811", "F401", "PLR1711"]
 "notebooks/mean_spectrum_snr_table.py" = ["PLR1711"]
+"notebooks/cosmology_grid_posteriors.py" = ["PLR1711"]
 
 [tool.ty.src]
 # Most of `scripts/` stays absent because fixture generators can import
@@ -170,6 +171,7 @@ include = [
     "scripts/profile_model.py",
     "scripts/simulate_spectra.py",
     "notebooks/spectrum_snrs.py",
+    "notebooks/cosmology_grid_posteriors.py",
 ]
 
 [tool.pytest.ini_options]

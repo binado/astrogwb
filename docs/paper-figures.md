@@ -246,6 +246,25 @@ stand-in for the Poisson option, and no figure saving. A full run
 (`N = 2^18`, 100 draws, three cutoffs) is expensive the first time, until the
 spectrum cache is populated.
 
+## Grid posteriors
+
+`notebooks/cosmology_grid_posteriors.py` is a marimo notebook that evaluates
+the posteriors of `H0`, `(H0, Omega_m)` and `(xi_0, xi_n)` on a grid for all six
+networks, with no sampler. The data are a zero-noise Poisson injection
+(`data_seed = 41`); the model spectrum is a 1,000,000-source proposal
+(`proposal_seed = 42`) reweighted to each grid point. The log densities are
+cached in `default_cache_dir() / "posteriors"`, in a file whose name carries a
+hash of the seeds, grids, band, observing time, version and catalog keys, so a
+stale cache is never served. The first run generates the 1M catalog
+(`outputs/catalogs/`, chunked by `PolarizationPowerSimulator(chunk_size=...)`).
+Figures go to `outputs/figures/cosmology_grid_posteriors/` when the
+`Write figures` switch is on:
+
+```bash
+uv run --extra notebook --group dev marimo check --strict notebooks/cosmology_grid_posteriors.py
+ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/cosmology_grid_posteriors.py
+```
+
 ## Scripts
 
 Figure entry points are plain Python scripts under `scripts/`. Each reads its

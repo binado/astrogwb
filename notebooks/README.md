@@ -61,6 +61,14 @@ repository root as the working directory.
   cache and writes three paper figures (A1-A3) and eleven supporting
   figures. Smoke test:
   `ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/spectrum_snrs.py`.
+- **`cosmology_grid_posteriors.py`** — marimo notebook. Grid posteriors for
+  $H_0$, $(H_0, \Omega_m)$ and $(\Xi_0, n)$ across the six detector networks,
+  from a zero-noise Poisson injection reweighted from a 1M-source proposal
+  (different seeds). The log densities are cached under
+  `default_cache_dir() / "posteriors"`, keyed by a hash of their settings, so
+  the figures iterate without recomputing. Writes per-problem marginals and
+  corner plots. Smoke test:
+  `ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/cosmology_grid_posteriors.py`.
 
 The paper notebooks merge a run's config layers with
 `assemble_run(*REFERENCE_RUN)` — the by-name convenience wrapper over the same
