@@ -47,8 +47,13 @@ WAVEFORM = WaveformMetadata(
     frequency_resolution=10.0,
 )
 POPULATION = PopulationMetadata(
-    model_name="bns_md_cosmological",
-    model_kwargs={"minimum_redshift": 0.0, "maximum_redshift": 5.0, "n_grid": 64},
+    model_name="bns_coba",
+    model_kwargs={
+        "mass_model": "uniform",
+        "minimum_redshift": 0.0,
+        "maximum_redshift": 5.0,
+        "n_grid": 64,
+    },
 )
 CATALOG = CatalogMetadata(
     waveform=WAVEFORM, population=POPULATION, fiducials=FIDUCIALS, num_samples=6

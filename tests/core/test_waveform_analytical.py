@@ -74,13 +74,7 @@ def bns_cutoff(bns: dict[str, jax.Array]) -> Callable[..., float]:
 
 
 def test_mean_inclination_factor_is_the_analytic_inclination_constant() -> None:
-    """``<g> / g(0)`` must equal the 0.4 in ``astrogwb.gwb.spectral_density``.
-
-    ``spectral_density(..., source_parameters={})`` multiplies by a bare 0.4
-    because the populations omit inclination for face-on sources.
-    That factor is only correct if it is the ratio of the inclination-averaged
-    ``g`` to its face-on value -- so this test is what couples the closed form
-    here to the magic number over there.
+    """``MEAN_INCLINATION_FACTOR`` is the isotropic average of ``inclination_factor``.
 
     The average is over ``cos iota`` uniform on ``[-1, 1]``, so integrating
     ``inclination_factor`` over the angle picks up a ``sin iota`` Jacobian and

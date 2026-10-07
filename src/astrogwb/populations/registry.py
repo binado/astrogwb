@@ -1,94 +1,40 @@
 """Name-to-population registry.
 
-A catalog file records the *name* of the population that drew it, never an
-import path and never a pickled callable. Registry keys change only on
-purpose; module paths change as collateral whenever a module is moved, so a
-persisted ``module:function`` string is a reference that silently rots.
-
-One registry, because a source model and its merger rate are not independent
-declarations: both are normalizations of the same redshift law, and composing
-them freely is how a guard-mixture proposal came to record the plain
-Madau-Dickinson rate -- a number that is not the normalization of the density
-it travels with. A registered population is a *factory*: it takes the
-construction kwargs and returns both callables at once, so the pairing is
-structural rather than conventional.
-
-A population that has no physical rate -- a guard mixture is a sampling
-density, not a population -- returns ``None`` for it, and every consumer that
-needs one fails by name instead of computing a meaningless scalar.
-
-What :func:`build_population` returns is a :class:`Population` of plain
-:func:`functools.partial` objects with the construction kwargs bound: a
-:data:`SourceFn` and an optional :data:`MergerRateFn`, each called with
-hyperparameters alone. Evaluating or sampling one is the job of
+A registered population is a *factory*: it takes the construction kwargs and
+returns a :data:`~astrogwb.populations._types.Population`, a callable
+``parameters -> (merger_rate, model)``. The rate and the source density come
+from one call, so both are normalizations of the same redshift law by
+construction. ``model()`` declares the per-source sample sites and returns the
+columns a catalog stores; evaluating or sampling it is the job of
 :func:`astrogwb.populations.evaluation.evaluate_sources` and
 :func:`astrogwb.populations.evaluation.sample_sources`.
 
 The factory's own signature is the kwargs schema: a construction key no
 population takes raises ``TypeError`` here rather than being filtered away.
 
-Registration also declares which hyperparameters the population lets a run
-marginalize analytically (:func:`amplitude_parameters`). That is a property of
-the density, not of the analysis: ``H0`` factors out of the spectrum only while
-the normalized redshift law is independent of it, which a delay measured in Gyr
-breaks. The declaration defaults to none, so a new population opts in.
-
-The name pins the name, not the mathematics: re-pointing a registered key at a
-different density would be invisible here.
+Which hyperparameters a population needs, which of them factor out of the
+spectrum, and whether it is a physical population or a proposal density are
+contracts documented on the factory, not checked here.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from inspect import signature
-from typing import NamedTuple
 
-import jax
-from jax.typing import ArrayLike
+from astrogwb.populations._types import Population
 
 __all__ = [
     "DEFAULT_DENSITY_SITES",
-    "MergerRateFn",
     "Population",
-    "SourceFn",
-    "amplitude_parameters",
     "build_population",
     "known_populations",
     "register_population",
 ]
 
-#: A bound source model: declares per-source sites as a side effect and
-#: returns the mapping that defines the source-output set -- the columns a
-#: catalog stores. ``luminosity_distance`` is required in it: it is the
-#: effective distance governing waveform amplitude.
-type SourceFn = Callable[[Mapping[str, ArrayLike]], Mapping[str, jax.Array]]
-
-#: A bound merger-rate callable: returns one observer-frame scalar, mergers per
-#: second, shape ``()``, from hyperparameters alone.
-type MergerRateFn = Callable[[Mapping[str, ArrayLike]], jax.Array]
-
-
-class Population(NamedTuple):
-    """One population's two bound callables, built together.
-
-    ``merger_rate_fn`` is ``None`` exactly when the population declares no
-    physical rate: a guard mixture fattens the tails of a proposal density and
-    the Madau-Dickinson total rate is not its normalization, so there is no
-    scalar to return rather than a wrong one.
-
-    Both members hash **by identity**. Build the population once per run and
-    reuse it: closing a jit-compiled function over a freshly built, equal
-    callable forces a recompile.
-    """
-
-    source_model: SourceFn
-    merger_rate_fn: MergerRateFn | None
-
-
 type PopulationFactory = Callable[..., Population]
 
 _REGISTRY: dict[str, PopulationFactory] = {}
-_AMPLITUDE_PARAMETERS: dict[str, tuple[str, ...]] = {}
 
 #: Density factors a catalog selects when nothing narrower is requested.
 #: Every registered source model declares ``redshift`` -- the one source
@@ -100,33 +46,25 @@ DEFAULT_DENSITY_SITES: tuple[str, ...] = (
 )
 
 
-def register_population[F: PopulationFactory](
-    name: str, *, amplitude_parameters: tuple[str, ...] = ()
-) -> Callable[[F], F]:
+def register_population[F: PopulationFactory](name: str) -> Callable[[F], F]:
     """Register a population factory under ``name``, returning it unchanged.
 
     Physical and proposal populations share this one registry -- a proposal is
     just the population a catalog happened to be drawn from. The registered
     factory takes construction kwargs by keyword and returns a
-    :class:`Population`; :func:`build_population` calls it.
-
-    ``amplitude_parameters`` names the hyperparameters whose effect on this
-    population's spectrum is a pure overall scaling, and so may be marginalized
-    analytically. Empty by default: claiming one wrongly gives a silently wrong
-    posterior, while omitting one only costs a sampled dimension.
+    :data:`Population`; :func:`build_population` calls it.
     """
 
     def decorate(fn: F) -> F:
         if name in _REGISTRY:
             raise ValueError(f"population {name!r} is already registered")
         _REGISTRY[name] = fn
-        _AMPLITUDE_PARAMETERS[name] = tuple(amplitude_parameters)
         return fn
 
     return decorate
 
 
-def build_population(name: str, **kwargs: float | bool) -> Population:
+def build_population(name: str, **kwargs: float | bool | str) -> Population:
     """Build a registered population from its construction kwargs.
 
     ``kwargs`` is the flat construction mapping a catalog persists, passed
@@ -139,8 +77,9 @@ def build_population(name: str, **kwargs: float | bool) -> Population:
     called, so a mismatch is reported against the *population* rather than
     surfacing as a ``TypeError`` about a private factory function.
 
-    The returned callables hash **by identity**. Build the population once per
-    run and reuse it.
+    The returned callable hashes **by identity**. Build the population once per
+    run and reuse it: closing a jit-compiled function over a freshly built, equal
+    callable forces a recompile.
     """
     try:
         factory = _REGISTRY[name]
@@ -157,17 +96,6 @@ def build_population(name: str, **kwargs: float | bool) -> Population:
             f"population {name!r}: {error}; its construction kwargs are: {accepted}"
         ) from None
     return factory(**kwargs)
-
-
-def amplitude_parameters(name: str) -> tuple[str, ...]:
-    """The hyperparameters population ``name`` may marginalize analytically."""
-    try:
-        return _AMPLITUDE_PARAMETERS[name]
-    except KeyError:
-        known = ", ".join(known_populations())
-        raise KeyError(
-            f"unknown population {name!r}; registered populations are: {known}"
-        ) from None
 
 
 def known_populations() -> tuple[str, ...]:

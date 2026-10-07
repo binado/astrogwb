@@ -38,7 +38,6 @@ WORKFLOW_DIR = PAPER_ROOT
 LINKED = ("Snakefile", "config", "scripts")
 CATALOG_RULES = ("waveform_catalog", "catalogs")
 MCMC_RULES = (
-    "validate",
     "run_mcmc",
     "plot_cosmological_parameters",
     "plot_modified_propagation",
@@ -278,7 +277,6 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
         "catalogs",
         "plot_cosmological_parameters",
         "importance_weights_grid",
-        "validate",
         "run_mcmc",
     } <= rules
     assert {

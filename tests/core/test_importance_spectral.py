@@ -19,8 +19,7 @@ from astrogwb_mock_population import (
     derived_columns,
     log_weight_kwargs,
     make_redshift_grid,
-    mock_merger_rate_fn,
-    mock_target_model,
+    mock_population,
 )
 from jax.typing import ArrayLike
 from numpyro.distributions import constraints
@@ -37,11 +36,9 @@ from astrogwb.importance.spectral import (
 )
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
+    Population,
     PopulationMetadata,
-    SourceFn,
-    build_population,
 )
-from astrogwb.populations.bns_madau_dickinson import bns_md_cosmological
 from astrogwb.simulators.polarization_power import (
     REDSHIFT_SITE,
     CatalogMetadata,
@@ -74,15 +71,11 @@ OFF_POPULATION_PARAMS = {
     name: value for name, value in OFF_FIDUCIALS.items() if name not in {"xi_0", "xi_n"}
 }
 MODEL_KWARGS = {
+    "mass_model": "uniform",
     "minimum_redshift": Z_MIN,
     "maximum_redshift": Z_MAX,
     "n_grid": N_GRID,
-    "sample_inclination": False,
 }
-
-
-def _generating_model() -> SourceFn:
-    return build_population("bns_md_cosmological", **MODEL_KWARGS).source_model
 
 
 def _source_parameters(
@@ -90,7 +83,7 @@ def _source_parameters(
 ) -> dict[str, jax.Array]:
     ones = jnp.ones_like(REDSHIFTS)
     return derived_columns(
-        _generating_model(),
+        mock_population(),
         params,
         {
             REDSHIFT_SITE: REDSHIFTS,
@@ -100,6 +93,7 @@ def _source_parameters(
             "spin_2z": 0.0 * ones,
             "lambda_1": 400.0 * ones,
             "lambda_2": 300.0 * ones,
+            "inclination": (jnp.pi / 3.0) * ones,
         },
     )
 
@@ -131,7 +125,7 @@ def _catalog(
     metadata = CatalogMetadata(
         waveform=_waveform_metadata(power.shape[0]),
         population=PopulationMetadata(
-            model_name="bns_md_cosmological",
+            model_name="bns_coba",
             model_kwargs=MODEL_KWARGS,
         ),
         fiducials={name: float(value) for name, value in params.items()},
@@ -143,15 +137,14 @@ def _catalog(
 def _importance(
     *,
     catalog: tuple[PolarizationPowerData, CatalogMetadata] | None = None,
-    source_model: SourceFn | None = None,
+    population: Population | None = None,
     frequency_mask: ArrayLike | None = None,
     density_sites: tuple[str, ...] = DEFAULT_DENSITY_SITES,
 ) -> dict[str, Any]:
     """Every keyword of ``importance_spectral_density``, prepared from a catalog."""
     spectrum = build_importance_spectrum(
         *(_catalog() if catalog is None else catalog),
-        source_model=mock_target_model() if source_model is None else source_model,
-        merger_rate_fn=mock_merger_rate_fn(),
+        population=mock_population() if population is None else population,
         density_sites=density_sites,
         frequency_mask=frequency_mask,
     )
@@ -187,8 +180,7 @@ def test_direct_construction_from_prepared_arrays_is_supported() -> None:
     """The proposal need not be a registered source model -- only an ``(N,)`` density."""
     spectrum = partial(
         importance_spectral_density,
-        source_model=mock_target_model(),
-        merger_rate_fn=mock_merger_rate_fn(),
+        population=mock_population(),
         source_parameters=_source_parameters(),
         polarization_power=POWER,
         proposal_log_prob=jnp.zeros(4),
@@ -209,35 +201,39 @@ def test_proposal_density_is_evaluated_only_during_preparation(
     preparation, one per later spectrum call (and one per trace under
     ``jit``) for the target.
     """
-    calls: list[SourceFn] = []
+    calls: list[Any] = []
     original = spectral.evaluate_sources
 
-    def counted(source_model, *args, **kwargs):
-        calls.append(source_model)
-        return original(source_model, *args, **kwargs)
+    def counted(model, *args, **kwargs):
+        calls.append(model)
+        return original(model, *args, **kwargs)
 
     monkeypatch.setattr(spectral, "evaluate_sources", counted)
-    target = mock_target_model()
-    importance = _importance(source_model=target)
+    importance = _importance()
     assert len(calls) == 1
-    assert calls[0].func is bns_md_cosmological  # ty: ignore[unresolved-attribute]
 
     spectrum = partial(importance_spectral_density, **importance)
     spectrum(FIDUCIALS)
     spectrum(OFF_FIDUCIALS)
     jax.jit(spectrum)(FIDUCIALS)
     assert len(calls) == 4
-    assert all(model is target for model in calls[1:])
 
 
 def test_a_target_without_a_distance_output_is_rejected() -> None:
-    def distanceless(params: Mapping[str, ArrayLike]) -> dict[str, jax.Array]:
-        outputs = dict(_generating_model()(params))
-        del outputs[LUMINOSITY_DISTANCE_SITE]
-        return outputs
+    def distanceless(
+        params: Mapping[str, ArrayLike],
+    ) -> tuple[jax.Array, Callable[[], dict[str, jax.Array]]]:
+        rate, model = mock_population()(params)
+
+        def without_distance() -> dict[str, jax.Array]:
+            outputs = dict(model())
+            del outputs[LUMINOSITY_DISTANCE_SITE]
+            return outputs
+
+        return rate, without_distance
 
     weight_kwargs: dict[str, Any] = log_weight_kwargs(_importance())
-    weight_kwargs["source_model"] = distanceless
+    weight_kwargs["population"] = distanceless
     with pytest.raises(KeyError, match=LUMINOSITY_DISTANCE_SITE):
         evaluate_log_weights(FIDUCIALS, **weight_kwargs)
 
@@ -253,8 +249,7 @@ def _spectrum(
 ):
     return build_importance_spectrum(
         *(_catalog() if catalog is None else catalog),
-        source_model=mock_target_model(),
-        merger_rate_fn=mock_merger_rate_fn(),
+        population=mock_population(),
         density_sites=density_sites,
         frequency_mask=frequency_mask,
     )
@@ -277,9 +272,9 @@ def test_a_catalog_reweighted_to_its_own_proposal_has_exactly_zero_log_weights()
 ):
     """Non-negotiable, and exactly rather than approximately.
 
-    ``xi_0 = 1`` makes the modified-propagation target reduce bit-for-bit to
-    the cosmological source model that drew the catalog, so target and proposal
-    are the same expressions on the same inputs. A tolerance here would hide an
+    ``xi_0 = 1`` makes the modified-propagation distance ratio identically one,
+    so the target reduces bit-for-bit to the model that drew the catalog, and
+    target and proposal are the same expressions on the same inputs. A tolerance here would hide an
     operation-order change that costs a ulp per weight -- small on its own, but
     this identity is what several other tests build exact expectations on.
     """
@@ -293,7 +288,7 @@ def test_a_catalog_reweighted_to_its_own_proposal_has_exactly_zero_log_weights()
     spectrum, extras = importance_spectral_density(at_generating, **importance)
     np.testing.assert_allclose(
         spectrum,
-        0.4 * float(jnp.asarray(extras["total_merger_rate"])) * POWER.mean(axis=1),
+        float(jnp.asarray(extras["total_merger_rate"])) * POWER.mean(axis=1),
         rtol=1e-14,
     )
     np.testing.assert_array_equal(extras["importance_relative_ess"], 1.0)
@@ -333,7 +328,6 @@ def _grid_reference(
             importance["polarization_power"],
             jnp.exp(log_weights),
             rate,
-            source_parameters=importance["source_parameters"],
         ), {
             "total_merger_rate": jnp.asarray(rate),
             "importance_relative_ess": relative_ess(log_weights),
@@ -435,7 +429,6 @@ def test_precomputed_mixture_density_is_used_in_estimate() -> None:
         POWER,
         jnp.exp(manual_log_weights),
         rate,
-        source_parameters=mixed["source_parameters"],
     )
     np.testing.assert_allclose(
         importance_spectral_density(FIDUCIALS, **mixed)[0], expected, rtol=1e-13

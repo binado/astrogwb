@@ -72,6 +72,7 @@ def test_mock_catalog_defaults_cover_the_production_band(mock_catalog_factory) -
         "spin_2z",
         "lambda_1",
         "lambda_2",
+        "inclination",
         "detector_frame_mass_1",
         "detector_frame_mass_2",
         "luminosity_distance",
@@ -164,7 +165,6 @@ def test_catalog_contraction_matches_the_analytic_spectrum(
             polarization_power,
             jnp.ones(num_sources),
             total_merger_rate,
-            source_parameters=samples,
         )
         analytic_values = np.asarray(analytic)
         contracted_values = np.asarray(contracted)
@@ -256,7 +256,6 @@ def test_catalog_omega_gw_matches_the_analytic_spectrum(mock_catalog_factory) ->
         polarization_power,
         jnp.ones(LARGE_CATALOG_SIZE),
         total_merger_rate,
-        source_parameters=samples,
     )
     analytic = _analytic_spectral_density(frequencies)
 

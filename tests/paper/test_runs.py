@@ -19,7 +19,6 @@ from repo import REPO_ROOT
 from astrogwb.paper.config.catalogs import (
     check_catalog_requests,
     resolve_run_catalogs,
-    validate_all_runs,
 )
 from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import (
@@ -248,7 +247,7 @@ def test_a_guard_customized_at_its_source_keeps_the_shared_window(
     proposal = CatalogMetadata.model_validate(raw["analysis"]["proposal"])
     window = raw["catalog"]["population"]["model_kwargs"]
 
-    assert proposal.population.model_name == "bns_md_uniform_mixture"
+    assert proposal.population.model_name == "bns_coba"
     assert proposal.population.model_kwargs == {
         **window,
         "uniform_mixing_fraction": fraction,
@@ -263,7 +262,8 @@ def test_the_injection_is_drawn_at_the_fiducials_the_run_initializes_at() -> Non
 
     assert injection["fiducials"] == raw["fiducials"]
     assert injection["fiducials"]["delay_slope"] == -1.0
-    assert injection["population"]["model_name"] == "bns_md_time_delayed_cosmological"
+    assert injection["population"]["model_name"] == "bns_coba"
+    assert injection["population"]["model_kwargs"]["time_delay"] is True
 
 
 def test_the_catalog_size_series_differs_only_in_size() -> None:
@@ -351,15 +351,6 @@ def test_an_invalid_role_is_rejected_naming_it(tmp_path: Path) -> None:
         resolve_run_catalogs(tmp_path)
 
 
-def test_a_guard_mixture_is_rejected_as_an_injection() -> None:
-    raw = assemble_run("variable-proposal-guard", "eps1e-1")
-    raw["analysis"]["injection"] = raw["analysis"]["proposal"]
-    config = build_run_config(raw)
-
-    with pytest.raises(ValueError, match="declares no merger rate"):
-        check_catalog_requests(config, label="demo/only")
-
-
 def test_an_unregistered_catalog_population_is_rejected() -> None:
     raw = assemble_run("cosmological-parameters", "ET-triangular")
     raw["analysis"]["proposal"]["population"] = {
@@ -372,10 +363,16 @@ def test_an_unregistered_catalog_population_is_rejected() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# The pre-flight gate that replaced `astrogwb-assemble-config --all`
+# Every committed run
 # --------------------------------------------------------------------------- #
-def test_the_validation_gate_covers_every_run() -> None:
-    labels = validate_all_runs()
+def test_every_committed_run_assembles_validates_and_checks_its_catalogs() -> None:
+    labels: list[str] = []
+    for experiment, runs in discover_runs().items():
+        for run in runs:
+            label = f"{experiment}/{run}"
+            config = build_run_config(assemble_run(experiment, run))
+            check_catalog_requests(config, label=label)
+            labels.append(label)
 
     assert len(labels) == 27
     for label in (

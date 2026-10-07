@@ -227,9 +227,10 @@ The seven experiments and their 27 runs:
 retriggers exactly that chain, editing an experiment's `_base.toml` retriggers
 that experiment, and editing any of the four shared layers retriggers all 27.
 
-`snakemake validate` merges and catalog-checks every run without building
-anything. Run it before a campaign: it fails on the first invalid run *before
-any catalog is built*, and a catalog is a GPU job.
+A dry run (`snakemake --dry-run experiments`) merges every run and resolves its
+catalog requests without building anything. Run it before a campaign: a
+malformed config fails there, *before any catalog is built*, and a catalog is a
+GPU job.
 
 ## Catalogs and the proposal density
 
@@ -273,8 +274,8 @@ names is gone.
 
 The window is narrower than what was generated, which is why the per-sample
 density cannot be baked into the file. Nothing about it is resolved at config
-time, so `snakemake validate` stays cheap: a config typo, or an unregistered
-population name, fails without any catalog having to exist.
+time, so the dry run stays cheap: a config typo fails without any catalog
+having to exist.
 
 `analysis.population` is the *target* population the sampled hyperparameters
 describe, a `PopulationMetadata` like any catalog's, though a target is evaluated rather
@@ -285,10 +286,10 @@ than drawn from:
 population = "${populations.target}"
 ```
 
-`[populations.target]` is `bns_md_modified_propagation`, which every run but
-`time-delay` uses. It reduces exactly to the plain cosmological population at
-`xi_0 = 1`, which is how a run that does not sample the propagation parameters
-gets the standard law without naming a second model.
+`[populations.target]` is `bns_coba`, which every run but `time-delay` uses.
+Modified propagation reduces exactly to the standard law at `xi_0 = 1`, which is
+how a run that does not sample the propagation parameters gets the standard law
+without naming a second model.
 
 Its `model_kwargs` are the one statement of the analysis redshift window and
 grid: the same three numbers build the target callables and define the grid
@@ -308,10 +309,10 @@ Run one experiment's chains through Snakemake from the repository root:
 
 ```bash
 snakemake --snakefile Snakefile \
-  --allowed-rules validate run_mcmc run_experiment_cosmological_parameters \
+  --allowed-rules run_mcmc run_experiment_cosmological_parameters \
   --profile profiles/local --cores 8 run_experiment_cosmological_parameters
 snakemake --snakefile Snakefile \
-  --allowed-rules validate run_mcmc run_experiment_modified_propagation \
+  --allowed-rules run_mcmc run_experiment_modified_propagation \
   --profile profiles/slurm run_experiment_modified_propagation
 ```
 

@@ -11,8 +11,7 @@ import numpy as np
 import pytest
 from astrogwb_mock_population import (
     FIDUCIALS,
-    mock_merger_rate_fn,
-    mock_target_model,
+    mock_population,
 )
 from jax.typing import ArrayLike
 from numpyro.infer.util import log_density
@@ -168,8 +167,7 @@ def test_importance_jacobian_matches_finite_differences(
 ) -> None:
     spectrum, _ = build_importance_spectrum(
         *mock_catalog_factory(num_sources=256),
-        source_model=mock_target_model(),
-        merger_rate_fn=mock_merger_rate_fn(),
+        population=mock_population(),
         density_sites=DEFAULT_DENSITY_SITES,
     )
     names = ("H0", "xi_0", "gamma")

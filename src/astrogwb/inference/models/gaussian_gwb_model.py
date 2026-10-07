@@ -11,8 +11,7 @@ target outside inference::
 
     spectrum = build_importance_spectrum(
         catalog,
-        source_model=target.source_model,
-        merger_rate_fn=target.merger_rate_fn,
+        population=target,
         density_sites=DEFAULT_DENSITY_SITES,
     )[0]
     model = partial(

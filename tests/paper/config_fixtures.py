@@ -71,16 +71,18 @@ _MINIMAL_WAVEFORM: dict[str, Any] = {
 }
 _MINIMAL_POPULATIONS: dict[str, Any] = {
     "default": {
-        "model_name": "bns_md_cosmological",
+        "model_name": "bns_coba",
         "model_kwargs": {
+            "mass_model": "uniform",
             "minimum_redshift": 0.0,
             "maximum_redshift": 20.0,
             "n_grid": 64,
         },
     },
     "target": {
-        "model_name": "bns_md_modified_propagation",
+        "model_name": "bns_coba",
         "model_kwargs": {
+            "mass_model": "uniform",
             "minimum_redshift": 0.3,
             "maximum_redshift": 20.0,
             "n_grid": 256,

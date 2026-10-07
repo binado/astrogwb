@@ -134,8 +134,12 @@ def build_potential(
         *injection,
         *proposal,
         observation_time=config.analysis.observation_time,
-        minimum_redshift=config.analysis.population.model_kwargs["minimum_redshift"],
-        maximum_redshift=config.analysis.population.model_kwargs["maximum_redshift"],
+        minimum_redshift=float(
+            config.analysis.population.model_kwargs["minimum_redshift"]
+        ),
+        maximum_redshift=float(
+            config.analysis.population.model_kwargs["maximum_redshift"]
+        ),
         minimum_frequency=config.analysis.minimum_frequency,
         maximum_frequency=config.analysis.maximum_frequency,
         detectors=detectors,

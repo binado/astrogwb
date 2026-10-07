@@ -139,16 +139,17 @@ def main(argv: Sequence[str] | None = None) -> None:
     if args.events < 1 or args.repeats < 1:
         raise ValueError("--events and --repeats must be positive")
 
-    source_model, _ = build_population(
-        "bns_md_cosmological",
+    population = build_population(
+        "bns_coba",
+        mass_model="uniform",
         minimum_redshift=0.3,
         maximum_redshift=20.0,
         n_grid=256,
     )
+    _, model = population(_PARAMETERS)
     source_parameters = sample_sources(
-        source_model,
+        model,
         jax.random.key(20250314),
-        _PARAMETERS,
         num_samples=args.events,
     )
 

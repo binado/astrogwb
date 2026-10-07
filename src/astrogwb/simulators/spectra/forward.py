@@ -12,8 +12,7 @@ import numpyro
 from jax.typing import ArrayLike
 from numpy.typing import NDArray
 
-from astrogwb.gwb.spectral import inclination_averaging_factor
-from astrogwb.populations import SourceFn
+from astrogwb.populations._types import PopulationModel
 from astrogwb.simulators.population.simulator import bucket_size
 from astrogwb.utils import array_dict_shape
 from astrogwb.waveform import PolarizationPowerGenerator
@@ -109,9 +108,8 @@ def _sum_polarization_power(
 
 
 def validate_source_model(
-    params: Mapping[str, ArrayLike],
+    model: PopulationModel,
     *,
-    source_model: SourceFn,
     generator: PolarizationPowerGenerator,
     rng_key: jax.Array | int,
 ) -> None:
@@ -126,14 +124,14 @@ def validate_source_model(
     No waveform is evaluated, so this is cheap enough to call unconditionally.
 
     Raises:
-        KeyError: If ``source_model`` does not return ``luminosity_distance``.
+        KeyError: If ``model`` does not return ``luminosity_distance``.
         ValueError: If a drawn value names a degree of freedom the generator's
             approximant does not carry -- a tidal population against an
             aligned-spin model, say, whose deformabilities would otherwise be
             silently ignored.
     """
     with numpyro.handlers.seed(rng_seed=rng_key), numpyro.plate("events", 1):
-        sources = dict(source_model(params))
+        sources = dict(model())
     _require_luminosity_distance(sources)
     generator.check_sources(sources)
 
@@ -207,7 +205,6 @@ class ChunkedPowerSum:
 
 def normalize_spectra(
     power_sum: ArrayLike,
-    sources: Mapping[str, ArrayLike],
     *,
     count: Literal["poisson", "fixed"],
     total_merger_rate: float | NDArray[np.float64],
@@ -216,7 +213,7 @@ def normalize_spectra(
 ) -> NDArray[np.float64]:
     r"""Turn one draw's power sum into a strain spectrum, ``(F,)``.
 
-    ``S_h = A_{\rm inc}\, k \sum_i P_i(f)`` with the factor ``k = 1/T`` for
+    ``S_h = k \sum_i P_i(f)`` with the factor ``k = 1/T`` for
     Poisson counts (the sum over the realized events divided by the observation
     time) and ``k = \mathcal{R} / N`` for fixed counts (the population rate
     times the sample mean power, so ``T`` cancels). The two modes share
@@ -228,8 +225,4 @@ def normalize_spectra(
         factor = float(total_merger_rate) / num_events
     else:
         factor = 1.0 / observation_seconds
-    return (
-        inclination_averaging_factor(sources)
-        * factor
-        * np.asarray(power_sum, dtype=np.float64)
-    )
+    return factor * np.asarray(power_sum, dtype=np.float64)

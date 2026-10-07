@@ -57,8 +57,8 @@ from jax.typing import ArrayLike
 from astrogwb.gwb.spectral import spectral_density
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.importance.weights import importance_log_weights
+from astrogwb.populations._types import Population, PopulationModel
 from astrogwb.populations.evaluation import evaluate_sources
-from astrogwb.populations.registry import MergerRateFn, SourceFn
 
 if TYPE_CHECKING:
     from astrogwb.inference.protocol import SpectralDensityFn
@@ -80,23 +80,16 @@ __all__ = [
 _LUMINOSITY_DISTANCE = "luminosity_distance"
 
 
-def evaluate_log_weights(
-    params: Mapping[str, ArrayLike],
+def _log_weights(
+    model: PopulationModel,
     *,
-    source_model: SourceFn,
     source_parameters: Mapping[str, jax.Array],
     proposal_log_prob: jax.Array,
     log_reference_distance: jax.Array,
     density_sites: Sequence[str],
 ) -> jax.Array:
-    """Per-source log importance weights at ``params``, shape ``(N,)``.
-
-    One isolated target execution supplies both the selected density and the
-    distance. ``density_sites`` must be the same value ``proposal_log_prob``
-    was evaluated with. Requires no merger rate: weights are a density ratio.
-    """
     target_log_prob, outputs = evaluate_sources(
-        source_model, params, source_parameters, density_sites=density_sites
+        model, source_parameters, density_sites=density_sites
     )
     if _LUMINOSITY_DISTANCE not in outputs:
         raise KeyError(
@@ -111,11 +104,36 @@ def evaluate_log_weights(
     )
 
 
+def evaluate_log_weights(
+    params: Mapping[str, ArrayLike],
+    *,
+    population: Population,
+    source_parameters: Mapping[str, jax.Array],
+    proposal_log_prob: jax.Array,
+    log_reference_distance: jax.Array,
+    density_sites: Sequence[str],
+) -> jax.Array:
+    """Per-source log importance weights at ``params``, shape ``(N,)``.
+
+    One isolated target execution supplies both the selected density and the
+    distance. ``density_sites`` must be the same value ``proposal_log_prob``
+    was evaluated with. The merger rate plays no part: weights are a density
+    ratio.
+    """
+    _, model = population(params)
+    return _log_weights(
+        model,
+        source_parameters=source_parameters,
+        proposal_log_prob=proposal_log_prob,
+        log_reference_distance=log_reference_distance,
+        density_sites=density_sites,
+    )
+
+
 def importance_spectral_density(
     params: Mapping[str, ArrayLike],
     *,
-    source_model: SourceFn,
-    merger_rate_fn: MergerRateFn,
+    population: Population,
     source_parameters: Mapping[str, jax.Array],
     polarization_power: jax.Array,
     proposal_log_prob: jax.Array,
@@ -133,20 +151,19 @@ def importance_spectral_density(
     sampler step is not a diagnostic; :func:`evaluate_log_weights` gives the
     raw weights.
     """
-    log_weights = evaluate_log_weights(
-        params,
-        source_model=source_model,
+    merger_rate, model = population(params)
+    log_weights = _log_weights(
+        model,
         source_parameters=source_parameters,
         proposal_log_prob=proposal_log_prob,
         log_reference_distance=log_reference_distance,
         density_sites=density_sites,
     )
-    total_merger_rate = jnp.reshape(jnp.asarray(merger_rate_fn(params)), ())
+    total_merger_rate = jnp.reshape(jnp.asarray(merger_rate), ())
     prediction = spectral_density(
         polarization_power,
         jnp.exp(log_weights),
         total_merger_rate,
-        source_parameters=source_parameters,
     )
     return prediction, {
         "total_merger_rate": total_merger_rate,
@@ -162,8 +179,7 @@ def build_importance_spectrum(
     data: PolarizationPowerData,
     metadata: CatalogMetadata,
     *,
-    source_model: SourceFn,
-    merger_rate_fn: MergerRateFn,
+    population: Population,
     density_sites: Sequence[str],
     frequency_mask: ArrayLike | None = None,
 ) -> tuple[SpectralDensityFn, LogWeightsFn]:
@@ -179,15 +195,14 @@ def build_importance_spectrum(
     catalog's arrays are the same whichever factors are counted, so the choice
     belongs to the analysis that reweights them rather than to the file.
 
-    ``source_model`` and ``merger_rate_fn`` are the target's already-built
-    callables -- normally the two members of one
+    ``population`` is the target's already-built
     :class:`~astrogwb.populations.Population` from
     :func:`~astrogwb.populations.build_population`, built once per run and
     reused, since the returned partials hash by identity and a fresh,
     equal-but-not-identical rebuild forces a jit recompile. The rate is the
-    *target's*, never the proposal's, so it is never ``None``: a proposal is a
-    density, and a guard mixture declares no rate at all. ``data`` and ``metadata`` must
-    already be restricted to the analysis redshift window.
+    *target's*, never the proposal's: the target must not be a guard-mixture
+    proposal. ``data`` and ``metadata`` must already be restricted to the
+    analysis redshift window.
 
     One preparation pass feeds both returned callables from a single keyword
     mapping, so the weights and the spectrum provably use the density factors
@@ -206,9 +221,9 @@ def build_importance_spectrum(
         name: jnp.asarray(value) for name, value in data["source_parameters"].items()
     }
     sites = tuple(density_sites)
+    _, proposal_model = metadata.population.build()(metadata.fiducials)
     proposal_log_prob, _ = evaluate_sources(
-        metadata.population.build().source_model,
-        metadata.fiducials,
+        proposal_model,
         source_parameters,
         density_sites=sites,
     )
@@ -238,7 +253,7 @@ def build_importance_spectrum(
         )
 
     weight_kwargs = {
-        "source_model": source_model,
+        "population": population,
         "source_parameters": source_parameters,
         "proposal_log_prob": proposal_log_prob,
         "log_reference_distance": jnp.log(reference_distance),
@@ -247,7 +262,6 @@ def build_importance_spectrum(
     return (
         partial(
             importance_spectral_density,
-            merger_rate_fn=merger_rate_fn,
             polarization_power=power,
             **weight_kwargs,
         ),

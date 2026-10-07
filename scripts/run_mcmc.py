@@ -54,8 +54,7 @@ fiducials. The recorded population, narrowed to the run's analysis redshift
 window, is stamped into the saved chain, which stays the self-describing record
 of what was sampled.
 
-See docs/running-inference.md for the layer tree, and
-``scripts/validate_configs.py`` for the pre-flight gate over every run.
+See docs/running-inference.md for the layer tree.
 
 Add ``--extra cuda`` (or ``--extra tpu``) to ``uv run`` for the matching JAX
 accelerator plugin.
@@ -186,8 +185,12 @@ def run(
         *injection,
         *proposal,
         observation_time=config.analysis.observation_time,
-        minimum_redshift=config.analysis.population.model_kwargs["minimum_redshift"],
-        maximum_redshift=config.analysis.population.model_kwargs["maximum_redshift"],
+        minimum_redshift=float(
+            config.analysis.population.model_kwargs["minimum_redshift"]
+        ),
+        maximum_redshift=float(
+            config.analysis.population.model_kwargs["maximum_redshift"]
+        ),
         minimum_frequency=config.analysis.minimum_frequency,
         maximum_frequency=config.analysis.maximum_frequency,
         detectors=detectors,
@@ -394,8 +397,7 @@ def main(argv: list[str] | None = None) -> None:
         label=args.label,
     )
     # Reject a catalog spec that could not be drawn before JAX claims a
-    # device. `scripts/validate_configs.py` runs the same check over all runs
-    # at once, before any catalog is built.
+    # device.
     check_catalog_requests(config, label=args.label or "run")
 
     logger.info(

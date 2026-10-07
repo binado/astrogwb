@@ -125,48 +125,61 @@ population declares its density factors and source outputs.
 
 A role inherits every field it does not name, whether or not the population it
 names reads all of it: the guard inherits `[fiducials]` whole,
-`local_merger_rate` included, even though `bns_md_uniform_mixture` declares no
-merger rate. That is right for a guard mixture: it is a sampling density, and
-nothing reads a rate off a proposal (see below).
+`local_merger_rate` included, even though a guard mixture's rate is never used.
+That is right: it is a sampling density, and nothing reads a rate off a
+proposal (see below).
 
 **A registry key, not an import path.** Registry keys change only on purpose;
 module paths move as collateral whenever a module is reorganized, so a
 persisted `module:function` string is a reference that silently rots. An
-unknown key fails pre-flight, in `snakemake validate`, listing what is
-registered — before a GPU job is queued.
+unknown key fails when the population is built, listing what is registered.
 
 A registered population is a *factory*: it takes the construction kwargs and
-returns the source model and the merger rate together, each a
-`functools.partial` with those kwargs bound. Hyperparameters and source
-arrays remain arguments.
+returns a callable `parameters -> (merger_rate, model)`. One call builds the
+redshift distribution once, so the rate and the source density come from the
+same grid; `model()` is a no-argument NumPyro model. Hyperparameters are what
+the callable is called with, and source arrays are what `evaluate_sources`
+conditions in.
 
 ```python
 from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
 from astrogwb.populations.evaluation import evaluate_sources, sample_sources
 
-source_model, merger_rate_fn = build_population(
-    "bns_md_cosmological", minimum_redshift=0.0, maximum_redshift=20.0, n_grid=4096
+population = build_population(
+    "bns_coba",
+    mass_model="uniform",
+    minimum_redshift=0.0,
+    maximum_redshift=20.0,
+    n_grid=4096,
 )
+total_merger_rate, model = population(params)  # rate: shape ()
 
-sources = sample_sources(source_model, key, params, num_samples=1024)
+sources = sample_sources(model, key, num_samples=1024)
 log_prob, outputs = evaluate_sources(
-    source_model, params, sources, density_sites=DEFAULT_DENSITY_SITES
+    model, sources, density_sites=DEFAULT_DENSITY_SITES
 )  # log_prob: shape (1024,); outputs["luminosity_distance"]: shape (1024,)
-total_merger_rate = merger_rate_fn(params)  # shape ()
 ```
 
-One name, not two. The source model and its merger rate are both
-normalizations of the same redshift law, and composing them freely is how every
-guarded-proposal catalog came to record the plain Madau-Dickinson rate -- a
-number that is not the normalization of the density its samples were drawn
-from. A population that has no physical rate returns `None` for it, so a
-proposal catalog used as an injection fails by name rather than scaling an
-observed spectrum by the wrong factor.
+One call, not two. The source model and its merger rate are both
+normalizations of the same redshift law, so they are built together. The one
+exception is a guard mixture: its returned rate is still the Madau-Dickinson
+total rate, which does not normalize the mixture density. A guard mixture is a
+proposal, and the caller is trusted never to use one as an injection or an
+analysis target.
+
+`bns_coba` is the one shipped population, and its variants are construction
+kwargs: `mass_model` (`"uniform"` or `"gaussian"`), `time_delay` (with
+`minimum_delay`, `maximum_formation_redshift`, `n_delay_nodes`) and
+`uniform_mixing_fraction`. Modified GW propagation is selected by the
+hyperparameters, not a kwarg: it applies whenever `xi_0` is among them, and is
+the identity at `xi_0 = 1`. The contracts each setting carries -- which
+hyperparameters it needs, which only rescale the spectrum (`H0` stops being one
+when `time_delay` is on), what a proposal may be used for -- are documented in
+the `bns_coba_population_fn` docstring and are not checked.
 
 The factory's signature *is* the construction-settings schema. A key the named
 population does not take raises `TypeError` naming the population and what it
-accepts, rather than being silently filtered on its way to one of two
-separately built callables.
+accepts, rather than being silently dropped.
 
 - The source model's returned mapping defines the stored columns, including
   spins, detector-frame masses, and `luminosity_distance`. Its sample sites are
@@ -188,7 +201,7 @@ the same code path density evaluation takes, which preserves exactly zero
 self-reweighting errors. Both functions isolate their NumPyro effects from
 enclosing inference models with `handlers.block`.
 
-A bound partial hashes by identity: build it once per run and close a
+A population hashes by identity: build it once per run and close a
 JIT-compiled function over it, while hyperparameters and source arrays are
 traced. To compile sampling, keep `num_samples` static.
 
@@ -197,15 +210,12 @@ traced. To compile sampling, keep `num_samples` static.
 Component masses are an ordered pair: `source_frame_mass_1` is the larger one.
 Two mass laws share the rest of the BNS Madau-Dickinson declaration:
 
-- **Ordered uniforms** (`bns_md_cosmological`, `bns_md_modified_propagation`,
-  `bns_md_uniform_mixture`). Parameters `minimum_mass` and `mass_width`; the
+- **Ordered uniforms** (`mass_model = "uniform"`). Parameters `minimum_mass` and `mass_width`; the
   fiducial support is `[1.0, 2.5]` solar masses, with constant joint density
   `2 / width**2` on the ordered triangle. That triangle is compact, so a NUTS
   step that moves the edges can send catalog samples outside the support and
   drop their importance weights to zero.
-- **Ordered Gaussians** (`bns_md_gaussian_cosmological`,
-  `bns_md_gaussian_modified_propagation`, `bns_md_gaussian_uniform_mixture`).
-  Both components are i.i.d. `Normal(mass_mean, mass_sigma)`, then ordered.
+- **Ordered Gaussians** (`mass_model = "gaussian"`). Both components are i.i.d. `Normal(mass_mean, mass_sigma)`, then ordered.
   The joint density `2 N(m1) N(m2)` lives on the half-plane `m1 >= m2`, with
   no compact mass support, so moving `(mass_mean, mass_sigma)` never zeros a
   weight. Galactic BNS masses motivate the shape (a Gaussian around
@@ -214,22 +224,21 @@ Two mass laws share the rest of the BNS Madau-Dickinson declaration:
 
 ### Guard mixtures are one density, not two draws
 
-`bns_md_uniform_mixture` blends a fraction ε of uniform-in-redshift draws into
-the Madau-Dickinson density with `numpyro.distributions.MixtureGeneral`. The
+`uniform_mixing_fraction = ε` blends a fraction ε of uniform-in-redshift draws
+into the Madau-Dickinson density with `numpyro.distributions.MixtureGeneral`. The
 same mixture that draws the redshifts evaluates their log density, so the
 recorded guard fraction can never be something other than what was drawn. It
 replaced a pair of gwmock graphs differing only in their redshift block, a
 weighted `MixtureSimulator`, and a hand-written `logaddexp` mixture density in
 the analysis layer.
 
-A guard mixture declares **no merger rate**: it is a sampling density, not a
-physical population, and the Madau-Dickinson total rate is the normalization of
-the Madau-Dickinson redshift density, not of a mixture of it with a uniform
-component. Nothing reads a rate off a proposal -- importance weighting takes
-the *target's* -- so this costs nothing, and a catalog drawn from a guard
-mixture now raises if used as an injection or named as an analysis target,
-where before it would have returned a finite rate wrong by the guard
-fraction.
+A guard mixture is a sampling density, not a physical population, and the
+Madau-Dickinson total rate is the normalization of the Madau-Dickinson redshift
+density, not of a mixture of it with a uniform component. Nothing reads a rate
+off a proposal -- importance weighting takes the *target's* -- so this costs
+nothing, but a guard mixture used as an injection or an analysis target would
+silently pair a rate that does not normalize it. Nothing checks this; it is the
+caller's to honour.
 
 ### Prefix stability across sizes
 
@@ -397,7 +406,7 @@ regenerate them.
 
 ## Inclination convention
 
-All shipped BNS population models sample isotropic inclination by default:
+The shipped BNS population always samples isotropic inclination:
 `cos(iota)` is uniform on `[-1, 1]`, and the returned `inclination` sample site
 is in radians. Polarization-power catalogs store this column, and density
 reconstruction conditions on the recorded values even though inclination is
@@ -411,35 +420,19 @@ population metadata, rather than the individual event columns. Sampling
 inclination restores orientation fluctuations in both count modes; fixed-count
 estimator scatter and Poisson observation scatter remain different experiments.
 
-For explicit analytic quadrupole averaging, set `sample_inclination = false`
-in the population's `model_kwargs`. For example, a layer can override the
-shared population and every role that inherits its settings:
+Earlier versions could omit the inclination site and column
+(`sample_inclination = false`) and rescale face-on power by the analytic `2/5`
+factor. That path is gone: inclination is always sampled, and contraction never
+rescales. Catalogs drawn without the column are not reused, since the
+population record and the version are part of the key.
 
-```toml
-[populations.cosmological.model_kwargs]
-sample_inclination = false
-```
-
-Or construct it directly with
-`build_population("bns_md_cosmological", sample_inclination=False, **kwargs)`.
-This omits the inclination sample site and column. Waveform generators then use
-face-on power, and contraction applies the analytic `2/5` factor. It preserves
-the quadrupole ensemble mean but removes orientation fluctuations; it is not a
-universal orientation average for higher-mode waveforms. The waveform comparison
-notebook uses the sampled default, without an additional `IsotropicInclination`
-wrapper. That handler remains available for custom models that omit inclination.
-
-The choice is a boolean construction setting, recorded in provenance and cache
-identity. It is not an option on the waveform or artifact generator. Numeric
-substitutes such as `0` and `1` are rejected for this setting.
-
-Version **0.3.0** changes the default population draw. Both catalog and spectrum
-artifacts therefore receive new keys; old face-on artifacts are not reused as
-sampled-inclination draws. From the repository root, regenerate workflow catalogs
-and chains with:
+Version **0.6.0** replaces the `bns_md_*` populations with `bns_coba`. Both
+catalog and spectrum artifacts therefore receive new keys; older artifacts are
+not reused. From the repository root, regenerate workflow catalogs and chains
+with:
 
 ```bash
-uv run --group workflow snakemake --snakefile Snakefile --cores 1 validate
+uv run --group workflow snakemake --snakefile Snakefile --dry-run --cores 1 experiments
 uv run --group workflow snakemake --snakefile Snakefile --cores 1 experiments
 ```
 

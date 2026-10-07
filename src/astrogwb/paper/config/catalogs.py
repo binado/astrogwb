@@ -30,7 +30,6 @@ import numpy as np
 
 from astrogwb.paper.config.mcmc import (
     RunConfig,
-    build_run_config,
     check_redshift_grid,
 )
 from astrogwb.paper.config.runs import CATALOG_ROLES, assemble_run, discover_runs
@@ -43,30 +42,18 @@ def check_population_model(
     name: str,
     *,
     label: str,
-    kwargs: Mapping[str, float | int | bool] | None = None,
-    requires_merger_rate: bool = False,
-    amplitude_parameter: str | None = None,
+    kwargs: Mapping[str, float | int | bool | str] | None = None,
 ) -> None:
     """Reject a population a run or catalog cannot actually be built from.
 
-    Checks as much as the caller supplies: the name is registered, ``kwargs``
-    are kwargs that population takes, and -- for an analysis target, which
-    reconstructs an observed total rate -- that it declares a merger rate at
-    all. A guard mixture does not, so naming one as a target is a
-    configuration error rather than a silently meaningless spectrum.
-    ``amplitude_parameter``, when given, must be one the population declares
-    it can marginalize analytically; otherwise the marginalized likelihood
-    would be a silently wrong posterior.
+    Checks as much as the caller supplies: the name is registered and
+    ``kwargs`` are kwargs that population takes.
 
     Imports :mod:`astrogwb.populations` in its own body: the registry is
     populated by importing the models, which pulls in JAX, and this module is
     otherwise free of it.
     """
-    from astrogwb.populations import (
-        amplitude_parameters,
-        build_population,
-        known_populations,
-    )
+    from astrogwb.populations import build_population, known_populations
 
     known = known_populations()
     if name not in known:
@@ -74,25 +61,12 @@ def check_population_model(
             f"{label}: unknown population {name!r}; registered populations are: "
             f"{', '.join(known)}"
         )
-    if amplitude_parameter is not None:
-        supported = amplitude_parameters(name)
-        if amplitude_parameter not in supported:
-            raise ValueError(
-                f"{label}: population {name!r} cannot marginalize "
-                f"{amplitude_parameter!r} analytically; its amplitude parameters "
-                f"are: {', '.join(supported) or 'none'}"
-            )
     if kwargs is None:
         return
     try:
-        population = build_population(name, **kwargs)
+        build_population(name, **kwargs)
     except TypeError as error:
         raise ValueError(f"{label}: {error}") from None
-    if requires_merger_rate and population.merger_rate_fn is None:
-        raise ValueError(
-            f"{label}: population {name!r} declares no merger rate, so it "
-            "cannot be an analysis target or an injection; it is a proposal density"
-        )
 
 
 def check_catalog_requests(config: RunConfig, *, label: str) -> None:
@@ -109,14 +83,10 @@ def check_catalog_requests(config: RunConfig, *, label: str) -> None:
         check_redshift_grid(
             population.model_kwargs, label=f"{role_label}.population.model_kwargs"
         )
-        # The injection is the "observed" data, whose spectrum is scaled by a
-        # physical rate; a guard mixture declares none, so it can only ever be
-        # a proposal.
         check_population_model(
             population.model_name,
             label=f"{role_label} population.model_name",
             kwargs=population.model_kwargs,
-            requires_merger_rate=role == "injection",
         )
 
 
@@ -174,43 +144,9 @@ def resolve_run_catalogs(root: Path | None = None) -> RunCatalogs:
     return RunCatalogs(requests=requests, by_run=by_run)
 
 
-def validate_all_runs(root: Path | None = None) -> list[str]:
-    """Merge, validate, and catalog-check every declared run; return their labels.
-
-    The pre-flight gate ``astrogwb-assemble-config --all`` used to provide,
-    kept because its real value was never the JSON it wrote: it fails on the
-    first invalid run *before any catalog is built*, and a catalog is a GPU job.
-    Populations are built here too, so an unregistered name, a construction
-    setting the named population does not take, or a proposal density named as
-    an analysis target is caught by the same pre-flight rather than at the top
-    of a queued generation job.
-
-    It lives here rather than in :mod:`astrogwb.paper.config.runs` because
-    that module must stay stdlib-only.
-    """
-    labels: list[str] = []
-    for experiment, runs in discover_runs(root).items():
-        for run in runs:
-            label = f"{experiment}/{run}"
-            config = build_run_config(assemble_run(experiment, run, root=root))
-            check_catalog_requests(config, label=label)
-            target = config.analysis.population
-            check_population_model(
-                target.model_name,
-                label=f"{label} analysis.population.model_name",
-                kwargs=target.model_kwargs,
-                requires_merger_rate=True,
-                amplitude_parameter=config.analysis.amplitude_parameter,
-            )
-            logger.info("ok %s", label)
-            labels.append(label)
-    return labels
-
-
 __all__ = [
     "RunCatalogs",
     "check_catalog_requests",
     "check_population_model",
     "resolve_run_catalogs",
-    "validate_all_runs",
 ]

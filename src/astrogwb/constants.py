@@ -15,7 +15,6 @@ __all__ = [
     "FACE_ON_INCLINATION_FACTOR",
     "GPC_IN_METERS",
     "GRAVITATIONAL_CONSTANT",
-    "INCLINATION_AVERAGE_TO_FACE_ON_RATIO",
     "ISCO_ALPHA",
     "MEAN_INCLINATION_FACTOR",
     "MPC_IN_METERS",
@@ -99,9 +98,3 @@ FACE_ON_INCLINATION_FACTOR: float = 2.0  # dimensionless
 # Inclination-averaged quadrupolar factor, <g> = 4/5 for cos iota uniform on
 # [-1, 1]: <((1 + cos^2 iota)/2)^2> = 7/15 and <cos^2 iota> = 1/3.
 MEAN_INCLINATION_FACTOR: float = 0.8  # dimensionless
-
-# <g> / g(0) = 2/5. The factor by which a catalog of face-on sources must be
-# scaled to represent an inclination-averaged population.
-INCLINATION_AVERAGE_TO_FACE_ON_RATIO: float = (
-    MEAN_INCLINATION_FACTOR / FACE_ON_INCLINATION_FACTOR
-)  # dimensionless
