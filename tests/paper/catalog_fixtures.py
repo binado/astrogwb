@@ -16,9 +16,10 @@ from repo import REPO_ROOT
 from astrogwb.paper.config import fiducials, population_metadata
 from astrogwb.populations import PopulationMetadata, build_population
 from astrogwb.populations.evaluation import evaluate_sources
+from astrogwb.simulators.core import write
 from astrogwb.simulators.polarization_power import (
     CatalogMetadata,
-    PolarizationPowerCatalog,
+    PolarizationPowerData,
 )
 from astrogwb.waveform import WaveformMetadata
 
@@ -100,8 +101,8 @@ def make_catalog(
     fiducials: Mapping[str, float] | None = None,
     population_params: Mapping[str, float] | None = None,
     extra_source_parameters: Mapping[str, np.ndarray] | None = None,
-) -> PolarizationPowerCatalog:
-    """Build a valid paper-format catalog over a chosen redshift ladder."""
+) -> tuple[PolarizationPowerData, CatalogMetadata]:
+    """Build a paper-format ``(data, metadata)`` pair over a redshift ladder."""
     if fiducials is None:
         fiducials = population_params
     redshift = np.asarray(redshift, dtype=np.float64)
@@ -127,51 +128,44 @@ def make_catalog(
             }
         )
 
-    return PolarizationPowerCatalog(
-        source_parameters=parameters,
-        polarization_power=polarization_power,
+    data = PolarizationPowerData(
         frequencies=minimum_frequency
         + df * np.arange(num_frequencies, dtype=np.float64),
-        _metadata=CatalogMetadata(
-            waveform=WaveformMetadata(
-                approximant=approximant,
-                minimum_frequency=minimum_frequency,
-                maximum_frequency=minimum_frequency + df * (num_frequencies - 1),
-                reference_frequency=reference_frequency,
-                sampling_frequency=sampling_frequency,
-                frequency_resolution=df,
-            ),
-            population=PopulationMetadata(
-                model_name=model_name,
-                model_kwargs=dict(model_kwargs or PAPER_MODEL_KWARGS),
-            ),
-            fiducials={
-                name: float(value)
-                for name, value in (fiducials or PAPER_POPULATION_PARAMS).items()
-            },
-            num_samples=int(np.shape(polarization_power)[1]),
-        ),
+        polarization_power=polarization_power,
+        source_parameters=parameters,
     )
+    metadata = CatalogMetadata(
+        waveform=WaveformMetadata(
+            approximant=approximant,
+            minimum_frequency=minimum_frequency,
+            maximum_frequency=minimum_frequency + df * (num_frequencies - 1),
+            reference_frequency=reference_frequency,
+            sampling_frequency=sampling_frequency,
+            frequency_resolution=df,
+        ),
+        population=PopulationMetadata(
+            model_name=model_name,
+            model_kwargs=dict(model_kwargs or PAPER_MODEL_KWARGS),
+        ),
+        fiducials={
+            name: float(value)
+            for name, value in (fiducials or PAPER_POPULATION_PARAMS).items()
+        },
+        num_samples=int(np.shape(polarization_power)[1]),
+    )
+    return data, metadata
 
 
 def save_catalog(
-    catalog: PolarizationPowerCatalog, path: Path, *, seed: int = 41
+    catalog: tuple[PolarizationPowerData, CatalogMetadata],
+    path: Path,
+    *,
+    seed: int = 41,
 ) -> None:
-    """Write ``catalog`` in the cache's file format, as ``polarization_power`` would.
+    """Write a ``(data, metadata)`` pair in the simulators' file format.
 
     Tests that hand a run a catalog *by path* need a file; this is the same
-    writer the cache uses, fed the catalog's arrays and an explicit seed.
+    writer a generated catalog goes through, fed an explicit seed.
     """
-    from astrogwb.simulators.core.cache import _save_atomically
-
-    _save_atomically(
-        path,
-        name="polarization_power",
-        inputs={"seed": np.uint64(seed)},
-        outputs={
-            "frequencies": catalog.frequencies,
-            "polarization_power": catalog.polarization_power,
-            "source_parameters": dict(catalog.source_parameters),
-        },
-        metadata=catalog.metadata,
-    )
+    data, metadata = catalog
+    write(path, data, metadata, seed=seed)

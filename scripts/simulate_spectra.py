@@ -2,14 +2,15 @@
 
 The draws are determined by a :class:`~astrogwb.simulators.spectra.SpectraMetadata`
 -- waveform, population, each hyperparameter's fixed value or prior,
-observation time, count mode and source count or padding -- declared as the
+observation time, count mode and fixed source count -- declared as the
 ``[spectra]`` table of the ``--config`` layers, merged in process exactly as
 ``run_mcmc`` merges a run, and by the seeds the sibling ``[draws]`` table names
-(``seed`` split into ``num_draws`` children). This script calls the cached
-:func:`~astrogwb.simulators.spectra.spectra` node on them, which writes
-``<output-dir>/spectra-<key>-<digest>.h5``. It writes ``(draws, F)`` spectra
+(``seed`` expanded into ``num_draws`` keys by
+:func:`~astrogwb.simulators.core.batch_keys`). This script runs a
+:class:`~astrogwb.simulators.spectra.SpectraSimulator` on them and writes
+``<output-dir>/spectra-<key>-<seed>-<num_draws>.h5``. It writes ``(draws, F)`` spectra
 only; no ``(F, N)`` catalog power is ever materialized. A second invocation
-with the same layers is a cache hit.
+with the same layers reuses the file.
 
 A hyperparameter is a ``"${fiducials.X}"`` reference to fix it, or a
 ``"${priors.X}"`` one to draw it once per row; see
@@ -35,8 +36,6 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-from numpy.typing import NDArray
 from pydantic import ValidationError
 
 from astrogwb.paper.cache import default_cache_dir
@@ -44,11 +43,12 @@ from astrogwb.paper.config.runs import (
     add_config_arguments,
     load_merged_config,
 )
-from astrogwb.simulators.core import split_seed
+from astrogwb.simulators.core import batch_keys, load, write
 from astrogwb.simulators.spectra import (
     SpectralDensityCatalog,
     SpectraMetadata,
-    spectra,
+    SpectraSimulator,
+    stack_spectra,
 )
 
 logger = logging.getLogger(__name__)
@@ -88,6 +88,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Sources per waveform chunk; changes memory, not the draws.",
     )
     parser.add_argument(
+        "--source-chunk-size",
+        type=int,
+        default=None,
+        help="Sources per draw piece for Poisson counts (default: --chunk-size).",
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="Draw again and replace an existing cached spectra file.",
@@ -112,8 +118,8 @@ def spectra_metadata(config: dict[str, Any]) -> SpectraMetadata:
         raise ValueError(f"invalid [spectra] table: {error}") from None
 
 
-def draw_seeds(config: dict[str, Any]) -> NDArray[np.uint64]:
-    """The seeds the merged config's ``[draws]`` table names."""
+def draw_request(config: dict[str, Any]) -> tuple[int, int]:
+    """The ``(seed, num_draws)`` the merged config's ``[draws]`` table names."""
     draws = config.get("draws")
     if not isinstance(draws, dict) or set(draws) != {"seed", "num_draws"}:
         raise ValueError(
@@ -122,7 +128,7 @@ def draw_seeds(config: dict[str, Any]) -> NDArray[np.uint64]:
         )
     if draws["num_draws"] <= 0:
         raise ValueError("[draws].num_draws must be positive")
-    return split_seed(draws["seed"], draws["num_draws"])
+    return int(draws["seed"]), int(draws["num_draws"])
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -133,18 +139,34 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = parse_args(argv)
     config = load_merged_config(args)
     metadata = spectra_metadata(config)
-    inputs = {"seeds": draw_seeds(config)}
-    cache_dir = args.output_dir.expanduser()
-    output = spectra.path(inputs, metadata, cache_dir).resolve()
+    seed, num_draws = draw_request(config)
+    output = (
+        args.output_dir.expanduser() / f"spectra-{metadata.key()}-{seed}-{num_draws}.h5"
+    ).resolve()
     if args.force:
         output.unlink(missing_ok=True)
     hit = output.exists()
 
-    outputs = spectra(inputs, metadata, cache_dir=cache_dir, chunk_size=args.chunk_size)
+    if hit:
+        outputs, recorded, _ = load(output, SpectraMetadata)
+        if recorded.key() != metadata.key():
+            raise ValueError(f"{output} records {recorded.key()}, not {metadata.key()}")
+    else:
+        simulator = SpectraSimulator(
+            metadata,
+            chunk_size=args.chunk_size,
+            source_chunk_size=args.source_chunk_size,
+        )
+        parts = []
+        for draw, key in enumerate(batch_keys(seed, num_draws), start=1):
+            parts.append(simulator(key))
+            logger.info("Drew spectrum %d/%d", draw, num_draws)
+        outputs = stack_spectra(parts)
+        write(output, outputs, metadata, seed=seed)
     catalog = SpectralDensityCatalog.from_arrays(outputs, metadata)
     logger.info(
         "%s spectra %s: count=%s num_events=%s, %d draws, %d frequencies, at %s",
-        "Cache hit for" if hit else "Saved",
+        "Reused" if hit else "Saved",
         metadata.key(),
         metadata.count,
         metadata.num_events,

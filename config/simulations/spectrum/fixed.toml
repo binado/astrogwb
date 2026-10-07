@@ -2,7 +2,7 @@
 # waveforms.toml, populations.toml and detectors.toml, then pass to
 # scripts/simulate_spectra.py. This is a simulation layer, not a run layer.
 # num_events counts sources per realization; [draws].num_draws counts
-# realizations, drawn at the seeds split_seed([draws].seed, num_draws) gives.
+# realizations, drawn at the keys batch_keys([draws].seed, num_draws) gives.
 # Observation time stays positive but cancels from fixed-count normalization.
 
 [spectra]

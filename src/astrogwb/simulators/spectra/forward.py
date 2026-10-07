@@ -3,16 +3,26 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import Literal
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 import numpyro
 from jax.typing import ArrayLike
+from numpy.typing import NDArray
 
+from astrogwb.gwb.spectral import inclination_averaging_factor
 from astrogwb.populations import SourceFn
+from astrogwb.simulators.population.simulator import bucket_size
 from astrogwb.utils import array_dict_shape
 from astrogwb.waveform import PolarizationPowerGenerator
+
+#: Growth of the padded buffer's static capacity. Padding here is waveform work
+#: only up to the last chunk (the loop's trip count is traced), so this ladder
+#: sets how many buffer shapes -- hence compiles -- a stream of draws sees, not
+#: how much is evaluated; it is coarser than the source-draw ladder.
+PACK_RATIO = 1.5
 
 #: The source output naming the effective distance governing waveform
 #: amplitude. Required in every source model's returned mapping; see
@@ -126,3 +136,100 @@ def validate_source_model(
         sources = dict(source_model(params))
     _require_luminosity_distance(sources)
     generator.check_sources(sources)
+
+
+class ChunkedPowerSum:
+    """The sum of polarization power over the sources of one draw.
+
+    ``sources`` are flat ``(n,)`` columns. Chunks of ``chunk_size`` events run
+    through the generator and are added into an ``(F,)`` carry, with an event
+    mask zeroing the tail of the last chunk, so only that chunk is partial.
+    :func:`jax.lax.fori_loop`'s trip count is traced, so the compiled body does
+    not depend on how many chunks a draw has; the buffer is padded on the host
+    to a geometric capacity (:data:`PACK_RATIO`), so a stream of draws sees a
+    few shapes, not one per count. Padding rows repeat the first source -- a
+    physical source, so the waveform stays finite -- and are masked out.
+
+    Build once and call repeatedly: the jitted loop closes over ``generator``,
+    which hashes by identity, and a fresh equal rebuild would recompile.
+    """
+
+    def __init__(
+        self, generator: PolarizationPowerGenerator, *, chunk_size: int
+    ) -> None:
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be positive")
+        self._generator = generator
+        self._chunk_size = chunk_size
+        self._num_frequencies = int(np.shape(generator.frequencies)[0])
+        self._reduce = jax.jit(self._loop)
+
+    def _loop(self, sources: Mapping[str, jax.Array], count: jax.Array) -> jax.Array:
+        chunk = self._chunk_size
+
+        def body(index: jax.Array, total: jax.Array) -> jax.Array:
+            start = index * chunk
+            batch = {
+                name: jax.lax.dynamic_slice_in_dim(values, start, chunk)
+                for name, values in sources.items()
+            }
+            mask = (jnp.arange(chunk) + start) < count
+            return total + _batch_power_sum(self._generator, batch, mask)
+
+        return jax.lax.fori_loop(
+            0,
+            (count + chunk - 1) // chunk,
+            body,
+            jnp.zeros(self._num_frequencies, dtype=jnp.float64),
+        )
+
+    def __call__(self, sources: Mapping[str, ArrayLike]) -> jax.Array:
+        """The ``(F,)`` power sum; an empty draw returns zeros."""
+        _require_luminosity_distance(sources)  # ty: ignore[invalid-argument-type]
+        columns = {name: np.asarray(values) for name, values in sources.items()}
+        shapes = {name: values.shape for name, values in columns.items()}
+        if (
+            any(len(shape) != 1 for shape in shapes.values())
+            or len(set(shapes.values())) != 1
+        ):
+            raise ValueError(f"sources must be flat arrays of one length; got {shapes}")
+        n = next(iter(columns.values())).shape[0]
+        if n == 0:
+            return jnp.zeros(self._num_frequencies)
+
+        pad = bucket_size(n, self._chunk_size, PACK_RATIO) - n
+        padded = {
+            name: np.concatenate([values, np.repeat(values[:1], pad)])
+            for name, values in columns.items()
+        }
+        return self._reduce(padded, jnp.asarray(n))
+
+
+def normalize_spectra(
+    power_sum: ArrayLike,
+    sources: Mapping[str, ArrayLike],
+    *,
+    count: Literal["poisson", "fixed"],
+    total_merger_rate: float | NDArray[np.float64],
+    observation_seconds: float,
+    num_events: int | None,
+) -> NDArray[np.float64]:
+    r"""Turn one draw's power sum into a strain spectrum, ``(F,)``.
+
+    ``S_h = A_{\rm inc}\, k \sum_i P_i(f)`` with the factor ``k = 1/T`` for
+    Poisson counts (the sum over the realized events divided by the observation
+    time) and ``k = \mathcal{R} / N`` for fixed counts (the population rate
+    times the sample mean power, so ``T`` cancels). The two modes share
+    everything but this factor.
+    """
+    if count == "fixed":
+        if num_events is None:
+            raise ValueError("num_events is required for fixed counts")
+        factor = float(total_merger_rate) / num_events
+    else:
+        factor = 1.0 / observation_seconds
+    return (
+        inclination_averaging_factor(sources)
+        * factor
+        * np.asarray(power_sum, dtype=np.float64)
+    )

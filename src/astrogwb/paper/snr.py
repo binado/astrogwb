@@ -47,9 +47,10 @@ def compute_network_snrs(
 
     from astrogwb.paper.catalogs import load_run_catalog
 
-    catalog = load_run_catalog(injection_catalog_path, label="injection")
+    data, metadata = load_run_catalog(injection_catalog_path, label="injection")
     observation = prepare_observation(
-        catalog,
+        data,
+        metadata,
         minimum_redshift=minimum_redshift,
         maximum_redshift=maximum_redshift,
         minimum_frequency=minimum_frequency,

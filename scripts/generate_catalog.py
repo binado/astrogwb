@@ -4,26 +4,24 @@ The workflow's ``waveform_catalog`` rule is the caller: every run's
 ``[analysis.injection]`` and ``[analysis.proposal]`` are validated into
 :class:`~astrogwb.simulators.polarization_power.CatalogMetadata` records when the DAG is built, and
 each distinct ``(record, seed)`` becomes one job writing
-``outputs/catalogs/polarization_power-<key>-<digest>.h5``. This script is handed
-that record as JSON, with the seed, and builds it with the cached
-:func:`~astrogwb.simulators.polarization_power.polarization_power` node, which
-writes it atomically.
+``outputs/catalogs/polarization_power-<key>-<seed>.h5``. This script is handed
+that record as JSON, with the seed, and draws it with
+:func:`~astrogwb.paper.catalogs.generate_catalog`, which writes it atomically.
 
-The output must be ``polarization_power.path`` of the record and seed in its own
-directory. The workflow names the file and the record separately, so this is
+The output must be :func:`~astrogwb.paper.catalogs.catalog_path` of the record
+and seed in its own directory. The workflow names the file and the record separately, so this is
 where a mismatch between the two -- which would file one draw under another's
-address -- is refused. An output that already exists is a cache hit: it is
-checked against the record and left alone, unless ``--force`` asks for it
-to be drawn again.
+address -- is refused. An output that already exists is reused: it is checked against
+the record and left alone, unless ``--force`` asks for it to be drawn again.
 
-Outside the workflow, the node is the whole thing, and
-needs no script.
+Outside the workflow, :func:`~astrogwb.paper.catalogs.ensure_catalog` is the
+whole thing, and needs no script.
 
 Usage::
 
     uv run --extra paper python scripts/generate_catalog.py \\
         --request "$(cat request.json)" --seed 41 \\
-        --output outputs/catalogs/polarization_power-<key>-<digest>.h5
+        --output outputs/catalogs/polarization_power-<key>-<seed>.h5
 """
 
 from __future__ import annotations
@@ -33,15 +31,11 @@ import logging
 from collections.abc import Sequence
 from pathlib import Path
 
-import numpy as np
 from pydantic import ValidationError
 
+from astrogwb.paper.catalogs import catalog_path, ensure_catalog
 from astrogwb.paper.config.catalogs import check_population_model
-from astrogwb.simulators.polarization_power import (
-    CatalogMetadata,
-    PolarizationPowerCatalog,
-    polarization_power,
-)
+from astrogwb.simulators.polarization_power import CatalogMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +73,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--output",
         type=Path,
         required=True,
-        help="Destination .h5; its stem must be polarization_power.path's.",
+        help="Destination .h5; its stem must be catalog_stem's.",
     )
     parser.add_argument(
         "--force",
@@ -98,10 +92,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     metadata: CatalogMetadata = args.request
     if args.seed < 0:
         raise ValueError("--seed must be non-negative")
-    inputs = {"seed": np.uint64(args.seed)}
     output_path = args.output.expanduser().resolve()
-    cache_dir = output_path.parent
-    if output_path != polarization_power.path(inputs, metadata, cache_dir).resolve():
+    directory = output_path.parent
+    if output_path != catalog_path(metadata, args.seed, directory).resolve():
         raise ValueError(
             f"output {output_path.name} is not named by the metadata's key "
             f"{metadata.key()} and seed {args.seed}"
@@ -115,16 +108,15 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     if args.force:
         output_path.unlink(missing_ok=True)
-    outputs = polarization_power(inputs, metadata, cache_dir=cache_dir)
-    catalog = PolarizationPowerCatalog.from_arrays(outputs, metadata)
+    data, _ = ensure_catalog(metadata, args.seed, directory)
 
     logger.info(
         "Catalog %s: %d events, %d frequencies (%.2f-%.2f Hz), approximant=%s",
         metadata.key(),
-        catalog.num_samples,
-        catalog.frequencies.size,
-        catalog.frequencies[0].item(),
-        catalog.frequencies[-1].item(),
+        metadata.num_samples,
+        data["frequencies"].size,
+        data["frequencies"][0].item(),
+        data["frequencies"][-1].item(),
         metadata.waveform.approximant,
     )
     logger.info("Catalog at %s", output_path)

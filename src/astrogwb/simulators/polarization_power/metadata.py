@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
+import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
 from astrogwb import __version__
@@ -11,7 +12,7 @@ from astrogwb.populations.metadata import PopulationMetadata, widen_model_kwargs
 from astrogwb.simulators.core.keys import content_key
 from astrogwb.waveform.metadata import WaveformMetadata
 
-__all__ = ["CatalogMetadata"]
+__all__ = ["CatalogMetadata", "catalog_stem"]
 
 
 class CatalogMetadata(BaseModel):
@@ -19,11 +20,11 @@ class CatalogMetadata(BaseModel):
 
     It is both the request and the provenance, as
     :class:`~astrogwb.simulators.spectra.SpectraMetadata` is for spectra: the
-    :func:`~astrogwb.simulators.polarization_power.polarization_power` node
-    turns it and a seed into a catalog, the catalog carries it as
-    :attr:`~astrogwb.simulators.polarization_power.PolarizationPowerCatalog.metadata`,
-    and :meth:`key` is the middle part of the file name the node caches it
-    under. The seed is not part of it: it picks one realization of the
+    :class:`~astrogwb.simulators.polarization_power.PolarizationPowerSimulator`
+    turns it and a key into a catalog, the draw is stored beside it
+    (:func:`~astrogwb.simulators.core.write`),
+    and :meth:`key` is the middle part of the file name by convention
+    (:func:`catalog_stem`). The seed is not part of it: it picks one realization of the
     density this record describes.
 
     The waveform and population record alone are not enough: two catalogs
@@ -65,3 +66,13 @@ class CatalogMetadata(BaseModel):
             "population": payload.pop("population"),
         }
         return content_key(payload)
+
+
+def catalog_stem(metadata: CatalogMetadata, seed: int | np.integer) -> str:
+    """The file stem a catalog is kept under by convention: its record and seed.
+
+    ``polarization_power-<key>-<seed>``. A naming convention for the workflow and
+    notebooks, not an address: the file itself records the metadata and seed it
+    was drawn at, which a reader checks.
+    """
+    return f"polarization_power-{metadata.key()}-{int(seed)}"

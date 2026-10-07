@@ -52,7 +52,10 @@ from astrogwb.paper.config.runs import (
 from astrogwb.paper.runtime import add_runtime_arguments, configure_runtime
 
 if TYPE_CHECKING:
-    from astrogwb.simulators.polarization_power import PolarizationPowerCatalog
+    from astrogwb.simulators.polarization_power import (
+        CatalogMetadata,
+        PolarizationPowerData,
+    )
 
 logger = logging.getLogger("profile_model")
 
@@ -104,8 +107,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def build_potential(
     config: RunConfig,
-    injection_catalog: PolarizationPowerCatalog,
-    proposal_catalog: PolarizationPowerCatalog,
+    injection: tuple[PolarizationPowerData, CatalogMetadata],
+    proposal: tuple[PolarizationPowerData, CatalogMetadata],
     jax,
 ):
     """Build the production model inputs and return (potential_fn, init_params).
@@ -128,8 +131,8 @@ def build_potential(
         config.analysis.detectors
     )
     inputs = prepare_inference_inputs(
-        injection_catalog,
-        proposal_catalog,
+        *injection,
+        *proposal,
         observation_time=config.analysis.observation_time,
         minimum_redshift=config.analysis.population.model_kwargs["minimum_redshift"],
         maximum_redshift=config.analysis.population.model_kwargs["maximum_redshift"],
@@ -179,19 +182,13 @@ def main(argv: list[str] | None = None) -> None:
     # Serve both catalogs before JAX starts, the same way scripts/run_mcmc.py
     # does -- what is profiled must be the production model on production
     # inputs, including the proposal density each file records for itself.
-    from astrogwb.simulators.polarization_power import (
-        PolarizationPowerCatalog,
-        polarization_power,
-    )
+    from astrogwb.paper.catalogs import ensure_catalog
 
     catalog_dir = args.catalog_dir.resolve()
 
-    def served(role: str) -> PolarizationPowerCatalog:
+    def served(role: str) -> tuple[PolarizationPowerData, CatalogMetadata]:
         metadata, seed = config.catalog_request(role)
-        outputs = polarization_power(
-            {"seed": seed}, metadata, cache_dir=catalog_dir, generate=False
-        )
-        return PolarizationPowerCatalog.from_arrays(outputs, metadata)
+        return ensure_catalog(metadata, seed, catalog_dir, generate=False)
 
     injection_catalog, proposal_catalog = served("injection"), served("proposal")
 

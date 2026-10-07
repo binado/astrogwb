@@ -1,25 +1,24 @@
-"""Seeds, content keys and the cache in front of every simulator.
+"""The simulator protocol, batched keys, content keys and the HDF5 layer.
 
 Nothing in this package imports :mod:`astrogwb.populations`,
 :mod:`astrogwb.waveform`, :mod:`astrogwb.gwb` or :mod:`astrogwb.inference`;
 ``tests/core/test_simulators_core_imports.py`` asserts it.
 """
 
-from astrogwb.simulators.core.cache import Cached, cached, read
+from astrogwb.simulators.core.io import load, write
 from astrogwb.simulators.core.keys import CATALOG_KEY_LENGTH, Keyed, content_key
-from astrogwb.simulators.core.seeds import split_seed
-from astrogwb.simulators.core.tree import digest
+from astrogwb.simulators.core.rng import batch_keys
+from astrogwb.simulators.core.simulator import Simulator
 from astrogwb.simulators.core.types import Arrays, Tree
 
 __all__ = [
     "CATALOG_KEY_LENGTH",
     "Arrays",
-    "Cached",
     "Keyed",
+    "Simulator",
     "Tree",
-    "cached",
+    "batch_keys",
     "content_key",
-    "digest",
-    "read",
-    "split_seed",
+    "load",
+    "write",
 ]

@@ -44,7 +44,10 @@ from astrogwb.frequency import frequency_mask
 from astrogwb.gwb import spectral_density, spectral_snr_squared
 from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.populations import DEFAULT_DENSITY_SITES
-from astrogwb.simulators.polarization_power import PolarizationPowerCatalog
+from astrogwb.simulators.polarization_power import (
+    CatalogMetadata,
+    PolarizationPowerData,
+)
 
 #: Reference resolution, and the band the refinement study runs over.
 FINE_DF = 0.25
@@ -71,7 +74,9 @@ FIRST_STEP_TOLERANCE = 5e-3
 
 
 @pytest.fixture(scope="module")
-def fine_catalog(mock_population: dict[str, np.ndarray]) -> PolarizationPowerCatalog:
+def fine_catalog(
+    mock_population: dict[str, np.ndarray],
+) -> tuple[PolarizationPowerData, CatalogMetadata]:
     """The reference catalog every coarser grid is subsampled from."""
     return build_mock_catalog(
         mock_population,
@@ -84,7 +89,7 @@ def fine_catalog(mock_population: dict[str, np.ndarray]) -> PolarizationPowerCat
 
 def test_subsampling_a_fine_catalog_matches_a_coarse_one(
     mock_population: dict[str, np.ndarray],
-    fine_catalog: PolarizationPowerCatalog,
+    fine_catalog: tuple[PolarizationPowerData, CatalogMetadata],
 ) -> None:
     """``[::k]`` of a fine catalog *is* the catalog built at ``k * df``.
 
@@ -93,11 +98,12 @@ def test_subsampling_a_fine_catalog_matches_a_coarse_one(
     power-of-two ``df``, so any real disagreement means the grid construction
     changed.
     """
-    fine_frequencies = np.asarray(fine_catalog.frequencies)
-    fine_power = np.asarray(fine_catalog.polarization_power)
+    fine_data, _ = fine_catalog
+    fine_frequencies = np.asarray(fine_data["frequencies"])
+    fine_power = np.asarray(fine_data["polarization_power"])
 
     for factor in SUBSAMPLE_FACTORS:
-        coarse = build_mock_catalog(
+        coarse, _ = build_mock_catalog(
             mock_population,
             num_sources=NUM_SOURCES,
             f_min=F_MIN,
@@ -105,15 +111,15 @@ def test_subsampling_a_fine_catalog_matches_a_coarse_one(
             frequency_resolution=factor * FINE_DF,
         )
         np.testing.assert_allclose(
-            fine_frequencies[::factor], np.asarray(coarse.frequencies)
+            fine_frequencies[::factor], np.asarray(coarse["frequencies"])
         )
         np.testing.assert_allclose(
-            fine_power[::factor], np.asarray(coarse.polarization_power)
+            fine_power[::factor], np.asarray(coarse["polarization_power"])
         )
 
 
 def _analysis_at(
-    catalog: PolarizationPowerCatalog, factor: int, sensitivities: Mapping[str, Any]
+    data: PolarizationPowerData, factor: int, sensitivities: Mapping[str, Any]
 ) -> dict[str, Any]:
     """Re-derive the masked analysis inputs on the grid coarsened by ``factor``.
 
@@ -124,8 +130,8 @@ def _analysis_at(
     axis; ``noise_scale`` is a placeholder of one wherever the mask excludes a
     bin, which keeps an infinite PSD out of the log density.
     """
-    frequencies = jnp.asarray(catalog.frequencies)[::factor]
-    polarization_power = jnp.asarray(catalog.polarization_power)[::factor]
+    frequencies = jnp.asarray(data["frequencies"])[::factor]
+    polarization_power = jnp.asarray(data["polarization_power"])[::factor]
 
     network_psd = jnp.asarray(
         effective_psd(np.asarray(frequencies), DETECTORS, sensitivities)
@@ -145,14 +151,17 @@ def _analysis_at(
 
 
 @pytest.fixture(scope="module")
-def resolutions(fine_catalog: PolarizationPowerCatalog) -> dict[int, dict[str, Any]]:
+def resolutions(
+    fine_catalog: tuple[PolarizationPowerData, CatalogMetadata],
+) -> dict[int, dict[str, Any]]:
     """Masked analysis inputs, mock observations, and SNR^2 at each resolution."""
-    samples = catalog_samples(fine_catalog)
+    fine_data, _ = fine_catalog
+    samples = catalog_samples(fine_data)
     # The catalog is its own proposal: preparation caches the density and
     # reference distances the target re-forms at FIDUCIALS, which is what makes
     # every fiducial log-weight exactly zero.
     estimator, log_weights_fn = build_importance_spectrum(
-        fine_catalog,
+        *fine_catalog,
         source_model=mock_target_model(),
         merger_rate_fn=mock_merger_rate_fn(),
         density_sites=DEFAULT_DENSITY_SITES,
@@ -169,7 +178,7 @@ def resolutions(fine_catalog: PolarizationPowerCatalog) -> dict[int, dict[str, A
 
     runs: dict[int, dict[str, Any]] = {}
     for factor in (1, *SUBSAMPLE_FACTORS):
-        run = _analysis_at(fine_catalog, factor, sensitivities)
+        run = _analysis_at(fine_data, factor, sensitivities)
         run["samples"] = samples
         run["weights_fn"] = weights_fn
         # The catalog is its own proposal, so the injection is the unweighted

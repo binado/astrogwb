@@ -69,7 +69,11 @@ from astrogwb.populations import (
     amplitude_parameters,
     build_population,
 )
-from astrogwb.simulators.polarization_power import PolarizationPowerCatalog
+from astrogwb.simulators.polarization_power import (
+    CatalogMetadata,
+    PolarizationPowerData,
+    restrict_redshift,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +99,8 @@ class InferenceInputs:
     """Everything the NumPyro model is evaluated against, for one run."""
 
     observation: Observation
-    proposal: PolarizationPowerCatalog
+    proposal_data: PolarizationPowerData
+    proposal_metadata: CatalogMetadata
     effective_psd: jax.Array
     observation_time: float
     spectral_density_fn: SpectralDensityFn
@@ -207,7 +212,8 @@ def target_population(config: RunConfig) -> Population:
 
 
 def prepare_observation(
-    injection: PolarizationPowerCatalog,
+    injection_data: PolarizationPowerData,
+    injection_metadata: CatalogMetadata,
     *,
     minimum_redshift: float,
     maximum_redshift: float,
@@ -227,9 +233,11 @@ def prepare_observation(
     and keeping it independent of the importance weights is what lets a bug in
     the weights show up as a mismatch rather than cancel out of both sides.
     """
-    n_loaded = injection.polarization_power.shape[1]
-    restricted = injection.restrict_redshift(minimum_redshift, maximum_redshift)
-    n_kept = restricted.polarization_power.shape[1]
+    n_loaded = injection_data["polarization_power"].shape[1]
+    restricted, restricted_metadata = restrict_redshift(
+        injection_data, injection_metadata, minimum_redshift, maximum_redshift
+    )
+    n_kept = restricted["polarization_power"].shape[1]
     logger.info(
         "Loaded independent injection catalog: n_injection_samples=%d "
         "(%d outside the analysis window dropped)",
@@ -237,20 +245,20 @@ def prepare_observation(
         n_loaded - n_kept,
     )
 
-    total_merger_rate = catalog_total_merger_rate(restricted)
-    power = jnp.asarray(restricted.polarization_power)
+    total_merger_rate = catalog_total_merger_rate(restricted_metadata)
+    power = jnp.asarray(restricted["polarization_power"])
     spectrum = spectral_density(
         power,
         jnp.ones(power.shape[1]),
         total_merger_rate,
-        source_parameters=restricted.source_parameters,
+        source_parameters=restricted["source_parameters"],
     )
     logger.info(
         "Constructed independent fiducial observed spectrum (rate0=%.4e /s)",
         total_merger_rate,
     )
 
-    frequencies = jnp.asarray(restricted.frequencies)
+    frequencies = jnp.asarray(restricted["frequencies"])
     # Band bounds only: this function never sees a detector network, so bins
     # the network cannot measure are dropped later, in prepare_inference_inputs.
     analysis_frequency_mask = make_frequency_mask(
@@ -271,7 +279,7 @@ def prepare_observation(
     )
 
 
-def catalog_total_merger_rate(catalog: PolarizationPowerCatalog) -> jax.Array:
+def catalog_total_merger_rate(metadata: CatalogMetadata) -> jax.Array:
     """The observer-frame total merger rate this catalog's population implies.
 
     Recomputed from the recorded population rather than read from a stored
@@ -284,20 +292,22 @@ def catalog_total_merger_rate(catalog: PolarizationPowerCatalog) -> jax.Array:
     it with a uniform component -- so this raises rather than returning a
     number that would silently scale an observed spectrum by the wrong factor.
     """
-    merger_rate_fn = catalog.get_population().merger_rate_fn
+    merger_rate_fn = metadata.population.build().merger_rate_fn
     if merger_rate_fn is None:
         raise ValueError(
-            f"catalog population {catalog.population_model_name!r} declares no "
+            f"catalog population {metadata.population.model_name!r} declares no "
             "merger rate, so it cannot supply an observed total rate; it is a "
             "proposal density, not an injection"
         )
-    rate = merger_rate_fn(catalog.fiducials)
+    rate = merger_rate_fn(metadata.fiducials)
     return jnp.reshape(jnp.asarray(rate), ())
 
 
 def prepare_inference_inputs(
-    injection: PolarizationPowerCatalog,
-    proposal: PolarizationPowerCatalog,
+    injection_data: PolarizationPowerData,
+    injection_metadata: CatalogMetadata,
+    proposal_data: PolarizationPowerData,
+    proposal_metadata: CatalogMetadata,
     *,
     observation_time: float,
     minimum_redshift: float,
@@ -332,18 +342,21 @@ def prepare_inference_inputs(
             "normalize a predicted spectrum; it is a proposal density"
         )
     observation = prepare_observation(
-        injection,
+        injection_data,
+        injection_metadata,
         minimum_redshift=minimum_redshift,
         maximum_redshift=maximum_redshift,
         minimum_frequency=minimum_frequency,
         maximum_frequency=maximum_frequency,
     )
 
-    n_loaded = proposal.polarization_power.shape[1]
-    proposal_catalog = proposal.restrict_redshift(minimum_redshift, maximum_redshift)
-    proposal_frequencies = np.asarray(proposal_catalog.frequencies)
+    n_loaded = proposal_data["polarization_power"].shape[1]
+    proposal_data, proposal_metadata = restrict_redshift(
+        proposal_data, proposal_metadata, minimum_redshift, maximum_redshift
+    )
+    proposal_frequencies = np.asarray(proposal_data["frequencies"])
     validate_matching_frequency_grids(observation.frequencies, proposal_frequencies)
-    n_freq, n_samples = proposal_catalog.polarization_power.shape
+    n_freq, n_samples = proposal_data["polarization_power"].shape
     logger.info(
         "Loaded proposal catalog: n_frequency_bins=%d n_proposal_samples=%d "
         "(%d outside the analysis window dropped)",
@@ -399,14 +412,16 @@ def prepare_inference_inputs(
     # band is a traced mask rather than a compiled-in shape. `model_kwargs`
     # supplies it alongside arrays of the same length.
     spectral_density_fn, log_weights_fn = build_importance_spectrum(
-        proposal_catalog,
+        proposal_data,
+        proposal_metadata,
         source_model=target.source_model,
         merger_rate_fn=target.merger_rate_fn,
         density_sites=density_sites,
     )
     return InferenceInputs(
         observation=observation,
-        proposal=proposal_catalog,
+        proposal_data=proposal_data,
+        proposal_metadata=proposal_metadata,
         effective_psd=effective_psd_arr,
         observation_time=observation_time,
         spectral_density_fn=spectral_density_fn,

@@ -24,6 +24,7 @@ from reference_population import reference_merger_rate_distance_and_logprob
 
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.distributions.rates import madau_dickinson_rate
+from astrogwb.frequency import bin_widths
 from astrogwb.gwb import (
     analytic_spectral_density_from_mass_moments,
     omega_gw_from_spectral_density,
@@ -54,16 +55,16 @@ def test_mock_fiducials_preserve_the_population_support() -> None:
 
 def test_mock_catalog_defaults_cover_the_production_band(mock_catalog_factory) -> None:
     """The realistic default trades frequency resolution for catalog size."""
-    catalog = mock_catalog_factory()
-    waveform = catalog.waveform_metadata
-    frequencies = np.asarray(catalog.frequencies)
-    redshift = np.asarray(catalog.source_parameters["redshift"])
+    data, metadata = mock_catalog_factory()
+    waveform = metadata.waveform
+    frequencies = np.asarray(data["frequencies"])
+    redshift = np.asarray(data["source_parameters"]["redshift"])
 
-    assert catalog.frequencies.size == 512
-    assert catalog.num_samples == 1024
+    assert frequencies.size == 512
+    assert metadata.num_samples == 1024
     # Every stochastic site plus every per-source deterministic the population
     # declares -- the columns are the model's sites, by construction.
-    assert set(catalog.source_parameters) == {
+    assert set(data["source_parameters"]) == {
         "redshift",
         "source_frame_mass_1",
         "source_frame_mass_2",
@@ -77,7 +78,7 @@ def test_mock_catalog_defaults_cover_the_production_band(mock_catalog_factory) -
         "coa_phase",
         "coa_time",
     }
-    np.testing.assert_allclose(catalog.bin_widths, CATALOG_DF)
+    np.testing.assert_allclose(bin_widths(frequencies), CATALOG_DF)
     assert waveform.minimum_frequency == 2.0
     assert waveform.maximum_frequency == 4096.0
     np.testing.assert_allclose(np.diff(frequencies), CATALOG_DF)
@@ -131,7 +132,7 @@ def test_catalog_contraction_matches_the_analytic_spectrum(
         )
         for num_sources in catalog_sizes
     }
-    frequencies = jnp.asarray(catalogs[LARGE_CATALOG_SIZE].frequencies)
+    frequencies = jnp.asarray(catalogs[LARGE_CATALOG_SIZE][0]["frequencies"])
     mass_moments = uniform_prior_mass_moments(
         frequencies,
         minimum_redshift=Z_MIN,
@@ -151,9 +152,9 @@ def test_catalog_contraction_matches_the_analytic_spectrum(
     )
 
     ratios: dict[int, np.ndarray] = {}
-    for num_sources, catalog in catalogs.items():
-        polarization_power = jnp.asarray(catalog.polarization_power)
-        samples = catalog_samples(catalog)
+    for num_sources, (data, _) in catalogs.items():
+        polarization_power = jnp.asarray(data["polarization_power"])
+        samples = catalog_samples(data)
         total_merger_rate, _, _ = reference_merger_rate_distance_and_logprob(
             POPULATION_PARAMS,
             samples["redshift"],
@@ -239,15 +240,15 @@ def test_catalog_omega_gw_matches_the_analytic_spectrum(mock_catalog_factory) ->
        one multiplication each, so this holds to round-off or one of them is
        wrong.
     """
-    catalog = mock_catalog_factory(
+    data, _ = mock_catalog_factory(
         num_sources=LARGE_CATALOG_SIZE,
         f_min=F_MIN,
         f_max=F_MAX,
         frequency_resolution=CATALOG_DF,
     )
-    frequencies = jnp.asarray(catalog.frequencies)
-    polarization_power = jnp.asarray(catalog.polarization_power)
-    samples = catalog_samples(catalog)
+    frequencies = jnp.asarray(data["frequencies"])
+    polarization_power = jnp.asarray(data["polarization_power"])
+    samples = catalog_samples(data)
     total_merger_rate, _, _ = reference_merger_rate_distance_and_logprob(
         POPULATION_PARAMS, samples["redshift"], redshift_grid=make_redshift_grid()
     )

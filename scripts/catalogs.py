@@ -1,7 +1,7 @@
 """Inspect the content-addressed catalog cache.
 
 Catalog files are named by key and seed --
-``outputs/catalogs/polarization_power-<key>-<digest>.h5`` -- which is
+``outputs/catalogs/polarization_power-<key>-<seed>.h5`` -- which is
 unambiguous but unreadable. ``ls`` maps the names back to what they hold: every
 catalog a committed run asks for, what it draws, whether it has been built, and
 which runs sample against it. ``--orphans`` lists built files no run asks for

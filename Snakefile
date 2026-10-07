@@ -9,13 +9,12 @@ from astrogwb.paper.config.runs import (
     run_config_paths,
 )
 from astrogwb.paper.plotting import DETECTOR_NETWORK_RUNS
-from astrogwb.simulators.polarization_power import polarization_power
 
 # Keying the catalogs reaches pydantic: the key is taken over a validated
 # CatalogMetadata, which is the price of one canonical form. Importing the
 # records imports JAX (their parent packages do) but does not initialize the
-# XLA backend; `polarization_power.path` names the file from the
-# metadata and the seed alone.
+# XLA backend; `catalog_stem` names the file from the metadata and
+# the seed alone.
 
 
 JAX_PLATFORM = config.get("jax_platforms", "cuda")
@@ -24,14 +23,12 @@ CHAIN_PATTERN = "outputs/chains/{experiment}/{run}.nc"
 
 
 def catalog_path(stem: str) -> str:
-    """The file a catalog stem names: where `polarization_power` caches it."""
-    metadata, seed = run_catalogs.requests[stem]
-    return str(polarization_power.path({"seed": seed}, metadata, CATALOGS_DIR))
+    """The file a catalog stem names, in the catalog directory."""
+    return str(CATALOGS_DIR / f"{stem}.h5")
 
 
-#: `polarization_power.path` with the stem left as the rule's wildcard;
-#: `generate_catalog` refuses any output that is not the path of the metadata
-#: and seed it is given.
+#: `catalog_path` with the stem left as the rule's wildcard; `generate_catalog`
+#: refuses any output that is not named by the metadata and seed it is given.
 CATALOG_PATTERN = str(CATALOGS_DIR / "{catalog}.h5")
 
 
@@ -39,7 +36,7 @@ CATALOG_PATTERN = str(CATALOGS_DIR / "{catalog}.h5")
 # outputs/chains/<experiment>/<run>.nc. Catalogs are content-addressed instead:
 # each run's [analysis.injection] / [analysis.proposal] resolve to a
 # CatalogMetadata, and that record plus the seed it is drawn at (analysis.seeds)
-# names outputs/catalogs/polarization_power-<key>-<digest>.h5. Two runs asking
+# names outputs/catalogs/polarization_power-<key>-<seed>.h5. Two runs asking
 # for the same draw share one file, and any edit to a draw -- or a bump of the
 # astrogwb version -- names a new one, so the catalog rule needs no config
 # inputs to rebuild correctly.
@@ -141,7 +138,7 @@ def experiment_chains(experiment):
 
 
 wildcard_constraints:
-    catalog="polarization_power-[0-9a-f]{16}-[0-9a-f]{16}",
+    catalog="polarization_power-[0-9a-f]{16}-[0-9]+",
     experiment=EXPERIMENT_PATTERN,
     run=RUN_PATTERN,
 
@@ -159,7 +156,7 @@ localrules:
 rule waveform_catalog:
     """Population draw + waveform generation, in one process.
 
-    The output path is the metadata's key and the seed's digest, so the rule
+    The output path is the metadata's key and the seed, so the rule
     declares no config inputs: an edit that changes what a run asks for changes
     the path, and with it the file, rather than invalidating this one. The
     generator re-derives the path from the metadata and seed it is handed and

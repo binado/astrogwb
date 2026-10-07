@@ -53,11 +53,12 @@ with app.setup(hide_code=True):
     from astrogwb.paper.config.detectors import DetectorRegistry
     from astrogwb.paper.config.runs import FIGURES_DIR
     from astrogwb.paper.plotting import save_figures, use_paper_style
-    from astrogwb.simulators.core import split_seed
+    from astrogwb.simulators.core import batch_keys, load, write
     from astrogwb.simulators.spectra import (
         SpectralDensityCatalog,
         SpectraMetadata,
-        spectra,
+        SpectraSimulator,
+        stack_spectra,
     )
     from astrogwb.utils import years_to_seconds
 
@@ -315,8 +316,8 @@ class AnalysisSettings:
     minimum_frequency: float
     maximum_frequency: float
     chunk_size: int
-    #: The ensemble is ``num_draws`` draws at ``split_seed(seed, num_draws)``;
-    #: the optional Poisson reference is one draw at ``split_seed(data_seed, 1)``.
+    #: The ensemble is ``num_draws`` draws at ``batch_keys(seed, num_draws)``;
+    #: the optional Poisson reference is one draw at ``batch_keys(data_seed, 1)``.
     seed: int
     num_draws: int
     data_seed: int
@@ -562,26 +563,27 @@ def summarize_spectrum_snrs(
 @app.function(hide_code=True)
 def draw_catalog(
     metadata: SpectraMetadata,
-    seeds: NDArray[np.uint64],
+    seed: int,
+    num_draws: int,
     settings: AnalysisSettings,
 ) -> SpectralDensityCatalog:
-    """Serve or generate the spectra ``metadata`` gives at ``seeds``."""
-    outputs = spectra(
-        {"seeds": seeds},
-        metadata,
-        cache_dir=settings.cache_dir,
-        generate=not settings.cache_only,
-        chunk_size=settings.chunk_size,
-    )
+    """Serve or generate the spectra ``metadata`` gives at ``batch_keys(seed, num_draws)``."""
+    path = settings.cache_dir / f"spectra-{metadata.key()}-{seed}-{num_draws}.h5"
+    if path.is_file():
+        outputs, _, _ = load(path, SpectraMetadata)
+    elif settings.cache_only:
+        raise FileNotFoundError(f"no cached spectra at {path}")
+    else:
+        simulator = SpectraSimulator(metadata, chunk_size=settings.chunk_size)
+        outputs = stack_spectra([simulator(key) for key in batch_keys(seed, num_draws)])
+        write(path, outputs, metadata, seed=seed)
     return SpectralDensityCatalog.from_arrays(outputs, metadata)
 
 
 @app.function(hide_code=True)
 def analyze_metadata(metadata: SpectraMetadata, settings: AnalysisSettings) -> SNRCase:
     """Serve or generate one spectrum ensemble and summarize its SNRs."""
-    catalog = draw_catalog(
-        metadata, split_seed(settings.seed, settings.num_draws), settings
-    )
+    catalog = draw_catalog(metadata, settings.seed, settings.num_draws, settings)
     snrs, mean_spectrum_snr = compute_spectrum_snrs(catalog, settings)
     if np.any(snrs <= 0):
         raise ValueError("sigma(H0) requires strictly positive SNR draws")
@@ -687,9 +689,7 @@ def select_reference(
     if kind == "poisson":
         if poisson_metadata is None:
             raise ValueError("the poisson reference needs its metadata")
-        catalog = draw_catalog(
-            poisson_metadata, split_seed(settings.data_seed, 1), settings
-        )
+        catalog = draw_catalog(poisson_metadata, settings.data_seed, 1, settings)
         snrs, _ = compute_spectrum_snrs(catalog, settings)
         return Reference(
             kind=kind,

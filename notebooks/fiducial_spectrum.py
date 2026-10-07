@@ -35,7 +35,7 @@ with app.setup(hide_code=True):
         population_metadata,
         waveform_metadata,
     )
-    from astrogwb.paper.config.runs import FIGURES_DIR, SPECTRA_ROOT
+    from astrogwb.paper.config.runs import FIGURES_DIR
     from astrogwb.paper.plotting import (
         DETECTOR_COMPARISON_LEGEND,
         DETECTOR_NETWORKS,
@@ -46,8 +46,8 @@ with app.setup(hide_code=True):
         save_figures,
         use_paper_style,
     )
-    from astrogwb.simulators.core import split_seed
-    from astrogwb.simulators.spectra import SpectraMetadata, spectra
+    from astrogwb.simulators.core import batch_keys
+    from astrogwb.simulators.spectra import SpectraMetadata, SpectraSimulator
     from astrogwb.utils import years_to_seconds
 
 
@@ -106,11 +106,9 @@ def _():
     maximum_redshift = 20.0
 
     # One Poisson draw.
-    # chunk_size chunks the waveform generation;
-    # n_max_sigma sizes the static event plate a Poisson tail above the mean count.
+    # chunk_size chunks the waveform generation.
     seed = 41
     chunk_size = 1024
-    n_max_sigma = 5.0
 
     # Ordered legend from astrogwb.paper.plotting.DETECTOR_NETWORKS -- a network's
     # label lives there because nothing reads it without the order it sits in --
@@ -140,7 +138,6 @@ def _():
         maximum_redshift,
         minimum_frequency,
         minimum_redshift,
-        n_max_sigma,
         seed,
     )
 
@@ -378,7 +375,6 @@ def _(
     maximum_frequency,
     maximum_redshift,
     minimum_redshift,
-    n_max_sigma,
     observation_time,
     seed,
 ):
@@ -403,17 +399,13 @@ def _(
         ),
         hyperparameters=FIDUCIALS,
         observation_time=observation_time,
-        n_max_sigma=n_max_sigma,
     )
-    _spectra = spectra(
-        {"seeds": split_seed(seed, 1)},
-        _metadata,
-        cache_dir=ROOT_DIR / SPECTRA_ROOT,
-        chunk_size=chunk_size,
+    _spectrum = SpectraSimulator(_metadata, chunk_size=chunk_size)(
+        batch_keys(seed, 1)[0]
     )
-    frequencies = jnp.asarray(_spectra["frequencies"])
-    spectral_density = jnp.asarray(_spectra["spectral_density"][0])
-    _n_events = int(_spectra["n_events"][0])
+    frequencies = jnp.asarray(_spectrum["frequencies"])
+    spectral_density = jnp.asarray(_spectrum["spectral_density"])
+    _n_events = int(_spectrum["n_events"])
 
     {"Number of events": _n_events}
     return frequencies, spectral_density
