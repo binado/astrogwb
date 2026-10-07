@@ -32,7 +32,7 @@ with app.setup(hide_code=True):
     from astrogwb.frequency import frequency_mask
     from astrogwb.importance.diagnostics import relative_ess
     from astrogwb.importance.spectral import build_importance_spectrum
-    from astrogwb.inference import LogDensityFn, gwb_spectral_density_model
+    from astrogwb.inference import GaussianGWBBatchedLikelihood
     from astrogwb.paper.cache import default_cache_dir
     from astrogwb.paper.catalogs import (
         ensure_catalog,
@@ -104,8 +104,9 @@ def _():
 
     **Likelihood.** In each bin the observed spectrum is Gaussian about the
     predicted one with scale $\sigma_i = S_{\mathrm{eff},i}/\sqrt{2T\Delta f_i}$.
-    The network only changes $\sigma$ (and which bins are usable), so the six
-    networks reuse one compiled evaluator per problem.
+    The network only changes $\sigma$ (and which bins are usable), so each grid
+    point is predicted once and all six networks' likelihoods are evaluated on
+    that one prediction.
 
     **Prediction.** The proposal's polarization power is reweighted to the
     target population at each grid point,
@@ -342,7 +343,7 @@ def network_data(
 
 @app.function(hide_code=True)
 def evaluate_grid(
-    log_density_fn: LogDensityFn,
+    log_density_fn: GaussianGWBBatchedLikelihood,
     axes: Mapping[str, tuple[float, float, int]],
     fixed: Mapping[str, float],
     observed: NDArray[np.float64],
@@ -353,8 +354,8 @@ def evaluate_grid(
     Parameters
     ----------
     log_density_fn
-        The problem's evaluator, shared by all networks: only ``scale`` and
-        ``frequency_mask`` change, and both are traced.
+        The problem's evaluator: one prediction per grid point, shared by all
+        networks, which differ only in ``scale`` and ``frequency_mask``.
     axes
         ``(low, high, size)`` of each swept parameter.
     fixed
@@ -372,17 +373,19 @@ def evaluate_grid(
     """
     grids = {name: np.linspace(lo, hi, n) for name, (lo, hi, n) in axes.items()}
     jax_grids = {name: jnp.asarray(grid) for name, grid in grids.items()}
-    log_densities = {
-        network: np.asarray(
-            log_density_fn(
-                jax_grids,
-                fixed=fixed,
-                observed_spectral_density=jnp.asarray(observed),
-                **data,
-            )
+    names = list(per_network)
+    batched = np.asarray(
+        log_density_fn(
+            jax_grids,
+            fixed=fixed,
+            observed_spectral_density=jnp.asarray(observed),
+            scale=jnp.stack([jnp.asarray(per_network[n]["scale"]) for n in names]),
+            frequency_mask=jnp.stack(
+                [jnp.asarray(per_network[n]["frequency_mask"]) for n in names]
+            ),
         )
-        for network, data in per_network.items()
-    }
+    )
+    log_densities = {network: batched[i] for i, network in enumerate(names)}
     return grids, log_densities
 
 
@@ -557,8 +560,8 @@ def _():
     ## 4. Importance spectrum and evaluators
 
     Built once. The population is built a single time because it hashes by
-    identity, and each problem gets one `LogDensityFn`, so the six networks
-    reuse three compilations.
+    identity, and each problem gets one `GaussianGWBBatchedLikelihood`, which
+    predicts every grid point once for all six networks.
     """)
 
 
@@ -578,13 +581,10 @@ def _(
         population=target,
         density_sites=DEFAULT_DENSITY_SITES,
     )
-    model = partial(
-        gwb_spectral_density_model,
-        spectral_density_fn=spectral_density_fn,
-        priors=PRIORS,
-    )
     evaluators = {
-        name: LogDensityFn(model, chunk_size=grid_chunk_size)
+        name: GaussianGWBBatchedLikelihood(
+            spectral_density_fn, PRIORS, chunk_size=grid_chunk_size
+        )
         for name in ("H0", "H0_Omega_m", "xi_0_xi_n")
     }
     return evaluators, log_weights_fn

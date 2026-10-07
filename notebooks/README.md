@@ -66,7 +66,9 @@ repository root as the working directory.
   from a zero-noise Poisson injection reweighted from a 1M-source proposal
   (different seeds). The log densities are cached under
   `default_cache_dir() / "posteriors"`, keyed by a hash of their settings, so
-  the figures iterate without recomputing. Writes per-problem marginals and
+  the figures iterate without recomputing. Each grid point is predicted once
+  and shared by all six networks (`GaussianGWBBatchedLikelihood`); the numbers
+  equal the per-network evaluation, so existing cache files stay valid. Writes per-problem marginals and
   corner plots. Smoke test:
   `ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/cosmology_grid_posteriors.py`.
 
