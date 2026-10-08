@@ -151,10 +151,9 @@ def _intrinsic_log_prob(
     redshift: jax.Array,
     density_sites: Sequence[str],
 ) -> jax.Array:
-    count = next(iter(intrinsic.values())).shape[0]
     log_prob, _ = evaluate_sources(
-        model,
-        _with_extrinsic(intrinsic, redshift, count),
+        _pin_redshift_and_inclination(model, redshift),
+        intrinsic,
         density_sites=density_sites,
     )
     return log_prob
