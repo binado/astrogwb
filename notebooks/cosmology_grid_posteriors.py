@@ -596,11 +596,20 @@ def _():
     The proposal is the 1M-source catalog, generated chunk by chunk on a miss
     and read from `outputs/catalogs/` afterwards. The injection is one
     Poisson spectrum, cached beside the posteriors.
+
+    The importance spectrum is built in the same cell as the proposal, once.
+    The population is built a single time because it hashes by identity. Each
+    problem builds its own `GaussianGWBBatchedLikelihood` in its section, which
+    predicts every grid point once for all six networks. The NumPy catalog is
+    dropped there, so only the device copy stays resident.
     """)
+    return
 
 
 @app.cell
-def _(proposal_metadata, proposal_seed):
+def _(population, proposal_metadata, proposal_seed):
+    # The NumPy catalog is local to this cell, so it is freed once the device
+    # copy made by build_importance_spectrum exists: only one copy stays resident.
     proposal_data, proposal_metadata_loaded = ensure_catalog(
         proposal_metadata, np.uint64(proposal_seed), CATALOGS_ROOT
     )
@@ -609,7 +618,19 @@ def _(proposal_metadata, proposal_seed):
         f"proposal: {proposal_data['polarization_power'].shape[1]:,} sources, "
         f"{frequencies.size} frequency bins"
     )
-    return frequencies, proposal_data, proposal_metadata_loaded
+    target = build_population(population.model_name, **population.model_kwargs)
+    spectral_density_fn, log_weights_fn = build_importance_spectrum(
+        proposal_data,
+        proposal_metadata_loaded,
+        population=target,
+        density_sites=DEFAULT_DENSITY_SITES,
+    )
+    return (
+        frequencies,
+        log_weights_fn,
+        proposal_metadata_loaded,
+        spectral_density_fn,
+    )
 
 
 @app.cell
@@ -649,29 +670,6 @@ def _(
     validate_matching_frequency_grids(injection_frequencies, frequencies)
     print(f"injection: {num_injected:,} Poisson events")
     return (observed,)
-
-
-@app.cell(hide_code=True)
-def _():
-    mo.md(r"""
-    ## Importance spectrum
-
-    Built once. The population is built a single time because it hashes by
-    identity. Each problem builds its own `GaussianGWBBatchedLikelihood` in
-    its section, which predicts every grid point once for all six networks.
-    """)
-
-
-@app.cell
-def _(population, proposal_data, proposal_metadata_loaded):
-    target = build_population(population.model_name, **population.model_kwargs)
-    spectral_density_fn, log_weights_fn = build_importance_spectrum(
-        proposal_data,
-        proposal_metadata_loaded,
-        population=target,
-        density_sites=DEFAULT_DENSITY_SITES,
-    )
-    return log_weights_fn, spectral_density_fn
 
 
 @app.cell
