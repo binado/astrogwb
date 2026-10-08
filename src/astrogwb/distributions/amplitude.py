@@ -101,15 +101,12 @@ from jax.typing import ArrayLike
 from numpyro.distributions import constraints
 from numpyro.distributions.transforms import Transform
 
-from astrogwb.utils import cumulative_trapezoid, gauss_legendre_rule
+from astrogwb.utils import cumulative_trapezoid, gauss_legendre_nodes_weights
 
 #: Half-width of the integration window in units of :math:`\sigma_A = 1/\rho`.
 HALF_WIDTH = 7.0
-#: Gauss-Legendre order of :attr:`AmplitudeConditional.log_normalizer`.
-_ORDER = 32
 #: Nodes of the per-element grid that :meth:`AmplitudeConditional.icdf` inverts.
 _SAMPLING_NODES = 1024
-_LEGENDRE_NODES, _LEGENDRE_WEIGHTS = gauss_legendre_rule(_ORDER)
 
 
 def amplitude_prior(
@@ -192,7 +189,7 @@ class AmplitudeConditional(dist.Distribution):
     only as the quadrature scheme:
 
     - :attr:`log_normalizer` -- :math:`\ln Z` of the conditional under a
-      32-point Gauss-Legendre rule on the window; this *is* the
+      ``gauss_legendre_order``-point Gauss-Legendre rule on the window; this *is* the
       marginalization factor the model adds to its ``numpyro.factor`` site.
     - :meth:`sample` / :meth:`icdf` -- inverse-transform draws of
       :math:`A` for post-processing reconstruction, from a CDF tabulated on
@@ -229,6 +226,10 @@ class AmplitudeConditional(dist.Distribution):
         The amplitude-space prior :math:`\pi_A`, with :math:`A = 1` at the
         template; see :func:`amplitude_prior`. Defines the support, hence the
         window's clipping bounds.
+    gauss_legendre_order:
+        Number of Gauss-Legendre nodes of :attr:`log_normalizer`. A static
+        Python integer: it sets array shapes, so it is a pytree auxiliary
+        field, not a traced leaf.
     validate_args:
         Forwarded to :class:`~numpyro.distributions.Distribution`.
     """
@@ -246,6 +247,7 @@ class AmplitudeConditional(dist.Distribution):
         "lower",
         "upper",
     )
+    pytree_aux_fields = ("gauss_legendre_order",)
 
     def __init__(
         self,
@@ -253,11 +255,13 @@ class AmplitudeConditional(dist.Distribution):
         template_optimal_snr: ArrayLike,
         *,
         prior: dist.Distribution,
+        gauss_legendre_order: int = 32,
         validate_args: bool | None = None,
     ) -> None:
         self.amplitude_mle = jnp.asarray(amplitude_mle)
         self.template_optimal_snr = jnp.asarray(template_optimal_snr)
         self.prior = prior
+        self.gauss_legendre_order = gauss_legendre_order
         self.lower, self.upper = support_bounds(prior)
         batch_shape = jnp.broadcast_shapes(
             jnp.shape(amplitude_mle), jnp.shape(template_optimal_snr)
@@ -326,16 +330,13 @@ class AmplitudeConditional(dist.Distribution):
         so the prior is never evaluated off it.
         """
         lo, hi = self._window()
-        half = 0.5 * (hi - lo)
-        nodes = lo[..., None] + half[..., None] * (1.0 + _LEGENDRE_NODES)
+        nodes, weights = gauss_legendre_nodes_weights(lo, hi, self.gauss_legendre_order)
         log_integrand = self._log_density(
             nodes,
             self.amplitude_mle[..., None],
             self.template_optimal_snr[..., None],
         )
-        return jnp.log(half) + logsumexp(
-            log_integrand + jnp.log(_LEGENDRE_WEIGHTS), axis=-1
-        )
+        return logsumexp(log_integrand + jnp.log(weights), axis=-1)
 
     def log_prob(
         self, value: ArrayLike, intermediates: list[Any] | None = None

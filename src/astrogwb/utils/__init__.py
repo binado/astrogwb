@@ -1,12 +1,11 @@
 from collections.abc import Callable, Mapping
-from functools import cache, wraps
+from functools import wraps
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 from jax.typing import ArrayLike
 from numpy.polynomial.legendre import leggauss
-from numpy.typing import NDArray
 
 from astrogwb.constants import SECONDS_PER_YEAR
 
@@ -68,20 +67,6 @@ def cumulative_trapezoid(y: jax.Array, x: jax.Array) -> jax.Array:
     return jnp.concatenate([zeros, jnp.cumsum(segments, axis=-1)], axis=-1)
 
 
-@cache
-def gauss_legendre_rule(
-    order: int,
-) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Return cached host-side float64 nodes and weights on ``[-1, 1]``.
-
-    The rule is built on the host with :func:`numpy.polynomial.legendre.leggauss`
-    and memoized on ``order``, so repeated tracing of the same quadrature order
-    costs nothing after the first call.
-    """
-    nodes, weights = leggauss(order)
-    return nodes.astype(np.float64), weights.astype(np.float64)
-
-
 def gauss_legendre_nodes_weights(
     a: ArrayLike, b: ArrayLike, n: int
 ) -> tuple[jax.Array, jax.Array]:
@@ -121,7 +106,7 @@ def gauss_legendre_nodes_weights(
         weights to zeros, and Python floats need JAX x64 mode for float64.
     """
     dtype = jnp.result_type(a, b, float)
-    host_nodes, host_weights = gauss_legendre_rule(n)
+    host_nodes, host_weights = leggauss(n)
     nodes = jnp.asarray(host_nodes, dtype=dtype)
     weights = jnp.asarray(host_weights, dtype=dtype)
     a = jnp.asarray(a, dtype=dtype)
