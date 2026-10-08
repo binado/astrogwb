@@ -66,7 +66,7 @@ sources)` checks the sources once, jits it and packs `PolarizationPowerData`.
 fiducials, then that packaging), and `astrogwb.gwb.importance` places the same
 draw at redshift nodes:
 `importance_catalog(ImportanceCatalogMetadata, key)` places every intrinsic
-draw at each Gauss-Legendre node in `ln(1+z)` at a fixed effective
+draw at each Gauss-Legendre node in the scale factor `1/(1+z)` at a fixed effective
 inclination, and `build_importance_spectrum` integrates redshift on those nodes
 and reweights only the intrinsic draws. It is meant to replace the
 redshift-sampled `astrogwb.importance.spectral` estimator.

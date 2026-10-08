@@ -118,7 +118,7 @@ def _():
     lower edge $z_{\min}$. A $(2,2)$-mode aligned-spin waveform scales
     exactly with detector-frame mass, so with $s_j = (1+z_j)/(1+z_{\min})$
     the mean reference power $\bar P_{\mathrm{ref}}$ is rescaled to the
-    Gauss-Legendre nodes $z_j$ (in $\ln(1+z)$, weights $w_j$),
+    Gauss-Legendre nodes $z_j$ (in $a = 1/(1+z)$, weights $w_j$),
     $S(f;\Lambda) = R(\Lambda) \sum_j w_j\, p(z_j\mid\Lambda)\,
     [d^{\mathrm{ref}} / d_L(z_j\mid\Lambda)]^2\, s_j^4\,
     \bar P_{\mathrm{ref}}(f s_j)$,
@@ -152,7 +152,7 @@ def _():
     data_seed = 41
     catalog_seed = 42
     num_samples = 2**17  # intrinsic draws, one waveform each
-    redshift_nodes = 32  # Gauss-Legendre nodes in ln(1 + z); costs no waveforms
+    redshift_nodes = 32  # Gauss-Legendre nodes in 1/(1 + z); costs no waveforms
     catalog_chunk_size = 4096  # reference waveforms per lax.map batch
     chunk_size = 16_384  # injection waveforms per reduced chunk
     grid_chunk_size = 8  # grid points per lax.map batch; bounds peak memory

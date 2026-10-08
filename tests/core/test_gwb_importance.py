@@ -15,6 +15,7 @@ from astrogwb.gwb.importance import (
     build_importance_spectrum,
     build_rescaled_spectrum,
     importance_catalog,
+    redshift_quadrature,
     reference_catalog,
 )
 from astrogwb.populations import PopulationMetadata, build_population
@@ -64,6 +65,35 @@ def test_effective_inclination_gives_the_isotropic_mean_factor() -> None:
     assert float(inclination_factor(EFFECTIVE_INCLINATION)) == pytest.approx(
         0.8, rel=1e-14
     )
+
+
+@pytest.mark.parametrize("power", [2, 3, 5])
+def test_redshift_quadrature_polynomial_in_scale_factor_is_exact(power: int) -> None:
+    # dz = da / a**2, so a**power integrates as a polynomial of degree
+    # power - 2 in a, which four nodes reproduce up to degree seven.
+    minimum, maximum = 0.01, 5.0
+    redshift, weights = redshift_quadrature(minimum, maximum, 4)
+    lower, upper = 1.0 / (1.0 + maximum), 1.0 / (1.0 + minimum)
+    exact = (upper ** (power - 1) - lower ** (power - 1)) / (power - 1)
+    estimate = np.sum(weights / (1.0 + redshift) ** power)
+    assert estimate == pytest.approx(exact, rel=1e-13)
+
+
+def test_redshift_quadrature_weights_sum_to_the_window_width() -> None:
+    _, weights = redshift_quadrature(0.01, 5.0, 32)
+    assert np.sum(weights) == pytest.approx(4.99, rel=1e-10)
+
+
+def test_redshift_quadrature_nodes_increase_inside_the_window() -> None:
+    redshift, weights = redshift_quadrature(0.01, 5.0, 16)
+    assert np.all(np.diff(redshift) > 0.0)
+    assert 0.01 < redshift[0] and redshift[-1] < 5.0
+    assert np.all(weights > 0.0)
+
+
+def test_redshift_quadrature_without_nodes_raises() -> None:
+    with pytest.raises(ValueError, match="num_nodes"):
+        redshift_quadrature(0.01, 5.0, 0)
 
 
 @pytest.mark.integration

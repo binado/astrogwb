@@ -65,7 +65,7 @@ def _():
 
     The grid posteriors predict the spectrum from $N$ intrinsic draws, each
     generated once at the window's lower edge $z_{\min}$ and rescaled to
-    $Z$ Gauss-Legendre nodes in $\ln(1+z)$,
+    $Z$ Gauss-Legendre nodes in the scale factor $a = 1/(1+z)$,
 
     $$
     S(f;\Lambda) = R(\Lambda) \sum_j w_j\, p(z_j\mid\Lambda)

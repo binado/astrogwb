@@ -255,8 +255,9 @@ networks, with no sampler. The data are a zero-noise Poisson injection
 spectrum of `astrogwb.gwb.importance` (`catalog_seed = 42`): `2^19` intrinsic
 draws, each generated once at the window's lower edge by `reference_catalog`,
 and `build_rescaled_spectrum` rescaling their mean power to 32 Gauss-Legendre
-nodes in `ln(1 + z)` at each grid point, with no intrinsic reweighting. The
-log densities are cached in `default_cache_dir() / "posteriors"`, in a file
+nodes in the scale factor `1/(1 + z)` at each grid point, with no intrinsic
+reweighting. The log densities are cached in `default_cache_dir() /
+"posteriors"`, in a file
 whose name carries a hash of the seeds, grids, band, observing time, version
 and catalog keys, so a stale cache is never served. The first run generates the
 reference catalog (`outputs/catalogs/reference_catalog-<key>-42.h5`, chunked

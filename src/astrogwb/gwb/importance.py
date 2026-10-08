@@ -2,7 +2,8 @@ r"""The background spectrum as a redshift quadrature over an intrinsic sample.
 
 The spectrum is an expectation over sources. Only the intrinsic parameters
 are left to Monte Carlo here: redshift is integrated on fixed Gauss-Legendre
-nodes, and inclination is averaged exactly. Every one of :math:`N` intrinsic
+nodes in the scale factor :math:`1/(1 + z)` (:func:`redshift_quadrature`),
+and inclination is averaged exactly. Every one of :math:`N` intrinsic
 draws is placed at each of :math:`Z` nodes, so
 
 .. math::
@@ -129,18 +130,22 @@ def redshift_quadrature(
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     r"""Gauss-Legendre nodes and weights for :math:`\int dz` over a window.
 
-    The rule is Gauss-Legendre in :math:`u = \ln(1 + z)`, which spreads the
-    nodes evenly over the decades of :math:`1 + z`; the Jacobian
-    :math:`dz/du = 1 + z` is folded into the weights, so
-    :math:`\int f\, dz \approx \sum_j w_j f(z_j)`.
+    The rule is Gauss-Legendre in the scale factor :math:`a = 1/(1 + z)`, with
+    the Jacobian :math:`|dz/da| = a^{-2}` folded into the weights, so
+    :math:`\int f\, dz \approx \sum_j w_j f(z_j)`. The spectrum's kernel is
+    dominated by :math:`1/d_L^2`, and :math:`d_L = \chi / a` makes
+    :math:`dz / d_L^2 = da / \chi^2`: the Jacobian cancels the
+    :math:`(1 + z)^2` inside :math:`d_L^2`, leaving a smooth integrand in
+    :math:`a`, and the nodes crowd towards low redshift, where that weight
+    is. The nodes are returned in increasing redshift.
     """
     if num_nodes <= 0:
         raise ValueError("num_nodes must be positive")
     nodes, weights = np.polynomial.legendre.leggauss(num_nodes)
-    lower, upper = np.log1p(minimum_redshift), np.log1p(maximum_redshift)
+    lower, upper = 1.0 / (1.0 + maximum_redshift), 1.0 / (1.0 + minimum_redshift)
     half_width = 0.5 * (upper - lower)
-    one_plus_z = np.exp(lower + half_width * (nodes + 1.0))
-    return one_plus_z - 1.0, half_width * weights * one_plus_z
+    scale_factor = (lower + half_width * (nodes + 1.0))[::-1]
+    return 1.0 / scale_factor - 1.0, half_width * weights[::-1] / scale_factor**2
 
 
 class ImportanceCatalogMetadata(BaseModel):
