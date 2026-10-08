@@ -341,9 +341,14 @@ def spectra_at(
     spectral_density_fn: SpectralDensityFn,
     points: Mapping[str, Mapping[str, float]],
 ) -> NDArray[np.float64]:
-    """The spectrum at every evaluation point, shape ``(len(points), F)``."""
-    spectrum = jax.jit(lambda params: spectral_density_fn(params)[0])
-    return np.stack([np.asarray(spectrum(dict(params))) for params in points.values()])
+    """The spectrum at every evaluation point, shape ``(len(points), F)``.
+
+    Eager, not jitted: a jitted closure over the catalog's arrays is not
+    released when the closure is, so a loop over catalogs keeps every one.
+    """
+    return np.stack(
+        [np.asarray(spectral_density_fn(dict(params))[0]) for params in points.values()]
+    )
 
 
 @app.function(hide_code=True)
@@ -736,7 +741,8 @@ def _():
     the whole $N$ ladder costs no extra waveforms. At each $N$ the residuals
     are taken about the mean of the $M$ estimates; their standard deviation
     uses $M - 1$ degrees of freedom, so it estimates one estimator's scatter.
-    Catalogs are processed one at a time, so only one is resident.
+    Catalogs are drawn in memory one at a time and not cached, so only one is
+    resident and none is written.
     """)
 
 
@@ -776,10 +782,11 @@ def _(
     # (M, sizes, points, F)
     _spectra = []
     for _m in range(mc_catalogs):
-        _data = ensure_reference_catalog(
+        # Drawn in memory, not cached: each regenerates from its seed in
+        # seconds, and M of them would take M * 0.8 GB of disk.
+        _data = reference_catalog(
             _metadata,
-            mc_base_seed + _m,
-            catalog_dir,
+            batch_keys(mc_base_seed + _m, 1)[0],
             chunk_size=catalog_chunk_size,
         )
         if _m == 0:
@@ -799,6 +806,8 @@ def _(
                 for _n in mc_sizes
             ]
         )
+        # Release this catalog before the next is drawn.
+        del _data
     mc_spectra = np.asarray(_spectra)
     return mc_nodes, mc_sizes, mc_spectra
 
