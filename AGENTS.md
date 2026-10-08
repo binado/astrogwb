@@ -56,9 +56,18 @@ built from a validated metadata record `M` (it names itself with `key()`) plus
 cost-only settings (`chunk_size`), then called on the inputs that
 vary per item. `__call__` is the whole interface: its signature and the layout of
 its output `D` are the simulator's own contract. `PopulationSimulator` and
-`BackgroundSpectralDensitySimulator`, like `PolarizationPowerSimulator`, take
-one key and return one draw (a population, background spectral density, a
-catalog), already vectorized over its events; callers loop over `batch_keys`.
+`BackgroundSpectralDensitySimulator` take one key and return one draw (a
+population, a background spectral density), already vectorized over its
+events; callers loop over `batch_keys`. `PolarizationPowerSimulator(waveform,
+chunk_size=)` is deterministic: it knows only a `WaveformMetadata` and returns
+the power of the source columns it is called on. `draw_catalog(metadata, key)`
+is the plain catalog (sources drawn at the fiducials, then that simulator), and
+`astrogwb.gwb.importance` composes the same simulator over redshift nodes:
+`importance_catalog(ImportanceCatalogMetadata, key)` places every intrinsic
+draw at each Gauss-Legendre node in `ln(1+z)` at a fixed effective
+inclination, and `build_importance_spectrum` integrates redshift on those nodes
+and reweights only the intrinsic draws. It is meant to replace the
+redshift-sampled `astrogwb.importance.spectral` estimator.
 Anything static is bound in the
 constructor. The output `D`
 is a per-simulator `TypedDict` of array-like leaves (`PopulationData`,
@@ -86,7 +95,7 @@ time (`resolve_run_catalogs`, which maps each file stem to `(metadata, seed)`),
 plus `--seed` and declares no config inputs, and `run_mcmc` and the notebooks
 alike reach the files through `astrogwb.paper.catalogs.ensure_catalog(metadata,
 seed, directory)` (notebooks via `run_catalog`), which loads a hit, checks it
-against the request, and on a miss draws it with `PolarizationPowerSimulator`
+against the request, and on a miss draws it with `draw_catalog`
 at `batch_keys(seed, 1)[0]` -- unless `generate=False`, which the workflow's
 `run_mcmc --cached-only` uses so a job never generates.
 `ensure_catalog` and `run_catalog` return the `(data, metadata)` pair as is; there
