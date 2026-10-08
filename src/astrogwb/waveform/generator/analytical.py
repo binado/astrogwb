@@ -305,7 +305,7 @@ class AnalyticInspiralGenerator(PolarizationPowerGenerator):
             self.metadata.turnover_frequency,
         )
 
-    def generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
+    def _generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
         prepared_parameters = {
             name: jnp.asarray(values) for name, values in source_parameters.items()
         }
