@@ -30,14 +30,15 @@ with app.setup(hide_code=True):
     from astrogwb import __version__
     from astrogwb.detector import effective_psd, gaussian_bin_scale
     from astrogwb.frequency import frequency_mask
-    from astrogwb.importance.diagnostics import relative_ess
-    from astrogwb.importance.spectral import build_importance_spectrum
+    from astrogwb.gwb.importance import (
+        ImportanceCatalogMetadata,
+        build_importance_spectrum,
+        importance_catalog,
+        importance_catalog_stem,
+    )
     from astrogwb.inference import GaussianGWBBatchedLikelihood
     from astrogwb.paper.cache import default_cache_dir
-    from astrogwb.paper.catalogs import (
-        ensure_catalog,
-        validate_matching_frequency_grids,
-    )
+    from astrogwb.paper.catalogs import validate_matching_frequency_grids
     from astrogwb.paper.config import (
         detector_registry,
         fiducials,
@@ -46,7 +47,6 @@ with app.setup(hide_code=True):
         waveform_metadata,
     )
     from astrogwb.paper.config.detectors import DetectorRegistry
-    from astrogwb.paper.config.mcmc import DEFAULT_DENSITY_SITES
     from astrogwb.paper.config.runs import CATALOGS_ROOT, FIGURES_DIR
     from astrogwb.paper.plotting import (
         CORNER_LEVELS,
@@ -62,8 +62,8 @@ with app.setup(hide_code=True):
         use_paper_style,
     )
     from astrogwb.populations import build_population
-    from astrogwb.simulators.core import batch_keys
-    from astrogwb.simulators.polarization_power import CatalogMetadata
+    from astrogwb.simulators.core import batch_keys, load, write
+    from astrogwb.simulators.polarization_power import PolarizationPowerData
     from astrogwb.simulators.spectra import (
         BackgroundSpectralDensityMetadata,
         BackgroundSpectralDensitySimulator,
@@ -81,10 +81,10 @@ def _():
 
     The data are a **zero-noise Poisson injection**: one Poisson-count
     spectrum drawn at the fiducials, with no Gaussian noise added on top. The
-    model spectrum is a **1,000,000-source importance-reweighted proposal**
-    drawn at the same fiducials, large enough that its shot noise is
-    negligible. The two are drawn at different seeds, so the injection is
-    not a subset of the proposal.
+    model spectrum comes from a **redshift-node importance catalog**: 2048
+    intrinsic draws at the same fiducials, each placed at 64 Gauss-Legendre
+    redshift nodes. The two are drawn at different seeds, so the injection is
+    not a subset of the catalog.
 
     Three problems, each over all six detector networks, each in its own
     section below:
@@ -94,7 +94,7 @@ def _():
     3. $\Xi_0$ and $n$ (*Inferring modified propagation parameters*), with
        $H_0$ fixed.
 
-    Setting `ASTROGWB_NOTEBOOK_SMOKE=1` swaps in a tiny proposal and coarse
+    Setting `ASTROGWB_NOTEBOOK_SMOKE=1` swaps in a tiny catalog and coarse
     grids so the whole notebook runs in a minute or two.
     """)
 
@@ -110,11 +110,16 @@ def _():
     point is predicted once and all six networks' likelihoods are evaluated on
     that one prediction.
 
-    **Prediction.** The proposal's polarization power is reweighted to the
-    target population at each grid point,
-    $\log w_i = \log p(x_i\mid\theta) - \log q(x_i) - 2\,[\log d_L(z_i\mid\theta) - \log d_i^{\mathrm{ref}}]$,
-    so $\Xi_0$ and $n$ enter through $d_L$ and $H_0$, $\Omega_m$ through both
-    the density and $d_L$.
+    **Prediction.** Redshift is integrated on fixed Gauss-Legendre nodes
+    $z_j$ (in $\ln(1+z)$, weights $w_j$) and the intrinsic draws $\theta_k$
+    are averaged,
+    $S(f;\Lambda) = R(\Lambda) \sum_j w_j\, p(z_j\mid\Lambda)\,
+    [d^{\mathrm{ref}}_j / d_L(z_j\mid\Lambda)]^2\,
+    \frac{1}{N}\sum_k P(f;\theta_k,z_j)$,
+    with the power $P$ generated at node $j$'s fiducial distance
+    $d^{\mathrm{ref}}_j$. No swept parameter is intrinsic, so the draws are
+    not reweighted: $\Xi_0$ and $n$ enter through $d_L$, and $H_0$, $\Omega_m$
+    through both $p(z)$ and $d_L$. Redshift carries no Monte Carlo noise.
 
     **Posterior.** The model samples every parameter in `[priors]`, so the
     prior is in the log density. Parameters that are not swept are pinned at
@@ -134,11 +139,13 @@ def _():
     ROOT_DIR = Path(__file__).resolve().parents[1]
     FIGURES = ROOT_DIR / FIGURES_DIR / "cosmology_grid_posteriors"
 
-    # Different seeds: the injection must not be a subset of the proposal.
+    # Different seeds: the injection must not be a subset of the catalog.
     data_seed = 41
-    proposal_seed = 42
-    proposal_size = 1_000_000
-    chunk_size = 16_384  # waveform sources per generated chunk
+    catalog_seed = 42
+    importance_samples = 2048  # intrinsic draws
+    redshift_nodes = 64  # Gauss-Legendre nodes in ln(1 + z)
+    catalog_chunk_size = 4096  # importance-catalog waveforms per lax.map batch
+    chunk_size = 16_384  # injection waveforms per reduced chunk
     grid_chunk_size = 8  # grid points per lax.map batch; bounds peak memory
 
     observation_time = 1.0  # years
@@ -162,7 +169,9 @@ def _():
     write_figures_default = True
     cache_name_prefix = ""
     if SMOKE:
-        proposal_size = 2048
+        importance_samples = 64
+        redshift_nodes = 8
+        catalog_chunk_size = 512
         chunk_size = 512
         grid_chunk_size = 4
         write_figures_default = False
@@ -191,15 +200,17 @@ def _():
     PRIORS = priors(root=ROOT_DIR)
     registry = detector_registry(root=ROOT_DIR)
 
-    # The injection and the proposal share the waveform (hence the frequency
-    # grid) and the cosmological population; they differ in seed and count.
+    # The injection and the importance catalog share the waveform (hence the
+    # frequency grid) and the cosmological population, whose redshift window
+    # the catalog's nodes span; they differ in seed and in how sources are placed.
     waveform = waveform_metadata(root=ROOT_DIR)
     population = population_metadata(root=ROOT_DIR)
-    proposal_metadata = CatalogMetadata(
+    catalog_metadata = ImportanceCatalogMetadata(
         waveform=waveform,
         population=population,
         fiducials=FIDUCIALS,
-        num_samples=proposal_size,
+        num_samples=importance_samples,
+        num_redshift_nodes=redshift_nodes,
     )
     injection_metadata = BackgroundSpectralDensityMetadata(
         count="fixed" if SMOKE else "poisson",
@@ -221,6 +232,9 @@ def _():
         PRIORS,
         cache_dir,
         cache_name_prefix,
+        catalog_chunk_size,
+        catalog_metadata,
+        catalog_seed,
         chunk_size,
         data_seed,
         fiducial_network,
@@ -232,8 +246,6 @@ def _():
         network_names,
         observation_time,
         population,
-        proposal_metadata,
-        proposal_seed,
         registry,
         write_figures,
     )
@@ -307,6 +319,55 @@ def cached_log_densities(
             if k.startswith("log_density__")
         }
     return grids, log_densities
+
+
+@app.function(hide_code=True)
+def ensure_importance_catalog(
+    metadata: ImportanceCatalogMetadata,
+    seed: int,
+    directory: Path,
+    *,
+    chunk_size: int | None = None,
+) -> PolarizationPowerData:
+    """The importance catalog of ``metadata`` at ``seed``, drawn on a miss.
+
+    The file is ``<directory>/importance_catalog-<key>-<seed>.h5``. A hit is
+    checked against the request, as ``paper.catalogs.ensure_catalog`` checks a
+    plain catalog; a miss is drawn at ``batch_keys(seed, 1)[0]`` and written.
+
+    Parameters
+    ----------
+    metadata
+        The catalog's record.
+    seed
+        The draw's seed.
+    directory
+        Cache directory.
+    chunk_size
+        Waveforms per ``lax.map`` batch on a miss; cost only.
+
+    Returns
+    -------
+    PolarizationPowerData
+        Power ``(F, Z * N)``, node-major.
+
+    Raises
+    ------
+    ValueError
+        If the cached file records another metadata or seed.
+    """
+    path = directory / f"{importance_catalog_stem(metadata, seed)}.h5"
+    if path.is_file():
+        data, recorded, attrs = load(path, ImportanceCatalogMetadata)
+        if recorded.key() != metadata.key() or attrs.get("seed") != seed:
+            raise ValueError(
+                f"{path} records {recorded.key()} at seed {attrs.get('seed')}, "
+                f"not the requested {metadata.key()} at seed {seed}"
+            )
+        return data  # ty: ignore[invalid-return-type]
+    data = importance_catalog(metadata, batch_keys(seed, 1)[0], chunk_size=chunk_size)
+    write(path, data, metadata, seed=seed)
+    return data
 
 
 @app.function(hide_code=True)
@@ -591,13 +652,14 @@ def plot_marginals(
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    ## Proposal and injection
+    ## Importance catalog and injection
 
-    The proposal is the 1M-source catalog, generated chunk by chunk on a miss
-    and read from `outputs/catalogs/` afterwards. The injection is one
+    The importance catalog places every intrinsic draw at every redshift
+    node, so its power is `(F, Z·N)`. It is generated in `lax.map` batches on
+    a miss and read from `outputs/catalogs/` afterwards. The injection is one
     Poisson spectrum, cached beside the posteriors.
 
-    The importance spectrum is built in the same cell as the proposal, once.
+    The importance spectrum is built in the same cell as the catalog, once.
     The population is built a single time because it hashes by identity. Each
     problem builds its own `GaussianGWBBatchedLikelihood` in its section, which
     predicts every grid point once for all six networks. The NumPy catalog is
@@ -607,30 +669,28 @@ def _():
 
 
 @app.cell
-def _(population, proposal_metadata, proposal_seed):
+def _(catalog_chunk_size, catalog_metadata, catalog_seed, population):
     # The NumPy catalog is local to this cell, so it is freed once the device
     # copy made by build_importance_spectrum exists: only one copy stays resident.
-    proposal_data, proposal_metadata_loaded = ensure_catalog(
-        proposal_metadata, np.uint64(proposal_seed), CATALOGS_ROOT
+    catalog_data = ensure_importance_catalog(
+        catalog_metadata, catalog_seed, CATALOGS_ROOT, chunk_size=catalog_chunk_size
     )
-    frequencies = np.asarray(proposal_data["frequencies"])
+    frequencies = np.asarray(catalog_data["frequencies"])
+    power = catalog_data["polarization_power"]
     print(
-        f"proposal: {proposal_data['polarization_power'].shape[1]:,} sources, "
-        f"{frequencies.size} frequency bins"
+        f"importance catalog: {catalog_metadata.num_samples:,} draws x "
+        f"{catalog_metadata.num_redshift_nodes} nodes, {frequencies.size} "
+        f"frequency bins, {power.nbytes / 1e9:.2f} GB of power"
     )
     target = build_population(population.model_name, **population.model_kwargs)
-    spectral_density_fn, log_weights_fn = build_importance_spectrum(
-        proposal_data,
-        proposal_metadata_loaded,
+    # No swept parameter is intrinsic, so no density factor enters a weight.
+    spectral_density_fn, _ = build_importance_spectrum(
+        catalog_data,
+        catalog_metadata,
         population=target,
-        density_sites=DEFAULT_DENSITY_SITES,
+        density_sites=(),
     )
-    return (
-        frequencies,
-        log_weights_fn,
-        proposal_metadata_loaded,
-        spectral_density_fn,
-    )
+    return frequencies, spectral_density_fn
 
 
 @app.cell
@@ -674,6 +734,8 @@ def _(
 
 @app.cell
 def _(
+    catalog_metadata,
+    catalog_seed,
     data_seed,
     frequencies,
     injection_metadata,
@@ -681,8 +743,6 @@ def _(
     minimum_frequency,
     network_names,
     observation_time,
-    proposal_metadata_loaded,
-    proposal_seed,
     registry,
 ):
     per_network = {
@@ -700,12 +760,12 @@ def _(
     cache_settings = {
         "version": __version__,
         "networks": network_names,
-        "seeds": (data_seed, proposal_seed),
+        "seeds": (data_seed, catalog_seed),
         "band": (minimum_frequency, maximum_frequency),
         "observation_time": observation_time,
-        "density_sites": DEFAULT_DENSITY_SITES,
+        "density_sites": (),
         "injection": injection_metadata.key(),
-        "proposal": proposal_metadata_loaded.key(),
+        "importance_catalog": catalog_metadata.key(),
     }
     labelled_networks = [(n, l) for n, l in DETECTOR_NETWORKS if n in network_names]
     return cache_settings, labelled_networks, per_network
@@ -759,31 +819,6 @@ def _(
         prefix=cache_name_prefix,
     )
     return (h0_posterior,)
-
-
-@app.cell(hide_code=True)
-def _():
-    mo.md(r"""
-    **Sanity: importance effective sample size.** The relative ESS of the
-    weights at the edges of the $H_0$ 68% interval of the fiducial network.
-    At the fiducials the target equals the proposal, so it is one there by
-    construction; what matters is that it stays large away from them.
-    """)
-
-
-@app.cell
-def _(FIDUCIALS, fiducial_network, h0_posterior, log_weights_fn):
-    _grids, _log_densities = h0_posterior
-    _grid = _grids["H0"]
-    _density = marginal_density(_grid, _log_densities[fiducial_network], axis=0)
-    _, _lo, _hi = median_and_hdi(_grid, _density)
-    ess = {
-        f"H0 = {value:.2f}": float(
-            relative_ess(log_weights_fn({**FIDUCIALS, "H0": value}))
-        )
-        for value in (_lo, FIDUCIALS["H0"], _hi)
-    }
-    ess
 
 
 @app.cell

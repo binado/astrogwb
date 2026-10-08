@@ -63,8 +63,9 @@ repository root as the working directory.
   `ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/spectrum_snrs.py`.
 - **`cosmology_grid_posteriors.py`** — marimo notebook. Grid posteriors for
   $H_0$, $(H_0, \Omega_m)$ and $(\Xi_0, n)$ across the six detector networks,
-  from a zero-noise Poisson injection reweighted from a 1M-source proposal
-  (different seeds). The log densities are cached under
+  from a zero-noise Poisson injection, modeled with the redshift-node
+  importance spectrum (`astrogwb.gwb.importance`: 2048 intrinsic draws at 64
+  redshift nodes, a different seed). The log densities are cached under
   `default_cache_dir() / "posteriors"`, keyed by a hash of their settings, so
   the figures iterate without recomputing. Each grid point is predicted once
   and shared by all six networks (`GaussianGWBBatchedLikelihood`); the numbers

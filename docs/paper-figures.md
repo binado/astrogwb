@@ -251,12 +251,15 @@ spectrum cache is populated.
 `notebooks/cosmology_grid_posteriors.py` is a marimo notebook that evaluates
 the posteriors of `H0`, `(H0, Omega_m)` and `(xi_0, xi_n)` on a grid for all six
 networks, with no sampler. The data are a zero-noise Poisson injection
-(`data_seed = 41`); the model spectrum is a 1,000,000-source proposal
-(`proposal_seed = 42`) reweighted to each grid point. The log densities are
-cached in `default_cache_dir() / "posteriors"`, in a file whose name carries a
-hash of the seeds, grids, band, observing time, version and catalog keys, so a
-stale cache is never served. The first run generates the 1M catalog
-(`outputs/catalogs/`, chunked by `PolarizationPowerSimulator(chunk_size=...)`).
+(`data_seed = 41`); the model spectrum is the redshift-node importance
+spectrum of `astrogwb.gwb.importance` (`catalog_seed = 42`): 2048 intrinsic
+draws, each placed at 64 Gauss-Legendre nodes in `ln(1 + z)`, with redshift
+integrated on the nodes at each grid point and no intrinsic reweighting. The
+log densities are cached in `default_cache_dir() / "posteriors"`, in a file
+whose name carries a hash of the seeds, grids, band, observing time, version
+and catalog keys, so a stale cache is never served. The first run generates the
+importance catalog (`outputs/catalogs/importance_catalog-<key>-42.h5`, chunked
+by `importance_catalog(..., chunk_size=...)`).
 Figures go to `outputs/figures/cosmology_grid_posteriors/` when the
 `Write figures` switch is on:
 
