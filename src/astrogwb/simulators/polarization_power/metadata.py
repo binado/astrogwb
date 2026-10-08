@@ -20,7 +20,7 @@ class CatalogMetadata(BaseModel):
 
     It is both the request and the provenance, as
     :class:`~astrogwb.simulators.spectra.BackgroundSpectralDensityMetadata` is for spectra: the
-    :class:`~astrogwb.simulators.polarization_power.PolarizationPowerSimulator`
+    :func:`~astrogwb.simulators.polarization_power.draw_catalog`
     turns it and a key into a catalog, the draw is stored beside it
     (:func:`~astrogwb.simulators.core.write`),
     and :meth:`key` is the middle part of the file name by convention

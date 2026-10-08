@@ -27,7 +27,7 @@ from astrogwb.simulators.core import batch_keys, load
 from astrogwb.simulators.polarization_power import (
     CatalogMetadata,
     PolarizationPowerData,
-    PolarizationPowerSimulator,
+    draw_catalog,
 )
 
 RequestFactory = Callable[..., CatalogMetadata]
@@ -39,7 +39,7 @@ def _draw(
     request: CatalogMetadata, seed: np.uint64 = SEED
 ) -> tuple[PolarizationPowerData, CatalogMetadata]:
     """The draw ``request`` gives at ``seed``, generated in memory."""
-    return PolarizationPowerSimulator(request)(batch_keys(seed, 1)[0]), request
+    return draw_catalog(request, batch_keys(seed, 1)[0]), request
 
 
 @pytest.fixture(scope="module")

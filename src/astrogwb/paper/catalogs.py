@@ -31,8 +31,8 @@ from astrogwb.simulators.core import batch_keys, load, write
 from astrogwb.simulators.polarization_power import (
     CatalogMetadata,
     PolarizationPowerData,
-    PolarizationPowerSimulator,
     catalog_stem,
+    draw_catalog,
 )
 
 
@@ -87,7 +87,7 @@ def generate_catalog(
     The seed becomes the draw's key through :func:`~astrogwb.simulators.core.batch_keys`
     (key 0 of the seed's batch). Generation reaches JAX.
     """
-    data = PolarizationPowerSimulator(metadata)(batch_keys(seed, 1)[0])
+    data = draw_catalog(metadata, batch_keys(seed, 1)[0])
     write(path, data, metadata, seed=int(seed))
     return data, metadata
 

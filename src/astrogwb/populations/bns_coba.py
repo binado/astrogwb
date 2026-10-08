@@ -29,7 +29,9 @@ Contracts the caller is trusted to honour (nothing here checks them):
 - Component masses are an ordered pair: the first is the larger one. The
   uniform law has compact support, so a hyperparameter step that moves its
   edges can send catalog samples outside it; the Gaussian law has none.
-- Inclination is always sampled, isotropically.
+- Inclination is always sampled, isotropically, and the intrinsic sites (masses,
+  spins, tidal deformabilities) are independent of redshift and inclination;
+  :mod:`astrogwb.gwb.importance` relies on both.
 """
 
 from __future__ import annotations

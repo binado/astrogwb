@@ -18,7 +18,7 @@ from astrogwb.populations import PopulationMetadata
 from astrogwb.simulators.core import Arrays, batch_keys, load, write
 from astrogwb.simulators.polarization_power import (
     CatalogMetadata,
-    PolarizationPowerSimulator,
+    draw_catalog,
 )
 from astrogwb.simulators.population import PopulationSimulator
 from astrogwb.simulators.spectra import (
@@ -88,8 +88,7 @@ def _same(first: Arrays, second: Arrays) -> None:
 
 @pytest.mark.integration
 def test_polarization_power_round_trips_through_a_file(tmp_path: Path) -> None:
-    simulator = PolarizationPowerSimulator(CATALOG)
-    fresh = simulator(batch_keys(41, 1)[0])
+    fresh = draw_catalog(CATALOG, batch_keys(41, 1)[0])
     path = write(tmp_path / "catalog.h5", fresh, CATALOG, seed=41)
 
     data, metadata, attrs = load(path, CatalogMetadata)
@@ -101,10 +100,9 @@ def test_polarization_power_round_trips_through_a_file(tmp_path: Path) -> None:
 
 @pytest.mark.integration
 def test_polarization_power_key_picks_the_realization() -> None:
-    simulator = PolarizationPowerSimulator(CATALOG)
-    one = simulator(batch_keys(41, 1)[0])
-    again = simulator(batch_keys(41, 1)[0])
-    other = simulator(batch_keys(42, 1)[0])
+    one = draw_catalog(CATALOG, batch_keys(41, 1)[0])
+    again = draw_catalog(CATALOG, batch_keys(41, 1)[0])
+    other = draw_catalog(CATALOG, batch_keys(42, 1)[0])
 
     np.testing.assert_array_equal(
         one["polarization_power"], again["polarization_power"]
@@ -116,8 +114,8 @@ def test_polarization_power_key_picks_the_realization() -> None:
 @pytest.mark.parametrize("chunk_size", [1, 4, 6, 100])
 def test_polarization_power_is_independent_of_chunk_size(chunk_size: int) -> None:
     key = batch_keys(41, 1)[0]
-    whole = PolarizationPowerSimulator(CATALOG, chunk_size=None)(key)
-    chunked = PolarizationPowerSimulator(CATALOG, chunk_size=chunk_size)(key)
+    whole = draw_catalog(CATALOG, key, chunk_size=None)
+    chunked = draw_catalog(CATALOG, key, chunk_size=chunk_size)
 
     # Sources are drawn before chunking, so they are exact. The power is the
     # same elementwise computation, but XLA may fuse a differently shaped chunk
