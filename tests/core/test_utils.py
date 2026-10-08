@@ -10,7 +10,7 @@ import pytest
 from astrogwb.utils import (
     array_dict_shape,
     cumulative_trapezoid,
-    mapped_gauss_legendre_rule,
+    gauss_legendre_nodes_weights,
     require_x64,
 )
 
@@ -96,25 +96,25 @@ def test_cumulative_trapezoid_broadcasts_over_leading_batch_dimensions() -> None
 
 
 @pytest.mark.parametrize("order", [2, 4, 8])
-def test_mapped_rule_is_exact_for_the_highest_representable_degree(
+def test_nodes_weights_is_exact_for_the_highest_representable_degree(
     order: int,
 ) -> None:
     """An ``order``-point rule integrates degree ``2 * order - 1`` exactly."""
     lower, upper = 0.5, 3.0
     degree = 2 * order - 1
 
-    points, weights = mapped_gauss_legendre_rule(order, lower, upper)
+    points, weights = gauss_legendre_nodes_weights(lower, upper, order)
     actual = jnp.sum(weights * points**degree, axis=-1)
 
     expected = (upper ** (degree + 1) - lower ** (degree + 1)) / (degree + 1)
     assert float(actual) == pytest.approx(expected, rel=2e-14)
 
 
-def test_mapped_rule_weights_carry_the_interval_jacobian() -> None:
+def test_nodes_weights_weights_carry_the_interval_jacobian() -> None:
     lower = jnp.array([0.0, 1.0, 3.0])
     upper = jnp.array([1.0, 3.0, 7.0])
 
-    _, weights = mapped_gauss_legendre_rule(4, lower, upper)
+    _, weights = gauss_legendre_nodes_weights(lower, upper, 4)
 
     np.testing.assert_allclose(
         np.asarray(jnp.sum(weights, axis=-1)),
@@ -123,12 +123,12 @@ def test_mapped_rule_weights_carry_the_interval_jacobian() -> None:
     )
 
 
-def test_mapped_rule_covers_every_interval_of_a_grid() -> None:
+def test_nodes_weights_covers_every_interval_of_a_grid() -> None:
     """Per-interval integrals must sum to the integral over the whole range."""
     order = 4
     grid = jnp.linspace(0.0, 2.0, 9)
 
-    points, weights = mapped_gauss_legendre_rule(order, grid[:-1], grid[1:])
+    points, weights = gauss_legendre_nodes_weights(grid[:-1], grid[1:], order)
     assert points.shape == weights.shape == (grid.size - 1, order)
 
     interval_integrals = jnp.sum(weights * jnp.exp(points), axis=-1)
@@ -137,14 +137,16 @@ def test_mapped_rule_covers_every_interval_of_a_grid() -> None:
     assert total == pytest.approx(float(jnp.exp(2.0) - 1.0), rel=2e-14)
 
 
-def test_mapped_rule_honours_the_requested_dtype() -> None:
-    points, weights = mapped_gauss_legendre_rule(4, 0.0, 1.0, dtype=jnp.float32)
+def test_nodes_weights_follow_the_dtype_of_the_bounds() -> None:
+    points, weights = gauss_legendre_nodes_weights(
+        jnp.asarray(0.0, jnp.float32), jnp.asarray(1.0, jnp.float32), 4
+    )
 
     assert points.dtype == jnp.float32
     assert weights.dtype == jnp.float32
 
 
-def test_mapped_rule_promotes_integer_bounds_instead_of_truncating() -> None:
+def test_nodes_weights_promotes_integer_bounds_instead_of_truncating() -> None:
     """Integer bounds cast to a float dtype must not collapse the rule to zeros.
 
     This is the failure mode guarded in
@@ -155,8 +157,8 @@ def test_mapped_rule_promotes_integer_bounds_instead_of_truncating() -> None:
     integer_grid = jnp.arange(0, 5)
     dtype = jnp.result_type(integer_grid, float)
 
-    points, weights = mapped_gauss_legendre_rule(
-        4, integer_grid[:-1], integer_grid[1:], dtype=dtype
+    points, weights = gauss_legendre_nodes_weights(
+        integer_grid[:-1], integer_grid[1:], 4
     )
 
     assert jnp.issubdtype(points.dtype, jnp.floating)
@@ -166,17 +168,17 @@ def test_mapped_rule_promotes_integer_bounds_instead_of_truncating() -> None:
     np.testing.assert_allclose(
         np.asarray(points),
         np.asarray(
-            mapped_gauss_legendre_rule(
-                4, integer_grid[:-1].astype(dtype), integer_grid[1:].astype(dtype)
+            gauss_legendre_nodes_weights(
+                integer_grid[:-1].astype(dtype), integer_grid[1:].astype(dtype), 4
             )[0]
         ),
         rtol=2e-15,
     )
 
 
-def test_mapped_rule_is_jittable_and_differentiable_in_its_bounds() -> None:
+def test_nodes_weights_is_jittable_and_differentiable_in_its_bounds() -> None:
     def integrate(upper: jax.Array) -> jax.Array:
-        points, weights = mapped_gauss_legendre_rule(4, 0.0, upper)
+        points, weights = gauss_legendre_nodes_weights(0.0, upper, 4)
         return jnp.sum(weights * points**2, axis=-1)
 
     upper = jnp.asarray(3.0)

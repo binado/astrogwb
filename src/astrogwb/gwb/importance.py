@@ -84,6 +84,7 @@ from astrogwb.simulators.polarization_power.simulator import (
     PolarizationPowerData,
     polarization_power_data,
 )
+from astrogwb.utils import gauss_legendre_nodes_weights
 
 __all__ = [
     "EFFECTIVE_INCLINATION",
@@ -128,11 +129,11 @@ def redshift_quadrature(
     """
     if num_nodes <= 0:
         raise ValueError("num_nodes must be positive")
-    nodes, weights = np.polynomial.legendre.leggauss(num_nodes)
     lower, upper = 1.0 / (1.0 + maximum_redshift), 1.0 / (1.0 + minimum_redshift)
-    half_width = 0.5 * (upper - lower)
-    scale_factor = (lower + half_width * (nodes + 1.0))[::-1]
-    return 1.0 / scale_factor - 1.0, half_width * weights[::-1] / scale_factor**2
+    nodes, weights = gauss_legendre_nodes_weights(lower, upper, num_nodes)
+    scale_factor = np.asarray(nodes, dtype=np.float64)[::-1]
+    weights = np.asarray(weights, dtype=np.float64)[::-1]
+    return 1.0 / scale_factor - 1.0, weights / scale_factor**2
 
 
 def node_sources(

@@ -22,7 +22,7 @@ import jax.numpy as jnp
 from jax.typing import ArrayLike
 
 from astrogwb.constants import MPC_IN_METERS, SECONDS_PER_YEAR, SPEED_OF_LIGHT
-from astrogwb.utils import mapped_gauss_legendre_rule
+from astrogwb.utils import gauss_legendre_nodes_weights
 
 #: Fixed Gauss-Legendre quadrature order used by the grid helpers. 4 nodes per
 #: interval reach near machine precision for the smooth flat-LCDM integrand
@@ -132,7 +132,7 @@ def distance_and_volume_grid(
 
     The redshift integral is evaluated with a fixed
     :data:`GAUSS_LEGENDRE_ORDER`-point Gauss-Legendre rule within each grid
-    interval, via :func:`astrogwb.utils.mapped_gauss_legendre_rule`. The order
+    interval, via :func:`astrogwb.utils.gauss_legendre_nodes_weights`. The order
     is a module-level Python constant, so no static scalars are extracted from
     traced values. For the smooth flat-LCDM integrand :math:`1/E(z)` this
     reaches near machine precision while keeping the computation a single
@@ -141,19 +141,12 @@ def distance_and_volume_grid(
     redshift = jnp.asarray(redshift)
     omega_m = jnp.asarray(omega_m)
 
-    # Promote through float so an integer redshift grid cannot truncate the
-    # quadrature nodes to zeros.
-    dtype = jnp.result_type(redshift, float)
-
     extended = jnp.concatenate(
         [jnp.zeros_like(redshift[..., :1]), redshift],
         axis=-1,
     )
-    quadrature_points, quadrature_weights = mapped_gauss_legendre_rule(
-        GAUSS_LEGENDRE_ORDER,
-        extended[..., :-1],
-        extended[..., 1:],
-        dtype=dtype,
+    quadrature_points, quadrature_weights = gauss_legendre_nodes_weights(
+        extended[..., :-1], extended[..., 1:], GAUSS_LEGENDRE_ORDER
     )
     e_quadrature = normalized_hubble_parameter(
         redshift=quadrature_points, omega_m=omega_m[..., None]

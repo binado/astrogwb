@@ -45,7 +45,7 @@ from astrogwb.constants import (
 from astrogwb.cosmology import hubble_constant_si, normalized_hubble_parameter
 from astrogwb.utils import (
     cumulative_trapezoid,
-    mapped_gauss_legendre_rule,
+    gauss_legendre_nodes_weights,
     require_x64,
 )
 
@@ -162,8 +162,8 @@ def _cumulative_mass_moment_grid(
         total_mass / maximum_component_mass - 1.0,
     )
 
-    mass_ratio, mass_ratio_weights = mapped_gauss_legendre_rule(
-        mass_ratio_quadrature_order, mass_ratio_lower, 1.0
+    mass_ratio, mass_ratio_weights = gauss_legendre_nodes_weights(
+        mass_ratio_lower, 1.0, mass_ratio_quadrature_order
     )
 
     total_mass_grid = total_mass[..., None]
@@ -350,8 +350,8 @@ def uniform_prior_mass_moments(
         ``2 * maximum_component_mass``.
     """
     frequencies = jnp.asarray(frequencies, dtype=jnp.float64)
-    redshift, _ = mapped_gauss_legendre_rule(
-        redshift_quadrature_order, minimum_redshift, maximum_redshift
+    redshift, _ = gauss_legendre_nodes_weights(
+        minimum_redshift, maximum_redshift, redshift_quadrature_order
     )
     total_mass_upper = _cutoff_total_mass(alpha, frequencies, redshift)
     return _uniform_cumulative_mass_moment(
@@ -393,8 +393,8 @@ def precompute_cumulative_mass_moments(
     values above it are exactly the full mass moment.
     """
     frequencies = jnp.asarray(frequencies, dtype=jnp.float64)
-    redshift, _ = mapped_gauss_legendre_rule(
-        redshift_quadrature_order, minimum_redshift, maximum_redshift
+    redshift, _ = gauss_legendre_nodes_weights(
+        minimum_redshift, maximum_redshift, redshift_quadrature_order
     )
     total_mass_upper = _cutoff_total_mass(alpha, frequencies, redshift)
     total_mass, cumulative_mass_moment = _cumulative_mass_moment_grid(
@@ -437,8 +437,8 @@ def analytic_spectral_density_from_mass_moments(
     """
     frequencies = jnp.asarray(frequencies, dtype=jnp.float64)
     cumulative_mass_moments = jnp.asarray(cumulative_mass_moments, dtype=jnp.float64)
-    redshift, redshift_weights = mapped_gauss_legendre_rule(
-        redshift_quadrature_order, minimum_redshift, maximum_redshift
+    redshift, redshift_weights = gauss_legendre_nodes_weights(
+        minimum_redshift, maximum_redshift, redshift_quadrature_order
     )
     merger_rate = jnp.broadcast_to(
         jnp.asarray(merger_rate_fn(redshift, hyperparameters), dtype=jnp.float64),
