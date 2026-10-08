@@ -97,6 +97,7 @@ def _():
     Setting `ASTROGWB_NOTEBOOK_SMOKE=1` swaps in a tiny catalog and coarse
     grids so the whole notebook runs in a minute or two.
     """)
+    return
 
 
 @app.cell(hide_code=True)
@@ -125,6 +126,7 @@ def _():
     prior is in the log density. Parameters that are not swept are pinned at
     their fiducial, which adds a constant. Plots normalize on the grid.
     """)
+    return
 
 
 @app.cell(hide_code=True)
@@ -132,6 +134,7 @@ def _():
     mo.md(r"""
     ## Configuration
     """)
+    return
 
 
 @app.cell
@@ -142,8 +145,8 @@ def _():
     # Different seeds: the injection must not be a subset of the catalog.
     data_seed = 41
     catalog_seed = 42
-    importance_samples = 2048  # intrinsic draws
-    redshift_nodes = 64  # Gauss-Legendre nodes in ln(1 + z)
+    importance_samples = 16384  # intrinsic draws
+    redshift_nodes = 32  # Gauss-Legendre nodes in ln(1 + z)
     catalog_chunk_size = 4096  # importance-catalog waveforms per lax.map batch
     chunk_size = 16_384  # injection waveforms per reduced chunk
     grid_chunk_size = 8  # grid points per lax.map batch; bounds peak memory
@@ -256,6 +259,7 @@ def _():
     mo.md(r"""
     ## Toolbox
     """)
+    return
 
 
 @app.function(hide_code=True)
@@ -779,6 +783,7 @@ def _():
     The two cosmological problems, with $H_0$ alone first and then $H_0$
     together with $\Omega_m$.
     """)
+    return
 
 
 @app.cell(hide_code=True)
@@ -790,6 +795,7 @@ def _():
     fiducial. $H_0$ alone has one parameter, so its corner plot is its
     marginal below.
     """)
+    return
 
 
 @app.cell
@@ -853,6 +859,7 @@ def _():
     $H_0$ and $\Omega_m$ together, $\Xi_0$ and $n$ pinned at their fiducials.
     The $H_0$ marginal integrates over $\Omega_m$.
     """)
+    return
 
 
 @app.cell
@@ -906,6 +913,7 @@ def _():
     mo.md(r"""
     Corner plot at the fiducial network.
     """)
+    return
 
 
 @app.cell
@@ -940,6 +948,7 @@ def _():
     $\Xi_0$ and $n$, with $H_0$ fixed at its fiducial. The marginal is in
     $\Xi_0$, which integrates over $n$.
     """)
+    return
 
 
 @app.cell
@@ -994,6 +1003,7 @@ def _():
     Corner plot at the fiducial network. At $\Xi_0 = 1$ the $n$ axis is
     degenerate: the valley along it is expected.
     """)
+    return
 
 
 @app.cell
@@ -1028,6 +1038,7 @@ def _():
     Median and 68% HDI of every swept parameter, by problem and network.
     Figures are written when the switch in *Configuration* is on.
     """)
+    return
 
 
 @app.cell
@@ -1036,6 +1047,7 @@ def _(h0_omega_m_summary_rows, h0_summary_rows, xi_summary_rows):
         [*h0_summary_rows, *h0_omega_m_summary_rows, *xi_summary_rows]
     )
     summary
+    return
 
 
 @app.cell
@@ -1058,6 +1070,7 @@ def _(
                 FIGURES / "corner_xi_0_xi_n.pdf": xi_corner,
             }
         )
+    return
 
 
 if __name__ == "__main__":
