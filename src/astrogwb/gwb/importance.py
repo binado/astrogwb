@@ -90,7 +90,6 @@ __all__ = [
     "EFFECTIVE_INCLINATION",
     "LogWeightsFn",
     "build_rescaled_spectrum",
-    "node_sources",
     "redshift_quadrature",
     "reference_catalog",
     "reference_catalog_stem",
@@ -134,28 +133,6 @@ def redshift_quadrature(
     scale_factor = np.asarray(nodes, dtype=np.float64)[::-1]
     weights = np.asarray(weights, dtype=np.float64)[::-1]
     return 1.0 / scale_factor - 1.0, weights / scale_factor**2
-
-
-def node_sources(
-    model: PopulationModel,
-    source_parameters: Mapping[str, ArrayLike],
-    redshift_nodes: ArrayLike,
-) -> dict[str, NDArray[Any]]:
-    """Every source at every redshift node, at :data:`EFFECTIVE_INCLINATION`.
-
-    Returns ``N * Z`` rows, node-major: row ``j * N + k`` is source ``k`` at
-    node ``j``. The rows are replayed through ``model``, so every column that
-    follows from redshift -- luminosity distance, detector-frame masses -- is
-    the model's own recomputation, not a stale copy.
-    """
-    columns = {name: np.asarray(values) for name, values in source_parameters.items()}
-    nodes = np.asarray(redshift_nodes, dtype=np.float64)
-    tiled = {name: np.tile(values, nodes.size) for name, values in columns.items()}
-    count = len(columns[REDSHIFT_SITE])
-    tiled[REDSHIFT_SITE] = np.repeat(nodes, count)
-    tiled[INCLINATION_SITE] = np.full(count * nodes.size, EFFECTIVE_INCLINATION)
-    _, outputs = evaluate_sources(model, tiled, density_sites=())
-    return {name: np.asarray(values) for name, values in outputs.items()}
 
 
 def _with_extrinsic(

@@ -12,7 +12,6 @@ from astrogwb.gwb.importance import (
     EFFECTIVE_INCLINATION,
     _pin_redshift_and_inclination,
     build_rescaled_spectrum,
-    node_sources,
     redshift_quadrature,
     reference_catalog,
 )
@@ -152,7 +151,18 @@ def _spectrum_on_nodes(
         key,
         num_samples=metadata.num_samples,
     )
-    rows = node_sources(fiducial_model, samples, redshift)
+    # Every source at every node, node-major: row ``j * N + k`` is source ``k``
+    # at node ``j``, replayed through the model so redshift-derived columns
+    # (luminosity distance, detector-frame masses) are recomputed.
+    count = metadata.num_samples
+    tiled = {
+        name: np.tile(np.asarray(values), redshift.size)
+        for name, values in samples.items()
+    }
+    tiled["redshift"] = np.repeat(redshift, count)
+    tiled["inclination"] = np.full(count * redshift.size, EFFECTIVE_INCLINATION)
+    _, outputs = evaluate_sources(fiducial_model, tiled, density_sites=())
+    rows = {name: np.asarray(values) for name, values in outputs.items()}
     power = polarization_power_data(OBSERVED_WAVEFORM.build(), rows)
     power = np.asarray(power["polarization_power"]).reshape(-1, NUM_NODES, 6)
 
