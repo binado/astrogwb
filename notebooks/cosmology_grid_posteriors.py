@@ -151,7 +151,7 @@ def _():
     # Different seeds: the injection must not be a subset of the catalog.
     data_seed = 41
     catalog_seed = 42
-    num_samples = 2**19  # intrinsic draws, one waveform each
+    num_samples = 2**17  # intrinsic draws, one waveform each
     redshift_nodes = 32  # Gauss-Legendre nodes in ln(1 + z); costs no waveforms
     catalog_chunk_size = 4096  # reference waveforms per lax.map batch
     chunk_size = 16_384  # injection waveforms per reduced chunk
