@@ -272,13 +272,11 @@ ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/c
 
 ## Importance convergence
 
-`notebooks/importance_convergence.py` measures the three errors of the
+`notebooks/importance_convergence.py` measures the two errors of the
 rescaled reference-redshift spectrum separately, to choose the grid posteriors'
-`(N, Z)`. The rescaling is checked on the real approximant against
-`importance_catalog`, which generates every draw at every node:
-`reference_catalog` and `importance_catalog` draw the same intrinsic sources
-from one key, so their difference is the rescaling and interpolation error
-alone. The redshift quadrature runs a `Z = 2^i` ladder (4 to 1024 nodes) on one
+`(N, Z)`. The rescaling itself holds for the (2,2)-mode aligned-spin waveforms
+used; `tests/core/test_gwb_importance.py` checks it against waveforms generated
+at every node. The redshift quadrature runs a `Z = 2^i` ladder (4 to 1024 nodes) on one
 reference catalog -- the node count is a builder argument, so the ladder costs
 no waveforms. The Monte Carlo noise is the scatter of `M`
 catalogs at fixed seeds about their mean; each `N = 2^k` is the first `N`

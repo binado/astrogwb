@@ -74,8 +74,7 @@ repository root as the working directory.
   corner plots. Smoke test:
   `ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/cosmology_grid_posteriors.py`.
 - **`importance_convergence.py`** — marimo notebook. Chooses the grid
-  posteriors' $(N, Z)$: the rescaling against waveforms generated at every
-  node on the same draws, redshift-quadrature convergence on a $Z = 2^i$
+  posteriors' $(N, Z)$: redshift-quadrature convergence on a $Z = 2^i$
   ladder over one fixed set of draws, and Monte
   Carlo noise as the scatter of $M$ fixed-seed catalogs about their mean, with
   every $N = 2^k$ read off as a prefix. Errors are in units of the most

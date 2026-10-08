@@ -26,11 +26,7 @@ with app.setup(hide_code=True):
     from astrogwb.detector import effective_psd, gaussian_bin_scale
     from astrogwb.frequency import frequency_mask
     from astrogwb.gwb.importance import (
-        ImportanceCatalogMetadata,
-        build_importance_spectrum,
         build_rescaled_spectrum,
-        importance_catalog,
-        importance_catalog_stem,
         reference_catalog,
         reference_catalog_stem,
     )
@@ -75,10 +71,11 @@ def _():
     $$
 
     with $\bar P_{\mathrm{ref}}$ the mean reference power, interpolated in
-    $\ln f$. Three checks, each measured on its own:
+    $\ln f$. The rescaling holds for the $(2,2)$-mode, aligned-spin,
+    quasi-circular waveforms used here; `tests/core/test_gwb_importance.py`
+    checks it against waveforms generated at every node. Two checks, each
+    measured on its own:
 
-    0. **The rescaling** on the real approximant: the rescaled spectrum
-       against waveforms generated at every node, on *the same* draws.
     1. **Redshift quadrature**: a $Z = 2^i$ ladder against its top rung. $Z$
        is a builder argument, so the ladder costs no waveforms.
     2. **Monte Carlo noise** from the $N$ draws: $M$ independent catalogs at
@@ -115,12 +112,9 @@ def _():
     FIGURES = ROOT_DIR / FIGURES_DIR / "importance_convergence"
     catalog_dir = ROOT_DIR / CATALOGS_ROOT
 
-    # Gate and redshift ladder: one fixed set of draws. The node catalog at
-    # gate_nodes generates waveforms at every node; the ladder's top rung is
-    # its reference.
-    gate_seed = 100
-    gate_samples = 256
-    gate_nodes = 16
+    # Redshift ladder: one fixed set of draws; the top rung is the reference.
+    ladder_seed = 100
+    ladder_samples = 256
     ladder_exponents = range(2, 11)  # Z = 4 ... 1024
 
     # Monte Carlo: M catalogs at N_max; each N = 2**k <= N_max is a prefix.
@@ -151,8 +145,7 @@ def _():
     SMOKE = os.environ.get("ASTROGWB_NOTEBOOK_SMOKE") == "1"
     write_figures_default = True
     if SMOKE:
-        gate_samples = 16
-        gate_nodes = 4
+        ladder_samples = 16
         ladder_exponents = range(2, 6)  # Z = 4 ... 32
         mc_catalogs = 3
         mc_max_samples = 64
@@ -194,10 +187,9 @@ def _():
         catalog_dir,
         evaluation_points,
         frequencies,
-        gate_nodes,
-        gate_samples,
-        gate_seed,
         ladder_exponents,
+        ladder_samples,
+        ladder_seed,
         maximum_frequency,
         mc_base_seed,
         mc_catalogs,
@@ -228,7 +220,7 @@ def _():
 @app.function(hide_code=True)
 def cached_catalog(
     path: Path,
-    metadata: CatalogMetadata | ImportanceCatalogMetadata,
+    metadata: CatalogMetadata,
     seed: int,
     draw: Callable[[jax.Array], PolarizationPowerData],
 ) -> PolarizationPowerData:
@@ -269,23 +261,6 @@ def ensure_reference_catalog(
         metadata,
         seed,
         lambda key: reference_catalog(metadata, key, chunk_size=chunk_size),
-    )
-
-
-@app.function(hide_code=True)
-def ensure_node_catalog(
-    metadata: ImportanceCatalogMetadata,
-    seed: int,
-    directory: Path,
-    *,
-    chunk_size: int | None = None,
-) -> PolarizationPowerData:
-    """The node catalog of ``metadata`` at ``seed``: power ``(F, Z * N)``."""
-    return cached_catalog(
-        directory / f"{importance_catalog_stem(metadata, seed)}.h5",
-        metadata,
-        seed,
-        lambda key: importance_catalog(metadata, key, chunk_size=chunk_size),
     )
 
 
@@ -475,98 +450,49 @@ def _(
     return mask, sigma
 
 
-@app.cell(hide_code=True)
-def _():
-    mo.md(r"""
-    ## 0. The rescaling, on the real approximant
-
-    One reference catalog and one node catalog, at the same seed, population,
-    fiducials and $N$: `importance_catalog` and `reference_catalog` draw the
-    same intrinsic sources from the key, which is asserted below. The node
-    catalog generates every draw at every node; the rescaled spectrum
-    generates each once, at $z_{\min}$. Their difference at the same $Z$ is
-    the error of the rescaling and of the $\ln f$ interpolation alone.
-    """)
-
-
 @app.cell
 def _(
     FIDUCIALS,
     catalog_chunk_size,
     catalog_dir,
-    evaluation_points,
-    frequencies,
-    gate_nodes,
-    gate_samples,
-    gate_seed,
+    ladder_samples,
+    ladder_seed,
     population,
     reference_waveform,
-    target,
-    waveform,
 ):
-    gate_reference_metadata = CatalogMetadata(
+    ladder_reference_metadata = CatalogMetadata(
         waveform=reference_waveform,
         population=population,
         fiducials=FIDUCIALS,
-        num_samples=gate_samples,
+        num_samples=ladder_samples,
     )
-    gate_reference = ensure_reference_catalog(
-        gate_reference_metadata,
-        gate_seed,
+    ladder_reference = ensure_reference_catalog(
+        ladder_reference_metadata,
+        ladder_seed,
         catalog_dir,
         chunk_size=catalog_chunk_size,
     )
-    _node_metadata = ImportanceCatalogMetadata(
-        waveform=waveform,
-        population=population,
-        fiducials=FIDUCIALS,
-        num_samples=gate_samples,
-        num_redshift_nodes=gate_nodes,
-    )
-    _nodes = ensure_node_catalog(
-        _node_metadata, gate_seed, catalog_dir, chunk_size=catalog_chunk_size
-    )
-    assert np.array_equal(
-        gate_reference["source_parameters"]["source_frame_mass_1"],
-        np.asarray(_nodes["source_parameters"]["source_frame_mass_1"])[:gate_samples],
-    ), "the two catalogs must share their draws"
-    assert np.array_equal(np.asarray(_nodes["frequencies"]), frequencies)
-    _node_fn, _ = build_importance_spectrum(
-        _nodes, _node_metadata, population=target, density_sites=()
-    )
-    gate_node_spectra = spectra_at(_node_fn, evaluation_points)
-    gate_rescaled_spectra = spectra_at(
-        rescaled_fn(
-            gate_reference, gate_reference_metadata, target, frequencies, gate_nodes
-        ),
-        evaluation_points,
-    )
     print(
-        f"gate: N = {gate_samples}, Z = {gate_nodes}, reference grid "
-        f"{np.asarray(gate_reference['frequencies']).size} bins"
+        f"ladder: N = {ladder_samples}, reference grid "
+        f"{np.asarray(ladder_reference['frequencies']).size} bins"
     )
-    return (
-        gate_node_spectra,
-        gate_reference,
-        gate_reference_metadata,
-        gate_rescaled_spectra,
-    )
+    return ladder_reference, ladder_reference_metadata
 
 
 @app.cell
 def _(
     FIDUCIALS,
     frequencies,
-    gate_reference,
-    gate_reference_metadata,
+    ladder_reference,
+    ladder_reference_metadata,
     ladder_exponents,
     peak_parameters,
     target,
 ):
     # The score direction of b: the converged rescaled spectrum's derivative.
     _fn = rescaled_fn(
-        gate_reference,
-        gate_reference_metadata,
+        ladder_reference,
+        ladder_reference_metadata,
         target,
         frequencies,
         2 ** ladder_exponents[-1],
@@ -575,63 +501,12 @@ def _(
     return (jacobian,)
 
 
-@app.cell
-def _(
-    evaluation_points,
-    gate_node_spectra,
-    gate_nodes,
-    gate_rescaled_spectra,
-    jacobian,
-    mask,
-    peak_parameters,
-    sigma,
-):
-    gate = pd.DataFrame(
-        error_rows(
-            "Z",
-            gate_nodes,
-            gate_rescaled_spectra - gate_node_spectra,
-            points=evaluation_points,
-            jacobian=jacobian,
-            sigma=sigma,
-            mask=mask,
-            parameters=peak_parameters,
-        )
-    )
-    gate
-    return (gate,)
-
-
-@app.cell
-def _(frequencies, gate_node_spectra, gate_rescaled_spectra, mask, sigma):
-    gate_figure, (_ax_ratio, _ax_sigma) = plt.subplots(
-        2, 1, figsize=(6, 5), sharex=True
-    )
-    _delta = gate_rescaled_spectra[0] - gate_node_spectra[0]
-    _ax_ratio.plot(frequencies, relative(_delta, gate_node_spectra[0], mask), lw=1)
-    _ax_ratio.axhline(0.0, color="0.3", lw=0.6)
-    _ax_ratio.set(
-        ylabel=r"$(S_\mathrm{rescaled} - S_\mathrm{nodes}) / S_\mathrm{nodes}$"
-    )
-    _ax_sigma.plot(frequencies, np.abs(in_sigma(_delta, sigma, mask)), lw=1)
-    _ax_sigma.set(
-        xscale="log",
-        yscale="log",
-        xlabel="Frequency [Hz]",
-        ylabel=r"$|S_\mathrm{rescaled} - S_\mathrm{nodes}| / \sigma_f$",
-    )
-    _ax_ratio.set_title("same draws, at the fiducials", fontsize="small")
-    gate_figure.tight_layout()
-    gate_figure
-    return (gate_figure,)
-
-
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
     ## 1. Redshift quadrature: $Z = 2^i$
 
-    The gate's reference catalog, at every rung: the draws are fixed, so the
+    One reference catalog, at every rung: the draws are fixed, so the
     difference to the top rung is pure quadrature error.
     """)
 
@@ -640,8 +515,8 @@ def _():
 def _(
     evaluation_points,
     frequencies,
-    gate_reference,
-    gate_reference_metadata,
+    ladder_reference,
+    ladder_reference_metadata,
     ladder_exponents,
     target,
 ):
@@ -649,7 +524,7 @@ def _(
     ladder_spectra = {
         _nodes: spectra_at(
             rescaled_fn(
-                gate_reference, gate_reference_metadata, target, frequencies, _nodes
+                ladder_reference, ladder_reference_metadata, target, frequencies, _nodes
             ),
             evaluation_points,
         )
@@ -920,7 +795,7 @@ def _():
 
     The cheapest drawn $N$ whose worst Monte Carlo shift is below tolerance,
     and the $N$ the $1/N$ variance law extrapolates to it from $N_\mathrm{max}$,
-    at the converged $Z$. The rescaling, quadrature and Monte Carlo errors are
+    at the converged $Z$. The quadrature and Monte Carlo errors are
     independent, so they are added in quadrature.
     """)
 
@@ -928,7 +803,6 @@ def _():
 @app.cell
 def _(
     chosen_nodes,
-    gate,
     mc_nodes,
     mc_shift_std,
     mc_sizes,
@@ -952,7 +826,6 @@ def _(
     _b_columns = [c for c in quadrature.columns if c.startswith("b_")]
     _rows = quadrature[quadrature["Z"] == mc_nodes]
     _quadrature = float(_rows[_b_columns].abs().max().max()) if len(_rows) else 0.0
-    _rescaling = float(gate[_b_columns].abs().max().max())
     _mc = float(_mc_worst[mc_sizes.index(chosen_samples)])
     _bins = reference_waveform.build().frequencies.size
     recommendation = pd.DataFrame(
@@ -963,10 +836,9 @@ def _(
                 "Z": mc_nodes,
                 "converged Z": chosen_nodes,
                 "reference power [GB] at N required": _bins * _required * 8 / 1e9,
-                "worst |b| rescaling": _rescaling,
                 "worst |b| quadrature": _quadrature,
                 "worst std b Monte Carlo": _mc,
-                "combined": float(np.sqrt(_rescaling**2 + _quadrature**2 + _mc**2)),
+                "combined": float(np.sqrt(_quadrature**2 + _mc**2)),
             }
         ]
     )
@@ -976,7 +848,6 @@ def _(
 @app.cell
 def _(
     FIGURES,
-    gate_figure,
     quadrature_figure,
     residual_figure,
     shift_figure,
@@ -985,7 +856,6 @@ def _(
     if write_figures.value:
         save_figures(
             {
-                FIGURES / "rescaling_gate.pdf": gate_figure,
                 FIGURES / "quadrature_convergence.pdf": quadrature_figure,
                 FIGURES / "monte_carlo_residuals.pdf": residual_figure,
                 FIGURES / "monte_carlo_peak_shift.pdf": shift_figure,
