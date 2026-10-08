@@ -113,9 +113,7 @@ at `batch_keys(seed, 1)[0]` -- unless `generate=False`, which the workflow's
 is no catalog wrapper class, and `restrict_redshift(data, metadata, zmin, zmax)`
 (`astrogwb.simulators.polarization_power`) narrows samples and recorded
 population window together. There is
-no `config/catalogs/` and no catalog name. The version is part of the key, so
-**bump `version` in `pyproject.toml` whenever a change alters what a population
-draw or a waveform generator produces**, or stale catalogs keep being served.
+no `config/catalogs/` and no catalog name. The version is part of the key.
 `just catalogs` maps stems back to what they draw, at which seed, and which runs
 use them.
 Forward-model spectra: a `BackgroundSpectralDensityMetadata` (each hyperparameter

@@ -10,6 +10,7 @@ import pytest
 
 from astrogwb.gwb.importance import (
     EFFECTIVE_INCLINATION,
+    _pin_redshift_and_inclination,
     build_rescaled_spectrum,
     node_sources,
     redshift_quadrature,
@@ -146,7 +147,11 @@ def _spectrum_on_nodes(
     )
     redshift, weights = redshift_quadrature(minimum, maximum, NUM_NODES)
     _, fiducial_model = population.build()(metadata.fiducials)
-    samples = sample_sources(fiducial_model, key, num_samples=metadata.num_samples)
+    samples = sample_sources(
+        _pin_redshift_and_inclination(fiducial_model, minimum),
+        key,
+        num_samples=metadata.num_samples,
+    )
     rows = node_sources(fiducial_model, samples, redshift)
     power = polarization_power_data(OBSERVED_WAVEFORM.build(), rows)
     power = np.asarray(power["polarization_power"]).reshape(-1, NUM_NODES, 6)

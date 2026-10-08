@@ -4,8 +4,9 @@
 :class:`PolarizationPowerData`, one power column per source; where the sources
 come from is the caller's. :func:`draw_catalog` is the plain catalog -- the
 population a :class:`~astrogwb.simulators.polarization_power.CatalogMetadata`
-names, drawn at its fiducials from one key -- and :mod:`astrogwb.gwb.importance`
-places the same draw at the redshift window's lower edge.
+names, drawn at its fiducials from one key -- and
+:func:`~astrogwb.gwb.importance.reference_catalog` draws at the redshift
+window's lower edge.
 :func:`~astrogwb.simulators.polarization_power.restrict_redshift` narrows a
 plain catalog and its record together.
 """

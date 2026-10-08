@@ -67,6 +67,7 @@ import numpy as np
 from jax.tree_util import Partial
 from jax.typing import ArrayLike
 from numpy.typing import NDArray
+from numpyro import handlers
 
 from astrogwb import __version__
 from astrogwb.importance.diagnostics import relative_ess
@@ -236,6 +237,19 @@ def _redshift_window(population: PopulationMetadata) -> tuple[float, float]:
     return minimum, maximum
 
 
+def _pin_redshift_and_inclination(
+    model: PopulationModel, redshift: float
+) -> PopulationModel:
+    """``model`` with redshift and inclination fixed rather than drawn."""
+    return handlers.condition(
+        model,
+        data={
+            REDSHIFT_SITE: redshift,
+            INCLINATION_SITE: EFFECTIVE_INCLINATION,
+        },
+    )
+
+
 def reference_catalog_stem(metadata: CatalogMetadata, seed: int | np.integer) -> str:
     """The file stem by convention: ``reference_catalog-<key>-<seed>``.
 
@@ -253,9 +267,8 @@ def reference_catalog(
 ) -> PolarizationPowerData:
     """Every draw of ``metadata`` placed at the window's lower edge: power ``(F, N)``.
 
-    The draws are those
-    :func:`~astrogwb.simulators.polarization_power.draw_catalog` makes from
-    ``key``, placed at the population's ``minimum_redshift`` and :data:`EFFECTIVE_INCLINATION`. ``chunk_size`` is
+    The model is conditioned on the population's ``minimum_redshift`` and
+    :data:`EFFECTIVE_INCLINATION` before the draw. ``chunk_size`` is
     :meth:`~astrogwb.waveform.PolarizationPowerGenerator.generate_batch`'s.
     """
     # x64 before the draw, as for a plain catalog: see draw_catalog.
@@ -272,12 +285,14 @@ def reference_catalog(
         metadata.num_samples,
     )
     _, model = metadata.population.build()(metadata.fiducials)
-    samples = sample_sources(model, key, num_samples=metadata.num_samples)
     minimum_redshift, _ = _redshift_window(metadata.population)
+    samples = sample_sources(
+        _pin_redshift_and_inclination(model, minimum_redshift),
+        key,
+        num_samples=metadata.num_samples,
+    )
     return polarization_power_data(
-        metadata.waveform.build(),
-        node_sources(model, samples, np.array([minimum_redshift])),
-        chunk_size=chunk_size,
+        metadata.waveform.build(), samples, chunk_size=chunk_size
     )
 
 
