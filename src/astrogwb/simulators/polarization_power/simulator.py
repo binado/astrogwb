@@ -51,8 +51,10 @@ class PolarizationPowerSimulator:
     and trusts its inputs, so a source carrying a degree of freedom the
     approximant cannot represent would otherwise be silently dropped.
 
-    ``chunk_size`` bounds how many sources one compiled call generates; it
-    changes cost, not output. ``None`` generates every source in one call.
+    ``chunk_size`` is forwarded to :func:`jax.lax.map` as ``batch_size``,
+    bounding peak memory to ``chunk_size`` sources' worth of waveform
+    intermediates; it changes cost, and the output only at rounding level.
+    ``None`` generates every source in one vectorized call.
     """
 
     def __init__(
@@ -69,7 +71,7 @@ class PolarizationPowerSimulator:
         # models. This simulator is the opposite case -- eager and
         # whole-catalog -- and at production sizes an unfused graph would hold
         # every waveform intermediate at once, so the jit belongs here.
-        self._power = jax.jit(self._generator.generate_batch)
+        self._power = jax.jit(self._generate)
 
     @property
     def metadata(self) -> WaveformMetadata:
@@ -95,28 +97,23 @@ class PolarizationPowerSimulator:
         generator.check_sources(columns)
         return {
             "frequencies": np.asarray(generator.frequencies),
-            "polarization_power": self._generate(columns, count),
+            "polarization_power": np.asarray(self._power(columns)),
             "source_parameters": columns,
         }
 
-    def _generate(
-        self, columns: Mapping[str, NDArray[Any]], count: int
-    ) -> NDArray[np.float64]:
-        chunk = self._chunk_size
-        if chunk is None or count <= chunk:
-            return np.asarray(self._power(columns))
-        # Every call has the same shape, so one compilation serves them all:
-        # the tail is padded with copies of the first source and trimmed.
-        pieces = []
-        for start in range(0, count, chunk):
-            stop = min(start + chunk, count)
-            pad = chunk - (stop - start)
-            piece = {
-                name: np.concatenate([values[start:stop], np.repeat(values[:1], pad)])
-                for name, values in columns.items()
-            }
-            pieces.append(np.asarray(self._power(piece))[:, : stop - start])
-        return np.concatenate(pieces, axis=1)
+    def _generate(self, columns: Mapping[str, jax.Array]) -> jax.Array:
+        generate_batch = self._generator.generate_batch
+        if self._chunk_size is None:
+            return generate_batch(columns)
+
+        def one(source: Mapping[str, jax.Array]) -> jax.Array:
+            return generate_batch(
+                {name: value[None] for name, value in source.items()}
+            )[:, 0]
+
+        # ``lax.map`` vmaps ``one`` over ``chunk_size`` sources at a time and
+        # handles the remainder itself, inside the one compiled call.
+        return jax.lax.map(one, dict(columns), batch_size=self._chunk_size).T
 
 
 def draw_catalog(

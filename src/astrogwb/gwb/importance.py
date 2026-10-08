@@ -186,8 +186,8 @@ def importance_catalog(
 ) -> PolarizationPowerData:
     """The importance catalog ``key`` draws: power ``(F, Z * N)``, node-major.
 
-    ``chunk_size`` bounds the sources one compiled waveform call generates; it
-    changes cost, not output.
+    ``chunk_size`` bounds the sources one batch of the waveform generates; see
+    :class:`~astrogwb.simulators.polarization_power.PolarizationPowerSimulator`.
     """
     # x64 before the draw, as for a plain catalog: see draw_catalog.
     jax.config.update("jax_enable_x64", True)
