@@ -1,4 +1,4 @@
-"""Per-source polarization-power catalogs, drawn from a :class:`CatalogMetadata`."""
+"""Per-source polarization power: the waveform simulator and the plain catalog draw."""
 
 from astrogwb.simulators.polarization_power.metadata import (
     CatalogMetadata,
@@ -12,6 +12,7 @@ from astrogwb.simulators.polarization_power.restrict import (
 from astrogwb.simulators.polarization_power.simulator import (
     PolarizationPowerData,
     PolarizationPowerSimulator,
+    draw_catalog,
 )
 
 __all__ = [
@@ -21,5 +22,6 @@ __all__ = [
     "PolarizationPowerData",
     "PolarizationPowerSimulator",
     "catalog_stem",
+    "draw_catalog",
     "restrict_redshift",
 ]
