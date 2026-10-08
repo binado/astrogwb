@@ -52,6 +52,11 @@ with app.setup(hide_code=True):
         PolarizationPowerData,
     )
 
+    # One compiled spectrum for every catalog: the spectral density function is
+    # a pytree argument, so its catalog is a traced input, not a constant, and
+    # catalogs of one shape share the compilation.
+    evaluate_spectrum = jax.jit(lambda fn, params: fn(params)[0])
+
 
 @app.cell(hide_code=True)
 def _():
@@ -341,13 +346,12 @@ def spectra_at(
     spectral_density_fn: SpectralDensityFn,
     points: Mapping[str, Mapping[str, float]],
 ) -> NDArray[np.float64]:
-    """The spectrum at every evaluation point, shape ``(len(points), F)``.
-
-    Eager, not jitted: a jitted closure over the catalog's arrays is not
-    released when the closure is, so a loop over catalogs keeps every one.
-    """
+    """The spectrum at every evaluation point, shape ``(len(points), F)``."""
     return np.stack(
-        [np.asarray(spectral_density_fn(dict(params))[0]) for params in points.values()]
+        [
+            np.asarray(evaluate_spectrum(spectral_density_fn, dict(params)))
+            for params in points.values()
+        ]
     )
 
 

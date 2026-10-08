@@ -16,6 +16,7 @@ with app.setup(hide_code=True):
     # Backend configuration precedes waveform construction and array creation.
     configure_runtime(num_chains=1)
 
+    import jax
     import jax.numpy as jnp
     import marimo as mo
     import matplotlib.pyplot as plt
@@ -425,7 +426,7 @@ def network_data(
 
 @app.function(hide_code=True)
 def evaluate_grid(
-    log_density_fn: GaussianGWBBatchedLikelihood,
+    log_density_fn: Callable[..., jax.Array],
     axes: Mapping[str, tuple[float, float, int]],
     fixed: Mapping[str, float],
     observed: NDArray[np.float64],
@@ -436,8 +437,10 @@ def evaluate_grid(
     Parameters
     ----------
     log_density_fn
-        The problem's evaluator: one prediction per grid point, shared by all
-        networks, which differ only in ``scale`` and ``frequency_mask``.
+        The problem's evaluator: a :class:`GaussianGWBBatchedLikelihood` with
+        its ``spectral_density_fn`` bound. One prediction per grid point,
+        shared by all networks, which differ only in ``scale`` and
+        ``frequency_mask``.
     axes
         ``(low, high, size)`` of each swept parameter.
     fixed
@@ -475,7 +478,7 @@ def evaluate_grid(
 def grid_posterior(
     run: str,
     axes: Mapping[str, tuple[float, float, int]],
-    evaluator: GaussianGWBBatchedLikelihood,
+    evaluator: Callable[..., jax.Array],
     *,
     fiducials: Mapping[str, float],
     observed: NDArray[np.float64],
@@ -493,7 +496,10 @@ def grid_posterior(
     axes
         ``(low, high, size)`` of each swept parameter.
     evaluator
-        The problem's :class:`GaussianGWBBatchedLikelihood`.
+        The problem's :class:`GaussianGWBBatchedLikelihood`, its
+        ``spectral_density_fn`` bound with :func:`functools.partial`: bound
+        per call, so the catalog stays a traced input of the compiled
+        evaluator rather than a constant baked into it.
     fiducials
         Every parameter; those not in ``axes`` are pinned at their value.
     observed
@@ -681,8 +687,11 @@ def _():
     The rescaled spectrum is built in the same cell as the catalog, once.
     The population is built a single time because it hashes by identity. Each
     problem builds its own `GaussianGWBBatchedLikelihood` in its section, which
-    predicts every grid point once for all six networks. The NumPy catalog is
-    dropped there, so only the device copy stays resident.
+    predicts every grid point once for all six networks. The spectral density
+    function is a pytree passed to it per call, so the catalog is one traced
+    input shared by all three problems rather than a constant compiled into
+    each. The NumPy catalog is dropped there, so only the device copy stays
+    resident.
     """)
     return
 
@@ -839,8 +848,9 @@ def _(
     h0_posterior = grid_posterior(
         "H0",
         grid_specs["H0"],
-        GaussianGWBBatchedLikelihood(
-            spectral_density_fn, PRIORS, chunk_size=grid_chunk_size
+        partial(
+            GaussianGWBBatchedLikelihood(PRIORS, chunk_size=grid_chunk_size),
+            spectral_density_fn=spectral_density_fn,
         ),
         fiducials=FIDUCIALS,
         observed=observed,
@@ -903,8 +913,9 @@ def _(
     h0_omega_m_posterior = grid_posterior(
         "H0_Omega_m",
         grid_specs["H0_Omega_m"],
-        GaussianGWBBatchedLikelihood(
-            spectral_density_fn, PRIORS, chunk_size=grid_chunk_size
+        partial(
+            GaussianGWBBatchedLikelihood(PRIORS, chunk_size=grid_chunk_size),
+            spectral_density_fn=spectral_density_fn,
         ),
         fiducials=FIDUCIALS,
         observed=observed,
@@ -992,8 +1003,9 @@ def _(
     xi_posterior = grid_posterior(
         "xi_0_xi_n",
         grid_specs["xi_0_xi_n"],
-        GaussianGWBBatchedLikelihood(
-            spectral_density_fn, PRIORS, chunk_size=grid_chunk_size
+        partial(
+            GaussianGWBBatchedLikelihood(PRIORS, chunk_size=grid_chunk_size),
+            spectral_density_fn=spectral_density_fn,
         ),
         fiducials=FIDUCIALS,
         observed=observed,
