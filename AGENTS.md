@@ -58,11 +58,13 @@ vary per item. `__call__` is the whole interface: its signature and the layout o
 its output `D` are the simulator's own contract. `PopulationSimulator` and
 `BackgroundSpectralDensitySimulator` take one key and return one draw (a
 population, a background spectral density), already vectorized over its
-events; callers loop over `batch_keys`. `PolarizationPowerSimulator(waveform,
-chunk_size=)` is deterministic: it knows only a `WaveformMetadata` and returns
-the power of the source columns it is called on. `draw_catalog(metadata, key)`
-is the plain catalog (sources drawn at the fiducials, then that simulator), and
-`astrogwb.gwb.importance` composes the same simulator over redshift nodes:
+events; callers loop over `batch_keys`. Waveform power itself is the
+generator's (`WaveformMetadata.build().generate_batch(sources, chunk_size=)`,
+trace-safe, chunked with `lax.map`); `polarization_power_data(generator,
+sources)` checks the sources once, jits it and packs `PolarizationPowerData`.
+`draw_catalog(metadata, key)` is the plain catalog (sources drawn at the
+fiducials, then that packaging), and `astrogwb.gwb.importance` places the same
+draw at redshift nodes:
 `importance_catalog(ImportanceCatalogMetadata, key)` places every intrinsic
 draw at each Gauss-Legendre node in `ln(1+z)` at a fixed effective
 inclination, and `build_importance_spectrum` integrates redshift on those nodes

@@ -43,8 +43,39 @@ class PolarizationPowerGenerator:
             )
         return power[:, 0]
 
-    def generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
-        """Generate frequency-first power for a catalog."""
+    def generate_batch(
+        self,
+        source_parameters: Mapping[str, ArrayLike],
+        *,
+        chunk_size: int | None = None,
+    ) -> jax.Array:
+        """Generate frequency-first power ``(F, N)`` for a catalog.
+
+        Trace-safe, so it composes inside ``jit`` and NumPyro models; an eager
+        whole-catalog caller should ``jit`` it. ``chunk_size`` is forwarded to
+        :func:`jax.lax.map` as ``batch_size``, bounding peak memory to
+        ``chunk_size`` sources' worth of waveform intermediates; it changes
+        cost, and the output only at rounding level. ``None`` generates every
+        source in one vectorized pass.
+        """
+        if chunk_size is None:
+            return self._generate_batch(source_parameters)
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be positive")
+        columns = {
+            name: jnp.asarray(value) for name, value in source_parameters.items()
+        }
+
+        def one(source: Mapping[str, jax.Array]) -> jax.Array:
+            single = {name: value[None] for name, value in source.items()}
+            return self._generate_batch(single)[:, 0]
+
+        # ``lax.map`` vmaps ``one`` over ``chunk_size`` sources at a time and
+        # handles the remainder itself.
+        return jax.lax.map(one, columns, batch_size=chunk_size).T
+
+    def _generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
+        """Every source in one vectorized pass; what a concrete generator implements."""
         raise NotImplementedError
 
     def __call__(

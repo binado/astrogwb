@@ -1,4 +1,4 @@
-"""Per-source polarization power: the waveform simulator and the plain catalog draw."""
+"""Per-source polarization-power catalogs: packaging generated power, and the plain draw."""
 
 from astrogwb.simulators.polarization_power.metadata import (
     CatalogMetadata,
@@ -11,8 +11,8 @@ from astrogwb.simulators.polarization_power.restrict import (
 )
 from astrogwb.simulators.polarization_power.simulator import (
     PolarizationPowerData,
-    PolarizationPowerSimulator,
     draw_catalog,
+    polarization_power_data,
 )
 
 __all__ = [
@@ -20,8 +20,8 @@ __all__ = [
     "REDSHIFT_WINDOW_KWARGS",
     "CatalogMetadata",
     "PolarizationPowerData",
-    "PolarizationPowerSimulator",
     "catalog_stem",
     "draw_catalog",
+    "polarization_power_data",
     "restrict_redshift",
 ]

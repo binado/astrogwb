@@ -205,7 +205,7 @@ class RippleGenerator(PolarizationPowerGenerator):
         check_sources(self.metadata.approximant, source_parameters)
 
     @require_x64
-    def generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
+    def _generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
         """Generate power in ``(frequency, sample)`` layout via Ripple.
 
         With ``"linear"`` spacing Ripple sees the whole one-sided grid above DC

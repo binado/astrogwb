@@ -66,7 +66,7 @@ from astrogwb.simulators.polarization_power.restrict import (
 )
 from astrogwb.simulators.polarization_power.simulator import (
     PolarizationPowerData,
-    PolarizationPowerSimulator,
+    polarization_power_data,
 )
 from astrogwb.waveform.metadata import WaveformMetadata
 
@@ -187,7 +187,7 @@ def importance_catalog(
     """The importance catalog ``key`` draws: power ``(F, Z * N)``, node-major.
 
     ``chunk_size`` bounds the sources one batch of the waveform generates; see
-    :class:`~astrogwb.simulators.polarization_power.PolarizationPowerSimulator`.
+    :meth:`~astrogwb.waveform.PolarizationPowerGenerator.generate_batch`.
     """
     # x64 before the draw, as for a plain catalog: see draw_catalog.
     jax.config.update("jax_enable_x64", True)
@@ -206,8 +206,11 @@ def importance_catalog(
     _, model = metadata.population.build()(metadata.fiducials)
     samples = sample_sources(model, key, num_samples=metadata.num_samples)
     nodes, _ = metadata.nodes()
-    simulator = PolarizationPowerSimulator(metadata.waveform, chunk_size=chunk_size)
-    return simulator(node_sources(model, samples, nodes))
+    return polarization_power_data(
+        metadata.waveform.build(),
+        node_sources(model, samples, nodes),
+        chunk_size=chunk_size,
+    )
 
 
 def _with_extrinsic(

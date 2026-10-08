@@ -368,7 +368,6 @@ Persistence and cache locations belong to the callers. The core `write` and
 | --- | --- | --- | --- | --- |
 | catalogs | `draw_catalog` | `CatalogMetadata` | one JAX key | `PolarizationPowerData` |
 | importance catalogs | `importance_catalog` | `ImportanceCatalogMetadata` | one JAX key | `PolarizationPowerData` |
-| per-source power | `PolarizationPowerSimulator` | `WaveformMetadata` | source columns | `PolarizationPowerData` |
 | spectra | `BackgroundSpectralDensitySimulator` | `BackgroundSpectralDensityMetadata` | one JAX key | `BackgroundSpectralDensityData` |
 
 Catalog files are `polarization_power-<key>-<seed>.h5`; spectra files are
