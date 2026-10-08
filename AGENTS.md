@@ -70,6 +70,12 @@ draw at each Gauss-Legendre node in `ln(1+z)` at a fixed effective
 inclination, and `build_importance_spectrum` integrates redshift on those nodes
 and reweights only the intrinsic draws. It is meant to replace the
 redshift-sampled `astrogwb.importance.spectral` estimator.
+`reference_catalog(CatalogMetadata, key)` makes one waveform per draw instead,
+at the population's minimum redshift (file stem `reference_catalog-<key>-<seed>`,
+apart from the plain catalog's), and `build_rescaled_spectrum` rescales the
+weighted mean power to the nodes in each call -- `s**4` and `f * s`, with
+`s = (1+z)/(1+z_min)`, exact for a (2,2)-only aligned-spin waveform -- so the
+node count is a builder argument and costs no waveforms.
 Anything static is bound in the
 constructor. The output `D`
 is a per-simulator `TypedDict` of array-like leaves (`PopulationData`,
