@@ -135,16 +135,6 @@ def redshift_quadrature(
     return 1.0 / scale_factor - 1.0, weights / scale_factor**2
 
 
-def _with_extrinsic(
-    columns: Mapping[str, jax.Array], redshift: ArrayLike, count: int
-) -> dict[str, jax.Array]:
-    """``columns`` broadcast to ``count`` rows, with redshift and inclination set."""
-    out = {name: jnp.broadcast_to(values, (count,)) for name, values in columns.items()}
-    out[REDSHIFT_SITE] = jnp.broadcast_to(jnp.asarray(redshift), (count,))
-    out[INCLINATION_SITE] = jnp.full((count,), EFFECTIVE_INCLINATION)
-    return out
-
-
 def _intrinsic_log_prob(
     model: PopulationModel,
     intrinsic: Mapping[str, jax.Array],
@@ -308,8 +298,10 @@ def rescaled_spectral_density(
     )
     first = {name: values[0] for name, values in intrinsic.items()}
     log_density, outputs = evaluate_sources(
-        model,
-        _with_extrinsic(first, redshift, redshift.shape[0]),
+        handlers.condition(
+            model, data={**first, INCLINATION_SITE: EFFECTIVE_INCLINATION}
+        ),
+        {REDSHIFT_SITE: redshift},
         density_sites=(REDSHIFT_SITE,),
     )
     distance_ratio = reference_distance / outputs[_LUMINOSITY_DISTANCE]
