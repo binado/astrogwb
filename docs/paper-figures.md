@@ -268,6 +268,28 @@ uv run --extra notebook --group dev marimo check --strict notebooks/cosmology_gr
 ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/cosmology_grid_posteriors.py
 ```
 
+## Importance convergence
+
+`notebooks/importance_convergence.py` measures the two errors of the
+redshift-node importance spectrum separately, to choose the grid posteriors'
+`(N, Z)`. The redshift quadrature runs a `Z = 2^i` ladder (4 to 512 nodes) on
+one seed and one `N`: `importance_catalog` draws the intrinsic sources before
+placing them at nodes, so every rung shares its draws and the difference to the
+top rung is pure quadrature error. The Monte Carlo noise is the scatter of `M`
+catalogs at fixed seeds about their mean; each `N = 2^k` is the first `N`
+draws of every catalog, so the `N` ladder costs no extra waveforms. Errors are
+reported in units of the most sensitive network's per-bin `sigma` and as each
+parameter's likelihood-peak shift in Fisher widths, at the fiducials and the
+grid windows' edges. A recommendation cell reports the cheapest pair below
+tolerance and the `N` the `1/N` variance law extrapolates to. Catalogs are
+cached in `outputs/catalogs/`; figures go to
+`outputs/figures/importance_convergence/` when `Write figures` is on:
+
+```bash
+uv run --extra notebook --group dev marimo check --strict notebooks/importance_convergence.py
+ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/importance_convergence.py
+```
+
 ## Scripts
 
 Figure entry points are plain Python scripts under `scripts/`. Each reads its

@@ -72,6 +72,14 @@ repository root as the working directory.
   equal the per-network evaluation, so existing cache files stay valid. Writes per-problem marginals and
   corner plots. Smoke test:
   `ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/cosmology_grid_posteriors.py`.
+- **`importance_convergence.py`** — marimo notebook. Chooses the grid
+  posteriors' importance-catalog size $(N, Z)$: redshift-quadrature
+  convergence on a $Z = 2^i$ ladder over one fixed set of draws, and Monte
+  Carlo noise as the scatter of $M$ fixed-seed catalogs about their mean, with
+  every $N = 2^k$ read off as a prefix. Errors are in units of the most
+  sensitive network's per-bin noise and of each parameter's Fisher width.
+  Smoke test:
+  `ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/importance_convergence.py`.
 
 The paper notebooks merge a run's config layers with
 `assemble_run(*REFERENCE_RUN)` — the by-name convenience wrapper over the same
