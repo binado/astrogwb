@@ -21,6 +21,7 @@ import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
 import pytest
+from jax.tree_util import Partial
 from jax.typing import ArrayLike
 from numpyro.infer.util import log_density
 
@@ -418,8 +419,12 @@ def test_batched_likelihood_matches_log_density_fn_per_network(
     grids: dict[str, jax.Array],
     fixed: dict[str, jax.Array],
 ) -> None:
-    batched = GaussianGWBBatchedLikelihood(_analytic, priors, chunk_size=3)(
-        grids, fixed=fixed, observed_spectral_density=observed, **networks
+    batched = GaussianGWBBatchedLikelihood(priors, chunk_size=3)(
+        grids,
+        spectral_density_fn=_analytic,
+        fixed=fixed,
+        observed_spectral_density=observed,
+        **networks,
     )
     expected = _per_network_reference(model, grids, fixed, observed, networks)
     np.testing.assert_allclose(batched, expected, rtol=1e-10)
@@ -431,8 +436,11 @@ def test_batched_likelihood_2d_grids_returns_k_first_in_insertion_order(
     networks: dict[str, jax.Array],
 ) -> None:
     grids = {"tilt": jnp.linspace(-1.0, 1.0, 4), "h0": jnp.linspace(55.0, 85.0, 5)}
-    result = GaussianGWBBatchedLikelihood(_analytic, priors)(
-        grids, observed_spectral_density=observed, **networks
+    result = GaussianGWBBatchedLikelihood(priors)(
+        grids,
+        spectral_density_fn=_analytic,
+        observed_spectral_density=observed,
+        **networks,
     )
     assert result.shape == (3, 4, 5)
 
@@ -448,15 +456,22 @@ def test_batched_likelihood_predicts_once_regardless_of_network_count(
         calls.append(None)
         return _analytic(params)
 
-    lp = GaussianGWBBatchedLikelihood(counting_spectrum, priors)
+    lp = GaussianGWBBatchedLikelihood(priors)
     grids = {"h0": jnp.linspace(60.0, 80.0, 4)}
     fixed = {"tilt": jnp.array(0.3)}
 
-    lp(grids, fixed=fixed, observed_spectral_density=observed, **networks)
+    lp(
+        grids,
+        spectral_density_fn=counting_spectrum,
+        fixed=fixed,
+        observed_spectral_density=observed,
+        **networks,
+    )
     assert len(calls) == 1, "one trace, however many networks"
 
     lp(
         grids,
+        spectral_density_fn=counting_spectrum,
         fixed=fixed,
         observed_spectral_density=observed,
         scale=networks["scale"] * 2.0,
@@ -466,6 +481,7 @@ def test_batched_likelihood_predicts_once_regardless_of_network_count(
 
     lp(
         grids,
+        spectral_density_fn=counting_spectrum,
         fixed=fixed,
         observed_spectral_density=observed,
         scale=networks["scale"][:2],
@@ -479,11 +495,76 @@ def test_batched_likelihood_outside_prior_support_is_negative_infinite(
     observed: jax.Array,
     networks: dict[str, jax.Array],
 ) -> None:
-    result = GaussianGWBBatchedLikelihood(_analytic, priors)(
+    result = GaussianGWBBatchedLikelihood(priors)(
         {"h0": jnp.array([40.0, 70.0])},
+        spectral_density_fn=_analytic,
         fixed={"tilt": jnp.array(0.0)},
         observed_spectral_density=observed,
         **networks,
     )
     assert bool(jnp.all(result[:, 0] == -jnp.inf))
     assert bool(jnp.all(jnp.isfinite(result[:, 1])))
+
+
+def test_batched_likelihood_traces_a_pytree_spectrum_once_per_shape(
+    priors: dict[str, dist.Distribution],
+    observed: jax.Array,
+    networks: dict[str, jax.Array],
+) -> None:
+    """A Partial's arrays are traced inputs: new values reuse the compilation."""
+    traces: list[None] = []
+
+    def scaled(params: Mapping[str, ArrayLike], *, shape: jax.Array) -> tuple:
+        traces.append(None)
+        return jnp.asarray(params["h0"]) * shape, {}
+
+    lp = GaussianGWBBatchedLikelihood(priors)
+    grids = {"h0": jnp.linspace(60.0, 80.0, 4)}
+    fixed = {"tilt": jnp.array(0.3)}
+    shapes = (jnp.array([1.0, 1.5, 2.0]), jnp.array([2.0, 1.0, 0.5]))
+
+    results = [
+        lp(
+            grids,
+            spectral_density_fn=Partial(scaled, shape=shape),
+            fixed=fixed,
+            observed_spectral_density=observed,
+            **networks,
+        )
+        for shape in shapes
+    ]
+
+    assert len(traces) == 1
+    assert not np.allclose(results[0], results[1])
+
+
+def test_batched_likelihood_with_a_pytree_spectrum_matches_its_closure(
+    priors: dict[str, dist.Distribution],
+    observed: jax.Array,
+    networks: dict[str, jax.Array],
+) -> None:
+    shape = jnp.array([1.0, 1.5, 2.0])
+
+    def scaled(params: Mapping[str, ArrayLike], *, shape: jax.Array) -> tuple:
+        return jnp.asarray(params["h0"]) * shape, {}
+
+    lp = GaussianGWBBatchedLikelihood(priors)
+    grids = {"h0": jnp.linspace(60.0, 80.0, 4)}
+    fixed = {"tilt": jnp.array(0.3)}
+
+    traced = lp(
+        grids,
+        spectral_density_fn=Partial(scaled, shape=shape),
+        fixed=fixed,
+        observed_spectral_density=observed,
+        **networks,
+    )
+    closed = lp(
+        grids,
+        spectral_density_fn=partial(scaled, shape=shape),
+        fixed=fixed,
+        observed_spectral_density=observed,
+        **networks,
+    )
+
+    np.testing.assert_allclose(traced, closed, rtol=1e-12)

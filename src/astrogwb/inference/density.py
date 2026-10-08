@@ -7,6 +7,7 @@ from typing import Any
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 import numpyro.distributions as dist
 from jax.typing import ArrayLike
 from numpyro.infer.util import log_density
@@ -87,13 +88,52 @@ class LogDensityFn:
         return self._evaluator(grids, fixed_params, tuple(model_args), model_kwargs)
 
 
+#: A callable's static half: its pytree structure, and every non-array leaf in
+#: order with ``None`` holding each array's place.
+type _Structure = tuple[Any, tuple[Any, ...]]
+
+
+def _is_array(leaf: Any) -> bool:
+    return isinstance(leaf, (jax.Array, np.ndarray))
+
+
+def _partition(fn: Any) -> tuple[list[Any], _Structure]:
+    """Split ``fn`` into its array leaves and a hashable static rest.
+
+    A pytree callable (:class:`jax.tree_util.Partial`) yields its arrays; a
+    plain function is one non-array leaf, so it is static whole, as before.
+    Flattening drops ``None``, so ``None`` cannot be a real static leaf.
+    """
+    leaves, treedef = jax.tree_util.tree_flatten(fn)
+    arrays = [leaf for leaf in leaves if _is_array(leaf)]
+    statics = tuple(None if _is_array(leaf) else leaf for leaf in leaves)
+    return arrays, (treedef, statics)
+
+
+def _combine(arrays: list[Any], structure: _Structure) -> Any:
+    """Inverse of :func:`_partition`."""
+    treedef, statics = structure
+    remaining = iter(arrays)
+    return jax.tree_util.tree_unflatten(
+        treedef, [next(remaining) if leaf is None else leaf for leaf in statics]
+    )
+
+
 class GaussianGWBBatchedLikelihood:
     """Grid-evaluate the Gaussian GWB log density for K networks at once.
 
-    ``spectral_density_fn`` is the expensive stage and does not depend on the
+    The spectral density is the expensive stage and does not depend on the
     network; only ``scale`` and ``frequency_mask`` do, at O(F) per point. This
     evaluator predicts the spectrum once per grid point and applies the
     likelihood of every network to it.
+
+    The spectral density function is a call argument, not part of the
+    evaluator. Its array leaves -- a catalog bound by
+    :func:`~astrogwb.gwb.importance.build_rescaled_spectrum`, say -- are traced
+    inputs, so they are held once and not baked into the compiled function,
+    and one compilation serves every function with the same static half and
+    array shapes. A plain closure has no array leaves and is static whole: it
+    still works, with whatever it captures compiled in as constants.
 
     It duplicates the Gaussian likelihood of
     :func:`astrogwb.inference.gwb_spectral_density_model` for speed; the
@@ -102,9 +142,6 @@ class GaussianGWBBatchedLikelihood:
 
     Parameters
     ----------
-    spectral_density_fn:
-        ``params -> (prediction, extras)`` with ``prediction`` of shape
-        ``(F,)``. Static; ``extras`` are discarded.
     priors:
         Prior of every parameter, static. Each contributes its log density at
         the grid or ``fixed`` value, so a pinned site adds a constant, as in
@@ -122,19 +159,21 @@ class GaussianGWBBatchedLikelihood:
 
     def __init__(
         self,
-        spectral_density_fn: SpectralDensityFn,
         priors: Mapping[str, dist.Distribution],
         *,
         chunk_size: int | None = None,
     ) -> None:
         def evaluate(
             names: tuple[str, ...],
+            structure: _Structure,
+            arrays: list[Any],
             grids: tuple[jax.Array, ...],
             fixed: dict[str, ArrayLike],
             observed: jax.Array,
             scale: jax.Array,
             mask: jax.Array,
         ) -> jax.Array:
+            spectral_density_fn = _combine(arrays, structure)
             mesh = jnp.meshgrid(*grids, indexing="ij")
             points = {
                 name: values.ravel() for name, values in zip(names, mesh, strict=True)
@@ -161,12 +200,14 @@ class GaussianGWBBatchedLikelihood:
 
         # `names` is static and `grids` a tuple: a dict argument would be
         # flattened in sorted-key order, losing the insertion order of the axes.
-        self._evaluator = jax.jit(evaluate, static_argnums=0)
+        # `structure` is the spectral density function's static half.
+        self._evaluator = jax.jit(evaluate, static_argnums=(0, 1))
 
     def __call__(
         self,
         grids: Mapping[str, jax.Array],
         *,
+        spectral_density_fn: SpectralDensityFn,
         fixed: Mapping[str, ArrayLike] | None = None,
         observed_spectral_density: jax.Array,
         scale: jax.Array,
@@ -178,6 +219,10 @@ class GaussianGWBBatchedLikelihood:
         ----------
         grids:
             Values of each swept parameter.
+        spectral_density_fn:
+            ``params -> (prediction, extras)`` with ``prediction`` of shape
+            ``(F,)``; ``extras`` are discarded. Its array leaves are traced, its
+            static rest is part of the compilation key.
         fixed:
             Values of the remaining prior sites, pinned at every point.
         observed_spectral_density:
@@ -205,8 +250,11 @@ class GaussianGWBBatchedLikelihood:
             if frequency_mask is None
             else jnp.asarray(frequency_mask)
         )
+        arrays, structure = _partition(spectral_density_fn)
         return self._evaluator(
             tuple(grids),
+            structure,
+            arrays,
             tuple(jnp.asarray(grid) for grid in grids.values()),
             dict(fixed) if fixed is not None else {},
             jnp.asarray(observed_spectral_density),

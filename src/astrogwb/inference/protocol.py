@@ -14,6 +14,12 @@ class SpectralDensityFn(Protocol):
     and shapes must stay stable during JAX tracing; keys must not collide with
     prior sites or likelihood-owned sites. Values are recorded unchanged as
     NumPyro deterministics by the inference model.
+
+    A function bound to data should be a pytree whose array state is its
+    leaves (:class:`jax.tree_util.Partial`), as the importance builders return:
+    passed as an argument to a jitted evaluator, the data is then a traced input
+    rather than a compiled-in constant. A plain closure is still valid; what it
+    captures is compiled in.
     """
 
     def __call__(

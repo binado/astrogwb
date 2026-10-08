@@ -75,7 +75,12 @@ at the population's minimum redshift (file stem `reference_catalog-<key>-<seed>`
 apart from the plain catalog's), and `build_rescaled_spectrum` rescales the
 weighted mean power to the nodes in each call -- `s**4` and `f * s`, with
 `s = (1+z)/(1+z_min)`, exact for a (2,2)-only aligned-spin waveform -- so the
-node count is a builder argument and costs no waveforms.
+node count is a builder argument and costs no waveforms. Both builders return
+pytree callables (`jax.tree_util.Partial` over a by-value static half): pass one
+*as an argument* to a jitted function -- `GaussianGWBBatchedLikelihood` takes
+`spectral_density_fn` per call for this -- and the catalog is a traced input,
+held once and shared by every compilation, instead of a constant each closure
+bakes in.
 Anything static is bound in the
 constructor. The output `D`
 is a per-simulator `TypedDict` of array-like leaves (`PopulationData`,

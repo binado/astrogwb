@@ -64,12 +64,13 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping, Sequence
-from functools import partial
+from dataclasses import dataclass
 from typing import Annotated, Any
 
 import jax
 import jax.numpy as jnp
 import numpy as np
+from jax.tree_util import Partial
 from jax.typing import ArrayLike
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field
@@ -263,6 +264,39 @@ def _intrinsic_log_prob(
     return log_prob
 
 
+@dataclass(frozen=True)
+class _Bound:
+    """The static half of a bound estimator: its function and non-array settings.
+
+    Compared by value, so two builds with the same population object and sites
+    are equal: :func:`_bind` wraps it in a :class:`jax.tree_util.Partial` whose
+    leaves are the arrays, and a ``jit`` taking that callable as an argument
+    traces once for every catalog of the same shapes.
+    """
+
+    function: Callable[..., Any]
+    population: Population
+    density_sites: tuple[str, ...]
+
+    def __call__(self, params: Mapping[str, ArrayLike], /, **arrays: Any) -> Any:
+        return self.function(
+            params,
+            population=self.population,
+            density_sites=self.density_sites,
+            **arrays,
+        )
+
+
+def _bind(
+    function: Callable[..., Any],
+    population: Population,
+    density_sites: Sequence[str],
+    **arrays: Any,
+) -> Any:
+    """``function`` as a pytree callable: ``arrays`` are its leaves, the rest static."""
+    return Partial(_Bound(function, population, tuple(density_sites)), **arrays)
+
+
 def evaluate_log_weights(
     params: Mapping[str, ArrayLike],
     *,
@@ -338,6 +372,12 @@ def build_importance_spectrum(
 
     ``population`` is the target's bound
     :class:`~astrogwb.populations.Population`; build it once per run.
+
+    Both callables are pytrees (:class:`jax.tree_util.Partial`): the catalog's
+    arrays are their leaves, so passing one *as an argument* to a jitted
+    function traces it as input buffers instead of baking it in as constants,
+    and the compiled function serves every catalog of the same shapes built
+    with the same ``population`` and ``density_sites``.
     """
     redshift, redshift_weights = metadata.nodes()
     num_nodes, num_samples = redshift.size, metadata.num_samples
@@ -358,20 +398,22 @@ def build_importance_spectrum(
         fiducial_model, intrinsic, redshift_nodes[0], density_sites
     )
     shared: dict[str, Any] = {
-        "population": population,
         "intrinsic": intrinsic,
         "redshift": redshift_nodes,
         "proposal_log_prob": proposal_log_prob,
-        "density_sites": tuple(density_sites),
     }
-    spectral_density_fn = partial(
+    spectral_density_fn = _bind(
         importance_spectral_density,
+        population,
+        density_sites,
         polarization_power=jnp.asarray(power),
         redshift_weights=jnp.asarray(redshift_weights),
         reference_distance=jnp.asarray(reference_distance),
         **shared,
     )
-    return spectral_density_fn, partial(evaluate_log_weights, **shared)
+    return spectral_density_fn, _bind(
+        evaluate_log_weights, population, density_sites, **shared
+    )
 
 
 def _redshift_window(population: PopulationMetadata) -> tuple[float, float]:
@@ -493,7 +535,8 @@ def build_rescaled_spectrum(
     :func:`build_importance_spectrum`. Call outside JAX transformations.
 
     The caller is trusted to pass a reference catalog of ``metadata`` and a
-    waveform the module's contracts hold for; nothing here checks either.
+    waveform the module's contracts hold for; nothing here checks either. The
+    callables are pytrees, as for :func:`build_importance_spectrum`.
     """
     minimum_redshift, maximum_redshift = _redshift_window(metadata.population)
     redshift, redshift_weights = redshift_quadrature(
@@ -516,14 +559,14 @@ def build_rescaled_spectrum(
         fiducial_model, intrinsic, redshift_nodes[0], density_sites
     )
     shared: dict[str, Any] = {
-        "population": population,
         "intrinsic": intrinsic,
         "redshift": redshift_nodes,
         "proposal_log_prob": proposal_log_prob,
-        "density_sites": tuple(density_sites),
     }
-    spectral_density_fn = partial(
+    spectral_density_fn = _bind(
         rescaled_spectral_density,
+        population,
+        density_sites,
         polarization_power=jnp.asarray(data["polarization_power"]),
         log_reference_frequencies=jnp.log(jnp.asarray(data["frequencies"])),
         query_log_frequencies=jnp.asarray(query_log_frequencies),
@@ -534,4 +577,6 @@ def build_rescaled_spectrum(
         ),
         **shared,
     )
-    return spectral_density_fn, partial(evaluate_log_weights, **shared)
+    return spectral_density_fn, _bind(
+        evaluate_log_weights, population, density_sites, **shared
+    )

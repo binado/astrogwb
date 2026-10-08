@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
+import jax
 import numpy as np
 import pytest
 
@@ -201,3 +203,35 @@ def test_rescaled_spectrum_reweights_like_the_node_spectrum(
     assert np.ptp(rescaled_weights) > 0.0
     np.testing.assert_allclose(rescaled_weights, node_weights, rtol=1e-12)
     np.testing.assert_allclose(rescaled, node, rtol=1e-5)
+
+
+@pytest.mark.integration
+def test_rescaled_spectrum_as_a_jit_argument_traces_once_per_shape(
+    metadata: ImportanceCatalogMetadata, reference_metadata: CatalogMetadata
+) -> None:
+    """Separately built catalogs of one shape share a compilation."""
+    target = build_population(
+        metadata.population.model_name, **metadata.population.model_kwargs
+    )
+    traces: list[None] = []
+
+    def body(fn: Any, params: dict[str, float]) -> jax.Array:
+        traces.append(None)
+        return fn(params)[0]
+
+    spectrum = jax.jit(body)
+    results = []
+    for seed in (41, 42):
+        data = reference_catalog(reference_metadata, batch_keys(seed, 1)[0])
+        fn, _ = build_rescaled_spectrum(
+            data,
+            reference_metadata,
+            population=target,
+            frequencies=data["frequencies"][:20],
+            num_redshift_nodes=4,
+            density_sites=(),
+        )
+        results.append(np.asarray(spectrum(fn, metadata.fiducials)))
+
+    assert len(traces) == 1
+    assert not np.allclose(results[0], results[1], rtol=1e-6, atol=0.0)
