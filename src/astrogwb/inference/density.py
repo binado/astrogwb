@@ -185,9 +185,11 @@ class GaussianGWBBatchedLikelihood:
             )
 
             values = points | fixed
-            log_prior = sum(
-                (prior.log_prob(values[name]) for name, prior in priors.items()),
-                start=jnp.zeros(()),
+            log_prior = jnp.asarray(
+                sum(
+                    (prior.log_prob(values[name]) for name, prior in priors.items()),
+                    start=jnp.zeros(()),
+                )
             )
 
             def likelihood(scale_k: jax.Array, mask_k: jax.Array) -> jax.Array:
@@ -196,7 +198,7 @@ class GaussianGWBBatchedLikelihood:
 
             total = log_prior[None] + jax.vmap(likelihood)(scale, mask)
             sizes = tuple(grid.size for grid in grids)
-            return total.reshape(scale.shape[0], *sizes)
+            return jnp.asarray(total).reshape(scale.shape[0], *sizes)
 
         # `names` is static and `grids` a tuple: a dict argument would be
         # flattened in sorted-key order, losing the insertion order of the axes.

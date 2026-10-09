@@ -205,13 +205,13 @@ def _redshift_window(population: PopulationMetadata) -> tuple[float, float]:
 
 
 def _pin_redshift_and_inclination(
-    model: PopulationModel, redshift: float
+    model: PopulationModel, redshift: ArrayLike
 ) -> PopulationModel:
     """``model`` with redshift and inclination fixed rather than drawn."""
     return handlers.condition(
         model,
         data={
-            REDSHIFT_SITE: redshift,
+            REDSHIFT_SITE: jnp.asarray(redshift),
             INCLINATION_SITE: EFFECTIVE_INCLINATION,
         },
     )

@@ -14,7 +14,7 @@ and ``scale`` vary between calls.
 
 from collections.abc import Callable, Mapping
 from functools import partial
-from typing import Any
+from typing import Any, TypedDict
 
 import jax
 import jax.numpy as jnp
@@ -370,8 +370,13 @@ def test_call_retraces_once_per_model_args_shape_not_per_value(
     assert len(calls) == 2, "a different array shape must trigger exactly one retrace"
 
 
+class Networks(TypedDict):
+    scale: jax.Array
+    frequency_mask: jax.Array
+
+
 @pytest.fixture
-def networks() -> dict[str, jax.Array]:
+def networks() -> Networks:
     """Three networks: plain, a different scale, and one with masked bins."""
     scale = jnp.array([[0.7, 0.9, 1.2], [0.4, 1.5, 0.8], [0.6, jnp.inf, 1.0]])
     mask = jnp.array([[True] * 3, [True] * 3, [True, False, True]])
@@ -383,7 +388,7 @@ def _per_network_reference(
     grids: Mapping[str, jax.Array],
     fixed: Mapping[str, ArrayLike],
     observed: jax.Array,
-    networks: Mapping[str, jax.Array],
+    networks: Networks,
 ) -> jax.Array:
     lp = LogDensityFn(model)
     return jnp.stack(
@@ -415,7 +420,7 @@ def test_batched_likelihood_matches_log_density_fn_per_network(
     model: Callable[..., None],
     priors: dict[str, dist.Distribution],
     observed: jax.Array,
-    networks: dict[str, jax.Array],
+    networks: Networks,
     grids: dict[str, jax.Array],
     fixed: dict[str, jax.Array],
 ) -> None:
@@ -433,7 +438,7 @@ def test_batched_likelihood_matches_log_density_fn_per_network(
 def test_batched_likelihood_2d_grids_returns_k_first_in_insertion_order(
     priors: dict[str, dist.Distribution],
     observed: jax.Array,
-    networks: dict[str, jax.Array],
+    networks: Networks,
 ) -> None:
     grids = {"tilt": jnp.linspace(-1.0, 1.0, 4), "h0": jnp.linspace(55.0, 85.0, 5)}
     result = GaussianGWBBatchedLikelihood(priors)(
@@ -448,7 +453,7 @@ def test_batched_likelihood_2d_grids_returns_k_first_in_insertion_order(
 def test_batched_likelihood_predicts_once_regardless_of_network_count(
     priors: dict[str, dist.Distribution],
     observed: jax.Array,
-    networks: dict[str, jax.Array],
+    networks: Networks,
 ) -> None:
     calls: list[None] = []
 
@@ -493,7 +498,7 @@ def test_batched_likelihood_predicts_once_regardless_of_network_count(
 def test_batched_likelihood_outside_prior_support_is_negative_infinite(
     priors: dict[str, dist.Distribution],
     observed: jax.Array,
-    networks: dict[str, jax.Array],
+    networks: Networks,
 ) -> None:
     result = GaussianGWBBatchedLikelihood(priors)(
         {"h0": jnp.array([40.0, 70.0])},
@@ -509,7 +514,7 @@ def test_batched_likelihood_outside_prior_support_is_negative_infinite(
 def test_batched_likelihood_traces_a_pytree_spectrum_once_per_shape(
     priors: dict[str, dist.Distribution],
     observed: jax.Array,
-    networks: dict[str, jax.Array],
+    networks: Networks,
 ) -> None:
     """A Partial's arrays are traced inputs: new values reuse the compilation."""
     traces: list[None] = []
@@ -541,7 +546,7 @@ def test_batched_likelihood_traces_a_pytree_spectrum_once_per_shape(
 def test_batched_likelihood_with_a_pytree_spectrum_matches_its_closure(
     priors: dict[str, dist.Distribution],
     observed: jax.Array,
-    networks: dict[str, jax.Array],
+    networks: Networks,
 ) -> None:
     shape = jnp.array([1.0, 1.5, 2.0])
 
