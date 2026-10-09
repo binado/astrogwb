@@ -1,127 +1,38 @@
-"""Tests for the native ``PriorDistribution`` fields on ``RunConfig``.
+"""Tests for prior specs: materialization into numpyro and back.
 
-``RunConfig.priors`` (including the marginalized amplitude parameter) holds
-live numpyro ``Uniform``/``Normal`` distributions via a ``BeforeValidator`` +
-``PlainSerializer`` pair (see ``astrogwb.paper.config.mcmc.PriorDistribution``).
-These tests pin the two properties that make that safe to do at config-parse
-time:
-
-- distributions materialize from spec mappings and serialize back to the exact
-  same spec, so ``RunConfig.save`` stays canonical; and
-- neither materialization nor serialization evaluates a JAX op -- the XLA
-  backend must still be uninitialized afterwards, or
-  ``configure_runtime``'s ``set_host_device_count`` silently no-ops. That
-  ordering can only be observed in a fresh interpreter, so the backend check
-  runs in a subprocess.
+The backend-safety half (materializing priors must not initialize the XLA
+backend) lives in ``test_cli.py``, since it can only be observed in a fresh
+interpreter.
 """
 
 from __future__ import annotations
 
-import subprocess
-import sys
-from pathlib import Path
-
+import numpyro.distributions as dist
 import pytest
-import tomli_w
-from config_fixtures import example_raw
+from repo import REPO_ROOT
 
-from astrogwb.paper.config.mcmc import (
-    build_run_config,
-    materialize_prior,
-    prior_to_spec,
-)
+from astrogwb.paper.config import priors
+from astrogwb.paper.config.priors import materialize_prior, prior_to_spec
 
 
 def test_priors_materialize_to_live_distributions() -> None:
-    import numpyro.distributions as dist
-
-    config = build_run_config(example_raw())
-
-    prior = config.priors["H0"]
-    assert isinstance(prior, dist.Uniform)
+    assert isinstance(priors(REPO_ROOT)["H0"], dist.Uniform)
+    assert isinstance(priors(REPO_ROOT)["Omega_m"], dist.Normal)
 
 
-def test_prior_field_json_dump_round_trips_the_spec() -> None:
-    raw = example_raw()
-    config = build_run_config(raw)
-
-    dumped = config.model_dump(mode="json")["priors"]
-    expected = raw["priors"]
-
-    assert dumped == expected
-
-
-def test_python_dump_serializes_priors_back_to_specs() -> None:
-    """``model_dump()`` also runs the serializer (when_used="always"): revalidating
-    a python dump rebuilds equal distributions from their specs."""
-    config = build_run_config(example_raw())
-
-    revalidated = build_run_config(config.model_dump())
-
-    assert prior_to_spec(revalidated.priors["H0"]) == prior_to_spec(config.priors["H0"])
+@pytest.mark.parametrize(
+    "spec",
+    [
+        {"dist": "Uniform", "kwargs": {"low": 20.0, "high": 140.0}},
+        {"dist": "Normal", "kwargs": {"loc": 0.3, "scale": 0.006}},
+    ],
+)
+def test_a_spec_round_trips_through_a_distribution(spec: dict) -> None:
+    assert prior_to_spec(materialize_prior(spec)) == spec
 
 
 def test_materialize_prior_passes_live_distributions_through() -> None:
     """An already-built distribution validates to itself (idempotent)."""
-    config = build_run_config(example_raw())
-
-    prior = config.priors["H0"]
+    prior = priors(REPO_ROOT)["H0"]
 
     assert materialize_prior(prior) is prior
-
-
-@pytest.mark.integration
-def test_config_build_and_dump_leave_the_xla_backend_uninitialized(
-    tmp_path: Path,
-) -> None:
-    """Config parse -> dump must not consume JAX's one-shot backend config.
-
-    ``configure_runtime`` sets ``JAX_PLATFORMS`` / ``XLA_FLAGS`` and calls
-    ``numpyro.set_host_device_count`` *after* config validation; each of those
-    is silently ignored once the XLA backend has initialized. This spawns a
-    fresh interpreter that validates and dumps a config, and only then touches
-    JAX: if anything in the config path initialized the backend, the late
-    ``set_host_device_count`` is a no-op and ``jax.device_count()`` stays 1.
-    """
-    script = r"""
-import json
-import sys
-from pathlib import Path
-
-from astrogwb.paper.utils import load_mapping
-from astrogwb.paper.config.mcmc import (
-    build_run_config,
-    prior_to_spec,
-)
-
-config = build_run_config(load_mapping(Path(sys.argv[1])))
-
-# Dists are materialized and round-trip to specs -- all pre-JAX.
-specs = {
-    name: prior_to_spec(prior) for name, prior in config.priors.items()
-}
-json.dumps(config.model_dump(mode="json"))
-
-# Only now touch JAX. Surviving set_host_device_count proves the backend was
-# still uninitialized after validation + serialization.
-import numpyro
-
-numpyro.set_host_device_count(2)
-import jax
-
-assert jax.device_count() == 2, f"backend initialized early: {jax.devices()}"
-print("backend-safe:", specs["H0"])
-"""
-    # The subprocess needs a config on disk; there is no committed one to point
-    # at, so write the assembled run config out as a TOML layer.
-    config_path = tmp_path / "run.toml"
-    config_path.write_text(tomli_w.dumps(example_raw()), encoding="utf-8")
-
-    result = subprocess.run(
-        [sys.executable, "-c", script, str(config_path)],
-        capture_output=True,
-        text=True,
-        timeout=300,
-        check=False,
-    )
-    assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"

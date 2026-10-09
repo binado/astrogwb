@@ -16,9 +16,9 @@ from types import ModuleType
 logger = logging.getLogger(__name__)
 
 # Every env var that can fan out a BLAS/vector thread pool per chain worker.
-# This matches the set Snakemake injects per job (snakemake/shell.py), which is
-# why a partial override under a Snakemake launch leaks job ``threads`` into
-# pools this flag is meant to pin (see --cpu-threads).
+# Job schedulers commonly set these to the job's thread count, so a partial
+# override would leak that count into pools this flag is meant to pin (see
+# --cpu-threads).
 CPU_THREAD_ENV_VARS = (
     "OMP_NUM_THREADS",
     "OPENBLAS_NUM_THREADS",
