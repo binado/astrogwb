@@ -333,3 +333,15 @@ def test_plot_network_marginals_draws_one_curve_per_network(
         label for _, label in networks
     ]
     matplotlib.pyplot.close(fig)
+
+
+def test_plot_corner_draws_one_panel_per_parameter_pair(gaussian_grid) -> None:
+    grids, log_density = gaussian_grid
+    posterior = plotting.convert_grids_to_samples(
+        grids, log_density, 5_000, rng=np.random.default_rng(3)
+    )
+
+    fig = plotting.plot_corner(posterior, {"x": 2.0, "y": -1.0})
+
+    assert len(fig.axes) == 4
+    matplotlib.pyplot.close(fig)

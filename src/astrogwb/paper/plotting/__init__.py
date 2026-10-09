@@ -608,3 +608,54 @@ def plot_network_marginals(
     fig = collection.viz["figure"].item()
     fig.tight_layout()
     return fig
+
+
+def plot_corner(
+    posterior: DataTree,
+    truths: Mapping[str, float],
+    *,
+    var_names: Sequence[str] | None = None,
+    **corner_kwargs: object,
+) -> Figure:
+    """Corner plot of posterior draws, via ``corner.corner()``.
+
+    Takes the same DataTree as :func:`plot_network_marginals`, so grid
+    posteriors (through :func:`convert_grids_to_samples`) and MCMC runs share
+    the path. Axis labels come from :func:`parameter_label`. The defaults are
+    :func:`get_corner_kwargs` with the datapoint scatter and density shading
+    off, which add noise at the draw counts used here; every one can be
+    overridden through ``corner_kwargs``.
+
+    Parameters
+    ----------
+    posterior
+        Draws in the ``posterior`` group.
+    truths
+        Marker position by parameter name; one entry for each of ``var_names``.
+    var_names
+        Parameters to plot, in panel order. Defaults to the keys of ``truths``.
+    **corner_kwargs
+        Forwarded to ``corner.corner()``; they take precedence over the
+        defaults.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+    """
+    import corner
+
+    names = list(truths if var_names is None else var_names)
+    defaults = get_corner_kwargs(
+        levels=CORNER_LEVELS,
+        plot_datapoints=False,
+        plot_density=False,
+        smooth=1.0,
+        bins=40,
+    )
+    return corner.corner(
+        posterior,
+        var_names=names,
+        labels=[parameter_label(name) for name in names],
+        truths=[truths[name] for name in names],
+        **(defaults | corner_kwargs),
+    )

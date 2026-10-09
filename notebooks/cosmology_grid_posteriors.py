@@ -46,12 +46,9 @@ with app.setup(hide_code=True):
     from astrogwb.paper.config.detectors import DetectorRegistry
     from astrogwb.paper.config.runs import CATALOGS_ROOT, FIGURES_DIR
     from astrogwb.paper.plotting import (
-        CORNER_LEVELS,
         DETECTOR_NETWORKS,
         convert_grids_to_samples,
-        get_corner_kwargs,
-        parameter_label,
-        plot_corner_for_posterior_grid,
+        plot_corner,
         plot_network_marginals,
         save_figures,
         use_paper_style,
@@ -146,8 +143,8 @@ def _():
     # Different seeds: the injection must not be a subset of the catalog.
     data_seed = 41
     catalog_seed = 42
-    marginal_seed = 43  # jitter and cell draws behind the marginal plots
-    num_marginal_samples = 2**18  # grid draws per network for the marginal KDEs
+    marginal_seed = 43  # cell and jitter draws behind the plots
+    num_marginal_samples = 2**18  # grid draws per plot, for the marginals and corners
     num_samples = 2**17  # intrinsic draws, one waveform each
     redshift_nodes = 32  # Gauss-Legendre nodes in 1/(1 + z); costs no waveforms
     catalog_chunk_size = 4096  # reference waveforms per lax.map batch
@@ -906,15 +903,23 @@ def _():
 
 
 @app.cell
-def _(FIDUCIALS, fiducial_network, grid_specs, h0_omega_m_posterior):
+def _(
+    FIDUCIALS,
+    fiducial_network,
+    grid_specs,
+    h0_omega_m_posterior,
+    marginal_seed,
+    num_marginal_samples,
+):
     _grids, _log_densities = h0_omega_m_posterior
-    _names = list(grid_specs["H0_Omega_m"])
-    h0_omega_m_corner = plot_corner_for_posterior_grid(
-        [_grids[name] for name in _names],
-        _log_densities[fiducial_network],
-        labels=[parameter_label(name) for name in _names],
-        truths=[FIDUCIALS[name] for name in _names],
-        **get_corner_kwargs(levels=CORNER_LEVELS),  # ty: ignore[invalid-argument-type]
+    h0_omega_m_corner = plot_corner(
+        convert_grids_to_samples(
+            _grids,
+            _log_densities[fiducial_network],
+            num_marginal_samples,
+            rng=np.random.default_rng(marginal_seed),
+        ),
+        {name: FIDUCIALS[name] for name in grid_specs["H0_Omega_m"]},
     )
     mo.as_html(h0_omega_m_corner)
     return (h0_omega_m_corner,)
@@ -997,15 +1002,23 @@ def _():
 
 
 @app.cell
-def _(FIDUCIALS, fiducial_network, grid_specs, xi_posterior):
+def _(
+    FIDUCIALS,
+    fiducial_network,
+    grid_specs,
+    marginal_seed,
+    num_marginal_samples,
+    xi_posterior,
+):
     _grids, _log_densities = xi_posterior
-    _names = list(grid_specs["xi_0_xi_n"])
-    xi_corner = plot_corner_for_posterior_grid(
-        [_grids[name] for name in _names],
-        _log_densities[fiducial_network],
-        labels=[parameter_label(name) for name in _names],
-        truths=[FIDUCIALS[name] for name in _names],
-        **get_corner_kwargs(levels=CORNER_LEVELS),  # ty: ignore[invalid-argument-type]
+    xi_corner = plot_corner(
+        convert_grids_to_samples(
+            _grids,
+            _log_densities[fiducial_network],
+            num_marginal_samples,
+            rng=np.random.default_rng(marginal_seed),
+        ),
+        {name: FIDUCIALS[name] for name in grid_specs["xi_0_xi_n"]},
     )
     mo.as_html(xi_corner)
     return (xi_corner,)
