@@ -8,11 +8,14 @@ import jax
 import numpy as np
 import pytest
 
+from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import luminosity_distance
 from astrogwb.distributions.rates import madau_dickinson_rate, total_merger_rate
 from astrogwb.gwb.importance import (
     EFFECTIVE_INCLINATION,
+    INCLINATION_SECOND_MOMENT,
     _pin_redshift_and_inclination,
+    build_rescaled_shot_noise,
     build_rescaled_spectrum,
     phinney_kernel,
     redshift_quadrature,
@@ -25,6 +28,7 @@ from astrogwb.simulators.polarization_power import (
     CatalogMetadata,
     polarization_power_data,
 )
+from astrogwb.utils import gauss_legendre_nodes_weights
 from astrogwb.waveform import WaveformMetadata
 from astrogwb.waveform.generator.analytical import inclination_factor
 
@@ -40,6 +44,9 @@ OBSERVED_WAVEFORM = WaveformMetadata(
 
 #: Redshift nodes of the comparisons.
 NUM_NODES = 3
+
+#: Observation time of the shot-noise comparisons, in years.
+OBSERVATION_TIME = 1.0
 
 
 @pytest.fixture
@@ -87,6 +94,15 @@ def test_effective_inclination_gives_the_isotropic_mean_factor() -> None:
     assert float(inclination_factor(EFFECTIVE_INCLINATION)) == pytest.approx(
         0.8, rel=1e-14
     )
+
+
+def test_inclination_second_moment_is_the_isotropic_ratio_of_moments() -> None:
+    # g is a polynomial of degree four in cos(iota), so five nodes integrate
+    # g**2 exactly under the isotropic (uniform in cos) average.
+    cosine, weights = gauss_legendre_nodes_weights(-1.0, 1.0, 5)
+    factor = np.asarray(inclination_factor(np.arccos(np.asarray(cosine))))
+    second_moment = np.sum(np.asarray(weights) * factor**2) / 2.0
+    assert second_moment / 0.8**2 == pytest.approx(INCLINATION_SECOND_MOMENT, rel=1e-13)
 
 
 @pytest.mark.parametrize("power", [2, 3, 5])
@@ -137,12 +153,14 @@ def _spectrum_on_nodes(
     key: jax.Array,
     params: dict[str, float],
     density_sites: tuple[str, ...],
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray]:
     """The quadrature by brute force: every draw generated at every node.
 
     No rescaling: the waveform is generated in the observer frame at each node,
     at the fiducial distance, and the redshift kernel is read off the target's
-    own model row by row.
+    own model row by row. Returns the spectrum and its shot-noise variance over
+    :data:`OBSERVATION_TIME`, the latter from each node's power at the target
+    distance, squared.
     """
     population = metadata.population
     minimum, maximum = (
@@ -176,37 +194,56 @@ def _spectrum_on_nodes(
     model = joint_model(redshift_distribution, source_model)
     log_density, outputs = evaluate_sources(model, rows, density_sites=("redshift",))
     distance_ratio = rows["luminosity_distance"] / outputs["luminosity_distance"]
-    kernel = weights * np.exp(log_density[::6]) * distance_ratio[::6] ** 2
+    target_power = power * distance_ratio.reshape(NUM_NODES, 6) ** 2
+    density = weights * np.exp(log_density[::6])
     first = {name: values[:6] for name, values in rows.items()}
     target, _ = evaluate_sources(model, first, density_sites=density_sites)
     drawn, _ = evaluate_sources(fiducial_model, first, density_sites=density_sites)
     importance = np.exp(np.asarray(target) - np.asarray(drawn))
-    return float(merger_rate) * np.einsum("fzn,z,n->f", power, kernel, importance) / 6
+    rate = float(merger_rate)
+    spectrum = rate * np.einsum("fzn,z,n->f", target_power, density, importance) / 6
+    second_moment = np.einsum("fzn,z,n->f", target_power**2, density, importance) / 6
+    variance = (
+        INCLINATION_SECOND_MOMENT
+        * rate
+        * second_moment
+        / (OBSERVATION_TIME * SECONDS_PER_YEAR)
+    )
+    return spectrum, variance
 
 
 def _rescaled_and_brute_force(
     metadata: CatalogMetadata,
     density_sites: tuple[str, ...],
     points: list[dict[str, float]],
+    *,
+    variance: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Rescaled and brute-force spectra on the same draws and nodes."""
+    """Rescaled and brute-force spectra, or variances, on the same draws and nodes."""
     key = batch_keys(41, 1)[0]
     reference = reference_catalog(metadata, key)
     target = build_population(
         metadata.population.model_name, **metadata.population.model_kwargs
     )
-    rescaled_fn, _ = build_rescaled_spectrum(
-        reference,
-        metadata,
-        population=target,
-        frequencies=OBSERVED_WAVEFORM.build().frequencies,
-        num_redshift_nodes=NUM_NODES,
-        density_sites=density_sites,
-    )
-    return (
-        np.stack([np.asarray(rescaled_fn(p)[0]) for p in points]),
-        np.stack([_spectrum_on_nodes(metadata, key, p, density_sites) for p in points]),
-    )
+    settings: dict[str, Any] = {
+        "population": target,
+        "frequencies": OBSERVED_WAVEFORM.build().frequencies,
+        "num_redshift_nodes": NUM_NODES,
+        "density_sites": density_sites,
+    }
+    if variance:
+        variance_fn = build_rescaled_shot_noise(
+            reference, metadata, observation_time=OBSERVATION_TIME, **settings
+        )
+        rescaled = [np.asarray(variance_fn(p)) for p in points]
+    else:
+        spectrum_fn, _ = build_rescaled_spectrum(reference, metadata, **settings)
+        rescaled = [np.asarray(spectrum_fn(p)[0]) for p in points]
+    brute_force = [
+        _spectrum_on_nodes(metadata, key, p, density_sites)[int(variance)]
+        for p in points
+    ]
+    return np.stack(rescaled), np.stack(brute_force)
 
 
 @pytest.mark.integration
@@ -234,6 +271,88 @@ def test_rescaled_spectrum_reweights_like_waveforms_generated_at_every_node(
     rescaled, brute_force = _rescaled_and_brute_force(reference_metadata, sites, points)
 
     np.testing.assert_allclose(rescaled, brute_force, rtol=1e-5)
+
+
+@pytest.mark.integration
+def test_rescaled_shot_noise_matches_waveforms_generated_at_every_node(
+    reference_metadata: CatalogMetadata,
+) -> None:
+    fiducials = reference_metadata.fiducials
+    points = [
+        fiducials,
+        {**fiducials, "H0": 60.0},
+        {**fiducials, "xi_0": 1.2, "xi_n": 2.0},
+    ]
+    rescaled, brute_force = _rescaled_and_brute_force(
+        reference_metadata, (), points, variance=True
+    )
+
+    # Squaring doubles the power-law index, so linear interpolation in ln f
+    # errs several times more than for the spectrum: about 2e-6 here.
+    np.testing.assert_allclose(rescaled, brute_force, rtol=1e-5)
+
+
+@pytest.mark.integration
+def test_rescaled_shot_noise_reweights_like_waveforms_generated_at_every_node(
+    reference_metadata: CatalogMetadata,
+) -> None:
+    sites = ("source_frame_mass_1", "source_frame_mass_2")
+    points = [{**reference_metadata.fiducials, "mass_width": 1.8}]
+    rescaled, brute_force = _rescaled_and_brute_force(
+        reference_metadata, sites, points, variance=True
+    )
+
+    np.testing.assert_allclose(rescaled, brute_force, rtol=1e-5)
+
+
+@pytest.fixture
+def shot_noise_builder(reference_metadata: CatalogMetadata) -> Any:
+    """``observation_time -> variance_fn`` on one reference catalog."""
+    data = reference_catalog(reference_metadata, batch_keys(41, 1)[0])
+    target = build_population(
+        reference_metadata.population.model_name,
+        **reference_metadata.population.model_kwargs,
+    )
+
+    def build(observation_time: float) -> Any:
+        return build_rescaled_shot_noise(
+            data,
+            reference_metadata,
+            population=target,
+            frequencies=OBSERVED_WAVEFORM.build().frequencies,
+            num_redshift_nodes=NUM_NODES,
+            density_sites=(),
+            observation_time=observation_time,
+        )
+
+    return build
+
+
+@pytest.mark.integration
+def test_rescaled_shot_noise_falls_inversely_with_observation_time(
+    reference_metadata: CatalogMetadata, shot_noise_builder: Any
+) -> None:
+    fiducials = reference_metadata.fiducials
+    one_year = np.asarray(shot_noise_builder(1.0)(fiducials))
+    four_years = np.asarray(shot_noise_builder(4.0)(fiducials))
+
+    np.testing.assert_allclose(four_years, one_year / 4.0, rtol=1e-14)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("hubble_constant", [50.0, 90.0])
+def test_rescaled_shot_noise_grows_linearly_with_the_hubble_constant(
+    reference_metadata: CatalogMetadata,
+    shot_noise_builder: Any,
+    hubble_constant: float,
+) -> None:
+    """The squared kernel goes as :math:`D_H / \\chi^2 \\propto H_0`."""
+    fiducials = reference_metadata.fiducials
+    variance_fn = shot_noise_builder(OBSERVATION_TIME)
+    shifted = np.asarray(variance_fn({**fiducials, "H0": hubble_constant}))
+    ratio = shifted / np.asarray(variance_fn(fiducials))
+
+    np.testing.assert_allclose(ratio, hubble_constant / fiducials["H0"], rtol=1e-12)
 
 
 @pytest.mark.integration
@@ -298,6 +417,38 @@ def test_rescaled_spectrum_as_a_jit_argument_traces_once_per_shape(
 
     assert len(traces) == 1
     assert not np.allclose(results[0], results[1], rtol=1e-6, atol=0.0)
+
+
+@pytest.mark.integration
+def test_rescaled_shot_noise_as_a_jit_argument_traces_once_per_shape(
+    reference_metadata: CatalogMetadata,
+) -> None:
+    """Separately built catalogs of one shape share a compilation."""
+    target = build_population(
+        reference_metadata.population.model_name,
+        **reference_metadata.population.model_kwargs,
+    )
+    traces: list[None] = []
+
+    def body(fn: Any, params: dict[str, float]) -> jax.Array:
+        traces.append(None)
+        return fn(params)
+
+    variance = jax.jit(body)
+    for seed in (41, 42):
+        data = reference_catalog(reference_metadata, batch_keys(seed, 1)[0])
+        fn = build_rescaled_shot_noise(
+            data,
+            reference_metadata,
+            population=target,
+            frequencies=data["frequencies"][:20],
+            num_redshift_nodes=4,
+            density_sites=(),
+            observation_time=OBSERVATION_TIME,
+        )
+        variance(fn, reference_metadata.fiducials)
+
+    assert len(traces) == 1
 
 
 @pytest.mark.parametrize("xi_0", [1.0, 0.8])
