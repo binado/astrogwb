@@ -40,14 +40,21 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
+import arviz_plots as azp
 import matplotlib.pyplot as plt
 import numpy as np
+from arviz_base import from_dict
+from matplotlib.axes import Axes
 from matplotlib.colors import to_hex
 from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
+from matplotlib.projections import register_projection
 from numpy.typing import ArrayLike
 from scipy.interpolate import CubicSpline
 
 if TYPE_CHECKING:
+    from xarray import DataTree
+
     from astrogwb.paper.config.detectors import DetectorRegistry
 
 _STYLE_PATH = Path(__file__).parent / "paper.mplstyle"
@@ -467,3 +474,137 @@ def detector_network_styles(
     colors = [color_by_base[_base_network_name(n.name)] for n in networks]
     linestyles = ["--" if n.name.endswith("-CE-Hanford") else "-" for n in networks]
     return colors, linestyles
+
+
+def convert_grids_to_samples(
+    grids: Mapping[str, ArrayLike],
+    log_density: ArrayLike,
+    num_samples: int,
+    *,
+    rng: np.random.Generator,
+) -> DataTree:
+    """Draw samples from a posterior evaluated on a uniform grid.
+
+    A cell is chosen with probability proportional to its density, then the
+    draw is jittered uniformly within the cell, so the samples are distributed
+    as the piecewise-constant density on the grid. The result has the layout
+    of an MCMC run with one chain, so grid and MCMC posteriors can share the
+    plotting code.
+
+    Parameters
+    ----------
+    grids
+        Bin-center coordinates by parameter name, one strictly increasing
+        uniform 1D array per axis of ``log_density``, in axis order.
+    log_density
+        Unnormalized log density with shape ``tuple(len(g) for g in grids)``.
+        ``-inf`` entries become empty cells.
+    num_samples
+        Number of draws.
+    rng
+        Source of randomness.
+
+    Returns
+    -------
+    xarray.DataTree
+        ``posterior`` group with one variable per grid, dims ``(chain, draw)``
+        of sizes ``(1, num_samples)``.
+    """
+    log_density = np.asarray(log_density, dtype=np.float64)
+    weights = np.exp(log_density - np.max(log_density)).ravel()
+    cells = np.unravel_index(
+        rng.choice(weights.size, size=num_samples, p=weights / weights.sum()),
+        log_density.shape,
+    )
+    draws = {}
+    for axis, (name, grid) in enumerate(grids.items()):
+        grid = np.asarray(grid, dtype=np.float64)
+        half_cell = (grid[1] - grid[0]) / 2
+        draws[name] = (
+            grid[cells[axis]] + rng.uniform(-half_cell, half_cell, num_samples)
+        )[None]
+    return from_dict({"posterior": draws})
+
+
+def plot_network_marginals(
+    parameter: str,
+    posteriors: Mapping[str, DataTree],
+    networks: Sequence[tuple[str, str]],
+    fiducial: float,
+    *,
+    bounds: tuple[float, float] | None = None,
+) -> Figure:
+    """Overlay one parameter's marginal posterior for every network.
+
+    A thin wrapper over :func:`arviz_plots.plot_dist` that applies the paper
+    styling: the detector-network colors and line styles, the neutral truth
+    line and the comparison legend. Grid posteriors enter through
+    :func:`convert_grids_to_samples`, MCMC posteriors as they are. Credible
+    intervals and point estimates are not drawn; quote them from the
+    summaries.
+
+    Parameters
+    ----------
+    parameter
+        Variable name in each ``posterior`` group, also the axis label key.
+    posteriors
+        Posterior draws by network name.
+    networks
+        ``(name, LaTeX label)`` in legend order.
+    fiducial
+        Truth marker position.
+    bounds
+        Hard limits of the parameter's support, such as a prior window. The
+        density estimate is cut and corrected at these limits instead of
+        leaking past them. Every draw must lie inside; for samples from
+        :func:`convert_grids_to_samples` these are the outer cell edges, half
+        a grid step beyond the first and last grid point.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+    """
+    # arviz_plots reads its backend off the Axes class's module. gwpy replaces
+    # the default axes with its own once imported, which selects a backend
+    # that does not exist; restore matplotlib's (idempotent).
+    register_projection(Axes)
+    styled = [Network(name, label, ()) for name, label in networks]
+    colors, linestyles = detector_network_styles(styled)
+    dist_stats = {} if bounds is None else {"custom_lims": bounds}
+    collection = azp.plot_dist(
+        {network.name: posteriors[network.name] for network in styled},
+        var_names=[parameter],
+        kind="kde",
+        backend="matplotlib",
+        # The stub omits "face", which the runtime accepts.
+        visuals={  # ty: ignore[invalid-argument-type]
+            "credible_interval": False,
+            "point_estimate": False,
+            "point_estimate_text": False,
+            "face": False,
+            "title": False,
+            "remove_axis": False,
+        },
+        stats={"dist": dist_stats},
+        aes={"color": ["model"], "linestyle": ["model"]},
+        color=colors,
+        linestyle=linestyles,
+        figure_kwargs={"figsize": plt.rcParams["figure.figsize"]},
+    )
+    ax = collection.viz["plot"][parameter].item()
+    ax.axvline(fiducial, **TRUTH)
+    ax.set(xlabel=parameter_label(parameter), ylabel="Posterior density")
+    handles = [
+        Line2D(
+            [],
+            [],
+            color=color,
+            linestyle=linestyle,  # ty: ignore[invalid-argument-type]
+            label=network.label,
+        )
+        for network, color, linestyle in zip(styled, colors, linestyles, strict=True)
+    ]
+    ax.legend(handles=handles, **DETECTOR_COMPARISON_LEGEND)
+    fig = collection.viz["figure"].item()
+    fig.tight_layout()
+    return fig

@@ -7,7 +7,7 @@ with app.setup(hide_code=True):
     import hashlib
     import json
     import os
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Mapping
     from functools import partial
     from pathlib import Path
 
@@ -19,12 +19,9 @@ with app.setup(hide_code=True):
     import jax
     import jax.numpy as jnp
     import marimo as mo
-    import matplotlib.pyplot as plt
     import numpy as np
     import pandas as pd
     from matplotlib.axes import Axes
-    from matplotlib.figure import Figure
-    from matplotlib.lines import Line2D
     from matplotlib.projections import register_projection
     from numpy.typing import NDArray
 
@@ -50,14 +47,12 @@ with app.setup(hide_code=True):
     from astrogwb.paper.config.runs import CATALOGS_ROOT, FIGURES_DIR
     from astrogwb.paper.plotting import (
         CORNER_LEVELS,
-        DETECTOR_COMPARISON_LEGEND,
         DETECTOR_NETWORKS,
-        TRUTH,
-        Network,
-        detector_network_styles,
+        convert_grids_to_samples,
         get_corner_kwargs,
         parameter_label,
         plot_corner_for_posterior_grid,
+        plot_network_marginals,
         save_figures,
         use_paper_style,
     )
@@ -151,6 +146,8 @@ def _():
     # Different seeds: the injection must not be a subset of the catalog.
     data_seed = 41
     catalog_seed = 42
+    marginal_seed = 43  # jitter and cell draws behind the marginal plots
+    num_marginal_samples = 2**18  # grid draws per network for the marginal KDEs
     num_samples = 2**17  # intrinsic draws, one waveform each
     redshift_nodes = 32  # Gauss-Legendre nodes in 1/(1 + z); costs no waveforms
     catalog_chunk_size = 4096  # reference waveforms per lax.map batch
@@ -183,6 +180,7 @@ def _():
         catalog_chunk_size = 512
         chunk_size = 512
         grid_chunk_size = 4
+        num_marginal_samples = 2000
         write_figures_default = False
         cache_name_prefix = "smoke_"
         h0_window, h0_size = (40.0, 100.0), 7
@@ -259,9 +257,11 @@ def _():
         grid_chunk_size,
         grid_specs,
         injection_metadata,
+        marginal_seed,
         maximum_frequency,
         minimum_frequency,
         network_names,
+        num_marginal_samples,
         observation_time,
         population,
         redshift_nodes,
@@ -621,58 +621,6 @@ def summary_rows(
     return rows
 
 
-@app.function(hide_code=True)
-def plot_marginals(
-    parameter: str,
-    grid: NDArray[np.float64],
-    densities: Mapping[str, NDArray[np.float64]],
-    networks: Sequence[tuple[str, str]],
-    fiducial: float,
-) -> Figure:
-    """Overlay one parameter's marginal posterior for every network.
-
-    Colors and line styles follow the detector-comparison convention of
-    ``scripts/mcmc_cosmological_parameters.py``.
-
-    Parameters
-    ----------
-    parameter
-        Parameter name, for the axis label.
-    grid
-        Parameter grid.
-    densities
-        Marginal density by network name.
-    networks
-        ``(name, LaTeX label)`` in legend order.
-    fiducial
-        Truth marker position.
-
-    Returns
-    -------
-    matplotlib.figure.Figure
-    """
-    styled = [Network(name, label, ()) for name, label in networks]
-    colors, linestyles = detector_network_styles(styled)
-    fig, ax = plt.subplots()
-    handles = []
-    for network, color, linestyle in zip(styled, colors, linestyles, strict=True):
-        ax.plot(grid, densities[network.name], color=color, linestyle=linestyle)
-        handles.append(
-            Line2D(
-                [],
-                [],
-                color=color,
-                linestyle=linestyle,  # ty: ignore[invalid-argument-type]
-                label=network.label,
-            )
-        )
-    ax.axvline(fiducial, **TRUTH)  # ty: ignore[invalid-argument-type]
-    ax.set(xlabel=parameter_label(parameter), ylabel="Posterior density")
-    ax.legend(handles=handles, **DETECTOR_COMPARISON_LEGEND)  # ty: ignore[no-matching-overload]
-    fig.tight_layout()
-    return fig
-
-
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
@@ -862,13 +810,13 @@ def _(
 
 
 @app.cell
-def _(FIDUCIALS, h0_posterior, labelled_networks):
+def _(FIDUCIALS, h0_posterior, labelled_networks, marginal_seed, num_marginal_samples):
     _grids, _log_densities = h0_posterior
-    h0_marginal = plot_marginals(
+    _rng = np.random.default_rng(marginal_seed)
+    h0_marginal = plot_network_marginals(
         "H0",
-        _grids["H0"],
         {
-            name: marginal_density(_grids["H0"], ld, axis=0)
+            name: convert_grids_to_samples(_grids, ld, num_marginal_samples, rng=_rng)
             for name, ld in _log_densities.items()
         },
         labelled_networks,
@@ -927,13 +875,19 @@ def _(
 
 
 @app.cell
-def _(FIDUCIALS, h0_omega_m_posterior, labelled_networks):
+def _(
+    FIDUCIALS,
+    h0_omega_m_posterior,
+    labelled_networks,
+    marginal_seed,
+    num_marginal_samples,
+):
     _grids, _log_densities = h0_omega_m_posterior
-    h0_omega_m_marginal = plot_marginals(
+    _rng = np.random.default_rng(marginal_seed)
+    h0_omega_m_marginal = plot_network_marginals(
         "H0",
-        _grids["H0"],
         {
-            name: marginal_density(_grids["H0"], ld, axis=0)
+            name: convert_grids_to_samples(_grids, ld, num_marginal_samples, rng=_rng)
             for name, ld in _log_densities.items()
         },
         labelled_networks,
@@ -1017,13 +971,13 @@ def _(
 
 
 @app.cell
-def _(FIDUCIALS, labelled_networks, xi_posterior):
+def _(FIDUCIALS, labelled_networks, marginal_seed, num_marginal_samples, xi_posterior):
     _grids, _log_densities = xi_posterior
-    xi_marginal = plot_marginals(
+    _rng = np.random.default_rng(marginal_seed)
+    xi_marginal = plot_network_marginals(
         "xi_0",
-        _grids["xi_0"],
         {
-            name: marginal_density(_grids["xi_0"], ld, axis=0)
+            name: convert_grids_to_samples(_grids, ld, num_marginal_samples, rng=_rng)
             for name, ld in _log_densities.items()
         },
         labelled_networks,

@@ -266,3 +266,70 @@ def test_detector_network_styles_pairs_et_and_et_plus_ce() -> None:
         assert base == companion
     assert linestyles == ["-", "--"] * 3
     assert len(set(colors)) == 3
+
+
+@pytest.fixture
+def gaussian_grid() -> tuple[dict[str, np.ndarray], np.ndarray]:
+    """A 2D Gaussian log density on a uniform grid, centered at (2, -1)."""
+    x = np.linspace(0.0, 4.0, 81)
+    y = np.linspace(-3.0, 1.0, 41)
+    log_density = -0.5 * (((x[:, None] - 2.0) / 0.3) ** 2 + ((y - -1.0) / 0.5) ** 2)
+    return {"x": x, "y": y}, log_density
+
+
+def test_convert_grids_to_samples_follows_density_and_stays_within_cells(
+    gaussian_grid,
+) -> None:
+    grids, log_density = gaussian_grid
+    rng = np.random.default_rng(0)
+
+    posterior = plotting.convert_grids_to_samples(
+        grids, log_density, 20_000, rng=rng
+    ).posterior
+
+    for name, center, scale in [("x", 2.0, 0.3), ("y", -1.0, 0.5)]:
+        draws = posterior[name].to_numpy()
+        assert draws.shape == (1, 20_000)
+        assert abs(draws.mean() - center) < 5 * scale / np.sqrt(draws.size)
+        assert abs(draws.std() - scale) < 0.05 * scale
+        step = grids[name][1] - grids[name][0]
+        assert draws.min() >= grids[name][0] - step / 2
+        assert draws.max() <= grids[name][-1] + step / 2
+
+
+def test_convert_grids_to_samples_skips_empty_cells(gaussian_grid) -> None:
+    grids, log_density = gaussian_grid
+    log_density = log_density.copy()
+    log_density[grids["x"] > 2.0, :] = -np.inf
+
+    posterior = plotting.convert_grids_to_samples(
+        grids, log_density, 5_000, rng=np.random.default_rng(1)
+    ).posterior
+
+    step = grids["x"][1] - grids["x"][0]
+    assert posterior["x"].max() <= 2.0 + step / 2
+
+
+@pytest.mark.parametrize("bounds", [None, (-0.5, 4.5)])
+def test_plot_network_marginals_draws_one_curve_per_network(
+    gaussian_grid, bounds
+) -> None:
+    grids, log_density = gaussian_grid
+    rng = np.random.default_rng(2)
+    networks = plotting.DETECTOR_NETWORKS[:3]
+    posteriors = {
+        name: plotting.convert_grids_to_samples(grids, log_density, 2_000, rng=rng)
+        for name, _ in networks
+    }
+
+    fig = plotting.plot_network_marginals("x", posteriors, networks, 2.0, bounds=bounds)
+
+    (ax,) = fig.axes
+    # One density curve per network, plus the truth line.
+    assert len(ax.lines) == len(networks) + 1
+    legend = ax.get_legend()
+    assert legend is not None
+    assert [t.get_text() for t in legend.get_texts()] == [
+        label for _, label in networks
+    ]
+    matplotlib.pyplot.close(fig)
