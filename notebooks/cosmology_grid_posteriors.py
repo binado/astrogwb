@@ -32,11 +32,16 @@ with app.setup(hide_code=True):
     from astrogwb.detector import effective_psd, gaussian_bin_scale
     from astrogwb.frequency import frequency_mask
     from astrogwb.gwb.importance import (
+        build_rescaled_shot_noise,
         build_rescaled_spectrum,
         reference_catalog,
         reference_catalog_stem,
     )
-    from astrogwb.inference import GaussianGWBBatchedLikelihood
+    from astrogwb.inference import (
+        GaussianGWBBatchedLikelihood,
+        SpectralVarianceFn,
+        amplitude_shot_noise_variance,
+    )
     from astrogwb.paper.cache import default_cache_dir
     from astrogwb.paper.catalogs import validate_matching_frequency_grids
     from astrogwb.paper.config import (
@@ -83,7 +88,9 @@ def _():
     so the figures can be iterated on without recomputing anything.
 
     The data are a **zero-noise Poisson injection**: one Poisson-count
-    spectrum drawn at the fiducials, with no Gaussian noise added on top. The
+    spectrum drawn at the fiducials, with no Gaussian noise added on top. It is
+    a catalog realization $S_h^{\mathrm{cat}}$, so it carries physical shot
+    noise about the expected spectrum, which the likelihood models. The
     model spectrum is a **rescaled reference-redshift catalog**: intrinsic
     draws at the same fiducials, each generated once at the window's lower
     edge and rescaled to the Gauss-Legendre redshift nodes. The two are drawn
@@ -113,6 +120,20 @@ def _():
     The network only changes $\sigma$ (and which bins are usable), so each grid
     point is predicted once and all six networks' likelihoods are evaluated on
     that one prediction.
+
+    **Shot noise.** The data are one finite catalog, so they also scatter
+    about the expected spectrum $S$ with the per-bin variance $V_f$ of a
+    Poisson sum (Campbell's theorem), computed from the same reference catalog
+    with every factor of the quadrature squared. Within the band almost all of
+    it is one flat amplitude mode, $S^{\mathrm{cat}} \approx S(1 + \epsilon)$,
+    so it enters as $\epsilon \sim \mathcal{N}(0, s^2)$ marginalized: a
+    rank-one covariance $D + s^2 S S^T$, inverted in closed form, with $s$ the
+    SNR-weighted mean of $\sqrt{V_f}/S_f$. Along the template this is a
+    Gaussian in the amplitude with variance $\rho^{-2} + A^2 s^2$. The
+    variance comes from the model at each grid point, never from the data.
+    Variants: `detector` (no shot noise), `amplitude` ($s^2$ at each point),
+    `fixed` ($s^2$ at the fiducial), and `per_frequency` ($u_f =
+    \sqrt{V_f}$, a cross-check where $\Xi_0$ and $n$ tilt the template).
 
     **Prediction.** Every draw $\theta_k$ is generated once, at the window's
     lower edge $z_{\min}$. A $(2,2)$-mode aligned-spin waveform scales
@@ -173,6 +194,18 @@ def _():
     omega_m_window, omega_m_size = (0.2856, 0.3336), 41  # +/- 4 prior sigma
     xi_0_window, xi_0_size = (0.94, 1.06), 121
     xi_n_window, xi_n_size = (0.3, 3.0), 55  # prior range
+
+    # Likelihood variants evaluated per problem, and the one every figure
+    # shows. "fixed" pins s^2 at the fiducial; the A/B section adopts it if it
+    # moves no posterior mean or sd by more than ab_tolerance detector sigma,
+    # which it does not (worst 0.003 sigma).
+    likelihood_variant = "fixed"
+    problem_variants = {
+        "H0": ("detector", "amplitude", "fixed"),
+        "H0_Omega_m": ("detector", "amplitude", "fixed"),
+        "xi_0_xi_n": ("detector", "amplitude", "fixed", "per_frequency"),
+    }
+    ab_tolerance = 0.05
 
     SMOKE = os.environ.get("ASTROGWB_NOTEBOOK_SMOKE") == "1"
     write_figures_default = True
@@ -247,6 +280,7 @@ def _():
         FIDUCIALS,
         FIGURES,
         PRIORS,
+        ab_tolerance,
         cache_dir,
         cache_name_prefix,
         catalog_chunk_size,
@@ -259,11 +293,13 @@ def _():
         grid_chunk_size,
         grid_specs,
         injection_metadata,
+        likelihood_variant,
         maximum_frequency,
         minimum_frequency,
         network_names,
         observation_time,
         population,
+        problem_variants,
         redshift_nodes,
         registry,
         write_figures,
@@ -526,6 +562,81 @@ def grid_posterior(
 
 
 @app.function(hide_code=True)
+def shot_noise_variant(
+    variant: str,
+    variance_fn: SpectralVarianceFn,
+    fiducial_relative_variance: NDArray[np.float64],
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Evaluator keyword arguments and cache settings of one likelihood variant.
+
+    Parameters
+    ----------
+    variant
+        ``"detector"``, ``"amplitude"``, ``"fixed"`` or ``"per_frequency"``.
+    variance_fn
+        The per-bin shot-noise variance, a pytree bound to the catalog.
+    fiducial_relative_variance
+        :math:`s^2` at the fiducials per network, in ``per_network`` order;
+        used by ``"fixed"`` only.
+
+    Returns
+    -------
+    tuple
+        Keyword arguments for :class:`GaussianGWBBatchedLikelihood`, and the
+        settings that set the variant apart in a cache digest. The detector
+        variant adds none, so its caches predate shot noise and stay valid.
+    """
+    if variant == "detector":
+        return {}, {}
+    if variant == "fixed":
+        values = [float(value) for value in fiducial_relative_variance]
+        return (
+            {"amplitude_shot_noise_variance": jnp.asarray(values)},
+            {"shot_noise": variant, "relative_variance": values},
+        )
+    return (
+        {"shot_noise_variance_fn": variance_fn, "shot_noise_direction": variant},
+        {"shot_noise": variant},
+    )
+
+
+@app.function(hide_code=True)
+def problem_posteriors(
+    run: str,
+    axes: Mapping[str, tuple[float, float, int]],
+    variants: Sequence[str],
+    evaluator: GaussianGWBBatchedLikelihood,
+    spectral_density_fn: Callable[..., object],
+    variance_fn: SpectralVarianceFn,
+    fiducial_relative_variance: NDArray[np.float64],
+    settings: Mapping[str, object],
+    **kwargs: object,
+) -> dict[str, tuple[dict[str, NDArray], dict[str, NDArray]]]:
+    """:func:`grid_posterior` of one problem for every likelihood variant.
+
+    ``kwargs`` are :func:`grid_posterior`'s remaining arguments. One evaluator
+    serves every variant; each variant compiles once.
+    """
+    posteriors = {}
+    for variant in variants:
+        evaluator_kwargs, variant_settings = shot_noise_variant(
+            variant, variance_fn, fiducial_relative_variance
+        )
+        posteriors[variant] = grid_posterior(
+            run,
+            axes,
+            partial(
+                evaluator,
+                spectral_density_fn=spectral_density_fn,
+                **evaluator_kwargs,
+            ),
+            settings={**settings, **variant_settings},
+            **kwargs,  # ty: ignore[invalid-argument-type]
+        )
+    return posteriors
+
+
+@app.function(hide_code=True)
 def marginal_density(
     grid: NDArray[np.float64], log_density: NDArray[np.float64], axis: int
 ) -> NDArray[np.float64]:
@@ -701,11 +812,12 @@ def _(
     catalog_metadata,
     catalog_seed,
     frequencies,
+    observation_time,
     population,
     redshift_nodes,
 ):
     # The NumPy catalog is local to this cell, so it is freed once the device
-    # copy made by build_rescaled_spectrum exists: only one copy stays resident.
+    # copies made by the two builders exist: the power and its square.
     catalog_data = ensure_reference_catalog(
         catalog_metadata, catalog_seed, CATALOGS_ROOT, chunk_size=catalog_chunk_size
     )
@@ -725,7 +837,16 @@ def _(
         num_redshift_nodes=redshift_nodes,
         density_sites=(),
     )
-    return (spectral_density_fn,)
+    shot_noise_variance_fn = build_rescaled_shot_noise(
+        catalog_data,
+        catalog_metadata,
+        population=target,
+        frequencies=frequencies,
+        num_redshift_nodes=redshift_nodes,
+        density_sites=(),
+        observation_time=observation_time,
+    )
+    return shot_noise_variance_fn, spectral_density_fn
 
 
 @app.cell
@@ -811,6 +932,57 @@ def _(
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
+    ### Shot noise at the fiducials
+
+    The relative amplitude scatter $s$ of one catalog realization and the
+    optimal SNR $\rho$ of the expected spectrum, per network. $\rho s$ is the
+    shot noise in units of the detector's amplitude error; it does not depend
+    on the observation time. `notebooks/spectrum_snrs.py` measures it
+    empirically from Poisson ensembles, about 0.48 for the fiducial network.
+    """)
+    return
+
+
+@app.cell
+def _(
+    FIDUCIALS,
+    per_network,
+    shot_noise_variance_fn,
+    spectral_density_fn,
+):
+    _spectrum = spectral_density_fn(FIDUCIALS)[0]
+    _variance = shot_noise_variance_fn(FIDUCIALS)
+    _label = dict(DETECTOR_NETWORKS)
+    _rows = []
+    for _name, _data in per_network.items():
+        _keep = np.asarray(_data["frequency_mask"])
+        _sigma = np.asarray(_data["scale"])
+        _s2 = float(
+            amplitude_shot_noise_variance(
+                _spectrum, _variance, _data["scale"], _data["frequency_mask"]
+            )
+        )
+        _snr = float(
+            np.sqrt(np.sum(np.where(_keep, (np.asarray(_spectrum) / _sigma) ** 2, 0)))
+        )
+        _rows.append(
+            {
+                "network": _label[_name],
+                "rho": _snr,
+                "s": np.sqrt(_s2),
+                "rho s": _snr * np.sqrt(_s2),
+                "s2": _s2,
+            }
+        )
+    shot_noise_table = pd.DataFrame(_rows)
+    fiducial_relative_variance = shot_noise_table["s2"].to_numpy()
+    shot_noise_table.drop(columns="s2")
+    return (fiducial_relative_variance,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
     # Inferring cosmological parameters
 
     The two cosmological problems, with $H_0$ alone first and then $H_0$
@@ -838,27 +1010,33 @@ def _(
     cache_dir,
     cache_name_prefix,
     cache_settings,
+    fiducial_relative_variance,
     grid_chunk_size,
     grid_specs,
+    likelihood_variant,
     observed,
     per_network,
+    problem_variants,
+    shot_noise_variance_fn,
     spectral_density_fn,
 ):
-    h0_posterior = grid_posterior(
+    h0_posteriors = problem_posteriors(
         "H0",
         grid_specs["H0"],
-        partial(
-            GaussianGWBBatchedLikelihood(PRIORS, chunk_size=grid_chunk_size),
-            spectral_density_fn=spectral_density_fn,
-        ),
+        problem_variants["H0"],
+        GaussianGWBBatchedLikelihood(PRIORS, chunk_size=grid_chunk_size),
+        spectral_density_fn,
+        shot_noise_variance_fn,
+        fiducial_relative_variance,
+        cache_settings,
         fiducials=FIDUCIALS,
         observed=observed,
         per_network=per_network,
-        settings=cache_settings,
         cache_dir=cache_dir,
         prefix=cache_name_prefix,
     )
-    return (h0_posterior,)
+    h0_posterior = h0_posteriors[likelihood_variant]
+    return h0_posterior, h0_posteriors
 
 
 @app.cell
@@ -903,27 +1081,33 @@ def _(
     cache_dir,
     cache_name_prefix,
     cache_settings,
+    fiducial_relative_variance,
     grid_chunk_size,
     grid_specs,
+    likelihood_variant,
     observed,
     per_network,
+    problem_variants,
+    shot_noise_variance_fn,
     spectral_density_fn,
 ):
-    h0_omega_m_posterior = grid_posterior(
+    h0_omega_m_posteriors = problem_posteriors(
         "H0_Omega_m",
         grid_specs["H0_Omega_m"],
-        partial(
-            GaussianGWBBatchedLikelihood(PRIORS, chunk_size=grid_chunk_size),
-            spectral_density_fn=spectral_density_fn,
-        ),
+        problem_variants["H0_Omega_m"],
+        GaussianGWBBatchedLikelihood(PRIORS, chunk_size=grid_chunk_size),
+        spectral_density_fn,
+        shot_noise_variance_fn,
+        fiducial_relative_variance,
+        cache_settings,
         fiducials=FIDUCIALS,
         observed=observed,
         per_network=per_network,
-        settings=cache_settings,
         cache_dir=cache_dir,
         prefix=cache_name_prefix,
     )
-    return (h0_omega_m_posterior,)
+    h0_omega_m_posterior = h0_omega_m_posteriors[likelihood_variant]
+    return h0_omega_m_posterior, h0_omega_m_posteriors
 
 
 @app.cell
@@ -993,27 +1177,33 @@ def _(
     cache_dir,
     cache_name_prefix,
     cache_settings,
+    fiducial_relative_variance,
     grid_chunk_size,
     grid_specs,
+    likelihood_variant,
     observed,
     per_network,
+    problem_variants,
+    shot_noise_variance_fn,
     spectral_density_fn,
 ):
-    xi_posterior = grid_posterior(
+    xi_posteriors = problem_posteriors(
         "xi_0_xi_n",
         grid_specs["xi_0_xi_n"],
-        partial(
-            GaussianGWBBatchedLikelihood(PRIORS, chunk_size=grid_chunk_size),
-            spectral_density_fn=spectral_density_fn,
-        ),
+        problem_variants["xi_0_xi_n"],
+        GaussianGWBBatchedLikelihood(PRIORS, chunk_size=grid_chunk_size),
+        spectral_density_fn,
+        shot_noise_variance_fn,
+        fiducial_relative_variance,
+        cache_settings,
         fiducials=FIDUCIALS,
         observed=observed,
         per_network=per_network,
-        settings=cache_settings,
         cache_dir=cache_dir,
         prefix=cache_name_prefix,
     )
-    return (xi_posterior,)
+    xi_posterior = xi_posteriors[likelihood_variant]
+    return xi_posterior, xi_posteriors
 
 
 @app.cell
@@ -1069,6 +1259,191 @@ def _(grid_specs, xi_posterior):
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
+    # Shot-noise likelihood variants
+
+    Every problem was evaluated with each of its likelihood variants. The
+    comparison uses the marginal posterior mean and standard deviation, which
+    are not quantized to the grid cell as the HDI is: on the $H_0$ grid one
+    cell is already about $0.17\sigma$.
+
+    - **Effect of shot noise**: the shift of the mean and the ratio of the
+      standard deviations of each variant against `detector`.
+    - **A/B, fixed vs per-point $s^2$**: a covariance that depends on the
+      parameters adds its $\ln\det$ to the likelihood, which can carry
+      spurious information. If pinning $s^2$ at the fiducial moves no mean or
+      standard deviation by more than `ab_tolerance` detector $\sigma$, the
+      fixed value is the safer choice.
+    - **Leakage**: for $(\Xi_0, n)$, which tilt the template, the
+      per-frequency direction against the amplitude one.
+    """)
+    return
+
+
+@app.function(hide_code=True)
+def moment_rows(
+    run: str,
+    likelihood: str,
+    grids: Mapping[str, NDArray[np.float64]],
+    log_densities: Mapping[str, NDArray[np.float64]],
+    axes: Mapping[str, tuple[float, float, int]],
+) -> list[dict[str, object]]:
+    """Marginal posterior mean and standard deviation, per network and parameter.
+
+    Trapezoid moments of :func:`marginal_density`; unlike the HDI they resolve
+    changes far below one grid cell.
+    """
+    label = dict(DETECTOR_NETWORKS)
+    rows: list[dict[str, object]] = []
+    for network, log_density in log_densities.items():
+        for axis, name in enumerate(axes):
+            grid = grids[name]
+            density = marginal_density(grid, log_density, axis=axis)
+            mean = float(np.trapezoid(grid * density, grid))
+            variance = float(np.trapezoid((grid - mean) ** 2 * density, grid))
+            rows.append(
+                {
+                    "problem": run,
+                    "likelihood": likelihood,
+                    "network": label[network],
+                    "parameter": name,
+                    "mean": mean,
+                    "sd": np.sqrt(variance),
+                    "cell": float(grid[1] - grid[0]),
+                }
+            )
+    return rows
+
+
+@app.function(hide_code=True)
+def compare_moments(
+    moments: pd.DataFrame, variant: str, reference: str, scale: str = "detector"
+) -> pd.DataFrame:
+    """``variant`` against ``reference``, in units of the ``scale`` sd.
+
+    Rows are the (problem, network, parameter) both were evaluated for. A
+    posterior narrower than one grid cell is not resolved, so its rows are NaN
+    rather than a ratio of discretization noise.
+    """
+    keys = ["problem", "network", "parameter"]
+    by = {
+        name: moments[moments["likelihood"] == name].set_index(keys)
+        for name in (variant, reference, scale)
+    }
+    index = by[variant].index.intersection(by[reference].index)
+    resolved = by[scale].loc[index, "sd"] >= by[scale].loc[index, "cell"]
+    sigma = by[scale].loc[index, "sd"].where(resolved)
+    return pd.DataFrame(
+        {
+            "mean shift / sigma": (
+                by[variant].loc[index, "mean"] - by[reference].loc[index, "mean"]
+            )
+            / sigma,
+            "sd change / sigma": (
+                by[variant].loc[index, "sd"] - by[reference].loc[index, "sd"]
+            )
+            / sigma,
+            "sd ratio": (
+                by[variant].loc[index, "sd"] / by[reference].loc[index, "sd"]
+            ).where(resolved),
+        }
+    ).reset_index()
+
+
+@app.cell
+def _(grid_specs, h0_omega_m_posteriors, h0_posteriors, xi_posteriors):
+    shot_noise_moments = pd.DataFrame(
+        [
+            row
+            for _run, _posteriors in (
+                ("H0", h0_posteriors),
+                ("H0_Omega_m", h0_omega_m_posteriors),
+                ("xi_0_xi_n", xi_posteriors),
+            )
+            for _variant, (_grids, _log_densities) in _posteriors.items()
+            for row in moment_rows(
+                _run, _variant, _grids, _log_densities, grid_specs[_run]
+            )
+        ]
+    )
+    return (shot_noise_moments,)
+
+
+@app.cell
+def _(shot_noise_moments):
+    shot_noise_effect = pd.concat(
+        [
+            compare_moments(shot_noise_moments, _variant, "detector").assign(
+                likelihood=_variant
+            )
+            for _variant in ("amplitude", "fixed", "per_frequency")
+            if (shot_noise_moments["likelihood"] == _variant).any()
+        ]
+    )
+    shot_noise_effect
+    return
+
+
+@app.cell
+def _(ab_tolerance, shot_noise_moments):
+    ab_comparison = compare_moments(shot_noise_moments, "fixed", "amplitude")
+    _worst = float(
+        ab_comparison[["mean shift / sigma", "sd change / sigma"]].abs().max().max()
+    )
+    if np.isnan(_worst):
+        _verdict = "no posterior is resolved by its grid: no A/B verdict"
+    elif _worst < ab_tolerance:
+        _verdict = (
+            f"fixed s^2 is within {ab_tolerance} sigma of per-point s^2 "
+            f"everywhere (worst {_worst:.3f}): adopt likelihood_variant = 'fixed'"
+        )
+    else:
+        _verdict = (
+            f"fixed s^2 moves a moment by {_worst:.3f} sigma > {ab_tolerance}: "
+            "keep the per-point 'amplitude' variant"
+        )
+    print(_verdict)
+    ab_comparison
+    return
+
+
+@app.cell
+def _(shot_noise_moments):
+    leakage = compare_moments(shot_noise_moments, "per_frequency", "amplitude")
+    leakage
+    return
+
+
+@app.cell
+def _(FIDUCIALS, fiducial_network, h0_posteriors):
+    shot_noise_variants_figure, _ax = plt.subplots()
+    # Dashed on top: "fixed" lies on "amplitude" to well below a line width.
+    _styles = {"detector": "-", "amplitude": "-", "fixed": "--"}
+    for _variant, (_grids, _log_densities) in h0_posteriors.items():
+        _ax.plot(
+            _grids["H0"],
+            marginal_density(_grids["H0"], _log_densities[fiducial_network], axis=0),
+            linestyle=_styles.get(_variant, ":"),
+            label=_variant.replace("_", " "),
+        )
+    # Zoom to +/- 5 detector-only sd about its mean: the grid window is wider.
+    _grid = h0_posteriors["detector"][0]["H0"]
+    _density = marginal_density(
+        _grid, h0_posteriors["detector"][1][fiducial_network], axis=0
+    )
+    _mean = np.trapezoid(_grid * _density, _grid)
+    _sd = np.sqrt(np.trapezoid((_grid - _mean) ** 2 * _density, _grid))
+    _ax.set_xlim(_mean - 5 * _sd, _mean + 5 * _sd)
+    _ax.axvline(FIDUCIALS["H0"], **TRUTH)  # ty: ignore[invalid-argument-type]
+    _ax.set(xlabel=parameter_label("H0"), ylabel="Posterior density")
+    _ax.legend(title="likelihood")
+    shot_noise_variants_figure.tight_layout()
+    mo.as_html(shot_noise_variants_figure)
+    return (shot_noise_variants_figure,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
     # Summary and output
 
     Median and 68% HDI of every swept parameter, by problem and network.
@@ -1092,6 +1467,7 @@ def _(
     h0_marginal,
     h0_omega_m_corner,
     h0_omega_m_marginal,
+    shot_noise_variants_figure,
     write_figures,
     xi_corner,
     xi_marginal,
@@ -1100,6 +1476,7 @@ def _(
         save_figures(
             {
                 FIGURES / "marginals_H0.pdf": h0_marginal,
+                FIGURES / "shot_noise_variants_H0.pdf": shot_noise_variants_figure,
                 FIGURES / "marginals_H0_Omega_m.pdf": h0_omega_m_marginal,
                 FIGURES / "corner_H0_Omega_m.pdf": h0_omega_m_corner,
                 FIGURES / "marginals_xi_0_xi_n.pdf": xi_marginal,

@@ -70,8 +70,15 @@ repository root as the working directory.
   `default_cache_dir() / "posteriors"`, keyed by a hash of their settings, so
   the figures iterate without recomputing. Each grid point is predicted once
   and shared by all six networks (`GaussianGWBBatchedLikelihood`); the numbers
-  equal the per-network evaluation, so existing cache files stay valid. Writes per-problem marginals and
-  corner plots. Smoke test:
+  equal the per-network evaluation, so existing cache files stay valid. The
+  injection is one catalog realization, so its physical shot noise is modeled
+  as a rank-one covariance term from the same reference catalog
+  (`build_rescaled_shot_noise`); each problem is evaluated with every
+  likelihood variant (`detector`, `amplitude`, `fixed`, `per_frequency`), the
+  figures show `likelihood_variant`, and a comparison section reports the
+  widening, the fixed vs per-point $s^2$ verdict, and the per-frequency
+  leakage check. Writes per-problem marginals and corner plots, and an $H_0$
+  overlay of the variants. Smoke test:
   `ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/cosmology_grid_posteriors.py`.
 - **`importance_convergence.py`** — marimo notebook. Chooses the grid
   posteriors' $(N, Z)$: redshift-quadrature convergence on a $Z = 2^i$
