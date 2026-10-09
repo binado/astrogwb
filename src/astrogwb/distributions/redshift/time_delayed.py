@@ -62,6 +62,58 @@ from astrogwb.distributions.redshift.base import (
 from astrogwb.utils import gauss_legendre_nodes_weights
 
 
+def time_delayed_merger_rate(
+    redshift: ArrayLike,
+    params: Mapping[str, ArrayLike],
+    *,
+    formation_rate: SourceFrameDistributionFn,
+    delay: dist.Distribution,
+    n_delay_nodes: int = 48,
+    maximum_formation_redshift: ArrayLike = 20.0,
+) -> jax.Array:
+    r"""Merger rate :math:`R_m(z)` of ``formation_rate`` delayed by ``delay``.
+
+    Pointwise and shape-agnostic: ``redshift`` need not be a grid, and the
+    result has its shape. The rate is rescaled to :math:`R_m(0) = \psi(0)`
+    by a separate evaluation at :math:`z = 0`. ``params`` must carry ``H0``
+    and ``Omega_m`` and is passed on to ``formation_rate``;
+    ``n_delay_nodes`` sets an array shape and so must be a static integer.
+    See :class:`TimeDelayedRedshiftDistribution` for the arguments.
+    """
+    hubble_constant, omega_m = params["H0"], params["Omega_m"]
+    longest_available = lookback_time(
+        maximum_formation_redshift, hubble_constant, omega_m
+    )
+
+    def delayed(merger_redshift: jax.Array) -> jax.Array:
+        merger_time = lookback_time(merger_redshift, hubble_constant, omega_m)
+        # Clip into the support so `cdf` saturates at 0 and 1 instead of warning.
+        available_probability = delay.cdf(
+            jnp.clip(
+                longest_available - merger_time,
+                getattr(delay.support, "lower_bound", -jnp.inf),
+                getattr(delay.support, "upper_bound", jnp.inf),
+            )
+        )
+        # The weights carry the Jacobian F(tau_avail) / 2, so the probability
+        # mass of the available delays is built in.
+        quantiles, weights = gauss_legendre_nodes_weights(
+            jnp.zeros_like(available_probability),
+            available_probability,
+            n_delay_nodes,
+        )
+        # Every node forms at or before the cut-off, which precedes the age of
+        # the universe, so no redshift here is infinite.
+        formation_redshift = redshift_at_lookback_time(
+            merger_time[..., None] + delay.icdf(quantiles), hubble_constant, omega_m
+        )
+        return jnp.sum(weights * formation_rate(formation_redshift, params), axis=-1)
+
+    redshift = jnp.asarray(redshift)
+    local_rate = formation_rate(jnp.zeros(()), params)
+    return delayed(redshift) * (local_rate / delayed(jnp.zeros((), redshift.dtype)))
+
+
 class TimeDelayedRedshiftDistribution(RedshiftDistribution):
     r"""Redshift distribution of mergers delayed from a formation rate.
 
@@ -136,38 +188,11 @@ class TimeDelayedRedshiftDistribution(RedshiftDistribution):
         self, redshift: jax.Array, params: Mapping[str, ArrayLike]
     ) -> jax.Array:
         r"""Delayed merger rate :math:`R_m(z)`, rescaled to :math:`R_m(0) = \psi(0)`."""
-        hubble_constant, omega_m = params["H0"], params["Omega_m"]
-        delay = self.time_delay_distribution
-        # Prepend z = 0 for the normalization: the grid need not start there.
-        merger_redshift = jnp.concatenate([jnp.zeros(1, redshift.dtype), redshift])
-        merger_time = lookback_time(merger_redshift, hubble_constant, omega_m)
-        available_delay = (
-            lookback_time(self.maximum_formation_redshift, hubble_constant, omega_m)
-            - merger_time
+        return time_delayed_merger_rate(
+            redshift,
+            params,
+            formation_rate=self._source_frame_distribution,
+            delay=self.time_delay_distribution,
+            n_delay_nodes=self.n_delay_nodes,
+            maximum_formation_redshift=self.maximum_formation_redshift,
         )
-        # Clip into the support so `cdf` saturates at 0 and 1 instead of warning.
-        available_probability = delay.cdf(
-            jnp.clip(
-                available_delay,
-                getattr(delay.support, "lower_bound", -jnp.inf),
-                getattr(delay.support, "upper_bound", jnp.inf),
-            )
-        )
-        # The weights carry the Jacobian F(tau_avail) / 2, so the probability
-        # mass of the available delays is built in.
-        quantiles, weights = gauss_legendre_nodes_weights(
-            jnp.zeros_like(available_probability),
-            available_probability,
-            self.n_delay_nodes,
-        )
-        # Every node forms at or before the cut-off, which precedes the age of
-        # the universe, so no redshift here is infinite.
-        formation_redshift = redshift_at_lookback_time(
-            merger_time[:, None] + delay.icdf(quantiles), hubble_constant, omega_m
-        )
-        rate = jnp.sum(
-            weights * self._source_frame_distribution(formation_redshift, params),
-            axis=-1,
-        )
-        local_rate = self._source_frame_distribution(jnp.zeros(()), params)
-        return rate[1:] * (local_rate / rate[0])

@@ -8,14 +8,17 @@ import jax
 import numpy as np
 import pytest
 
+from astrogwb.cosmology import luminosity_distance
+from astrogwb.distributions.rates import madau_dickinson_rate, total_merger_rate
 from astrogwb.gwb.importance import (
     EFFECTIVE_INCLINATION,
     _pin_redshift_and_inclination,
     build_rescaled_spectrum,
+    phinney_kernel,
     redshift_quadrature,
     reference_catalog,
 )
-from astrogwb.populations import PopulationMetadata, build_population
+from astrogwb.populations import PopulationMetadata, build_population, joint_model
 from astrogwb.populations.evaluation import evaluate_sources, sample_sources
 from astrogwb.simulators.core import batch_keys
 from astrogwb.simulators.polarization_power import (
@@ -61,7 +64,9 @@ def reference_metadata() -> CatalogMetadata:
                 "mass_model": "uniform",
                 "minimum_redshift": 0.1,
                 "maximum_redshift": 5.0,
-                "n_grid": 64,
+                # Fine: the brute force reads the table, the spectrum the closed
+                # form, and they agree only to the table's interpolation error.
+                "n_grid": 8192,
             },
         ),
         fiducials={
@@ -145,7 +150,7 @@ def _spectrum_on_nodes(
         for name in ("minimum_redshift", "maximum_redshift")
     )
     redshift, weights = redshift_quadrature(minimum, maximum, NUM_NODES)
-    _, fiducial_model = population.build()(metadata.fiducials)
+    fiducial_model = joint_model(*population.build()(metadata.fiducials))
     samples = sample_sources(
         _pin_redshift_and_inclination(fiducial_model, minimum),
         key,
@@ -153,7 +158,7 @@ def _spectrum_on_nodes(
     )
     # Every source at every node, node-major: row ``j * N + k`` is source ``k``
     # at node ``j``, replayed through the model so redshift-derived columns
-    # (luminosity distance, detector-frame masses) are recomputed.
+    # (the luminosity distance) are recomputed.
     count = metadata.num_samples
     tiled = {
         name: np.tile(np.asarray(values), redshift.size)
@@ -166,7 +171,9 @@ def _spectrum_on_nodes(
     power = polarization_power_data(OBSERVED_WAVEFORM.build(), rows)
     power = np.asarray(power["polarization_power"]).reshape(-1, NUM_NODES, 6)
 
-    merger_rate, model = population.build()(params)
+    redshift_distribution, source_model = population.build()(params)
+    merger_rate = redshift_distribution.total_merger_rate()
+    model = joint_model(redshift_distribution, source_model)
     log_density, outputs = evaluate_sources(model, rows, density_sites=("redshift",))
     distance_ratio = rows["luminosity_distance"] / outputs["luminosity_distance"]
     kernel = weights * np.exp(log_density[::6]) * distance_ratio[::6] ** 2
@@ -291,3 +298,31 @@ def test_rescaled_spectrum_as_a_jit_argument_traces_once_per_shape(
 
     assert len(traces) == 1
     assert not np.allclose(results[0], results[1], rtol=1e-6, atol=0.0)
+
+
+@pytest.mark.parametrize("xi_0", [1.0, 0.8])
+def test_phinney_kernel_times_the_distance_ratio_squared_is_the_rate_density(
+    xi_0: float,
+) -> None:
+    """Undoing the distance factor leaves ``psi / (1 + z) dV_c/dz`` per second."""
+    redshift, weights = redshift_quadrature(0.1, 5.0, 24)
+    hubble_constant, omega_m, reference_distance = 67.66, 0.3096, 700.0
+    merger_rate = np.asarray(madau_dickinson_rate(redshift, 1.42, 4.62, 1.84, 770.0))
+    distance_ratio = xi_0 + (1.0 - xi_0) * (1.0 + redshift) ** -2.0
+
+    kernel = phinney_kernel(
+        redshift,
+        merger_rate,
+        distance_ratio,
+        hubble_constant,
+        omega_m,
+        reference_distance,
+    )
+    distance = distance_ratio * luminosity_distance(redshift, hubble_constant, omega_m)
+    undone = np.asarray(kernel) * (np.asarray(distance) / reference_distance) ** 2
+
+    np.testing.assert_allclose(
+        np.sum(weights * undone),
+        total_merger_rate(redshift, weights, merger_rate, hubble_constant, omega_m),
+        rtol=1e-12,
+    )

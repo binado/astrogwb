@@ -6,13 +6,16 @@ an analytic calculator can return no diagnostics::
     def analytic_spectrum(params):
         return params["amplitude"] * jnp.ones(3), {}
 
-The importance-sampled spectrum is one too, once the catalog is bound to a
-target outside inference::
+The rescaled quadrature spectrum is one too, once the reference catalog is
+bound to a target outside inference::
 
-    spectrum = build_importance_spectrum(
-        catalog,
+    spectrum = build_rescaled_spectrum(
+        reference,
+        metadata,
         population=target,
-        density_sites=DEFAULT_DENSITY_SITES,
+        frequencies=frequencies,
+        num_redshift_nodes=32,
+        density_sites=("source_frame_mass_1", "source_frame_mass_2"),
     )[0]
     model = partial(
         gwb_spectral_density_model,

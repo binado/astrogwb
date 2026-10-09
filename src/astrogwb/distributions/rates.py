@@ -14,6 +14,9 @@ import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 
+from astrogwb.constants import SECONDS_PER_YEAR
+from astrogwb.cosmology import differential_comoving_volume
+
 
 def madau_dickinson_rate(
     redshift: ArrayLike,
@@ -50,3 +53,42 @@ def madau_dickinson_rate(
         * one_plus_z**gamma
         / (1.0 + (one_plus_z / (1.0 + z_peak)) ** exponent)
     )
+
+
+def total_merger_rate(
+    redshift: ArrayLike,
+    weights: ArrayLike,
+    merger_rate: ArrayLike,
+    hubble_constant: ArrayLike,
+    omega_m: ArrayLike,
+) -> jax.Array:
+    r"""Total merger rate in mergers per second, by quadrature over given nodes.
+
+    .. math::
+
+        \mathcal{R} = \int \frac{\psi(z)}{1 + z}
+            \frac{\mathrm{d}V_c}{\mathrm{d}z}\,\mathrm{d}z
+        \approx \sum_j w_j \frac{\psi(z_j)}{1 + z_j}
+            \frac{\mathrm{d}V_c}{\mathrm{d}z}(z_j),
+
+    the same quantity as
+    :meth:`~astrogwb.distributions.redshift.base.RedshiftDistribution.total_merger_rate`,
+    but with no distribution, grid or normalization table: only the rate
+    :math:`\psi` at the nodes and the cosmology.
+
+    Parameters
+    ----------
+    redshift, weights:
+        Quadrature nodes and weights of :math:`\int \mathrm{d}z`, shape ``(Z,)``.
+    merger_rate:
+        The source-frame rate :math:`\psi` at ``redshift``, in
+        :math:`\mathrm{Gpc}^{-3}\,\mathrm{yr}^{-1}`, shape ``(Z,)``.
+    hubble_constant, omega_m:
+        Flat :math:`\Lambda`CDM cosmology, as in :mod:`astrogwb.cosmology`.
+    """
+    redshift = jnp.asarray(redshift)
+    volume = differential_comoving_volume(redshift, hubble_constant, omega_m)
+    integral = jnp.sum(
+        jnp.asarray(weights) * jnp.asarray(merger_rate) / (1.0 + redshift) * volume
+    )
+    return 1e-9 * integral / SECONDS_PER_YEAR

@@ -8,7 +8,7 @@
 # narrows them all.
 
 # Every population is the one registered model "bns_coba"; the variants are its
-# construction kwargs (mass_model, uniform_mixing_fraction, time_delay, ...), and
+# construction kwargs (mass_model, time_delay, ...), and
 # the contracts each one carries are documented on
 # astrogwb.populations.bns_coba.bns_coba_population_fn.
 

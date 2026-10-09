@@ -23,6 +23,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from astrogwb import __version__
+from astrogwb.populations import joint_model
 from astrogwb.populations.evaluation import sample_sources
 from astrogwb.simulators.polarization_power.metadata import CatalogMetadata
 from astrogwb.waveform.generator.base import PolarizationPowerGenerator
@@ -105,7 +106,7 @@ def draw_catalog(
         metadata.num_samples,
         metadata.population.model_kwargs,
     )
-    _, model = metadata.population.build()(metadata.fiducials)
+    model = joint_model(*metadata.population.build()(metadata.fiducials))
     samples = sample_sources(model, key, num_samples=metadata.num_samples)
     return polarization_power_data(
         metadata.waveform.build(), samples, chunk_size=chunk_size

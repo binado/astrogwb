@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from functools import partial
 
 import jax
@@ -11,22 +11,17 @@ import numpy as np
 import pytest
 from astrogwb_mock_population import (
     FIDUCIALS,
-    mock_population,
+    build_reference_catalog,
+    build_reference_spectrum,
 )
 from jax.typing import ArrayLike
 from numpyro.infer.util import log_density
 
-from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.inference import (
     SpectralDensityFn,
     fisher_matrix_per_bin,
     gwb_spectral_density_model,
     spectral_density_jacobian,
-)
-from astrogwb.populations import DEFAULT_DENSITY_SITES
-from astrogwb.simulators.polarization_power import (
-    CatalogMetadata,
-    PolarizationPowerData,
 )
 
 
@@ -162,14 +157,8 @@ def test_masked_bins_contribute_zero_even_with_infinite_scale(
     np.testing.assert_allclose(masked[mask], full[mask], rtol=1e-12)
 
 
-def test_importance_jacobian_matches_finite_differences(
-    mock_catalog_factory: Callable[..., tuple[PolarizationPowerData, CatalogMetadata]],
-) -> None:
-    spectrum, _ = build_importance_spectrum(
-        *mock_catalog_factory(num_sources=256),
-        population=mock_population(),
-        density_sites=DEFAULT_DENSITY_SITES,
-    )
+def test_importance_jacobian_matches_finite_differences() -> None:
+    spectrum, _ = build_reference_spectrum(*build_reference_catalog(num_sources=256))
     names = ("H0", "xi_0", "gamma")
     jacobian = spectral_density_jacobian(spectrum, FIDUCIALS, names)
     assert np.all(np.isfinite(jacobian))

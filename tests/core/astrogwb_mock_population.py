@@ -19,7 +19,6 @@ from exactly the density the tests reweight with.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -27,12 +26,18 @@ import numpy as np
 from jax.typing import ArrayLike
 
 from astrogwb.constants import ISCO_ALPHA
-from astrogwb.importance.spectral import build_importance_spectrum
+from astrogwb.gwb.importance import (
+    LogWeightsFn,
+    build_rescaled_spectrum,
+    reference_catalog,
+)
+from astrogwb.inference import SpectralDensityFn
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
     Population,
     PopulationMetadata,
     build_population,
+    joint_model,
 )
 from astrogwb.populations.evaluation import evaluate_sources, sample_sources
 from astrogwb.simulators.polarization_power import (
@@ -57,7 +62,7 @@ def derived_columns(
     never trusted over the recomputation, and no static site-name list is
     needed.
     """
-    _, model = population(params)
+    model = joint_model(*population(params))
     _, outputs = evaluate_sources(model, sources, density_sites=())
     return outputs
 
@@ -131,7 +136,7 @@ def mock_population(n_grid: int = N_GRID) -> Population:
 
 def load_mock_population(num_sources: int = 1024) -> dict[str, np.ndarray]:
     """Draw the mock population as plain ``(N,)`` float64 arrays."""
-    _, model = mock_population()(POPULATION_PARAMS)
+    model = joint_model(*mock_population()(POPULATION_PARAMS))
     samples = sample_sources(
         model,
         jax.random.PRNGKey(MOCK_POPULATION_SEED),
@@ -224,90 +229,40 @@ def catalog_samples(data: PolarizationPowerData) -> dict[str, jax.Array]:
     }
 
 
-def synthetic_source_parameters(n_samples: int = 16) -> dict[str, jax.Array]:
-    """Sources on an evenly spaced redshift ladder, with derived columns.
+#: The density factors a reference-catalog spectrum may weight: the default
+#: sites minus redshift, which the quadrature integrates instead.
+INTRINSIC_DENSITY_SITES: tuple[str, ...] = tuple(
+    site for site in DEFAULT_DENSITY_SITES if site != "redshift"
+)
 
-    Deliberately not a draw: an even ladder spans the whole window with a
-    handful of sources, so a test that reweights it exercises the tails as well
-    as the bulk. The derived columns come from the generating model itself, so
-    the stored ``luminosity_distance`` is bit-identical to what any later
-    evaluation recomputes -- which is what keeps the self-proposal log weights
-    at exactly zero rather than at rounding noise.
-    """
-    ladder = jnp.linspace(Z_MIN, Z_MAX, n_samples)
-    constant = jnp.ones(n_samples)
-    stochastic = {
-        "redshift": ladder,
-        "source_frame_mass_1": 1.4 * constant,
-        "source_frame_mass_2": 1.3 * constant,
-        "spin_1z": 0.0 * constant,
-        "spin_2z": 0.0 * constant,
-        "lambda_1": 400.0 * constant,
-        "lambda_2": 300.0 * constant,
-        "inclination": (jnp.pi / 3.0) * constant,
-    }
-    return derived_columns(mock_population(), POPULATION_PARAMS, stochastic)
+#: Redshift nodes of the mock spectra: enough for a smooth kernel on the window.
+NUM_REDSHIFT_NODES = 24
 
 
-def log_weight_kwargs(importance: Mapping[str, Any]) -> dict[str, Any]:
-    """The subset of ``importance_spectral_density`` keywords the weights take.
-
-    ``evaluate_log_weights`` needs no power; this drops it from a full
-    spectrum keyword set.
-    """
-    spectrum_only = {"polarization_power"}
-    return {
-        name: value for name, value in importance.items() if name not in spectrum_only
-    }
-
-
-def build_synthetic_importance(
-    n_samples: int = 16,
+def build_reference_catalog(
+    num_sources: int = 256,
     *,
-    polarization_power: jax.Array | None = None,
-    population: Population | None = None,
-) -> tuple[dict[str, Any], dict[str, jax.Array]]:
-    """Build importance kwargs whose proposal *is* their target at the fiducials.
+    f_min: float = 2.0,
+    f_max: float = 4096.0,
+    frequency_resolution: float = 8.0,
+) -> tuple[PolarizationPowerData, CatalogMetadata]:
+    """A closed-form reference catalog of the mock population.
 
-    Returns ``(kwargs, samples)``. ``kwargs`` is the full keyword set of
-    :func:`~astrogwb.importance.spectral.importance_spectral_density`, so a
-    test binds it with ``partial(importance_spectral_density, **kwargs)`` or
-    overrides one entry with ``{**kwargs, ...}``.
-
-    Shared by ``test_importance.py`` and ``test_amplitude_scalings.py``, which
-    both need every log-weight to be exactly zero at ``FIDUCIALS``, so that any
-    departure is attributable to the parameter under test rather than to the
-    catalog. Preparation is what makes that exact rather than approximate: the
-    cached proposal density and reference distances are the *same
-    expressions*, on the same inputs, that the target side will evaluate.
-
-    ``polarization_power`` defaults to a single unit-power frequency bin --
-    callers that only want rates and weights need no waveforms. Its sample axis
-    must be ``n_samples``.
+    Every draw sits at the window's lower edge, as
+    :func:`~astrogwb.gwb.importance.reference_catalog` places them, and its power
+    comes from :class:`~astrogwb.waveform.AnalyticInspiralGenerator`: no Ripple
+    backend, no persisted file. The draw is seeded, so it is deterministic.
     """
-    samples = synthetic_source_parameters(n_samples)
-    if polarization_power is None:
-        polarization_power = jnp.ones((1, n_samples))
-    # A descriptor sized to whatever power the caller supplied; the frequencies
-    # themselves are never used by anything reweighting this catalog.
-    num_frequencies = int(jnp.shape(polarization_power)[0])
     generator = AnalyticInspiralGenerator(
         WaveformMetadata(
             alpha=ISCO_ALPHA,
             approximant="AnalyticInspiral",
-            minimum_frequency=F_MIN,
-            maximum_frequency=F_MIN * num_frequencies,
-            reference_frequency=F_MIN,
-            sampling_frequency=2.0 * F_MAX,
-            frequency_resolution=F_MIN,
+            minimum_frequency=f_min,
+            maximum_frequency=f_max,
+            reference_frequency=f_min,
+            sampling_frequency=2.0 * f_max,
+            frequency_resolution=frequency_resolution,
         )
-    )
-    data = PolarizationPowerData(
-        frequencies=np.asarray(generator.frequencies),
-        polarization_power=np.asarray(polarization_power),
-        source_parameters={
-            name: np.asarray(values) for name, values in samples.items()
-        },
     )
     metadata = CatalogMetadata(
         waveform=generator.metadata,
@@ -321,15 +276,31 @@ def build_synthetic_importance(
             },
         ),
         fiducials={name: float(value) for name, value in POPULATION_PARAMS.items()},
-        num_samples=int(np.shape(polarization_power)[1]),
+        num_samples=num_sources,
     )
-    spectrum = build_importance_spectrum(
+    return (
+        reference_catalog(metadata, jax.random.PRNGKey(MOCK_POPULATION_SEED)),
+        metadata,
+    )
+
+
+def build_reference_spectrum(
+    data: PolarizationPowerData,
+    metadata: CatalogMetadata,
+    *,
+    frequencies: ArrayLike | None = None,
+    density_sites: tuple[str, ...] = INTRINSIC_DENSITY_SITES,
+    population: Population | None = None,
+) -> tuple[SpectralDensityFn, LogWeightsFn]:
+    """The mock reference catalog bound to the mock target.
+
+    ``frequencies`` is the observed grid, the catalog's own by default.
+    """
+    return build_rescaled_spectrum(
         data,
         metadata,
         population=mock_population() if population is None else population,
-        density_sites=DEFAULT_DENSITY_SITES,
-    )
-    return (
-        dict(spectrum[0].keywords),  # ty: ignore[unresolved-attribute]
-        samples,
+        frequencies=data["frequencies"] if frequencies is None else frequencies,
+        num_redshift_nodes=NUM_REDSHIFT_NODES,
+        density_sites=density_sites,
     )

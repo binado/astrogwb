@@ -117,11 +117,20 @@ ALIGNED_SPIN_MODELS = _WaveformNames(
 TIDAL_MODELS = _WaveformNames(**_CBC_FILTERS, is_tidal=True)
 PRECESSING_MODELS = _WaveformNames(**_CBC_FILTERS, is_precessing=True)
 
-#: Canonical source names this adapter requires of every catalog.
+#: Canonical source names this adapter requires of every catalog. The two
+#: detector-frame masses may instead be given as source-frame masses and a
+#: redshift; see :func:`_canonical_arrays`.
 REQUIRED_PARAMETERS = (
     "detector_frame_mass_1",
     "detector_frame_mass_2",
     "luminosity_distance",
+)
+
+#: Source-frame names from which the detector-frame masses are derived when
+#: the latter are absent: ``m_detector = m_source * (1 + z)``.
+_SOURCE_FRAME_MASSES = (
+    ("detector_frame_mass_1", "source_frame_mass_1"),
+    ("detector_frame_mass_2", "source_frame_mass_2"),
 )
 
 #: Canonical source names that default to zero when a catalog omits them.
@@ -225,16 +234,53 @@ def _as_batch(
 def _canonical_arrays(
     approximant: str, source_parameters: Mapping[str, ArrayLike]
 ) -> dict[str, jax.Array]:
-    """Return every canonical parameter as a 1-D float64 array, zeros included."""
+    """Return every canonical parameter as a 1-D float64 array, zeros included.
+
+    Ripple only needs detector-frame masses, so those are the one place the
+    mapping may be given in either form. A detector-frame column that is present
+    is used as is and takes precedence; one that is absent is derived as
+    :math:`m_{\\mathrm{det}} = m_{\\mathrm{src}} (1 + z)` from the matching
+    ``source_frame_mass_*`` and ``redshift``.
+
+    Raises
+    ------
+    ValueError
+        If a detector-frame mass is absent and cannot be derived, or if any
+        other required name is missing or has the wrong shape.
+    """
     _approximant_metadata(approximant)
     first, *rest = REQUIRED_PARAMETERS
-    arrays = {first: _as_batch(source_parameters, first, None)}
+    arrays = {first: _detector_frame_mass(source_parameters, first, None)}
     n_events = arrays[first].shape[0]
     for name in rest:
-        arrays[name] = _as_batch(source_parameters, name, n_events)
+        arrays[name] = _detector_frame_mass(source_parameters, name, n_events)
     for name in OPTIONAL_PARAMETERS:
         arrays[name] = _as_batch(source_parameters, name, n_events, default=0.0)
     return arrays
+
+
+def _detector_frame_mass(
+    source_parameters: Mapping[str, ArrayLike], name: str, n_events: int | None
+) -> jax.Array:
+    """``name`` as a batch, derived from source-frame mass and redshift if absent."""
+    source_names = dict(_SOURCE_FRAME_MASSES)
+    if name in source_parameters or name not in source_names:
+        return _as_batch(source_parameters, name, n_events)
+    source_name = source_names[name]
+    missing = [
+        needed
+        for needed in (source_name, "redshift")
+        if needed not in source_parameters
+    ]
+    if missing:
+        raise ValueError(
+            f"missing required source parameter: {name!r}; give it directly, or "
+            f"give {source_name!r} and 'redshift' to derive it "
+            f"(also missing: {missing})"
+        )
+    source_mass = _as_batch(source_parameters, source_name, n_events)
+    redshift = _as_batch(source_parameters, "redshift", source_mass.shape[0])
+    return source_mass * (1.0 + redshift)
 
 
 def ripple_parameters(

@@ -61,7 +61,7 @@ def test_flags_travel_in_the_record_as_booleans_and_strings() -> None:
             **MODEL_KWARGS,
             "time_delay": True,
             "minimum_delay": 0.02,
-            "uniform_mixing_fraction": 0.1,
+            "maximum_formation_redshift": 15.0,
         }
     )
     restored = PopulationMetadata.model_validate_json(record.model_dump_json())

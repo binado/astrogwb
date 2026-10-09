@@ -8,13 +8,15 @@ draws is placed at each of :math:`Z` nodes, so
 
 .. math::
 
-    S(f; \Lambda) = R(\Lambda) \sum_j w_j\, p(z_j \mid \Lambda)
-        \left[\frac{d^{\mathrm{ref}}}{d_L(z_j \mid \Lambda)}\right]^2
+    S(f; \Lambda) = \sum_j w_j\, K(z_j \mid \Lambda)
         \frac{1}{N} \sum_k \omega_k(\Lambda)\, P(f; \theta_k, z_j),
 
-with :math:`P` the power at reference distance :math:`d^{\mathrm{ref}}` and
+with :math:`P` the power at reference distance :math:`d^{\mathrm{ref}}`,
 :math:`\omega_k` the ratio of the target to the drawn intrinsic density
-(one when the intrinsic hyperparameters are not varied). Redshift has no
+(one when the intrinsic hyperparameters are not varied), and :math:`K` the
+closed-form :func:`phinney_kernel`: the merger rate density times
+:math:`[d^{\mathrm{ref}}/d_{GW}]^2`, in which the comoving distance and the
+redshift density's normalization cancel. Redshift has no
 Monte Carlo variance left: the :math:`1/d_L^2` tail that dominated a
 redshift-sampled proposal is integrated exactly. Inclination is fixed at
 :data:`EFFECTIVE_INCLINATION`, where the quadrupolar factor equals its
@@ -40,12 +42,16 @@ builder's, not the catalog's, so changing it needs no new waveforms.
 
 Contracts the caller is trusted to honour (nothing here checks them):
 
-- The population's intrinsic sites are independent of redshift and
-  inclination, and inclination is isotropic.
+- The population's source model is independent of inclination, which is
+  isotropic. It is independent of redshift by construction: it never sees it.
 - The waveform is :math:`(2, 2)`-mode, aligned-spin and quasi-circular: its
   power is a function of :math:`M_d f` times :math:`M_d^2`.
 - ``density_sites`` names intrinsic sites only: redshift is integrated, never
   weighted.
+- The spectrum reads the rate, the cosmology and both distances off the
+  population's
+  :class:`~astrogwb.distributions.redshift.base.RedshiftDistribution` directly:
+  no model is run at the nodes.
 - The catalog is never narrowed with
   :func:`~astrogwb.simulators.polarization_power.restrict_redshift`: its
   reference redshift is the population window's lower edge.
@@ -70,10 +76,14 @@ from numpy.typing import NDArray
 from numpyro import handlers
 
 from astrogwb import __version__
+from astrogwb.constants import SECONDS_PER_YEAR
+from astrogwb.cosmology import hubble_distance, normalized_hubble_parameter
+from astrogwb.distributions.rates import total_merger_rate
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.inference.protocol import SpectralDensityFn
-from astrogwb.populations._types import Population, PopulationModel
+from astrogwb.populations._types import Population, PopulationModel, SourceModel
 from astrogwb.populations.evaluation import evaluate_sources, sample_sources
+from astrogwb.populations.joint import joint_model
 from astrogwb.populations.metadata import PopulationMetadata
 from astrogwb.simulators.polarization_power.metadata import CatalogMetadata
 from astrogwb.simulators.polarization_power.restrict import (
@@ -90,6 +100,7 @@ __all__ = [
     "EFFECTIVE_INCLINATION",
     "LogWeightsFn",
     "build_rescaled_spectrum",
+    "phinney_kernel",
     "redshift_quadrature",
     "reference_catalog",
     "reference_catalog_stem",
@@ -136,13 +147,14 @@ def redshift_quadrature(
 
 
 def _intrinsic_log_prob(
-    model: PopulationModel,
+    source_model: SourceModel,
     intrinsic: Mapping[str, jax.Array],
-    redshift: jax.Array,
     density_sites: Sequence[str],
 ) -> jax.Array:
     log_prob, _ = evaluate_sources(
-        _pin_redshift_and_inclination(model, redshift),
+        handlers.condition(
+            source_model, data={INCLINATION_SITE: EFFECTIVE_INCLINATION}
+        ),
         intrinsic,
         density_sites=density_sites,
     )
@@ -187,14 +199,71 @@ def evaluate_log_weights(
     *,
     population: Population,
     intrinsic: Mapping[str, jax.Array],
-    redshift: jax.Array,
     proposal_log_prob: jax.Array,
     density_sites: Sequence[str],
 ) -> jax.Array:
     """Per-draw intrinsic log importance weights at ``params``, shape ``(N,)``."""
-    _, model = population(params)
-    target = _intrinsic_log_prob(model, intrinsic, redshift[0], density_sites)
+    _, source_model = population(params)
+    target = _intrinsic_log_prob(source_model, intrinsic, density_sites)
     return target - proposal_log_prob
+
+
+def phinney_kernel(
+    redshift: ArrayLike,
+    merger_rate: ArrayLike,
+    distance_ratio: ArrayLike,
+    hubble_constant: ArrayLike,
+    omega_m: ArrayLike,
+    reference_distance: ArrayLike,
+) -> jax.Array:
+    r"""The redshift kernel of the spectrum, in closed form, per unit redshift.
+
+    .. math::
+
+        K(z) = \mathcal{R}\, p(z) \left[\frac{d^{\mathrm{ref}}}{d_{GW}(z)}\right]^2
+        = \frac{10^{-9}}{\mathrm{yr}}\, 4 \pi D_H \left(d^{\mathrm{ref}}\right)^2
+        \frac{\psi(z)}{(1 + z)^3 E(z)\, \Xi(z)^2},
+
+    where :math:`d_{GW} = (1 + z)\, \chi\, \Xi` and
+    :math:`\mathrm{d}V_c/\mathrm{d}z = 4 \pi D_H \chi^2 / E`. The comoving
+    distance :math:`\chi` and the normalization of :math:`p(z)` cancel
+    against the rate, so neither a distance table nor a density is needed.
+
+    Parameters
+    ----------
+    redshift, merger_rate, distance_ratio:
+        The nodes, the source-frame rate :math:`\psi` in
+        :math:`\mathrm{Gpc}^{-3}\,\mathrm{yr}^{-1}` there, and the ratio
+        :math:`\Xi = d_{GW}/d_{EM}` of the model's distance to the
+        electromagnetic one; all shape ``(Z,)``.
+    hubble_constant, omega_m:
+        Flat :math:`\Lambda`CDM cosmology.
+    reference_distance:
+        The distance :math:`d^{\mathrm{ref}}` in Mpc the power was generated at.
+
+    Returns
+    -------
+    jax.Array
+        :math:`K(z)` in mergers per second per unit redshift, shape ``(Z,)``.
+    """
+    redshift = jnp.asarray(redshift)
+    prefactor = (
+        1e-9
+        / SECONDS_PER_YEAR
+        * 4.0
+        * jnp.pi
+        * hubble_distance(hubble_constant)
+        * jnp.asarray(reference_distance) ** 2
+    )
+    return (
+        prefactor
+        * jnp.asarray(merger_rate)
+        / (
+            (1.0 + redshift) ** 3
+            * normalized_hubble_parameter(redshift, omega_m)
+            * jnp.asarray(distance_ratio) ** 2
+        )
+    )
 
 
 def _redshift_window(population: PopulationMetadata) -> tuple[float, float]:
@@ -251,7 +320,7 @@ def reference_catalog(
         metadata.population.model_name,
         metadata.num_samples,
     )
-    _, model = metadata.population.build()(metadata.fiducials)
+    model = joint_model(*metadata.population.build()(metadata.fiducials))
     minimum_redshift, _ = _redshift_window(metadata.population)
     samples = sample_sources(
         _pin_redshift_and_inclination(model, minimum_redshift),
@@ -286,28 +355,32 @@ def rescaled_spectral_density(
     ``extras`` holds ``total_merger_rate`` (observer frame, mergers per second)
     and ``importance_relative_ess`` over the intrinsic draws, both shape ``()``.
     """
-    merger_rate, model = population(params)
-    total_merger_rate = jnp.reshape(jnp.asarray(merger_rate), ())
+    distribution, source_model = population(params)
     log_weights = (
-        _intrinsic_log_prob(model, intrinsic, redshift[0], density_sites)
-        - proposal_log_prob
+        _intrinsic_log_prob(source_model, intrinsic, density_sites) - proposal_log_prob
     )
     mean_power = polarization_power @ jnp.exp(log_weights) / log_weights.shape[0]
     node_power = amplitude * jnp.interp(
         query_log_frequencies, log_reference_frequencies, mean_power, right=0.0
     )
-    first = {name: values[0] for name, values in intrinsic.items()}
-    log_density, outputs = evaluate_sources(
-        handlers.condition(
-            model, data={**first, INCLINATION_SITE: EFFECTIVE_INCLINATION}
-        ),
-        {REDSHIFT_SITE: redshift},
-        density_sites=(REDSHIFT_SITE,),
+    hubble_constant = distribution.params["H0"]
+    omega_m = distribution.params["Omega_m"]
+    merger_rate = distribution.merger_rate(redshift)
+    # The GW distance over the electromagnetic one: modified propagation alone.
+    distance_ratio = distribution.distance_ratio(redshift)
+    kernel = redshift_weights * phinney_kernel(
+        redshift,
+        merger_rate,
+        distance_ratio,
+        hubble_constant,
+        omega_m,
+        reference_distance,
     )
-    distance_ratio = reference_distance / outputs[_LUMINOSITY_DISTANCE]
-    kernel = redshift_weights * jnp.exp(log_density) * distance_ratio**2
-    return total_merger_rate * node_power @ kernel, {
-        "total_merger_rate": total_merger_rate,
+    total_rate = total_merger_rate(
+        redshift, redshift_weights, merger_rate, hubble_constant, omega_m
+    )
+    return node_power @ kernel, {
+        "total_merger_rate": total_rate,
         "importance_relative_ess": relative_ess(log_weights),
     }
 
@@ -358,16 +431,15 @@ def build_rescaled_spectrum(
     intrinsic = {
         name: jnp.asarray(np.asarray(values))
         for name, values in columns.items()
-        if name not in (REDSHIFT_SITE, INCLINATION_SITE)
+        if name not in (REDSHIFT_SITE, INCLINATION_SITE, _LUMINOSITY_DISTANCE)
     }
     redshift_nodes = jnp.asarray(redshift)
-    _, fiducial_model = metadata.population.build()(metadata.fiducials)
+    _, fiducial_source_model = metadata.population.build()(metadata.fiducials)
     proposal_log_prob = _intrinsic_log_prob(
-        fiducial_model, intrinsic, redshift_nodes[0], density_sites
+        fiducial_source_model, intrinsic, density_sites
     )
     shared: dict[str, Any] = {
         "intrinsic": intrinsic,
-        "redshift": redshift_nodes,
         "proposal_log_prob": proposal_log_prob,
     }
     spectral_density_fn = _bind(
@@ -382,6 +454,7 @@ def build_rescaled_spectrum(
         reference_distance=jnp.asarray(
             np.asarray(columns[_LUMINOSITY_DISTANCE], dtype=np.float64)[0]
         ),
+        redshift=redshift_nodes,
         **shared,
     )
     return spectral_density_fn, _bind(

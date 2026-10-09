@@ -9,7 +9,7 @@ import pytest
 from numpyro import handlers
 
 from astrogwb.frequency import bin_widths
-from astrogwb.populations import PopulationMetadata
+from astrogwb.populations import PopulationMetadata, joint_model
 from astrogwb.simulators.polarization_power import (
     CatalogMetadata,
     PolarizationPowerData,
@@ -102,7 +102,11 @@ def test_restrict_redshift_reaches_the_rebuilt_population(draw_factory) -> None:
     data, metadata = draw_factory(np.array([0.1, 0.5, 1.5, 19.0]))
     _, narrowed = restrict_redshift(data, metadata, 0.3, 2.0)
 
-    rate, model = narrowed.population.build()(narrowed.fiducials)
+    redshift_distribution, source_model = narrowed.population.build()(
+        narrowed.fiducials
+    )
+    model = joint_model(redshift_distribution, source_model)
+    rate = redshift_distribution.total_merger_rate()
     with handlers.seed(rng_seed=0):
         redshift = model()["redshift"]
     assert float(rate) > 0.0

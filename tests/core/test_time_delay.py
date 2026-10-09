@@ -238,3 +238,18 @@ def test_power_law_delay_rejects_a_zero_floor() -> None:
     """The parent accepts ``low = 0``; the log-space formulas cannot."""
     with pytest.raises(ValueError, match="low"):
         PowerLawDelayDistribution(0.0, 0.0, 1.0, validate_args=True)
+
+
+def test_pointwise_merger_rate_reproduces_the_table_at_any_shape() -> None:
+    """`merger_rate` is the function the table samples, for any input shape."""
+    distribution = _delayed(PowerLawDelayDistribution(-1.0, 0.02, 13.0))
+    on_grid = distribution.merger_rate(distribution.x[1:])
+    np.testing.assert_allclose(
+        on_grid, _merger_rate_on_grid(distribution)[1:], rtol=1e-12
+    )
+    redshift = jnp.array([[0.3, 1.0, 4.0], [0.0, 2.0, 7.5]])
+    rate = distribution.merger_rate(redshift)
+    assert rate.shape == redshift.shape
+    np.testing.assert_allclose(
+        rate[1, 0], distribution.merger_rate(jnp.zeros(())), rtol=1e-12
+    )

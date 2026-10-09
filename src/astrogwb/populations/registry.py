@@ -2,10 +2,12 @@
 
 A registered population is a *factory*: it takes the construction kwargs and
 returns a :data:`~astrogwb.populations._types.Population`, a callable
-``parameters -> (merger_rate, model)``. The rate and the source density come
-from one call, so both are normalizations of the same redshift law by
-construction. ``model()`` declares the per-source sample sites and returns the
-columns a catalog stores; evaluating or sampling it is the job of
+``parameters -> (redshift_distribution, source_model)``. The merger rate is
+``redshift_distribution.total_merger_rate()``, so rate and redshift density are
+normalizations of the same law by construction. ``source_model()`` declares the
+intrinsic sample sites and knows nothing about redshift;
+:func:`~astrogwb.populations.joint.joint_model` composes both halves into the
+model a catalog is drawn from. Evaluating or sampling that is the job of
 :func:`astrogwb.populations.evaluation.evaluate_sources` and
 :func:`astrogwb.populations.evaluation.sample_sources`.
 
@@ -26,6 +28,7 @@ from astrogwb.populations._types import Population
 
 __all__ = [
     "DEFAULT_DENSITY_SITES",
+    "INTRINSIC_DENSITY_SITES",
     "Population",
     "build_population",
     "known_populations",
@@ -36,14 +39,17 @@ type PopulationFactory = Callable[..., Population]
 
 _REGISTRY: dict[str, PopulationFactory] = {}
 
-#: Density factors a catalog selects when nothing narrower is requested.
-#: Every registered source model declares ``redshift`` -- the one source
-#: parameter whose density never cancels in an importance weight.
-DEFAULT_DENSITY_SITES: tuple[str, ...] = (
-    "redshift",
+#: The intrinsic density factors of a source model: the ordered source-frame
+#: mass pair. These are the factors an importance weight divides by, since
+#: redshift is integrated by quadrature rather than reweighted.
+INTRINSIC_DENSITY_SITES: tuple[str, ...] = (
     "source_frame_mass_1",
     "source_frame_mass_2",
 )
+
+#: Density factors of the joint model a catalog selects when nothing narrower
+#: is requested: ``redshift`` plus the intrinsic ones.
+DEFAULT_DENSITY_SITES: tuple[str, ...] = ("redshift", *INTRINSIC_DENSITY_SITES)
 
 
 def register_population[F: PopulationFactory](name: str) -> Callable[[F], F]:

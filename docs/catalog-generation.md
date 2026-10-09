@@ -84,14 +84,20 @@ persisted `module:function` string is a reference that silently rots. An
 unknown key fails when the population is built, listing what is registered.
 
 A registered population is a *factory*: it takes the construction kwargs and
-returns a callable `parameters -> (merger_rate, model)`. One call builds the
-redshift distribution once, so the rate and the source density come from the
-same grid; `model()` is a no-argument NumPyro model. Hyperparameters are what
-the callable is called with, and source arrays are what `evaluate_sources`
-conditions in.
+returns a callable `parameters -> (redshift_distribution, source_model)`. One
+call builds the redshift distribution once, so the rate and the redshift
+density come from the same grid. `source_model()` is a no-argument NumPyro
+model of the intrinsic parameters alone, in the source frame; it never sees
+redshift. `joint_model` composes the two halves into the model a catalog is
+drawn from. Hyperparameters are what the callable is called with, and source
+arrays are what `evaluate_sources` conditions in.
 
 ```python
-from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
+from astrogwb.populations import (
+    DEFAULT_DENSITY_SITES,
+    build_population,
+    joint_model,
+)
 from astrogwb.populations.evaluation import evaluate_sources, sample_sources
 
 population = build_population(
@@ -101,7 +107,9 @@ population = build_population(
     maximum_redshift=20.0,
     n_grid=4096,
 )
-total_merger_rate, model = population(params)  # rate: shape ()
+redshift_distribution, source_model = population(params)
+total_merger_rate = redshift_distribution.total_merger_rate()  # shape ()
+model = joint_model(redshift_distribution, source_model)
 
 sources = sample_sources(model, key, num_samples=1024)
 log_prob, outputs = evaluate_sources(
@@ -109,29 +117,30 @@ log_prob, outputs = evaluate_sources(
 )  # log_prob: shape (1024,); outputs["luminosity_distance"]: shape (1024,)
 ```
 
-One call, not two. The source model and its merger rate are both
-normalizations of the same redshift law, so they are built together. The one
-exception is a guard mixture: its returned rate is still the Madau-Dickinson
-total rate, which does not normalize the mixture density. A guard mixture is a
-proposal, and the caller is trusted never to use one as an injection or an
-analysis target.
+One call, not two. The redshift density and the merger rate are both
+normalizations of the same redshift law, so they come from one
+`~astrogwb.distributions.redshift.base.RedshiftDistribution`. Its
+`distance_model()` samples `redshift` and registers the GW `luminosity_distance`
+(modified propagation included), and the quadrature in `astrogwb.gwb.importance`
+reads the rate and the distances off it directly.
 
 `bns_coba` is the one shipped population, and its variants are construction
 kwargs: `mass_model` (`"uniform"` or `"gaussian"`), `time_delay` (with
-`minimum_delay`, `maximum_formation_redshift`, `n_delay_nodes`) and
-`uniform_mixing_fraction`. Modified GW propagation is selected by the
+`minimum_delay`, `maximum_formation_redshift`, `n_delay_nodes`). Modified GW propagation is selected by the
 hyperparameters, not a kwarg: it applies whenever `xi_0` is among them, and is
 the identity at `xi_0 = 1`. The contracts each setting carries -- which
 hyperparameters it needs, which only rescale the spectrum (`H0` stops being one
-when `time_delay` is on), what a proposal may be used for -- are documented in
+when `time_delay` is on) -- are documented in
 the `bns_coba_population_fn` docstring and are not checked.
 
 The factory's signature *is* the construction-settings schema. A key the named
 population does not take raises `TypeError` naming the population and what it
 accepts, rather than being silently dropped.
 
-- The source model's returned mapping defines the stored columns, including
-  spins, detector-frame masses, and `luminosity_distance`. Its sample sites are
+- The joint model's returned mapping defines the stored columns, including
+  redshift, source-frame masses, spins, and `luminosity_distance`. Detector-frame
+  masses are not stored: the waveform layer derives them from the source-frame
+  masses and redshift. Its sample sites are
   exactly the inputs needed to replay it; a missing one raises `KeyError`.
 - `density_sites` selects the density factors included in importance
   weighting. It is an argument, not a stored field: no sample depends on it, so
@@ -170,24 +179,6 @@ Two mass laws share the rest of the BNS Madau-Dickinson declaration:
   weight. Galactic BNS masses motivate the shape (a Gaussian around
   `1.33 Msun` with width `~0.09 Msun`). The default catalog still
   uses the uniform triangle.
-
-### Guard mixtures are one density, not two draws
-
-`uniform_mixing_fraction = ε` blends a fraction ε of uniform-in-redshift draws
-into the Madau-Dickinson density with `numpyro.distributions.MixtureGeneral`. The
-same mixture that draws the redshifts evaluates their log density, so the
-recorded guard fraction can never be something other than what was drawn. It
-replaced a pair of gwmock graphs differing only in their redshift block, a
-weighted `MixtureSimulator`, and a hand-written `logaddexp` mixture density in
-the analysis layer.
-
-A guard mixture is a sampling density, not a physical population, and the
-Madau-Dickinson total rate is the normalization of the Madau-Dickinson redshift
-density, not of a mixture of it with a uniform component. Nothing reads a rate
-off a proposal -- importance weighting takes the *target's* -- so this costs
-nothing, but a guard mixture used as an injection or an analysis target would
-silently pair a rate that does not normalize it. Nothing checks this; it is the
-caller's to honour.
 
 ### Prefix stability across sizes
 
@@ -266,7 +257,7 @@ a later weight counts, so the choice belongs to the analysis rather than to the
 file. What still matters is that one value covers both sides of a ratio — a
 proposal density computed with the mass factors excluded, reweighted against a
 target that includes them, gives silently wrong weights with no shape error
-anywhere — which is why `build_importance_spectrum` takes it once and threads
+anywhere — which is why `build_rescaled_spectrum` takes it once and threads
 that one value into both callables it returns.
 
 ### The file format
@@ -392,11 +383,11 @@ Draw once and reduce through several waveforms -- the same events, so the
 differences are the waveform's alone:
 
 ```python
-population = PopulationSimulator(metadata.sources)
+simulator = PopulationSimulator(metadata.sources)
 simulator_a, simulator_b = BackgroundSpectralDensitySimulator(metadata_a), BackgroundSpectralDensitySimulator(metadata_b)
 parts_a, parts_b = [], []
 for key in batch_keys(seed, n):
-    draw = population(key)
+    draw = simulator(key)
     parts_a.append(simulator_a.reduce(draw))
     parts_b.append(simulator_b.reduce(draw))
 spectra_a, spectra_b = stack_spectra(parts_a), stack_spectra(parts_b)

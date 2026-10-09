@@ -18,6 +18,7 @@ from typing import cast
 import jax
 import jax.numpy as jnp
 import numpy as np
+import numpyro
 import numpyro.distributions as dist
 import pytest
 
@@ -33,11 +34,12 @@ from reference_population import reference_merger_rate_distance_and_logprob
 from astrogwb.distributions.interpolated import InterpolatedDistribution
 from astrogwb.distributions.mass import MaxOfTwoNormalsDistribution
 from astrogwb.distributions.orientation import UniformCosineDistribution
-from astrogwb.distributions.rates import madau_dickinson_rate
+from astrogwb.distributions.rates import madau_dickinson_rate, total_merger_rate
 from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.distributions.redshift.madau_dickinson import (
     MadauDickinsonRedshiftDistribution,
 )
+from astrogwb.utils import gauss_legendre_nodes_weights
 
 #: Redshifts to evaluate at: interior to the grid, and not on a node.
 SAMPLE_REDSHIFTS = jnp.array([0.5, 1.234, 3.7, 12.0, 19.5])
@@ -568,4 +570,88 @@ def test_uniform_cosine_survives_jit_as_a_pytree_argument(
         np.asarray(jitted),
         np.asarray(distribution.log_prob(polar_angles)),
         rtol=1e-14,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Merger rate off the grid
+# --------------------------------------------------------------------------- #
+def test_merger_rate_is_the_source_frame_rate_at_the_construction_params() -> None:
+    redshift = SAMPLE_REDSHIFTS
+    expected = madau_dickinson_rate(
+        redshift,
+        FIDUCIALS["gamma"],
+        FIDUCIALS["kappa"],
+        FIDUCIALS["z_peak"],
+        FIDUCIALS["local_merger_rate"],
+    )
+    np.testing.assert_allclose(
+        _distribution().merger_rate(redshift), expected, rtol=1e-12
+    )
+
+
+@pytest.mark.parametrize("num_nodes", [256])
+def test_total_merger_rate_by_quadrature_matches_the_distribution(
+    num_nodes: int,
+) -> None:
+    """The node-based rate and the table-based one integrate the same function."""
+    distribution = _distribution()
+    nodes, weights = gauss_legendre_nodes_weights(Z_MIN, Z_MAX, num_nodes)
+    quadrature = total_merger_rate(
+        nodes,
+        weights,
+        distribution.merger_rate(nodes),
+        FIDUCIALS["H0"],
+        FIDUCIALS["Omega_m"],
+    )
+    # The distribution's own normalization is a trapezoid rule on the mock
+    # grid; the nodes are the more accurate side, so this bounds that error.
+    np.testing.assert_allclose(quadrature, distribution.total_merger_rate(), rtol=1e-3)
+
+
+# --------------------------------------------------------------------------- #
+# GW distance and the model that samples it
+# --------------------------------------------------------------------------- #
+def test_gw_distance_is_the_electromagnetic_one_without_modified_propagation() -> None:
+    distribution = _distribution()
+
+    np.testing.assert_array_equal(
+        np.asarray(distribution.gw_luminosity_distance(SAMPLE_REDSHIFTS)),
+        np.asarray(distribution.luminosity_distance(SAMPLE_REDSHIFTS)),
+    )
+
+
+def test_gw_distance_at_unit_xi_0_is_the_electromagnetic_one() -> None:
+    distribution = _distribution(xi_0=1.0, xi_n=1.91)
+
+    np.testing.assert_allclose(
+        np.asarray(distribution.gw_luminosity_distance(SAMPLE_REDSHIFTS)),
+        np.asarray(distribution.luminosity_distance(SAMPLE_REDSHIFTS)),
+    )
+
+
+def test_gw_distance_follows_xi_0_away_from_unity() -> None:
+    distribution = _distribution(xi_0=1.2, xi_n=1.91)
+
+    ratio = distribution.gw_luminosity_distance(
+        SAMPLE_REDSHIFTS
+    ) / distribution.luminosity_distance(SAMPLE_REDSHIFTS)
+    assert bool(jnp.all(ratio > 1.0))
+
+
+@pytest.mark.parametrize("overrides", [{}, {"xi_0": 1.2, "xi_n": 1.91}])
+def test_distance_model_samples_redshift_and_registers_the_gw_distance(
+    overrides: dict[str, float],
+) -> None:
+    distribution = _distribution(**overrides)
+    trace = numpyro.handlers.trace(
+        numpyro.handlers.seed(distribution.distance_model(), 0)
+    ).get_trace()
+
+    assert set(trace) == {"redshift", "luminosity_distance"}
+    assert trace["redshift"]["type"] == "sample"
+    assert trace["luminosity_distance"]["type"] == "deterministic"
+    np.testing.assert_array_equal(
+        np.asarray(trace["luminosity_distance"]["value"]),
+        np.asarray(distribution.gw_luminosity_distance(trace["redshift"]["value"])),
     )

@@ -20,10 +20,11 @@ from collections.abc import Callable, Mapping
 
 import jax
 import jax.numpy as jnp
+import numpyro
 from jax.typing import ArrayLike
 
 from astrogwb.constants import SECONDS_PER_YEAR
-from astrogwb.cosmology import distance_and_volume_grid
+from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
 from astrogwb.distributions.interpolated import InterpolatedDistribution
 
 type SourceFrameDistributionFn = Callable[
@@ -80,6 +81,7 @@ class RedshiftDistribution(InterpolatedDistribution):
     # traced values under `jax.jit`, where a hashed Python float would either be
     # wrong or force a retrace per grid.
     pytree_data_fields = (
+        "params",
         "luminosity_distance_grid",
         "differential_comoving_volume_grid",
     )
@@ -100,6 +102,9 @@ class RedshiftDistribution(InterpolatedDistribution):
         # where a `tree_unflatten` with mismatched leaves could make the two
         # copies disagree.
         self._source_frame_distribution = source_frame_distribution
+        # Kept, as a pytree leaf, so `merger_rate` can evaluate the rate off
+        # the grid with the same hyperparameters the table was built from.
+        self.params = dict(params)
         redshift_grid = jnp.linspace(minimum_redshift, maximum_redshift, n_grid)
 
         self.luminosity_distance_grid, self.differential_comoving_volume_grid = (
@@ -128,6 +133,16 @@ class RedshiftDistribution(InterpolatedDistribution):
         assigns *before* calling ``super().__init__``.
         """
         return self._source_frame_distribution(redshift, params)
+
+    def merger_rate(self, redshift: ArrayLike) -> jax.Array:
+        r"""The source-frame merger rate :math:`\psi(z)` at any redshift.
+
+        Evaluated pointwise at the hyperparameters the distribution was built
+        with, not interpolated from the grid, so it is the function the table
+        samples. For a subclass that overrides :meth:`_merger_rate` that is
+        the overridden rate.
+        """
+        return self._merger_rate(jnp.asarray(redshift), self.params)
 
     def source_frame_distribution(
         self, redshift: ArrayLike, params: Mapping[str, ArrayLike]
@@ -168,6 +183,46 @@ class RedshiftDistribution(InterpolatedDistribution):
     def luminosity_distance(self, redshift: ArrayLike) -> jax.Array:
         """Luminosity distance in Mpc at redshift(s), clamped outside the grid."""
         return jnp.interp(jnp.asarray(redshift), self.x, self.luminosity_distance_grid)
+
+    def distance_ratio(self, redshift: ArrayLike) -> jax.Array:
+        r"""The GW-to-EM luminosity-distance ratio :math:`\Xi(z)`.
+
+        Analytic in the hyperparameters: :math:`\Xi(z)` when ``xi_0`` is among
+        them (``xi_n`` must then be too), else one.
+        """
+        redshift = jnp.asarray(redshift)
+        if "xi_0" in self.params:
+            return jnp.exp(
+                log_gw_em_ratio(redshift, self.params["xi_0"], self.params["xi_n"])
+            )
+        return jnp.ones_like(redshift, dtype=self.x.dtype)
+
+    def gw_luminosity_distance(self, redshift: ArrayLike) -> jax.Array:
+        r"""Gravitational-wave luminosity distance in Mpc at redshift(s).
+
+        The electromagnetic distance, times :meth:`distance_ratio`.
+        """
+        return self.luminosity_distance(redshift) * self.distance_ratio(redshift)
+
+    def distance_model(self) -> Callable[[], dict[str, jax.Array]]:
+        """A no-argument NumPyro model of the source's redshift and GW distance.
+
+        Samples ``redshift`` from this distribution and registers
+        ``luminosity_distance`` (:meth:`gw_luminosity_distance`) as a
+        deterministic. Returns both, so a population composes it with a source
+        model that never sees redshift.
+        """
+
+        def model() -> dict[str, jax.Array]:
+            redshift = jnp.asarray(numpyro.sample("redshift", self))
+            distance = jnp.asarray(
+                numpyro.deterministic(
+                    "luminosity_distance", self.gw_luminosity_distance(redshift)
+                )
+            )
+            return {"redshift": redshift, "luminosity_distance": distance}
+
+        return model
 
     def differential_comoving_volume(self, redshift: ArrayLike) -> jax.Array:
         r"""All-sky :math:`\mathrm{d}V_c/\mathrm{d}z` in :math:`\mathrm{Mpc}^3`.

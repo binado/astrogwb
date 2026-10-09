@@ -73,8 +73,6 @@ def test_mock_catalog_defaults_cover_the_production_band(mock_catalog_factory) -
         "lambda_1",
         "lambda_2",
         "inclination",
-        "detector_frame_mass_1",
-        "detector_frame_mass_2",
         "luminosity_distance",
         "coa_phase",
         "coa_time",
