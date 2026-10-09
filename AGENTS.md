@@ -20,31 +20,16 @@ Every check is a `just` recipe, and CI runs the same string:
 - `uv sync --extra notebook --group dev`: full development environment.
 - `just lint`, `just typecheck`, `just fmt`.
 - `just test-core`, `just test-paper`, `just test-integration`.
-- `uv run --group workflow snakemake --snakefile Snakefile --dry-run --cores 1 experiments`:
-  production workflow entrypoint (omit `--dry-run` to execute). Chains come
-  from `run_experiment_<name>` targets; figures are opt-in via the `plot_*`
-  rules. The dry run merges and catalog-checks every run without building
-  anything.
-- `just catalogs`: maps catalog stems back to what they draw, at which seed, and
-  which runs use them.
 
-## Configuration
+## Code conventions and styleguide
 
-- Run workflow and application entrypoints from the repository root;
-  configuration paths are relative to the caller's current working directory.
-- A run config is six TOML layers merged in order: the four shared layers
-  (`config/defaults.toml`, `waveforms.toml`, `populations.toml`, `detectors.toml`),
-  then `config/runs/<experiment>/_base.toml`, then the run. Every entrypoint
-  takes the layer paths as repeated `--config` flags. Each layer's header comment
-  says what it is for; `config/runs/README.md` indexes the experiments.
-- Editing the shared `[fiducials]` re-keys every catalog, and the `astrogwb`
-  version is part of the catalog key.
-- Adding a population means adding a registered factory under
-  `src/astrogwb/populations/`, never an import path in a config.
-- `batch_keys` needs `jax_enable_x64`.
-- Pass the rescaled-spectrum builder's pytree callables *as arguments* to jitted
-  functions, not through a closure, so the catalog stays a traced input.
-- `run_mcmc --cached-only` never generates catalogs.
+- Use numpy-style docstrings
+- Don't use unicode symbols in comments or docstrings. Prefer rst math directives for the latter
+- Use jax.typing.ArrayLike for annotating array inputs and jax.Array for array outputs
+- When manipulating numpyro models, prefer desigining useful custom effect handlers
+- When designing methods that will be jit compiled, avoid capturing large constants or
+closing over arguments which may trigger many re-compilations
+
 
 ## Coding and testing
 
@@ -53,7 +38,11 @@ Every check is a `just` recipe, and CI runs the same string:
 - Runtime configuration must run before the XLA *backend* is initialized. Importing JAX
   or NumPyro does not initialize it; creating an array or querying devices
   does. `tests/paper/test_cli.py` asserts both halves.
-- Add core tests for scientific interfaces. Mark dependency-heavy tests with
+- Add core tests for scientific interfaces.
+- Use pytest fixtures and `pytest.mark.parametrize`
+- Avoid tests which re-implement functions
+- Avoid tests which require brittle `atol` and `rtol` in `np.testing.assert_allclose`
+- Mark dependency-heavy tests with
   `@pytest.mark.integration`.
 
 ## Commits and pull requests
