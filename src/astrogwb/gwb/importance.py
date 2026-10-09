@@ -367,9 +367,7 @@ def rescaled_spectral_density(
     omega_m = distribution.params["Omega_m"]
     merger_rate = distribution.merger_rate(redshift)
     # The GW distance over the electromagnetic one: modified propagation alone.
-    distance_ratio = distribution.gw_luminosity_distance(
-        redshift
-    ) / distribution.luminosity_distance(redshift)
+    distance_ratio = distribution.distance_ratio(redshift)
     kernel = redshift_weights * phinney_kernel(
         redshift,
         merger_rate,

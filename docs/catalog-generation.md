@@ -383,11 +383,11 @@ Draw once and reduce through several waveforms -- the same events, so the
 differences are the waveform's alone:
 
 ```python
-population = PopulationSimulator(metadata.sources)
+simulator = PopulationSimulator(metadata.sources)
 simulator_a, simulator_b = BackgroundSpectralDensitySimulator(metadata_a), BackgroundSpectralDensitySimulator(metadata_b)
 parts_a, parts_b = [], []
 for key in batch_keys(seed, n):
-    draw = population(key)
+    draw = simulator(key)
     parts_a.append(simulator_a.reduce(draw))
     parts_b.append(simulator_b.reduce(draw))
 spectra_a, spectra_b = stack_spectra(parts_a), stack_spectra(parts_b)

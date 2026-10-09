@@ -184,20 +184,25 @@ class RedshiftDistribution(InterpolatedDistribution):
         """Luminosity distance in Mpc at redshift(s), clamped outside the grid."""
         return jnp.interp(jnp.asarray(redshift), self.x, self.luminosity_distance_grid)
 
+    def distance_ratio(self, redshift: ArrayLike) -> jax.Array:
+        r"""The GW-to-EM luminosity-distance ratio :math:`\Xi(z)`.
+
+        Analytic in the hyperparameters: :math:`\Xi(z)` when ``xi_0`` is among
+        them (``xi_n`` must then be too), else one.
+        """
+        redshift = jnp.asarray(redshift)
+        if "xi_0" in self.params:
+            return jnp.exp(
+                log_gw_em_ratio(redshift, self.params["xi_0"], self.params["xi_n"])
+            )
+        return jnp.ones_like(redshift, dtype=self.x.dtype)
+
     def gw_luminosity_distance(self, redshift: ArrayLike) -> jax.Array:
         r"""Gravitational-wave luminosity distance in Mpc at redshift(s).
 
-        The electromagnetic distance, times :math:`\Xi(z)` when ``xi_0`` is in
-        the hyperparameters (``xi_n`` must then be too). Without ``xi_0`` it is
-        :meth:`luminosity_distance`.
+        The electromagnetic distance, times :meth:`distance_ratio`.
         """
-        redshift = jnp.asarray(redshift)
-        distance = self.luminosity_distance(redshift)
-        if "xi_0" in self.params:
-            distance = distance * jnp.exp(
-                log_gw_em_ratio(redshift, self.params["xi_0"], self.params["xi_n"])
-            )
-        return distance
+        return self.luminosity_distance(redshift) * self.distance_ratio(redshift)
 
     def distance_model(self) -> Callable[[], dict[str, jax.Array]]:
         """A no-argument NumPyro model of the source's redshift and GW distance.
