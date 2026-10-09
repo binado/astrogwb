@@ -9,7 +9,7 @@ import numpyro
 import numpyro.distributions as dist
 from numpyro import handlers
 
-from astrogwb.utils.numpyro import sample_model
+from astrogwb.utils.numpyro import SiteDistribution, sample_model
 
 
 def _model(scale: float = 1.0) -> None:
@@ -44,3 +44,32 @@ def test_ignores_enclosing_handlers_and_vmaps() -> None:
     keys = jax.random.split(jax.random.key(0), 3)
     batched = jax.vmap(lambda k: sample_model(_model, k))(keys)
     assert batched["x"].shape == (3,)
+
+
+def test_site_distribution_ignores_other_sites() -> None:
+    def model() -> None:
+        numpyro.sample("y", dist.Normal())
+
+    recorded = SiteDistribution(model, "x")
+    with handlers.seed(rng_seed=0):
+        recorded()
+    assert recorded.distribution is None
+
+
+def test_site_distribution_sees_the_unexpanded_site_inside_a_plate() -> None:
+    def model() -> None:
+        numpyro.sample("x", dist.Normal(1.0, 2.0))
+
+    inner = SiteDistribution(model, "x")
+
+    def plated() -> None:
+        with numpyro.plate("sources", 5):
+            inner()
+
+    outer = SiteDistribution(plated, "x")
+    with handlers.seed(rng_seed=0):
+        outer()
+    assert inner.distribution is not None
+    assert outer.distribution is not None
+    assert inner.distribution.batch_shape == ()
+    assert outer.distribution.batch_shape == (5,)

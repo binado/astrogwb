@@ -9,10 +9,13 @@ import numpy.typing as npt
 import pytest
 
 from astrogwb.cosmology import (
+    comoving_distance,
+    differential_comoving_volume,
     distance_and_volume_grid,
     hubble_distance,
     hubble_time_gyr,
     lookback_time,
+    luminosity_distance,
     normalized_hubble_parameter,
     redshift_at_lookback_time,
 )
@@ -299,3 +302,50 @@ def test_redshift_at_lookback_time_is_infinite_beyond_the_age(parameters) -> Non
         )
     )(times)
     assert np.all(np.isfinite(gradient))
+
+
+@pytest.mark.parametrize("redshift", [0.1, 1.0, 5.0, 10.0])
+def test_comoving_distance_matches_einstein_de_sitter(redshift: float) -> None:
+    """At Omega_m = 1, chi = 2 D_H (1 - 1 / sqrt(1 + z)) in closed form."""
+    h0 = 70.0
+    expected = 2.0 * hubble_distance(h0) * (1.0 - 1.0 / np.sqrt(1.0 + redshift))
+    np.testing.assert_allclose(
+        comoving_distance(redshift, h0, 1.0), expected, rtol=1e-9
+    )
+
+
+def test_pointwise_distances_match_the_grid_helper(parameters) -> None:
+    """Both routes agree on the grid nodes, in any order of the points."""
+    grid = jnp.linspace(0.0, 10.0, 257)
+    grid_distance, grid_volume = distance_and_volume_grid(grid, **parameters)
+    shuffled = jax.random.permutation(jax.random.PRNGKey(0), grid.shape[0])
+    np.testing.assert_allclose(
+        luminosity_distance(grid[shuffled], **parameters),
+        grid_distance[shuffled],
+        rtol=1e-8,
+        atol=1e-8,
+    )
+    np.testing.assert_allclose(
+        differential_comoving_volume(grid[shuffled], **parameters),
+        grid_volume[shuffled],
+        rtol=1e-8,
+        atol=1e-4,
+    )
+
+
+def test_pointwise_distances_are_differentiable(parameters) -> None:
+    redshift = jnp.array([0.5, 2.0, 8.0])
+    _assert_finite_grad(
+        lambda z, h, om: luminosity_distance(z, h, om).sum(),
+        1,
+        redshift,
+        jnp.asarray(70.0),
+        jnp.asarray(0.3),
+    )
+    _assert_finite_grad(
+        lambda z, h, om: differential_comoving_volume(z, h, om).sum(),
+        2,
+        redshift,
+        jnp.asarray(70.0),
+        jnp.asarray(0.3),
+    )

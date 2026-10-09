@@ -430,73 +430,6 @@ def test_nuts_samples_only_the_outer_hyperparameter() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# The uniform-guard mixture proposal
-# --------------------------------------------------------------------------- #
-def _redshift_log_density(
-    population: Population,
-    params: Mapping[str, ArrayLike],
-    redshift: ArrayLike,
-) -> jax.Array:
-    _, model = population(params)
-    with handlers.block(), handlers.seed(rng_seed=0):
-        trace = handlers.trace(model).get_trace()
-    site = trace.get(REDSHIFT_SITE)
-    if site is None or site["type"] != "sample":
-        raise ValueError(
-            f"source model declares no {REDSHIFT_SITE!r} sample site; every "
-            "source model must draw a redshift"
-        )
-    return jnp.asarray(site["fn"].log_prob(jnp.asarray(redshift)))
-
-
-def _uniform_mixture_population(uniform_mixing_fraction: float) -> Population:
-    return build_population(
-        "bns_coba",
-        **WINDOW,
-        uniform_mixing_fraction=uniform_mixing_fraction,
-    )
-
-
-def test_uniform_mixture_matches_the_explicit_logaddexp_proposal() -> None:
-    epsilon = 0.1
-    population = _uniform_mixture_population(epsilon)
-    actual = _redshift_log_density(population, POPULATION_PARAMS, SAMPLE_REDSHIFTS)
-
-    _, _, md_logprob = reference_merger_rate_distance_and_logprob(
-        FIDUCIALS, SAMPLE_REDSHIFTS, redshift_grid=make_redshift_grid()
-    )
-    expected = jnp.logaddexp(
-        jnp.log1p(-epsilon) + md_logprob,
-        jnp.log(epsilon) - jnp.log(Z_MAX - Z_MIN),
-    )
-    np.testing.assert_allclose(actual, expected, rtol=1e-13)
-
-    outside = jnp.array([Z_MIN - 0.1, Z_MAX + 0.1])
-    assert np.all(
-        np.isneginf(
-            np.asarray(_redshift_log_density(population, POPULATION_PARAMS, outside))
-        )
-    )
-
-
-def test_uniform_mixture_keeps_the_cosmological_distance() -> None:
-    """The guard changes which redshifts are drawn, not the physics at one."""
-    _, mixture_distance = evaluate(
-        _uniform_mixture_population(0.1), POPULATION_PARAMS, sample_values()
-    )
-    _, plain_distance = evaluate(mock_population(), POPULATION_PARAMS, sample_values())
-    np.testing.assert_array_equal(mixture_distance, plain_distance)
-
-
-@pytest.mark.parametrize("fraction", [-0.1, 1.5])
-def test_uniform_mixture_rejects_an_out_of_range_fraction(fraction: float) -> None:
-    """NumPyro validates the mixing probabilities when the model is built."""
-    population = _uniform_mixture_population(fraction)
-    with pytest.raises(ValueError, match="invalid probs"):
-        population(POPULATION_PARAMS)
-
-
-# --------------------------------------------------------------------------- #
 # Generation
 # --------------------------------------------------------------------------- #
 def draw(
@@ -608,14 +541,6 @@ def test_sampling_and_derivation_are_isolated_without_jit() -> None:
 # --------------------------------------------------------------------------- #
 # Ordered Gaussian masses
 # --------------------------------------------------------------------------- #
-def _gaussian_mixture_population(uniform_mixing_fraction: float) -> Population:
-    return build_population(
-        "bns_coba",
-        **{**WINDOW, "mass_model": "gaussian"},
-        uniform_mixing_fraction=uniform_mixing_fraction,
-    )
-
-
 def test_gaussian_mass_density_matches_two_iid_normals_on_the_ordered_half_plane() -> (
     None
 ):
@@ -719,21 +644,6 @@ def test_gaussian_and_uniform_models_share_distance() -> None:
     _, gaussian_distance = evaluate(_gaussian_population(), GAUSSIAN_PARAMS, values)
     _, uniform_distance = evaluate(mock_population(), POPULATION_PARAMS, values)
     np.testing.assert_array_equal(gaussian_distance, uniform_distance)
-
-
-def test_gaussian_uniform_mixture_matches_the_explicit_logaddexp_proposal() -> None:
-    epsilon = 0.1
-    actual = _redshift_log_density(
-        _gaussian_mixture_population(epsilon), GAUSSIAN_PARAMS, SAMPLE_REDSHIFTS
-    )
-    _, _, md_logprob = reference_merger_rate_distance_and_logprob(
-        FIDUCIALS, SAMPLE_REDSHIFTS, redshift_grid=make_redshift_grid()
-    )
-    expected = jnp.logaddexp(
-        jnp.log1p(-epsilon) + md_logprob,
-        jnp.log(epsilon) - jnp.log(Z_MAX - Z_MIN),
-    )
-    np.testing.assert_allclose(actual, expected, rtol=1e-13)
 
 
 # --------------------------------------------------------------------------- #

@@ -1,6 +1,6 @@
 r"""BNS population: one NumPyro model for every Madau-Dickinson variant.
 
-The redshift law, the mass law, the propagation law and the guard mixture are
+The redshift law, the mass law and the propagation law are
 construction settings of one model rather than separate registered functions,
 so the variants cannot disagree about the source density they share. A
 population is a callable ``parameters -> (merger_rate, model)``: the redshift
@@ -22,10 +22,6 @@ Contracts the caller is trusted to honour (nothing here checks them):
 - ``local_merger_rate`` is a pure overall scaling of the spectrum; ``H0`` is
   too, except when ``time_delay=True``: the delay is in Gyr while lookback time
   scales as :math:`1/H_0`, so the normalized redshift law depends on ``H0``.
-- ``uniform_mixing_fraction > 0`` makes a *proposal* density. The returned rate
-  is still the Madau-Dickinson total rate, which normalizes the
-  Madau-Dickinson density and not a mixture of it with a uniform component, so
-  such a population must not be used as an analysis target or an injection.
 - Component masses are an ordered pair: the first is the larger one. The
   uniform law has compact support, so a hyperparameter step that moves its
   edges can send catalog samples outside it; the Gaussian law has none.
@@ -41,7 +37,6 @@ from typing import Literal
 
 import jax
 import jax.numpy as jnp
-import numpy as np
 import numpyro
 import numpyro.distributions as dist
 from jax.typing import ArrayLike
@@ -134,32 +129,6 @@ def _redshift_distribution(
     )
 
 
-def _redshift_site(
-    redshift_distribution: RedshiftDistribution,
-    minimum_redshift: float,
-    maximum_redshift: float,
-    uniform_mixing_fraction: float,
-) -> dist.Distribution:
-    """The density the ``redshift`` site draws from, optionally with a uniform guard."""
-    if uniform_mixing_fraction == 0.0:
-        return redshift_distribution
-    # Static probabilities, so NumPyro can check the simplex constraint
-    # (``0 <= uniform_mixing_fraction <= 1``) eagerly instead of under a trace.
-    mixing = dist.Categorical(
-        probs=np.array([1.0 - uniform_mixing_fraction, uniform_mixing_fraction]),
-        validate_args=True,
-    )
-    return dist.MixtureGeneral(
-        mixing,
-        [
-            redshift_distribution,
-            dist.Uniform(minimum_redshift, maximum_redshift, validate_args=True),
-        ],
-        support=redshift_distribution.support,
-        validate_args=True,
-    )
-
-
 @register_population("bns_coba")
 def bns_coba_population_fn(
     minimum_redshift: float,
@@ -169,7 +138,6 @@ def bns_coba_population_fn(
     minimum_delay: float | None = None,
     maximum_formation_redshift: float = 20.0,
     n_delay_nodes: int = 48,
-    uniform_mixing_fraction: float = 0.0,
     n_grid: int = 1000,
     maximum_tidal_deformability: float = 2000.0,
     maximum_aligned_spin_component: float = 0.05,
@@ -192,9 +160,6 @@ def bns_coba_population_fn(
     minimum_delay, maximum_formation_redshift, n_delay_nodes
         The delay floor, the formation cut-off and the order of the delay
         quadrature. Only read when ``time_delay`` is true.
-    uniform_mixing_fraction
-        Fraction of uniform-in-redshift draws blended into the redshift law, a
-        guard that fattens the tails of a proposal. Must lie in ``[0, 1]``.
     maximum_tidal_deformability, maximum_aligned_spin_component
         Bounds of the uniform tidal-deformability and aligned-spin priors.
 
@@ -229,15 +194,9 @@ def bns_coba_population_fn(
             maximum_formation_redshift=maximum_formation_redshift,
             n_delay_nodes=n_delay_nodes,
         )
-        redshift_site = _redshift_site(
-            redshift_distribution,
-            minimum_redshift,
-            maximum_redshift,
-            uniform_mixing_fraction,
-        )
 
         def _population_model() -> dict[str, jax.Array]:
-            redshift = jnp.asarray(numpyro.sample("redshift", redshift_site))
+            redshift = jnp.asarray(numpyro.sample("redshift", redshift_distribution))
             distance = redshift_distribution.luminosity_distance(redshift)
             if "xi_0" in parameters:
                 distance = distance * jnp.exp(

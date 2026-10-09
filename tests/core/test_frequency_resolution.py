@@ -33,16 +33,14 @@ import pytest
 from astrogwb_mock_population import (
     FIDUCIALS,
     build_mock_catalog,
-    catalog_samples,
-    mock_population,
+    build_reference_catalog,
+    build_reference_spectrum,
 )
 
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
 from astrogwb.frequency import frequency_mask
-from astrogwb.gwb import spectral_density, spectral_snr_squared
-from astrogwb.importance.spectral import build_importance_spectrum
-from astrogwb.populations import DEFAULT_DENSITY_SITES
+from astrogwb.gwb import spectral_snr_squared
 from astrogwb.simulators.polarization_power import (
     CatalogMetadata,
     PolarizationPowerData,
@@ -52,6 +50,10 @@ from astrogwb.simulators.polarization_power import (
 FINE_DF = 0.25
 F_MIN = 2.0
 F_MAX = 256.0
+
+#: Where the reference catalog stops: above the detector-frame merger frequency
+#: of a BNS at the lowest redshift, so no query of the rescaled spectrum is cut.
+REFERENCE_F_MAX = 2048.0
 
 #: Sources. The subject here is ``df``, not ``N``, so this is set by build cost.
 NUM_SOURCES = 256
@@ -118,20 +120,17 @@ def test_subsampling_a_fine_catalog_matches_a_coarse_one(
 
 
 def _analysis_at(
-    data: PolarizationPowerData, factor: int, sensitivities: Mapping[str, Any]
+    frequencies: jax.Array, sensitivities: Mapping[str, Any]
 ) -> dict[str, Any]:
-    """Re-derive the masked analysis inputs on the grid coarsened by ``factor``.
+    """Derive the masked analysis inputs on one observed grid.
 
-    The PSD and the mask are rebuilt on the subsampled grid rather than
-    subsampled themselves, so nothing about the coarse analysis is inherited
-    from the fine one except the sources. Every array stays on the full
-    subsampled grid and the band is a mask, so bin widths derive from the whole
-    axis; ``noise_scale`` is a placeholder of one wherever the mask excludes a
-    bin, which keeps an infinite PSD out of the log density.
+    The PSD and the mask are rebuilt on each grid rather than subsampled, so
+    nothing about the coarse analysis is inherited from the fine one except
+    the sources. Every array stays on the full grid and the band is a mask, so
+    bin widths derive from the whole axis; ``noise_scale`` is a placeholder of
+    one wherever the mask excludes a bin, which keeps an infinite PSD out of
+    the log density.
     """
-    frequencies = jnp.asarray(data["frequencies"])[::factor]
-    polarization_power = jnp.asarray(data["polarization_power"])[::factor]
-
     network_psd = jnp.asarray(
         effective_psd(np.asarray(frequencies), DETECTORS, sensitivities)
     )
@@ -142,7 +141,6 @@ def _analysis_at(
     return {
         "frequencies": frequencies,
         "mask": mask,
-        "polarization_power": polarization_power,
         "effective_psd": network_psd,
         "noise_scale": jnp.where(mask, noise_scale, 1.0),
         "num_bins": int(jnp.sum(mask)),
@@ -150,25 +148,28 @@ def _analysis_at(
 
 
 @pytest.fixture(scope="module")
+def reference() -> tuple[PolarizationPowerData, CatalogMetadata]:
+    """One reference catalog every observed grid is predicted from.
+
+    It reaches past the detector-frame merger frequency at the window's lower
+    edge, which the rescaled spectrum's queries above the band need.
+    """
+    return build_reference_catalog(
+        NUM_SOURCES,
+        f_min=F_MIN,
+        f_max=REFERENCE_F_MAX,
+        frequency_resolution=FINE_DF,
+    )
+
+
+@pytest.fixture(scope="module")
 def resolutions(
-    fine_catalog: tuple[PolarizationPowerData, CatalogMetadata],
+    reference: tuple[PolarizationPowerData, CatalogMetadata],
 ) -> dict[int, dict[str, Any]]:
     """Masked analysis inputs, mock observations, and SNR^2 at each resolution."""
-    fine_data, _ = fine_catalog
-    samples = catalog_samples(fine_data)
-    # The catalog is its own proposal: preparation caches the density and
-    # reference distances the target re-forms at FIDUCIALS, which is what makes
-    # every fiducial log-weight exactly zero.
-    estimator, log_weights_fn = build_importance_spectrum(
-        *fine_catalog,
-        population=mock_population(),
-        density_sites=DEFAULT_DENSITY_SITES,
-    )
-    total_merger_rate = jnp.asarray(estimator(FIDUCIALS)[1]["total_merger_rate"])
-
-    def weights_fn(params: dict[str, float]) -> tuple[jax.Array, jax.Array]:
-        _, extras = estimator(params)
-        return jnp.asarray(extras["total_merger_rate"]), log_weights_fn(params)
+    data, _ = reference
+    fine_frequencies = jnp.asarray(data["frequencies"])
+    fine_frequencies = fine_frequencies[fine_frequencies <= F_MAX]
 
     # Loaded once: the noise curves are the same at every resolution, and
     # re-reading them per grid dominated the module's runtime.
@@ -176,16 +177,14 @@ def resolutions(
 
     runs: dict[int, dict[str, Any]] = {}
     for factor in (1, *SUBSAMPLE_FACTORS):
-        run = _analysis_at(fine_data, factor, sensitivities)
-        run["samples"] = samples
-        run["weights_fn"] = weights_fn
-        # The catalog is its own proposal, so the injection is the unweighted
-        # contraction and every log-weight is exactly zero at the fiducials.
-        run["observed"] = spectral_density(
-            run["polarization_power"],
-            jnp.ones(NUM_SOURCES),
-            total_merger_rate,
+        run = _analysis_at(fine_frequencies[::factor], sensitivities)
+        # One estimator per observed grid, all predicting from the same
+        # sources. The injection is its own fiducial prediction, so the
+        # chi^2 term vanishes at the fiducials and every log-weight is zero.
+        run["estimator"], run["log_weights_fn"] = build_reference_spectrum(
+            *reference, frequencies=run["frequencies"]
         )
+        run["observed"] = run["estimator"](FIDUCIALS)[0]
         run["snr_squared"] = float(
             spectral_snr_squared(
                 run["observed"],
@@ -201,14 +200,7 @@ def resolutions(
 
 def _log_likelihood(run: dict[str, Any], hubble_constant: float) -> float:
     """Gaussian log-density of the injection under the H0-shifted template."""
-    total_merger_rate, log_weights = run["weights_fn"](
-        {**FIDUCIALS, "H0": hubble_constant}
-    )
-    model = spectral_density(
-        run["polarization_power"],
-        jnp.exp(log_weights),
-        total_merger_rate,
-    )
+    model, _ = run["estimator"]({**FIDUCIALS, "H0": hubble_constant})
     log_prob = dist.Normal(model, run["noise_scale"]).log_prob(run["observed"])
     return float(jnp.sum(jnp.where(run["mask"], log_prob, 0.0)))
 
@@ -290,6 +282,6 @@ def test_every_log_weight_is_exactly_zero_at_the_fiducials(
 ) -> None:
     """The premise the identity above rests on, stated on its own."""
     run = resolutions[1]
-    _, log_weights = run["weights_fn"](dict(FIDUCIALS))
+    log_weights = run["log_weights_fn"](dict(FIDUCIALS))
     assert isinstance(log_weights, jax.Array)
     np.testing.assert_array_equal(np.asarray(log_weights), 0.0)

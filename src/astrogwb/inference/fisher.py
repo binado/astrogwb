@@ -23,10 +23,10 @@ bin's matrix is not.
 
 Any :class:`~astrogwb.inference.SpectralDensityFn` works, as long as it is
 differentiable in the requested parameters. The importance spectrum from
-:func:`~astrogwb.importance.spectral.build_importance_spectrum` is: it
+:func:`~astrogwb.gwb.importance.build_rescaled_spectrum` is: it
 reweights a fixed catalog without drawing anything. Its derivative is still a
-Monte Carlo estimate -- at the catalog's own fiducials it reduces to the
-score-function estimator, with noise that grows as
+Monte Carlo estimate over the intrinsic draws -- at the catalog's own fiducials
+it reduces to the score-function estimator, with noise that grows as
 :func:`~astrogwb.importance.diagnostics.relative_ess` drops -- so evaluate near
 those fiducials. A hyperparameter that moves a support edge (a hard mass
 cutoff, say) differentiates only the density's normalization, not the sources

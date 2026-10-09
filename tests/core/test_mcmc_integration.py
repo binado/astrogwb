@@ -34,15 +34,13 @@ from astrogwb_mock_population import (
     F_MAX,
     F_MIN,
     FIDUCIALS,
-    POPULATION_PARAMS,
-    catalog_samples,
-    make_redshift_grid,
+    build_reference_catalog,
+    build_reference_spectrum,
     mock_population,
 )
 from jax.typing import ArrayLike
 from numpyro import handlers
 from numpyro.infer import MCMC, NUTS, init_to_value
-from reference_population import reference_merger_rate_distance_and_logprob
 
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.detector import (
@@ -52,15 +50,13 @@ from astrogwb.detector import (
 )
 from astrogwb.distributions.amplitude import AmplitudeConditional, amplitude_prior
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
-from astrogwb.gwb import spectral_density, spectral_snr
-from astrogwb.importance.spectral import build_importance_spectrum
+from astrogwb.gwb import spectral_snr
 from astrogwb.inference import (
     SpectralDensityFn,
     amplitude_H0_transform,
     gwb_amplitude_marginalized_model,
     gwb_spectral_density_model,
 )
-from astrogwb.populations import DEFAULT_DENSITY_SITES
 from astrogwb.populations._types import PopulationModel
 from astrogwb.simulators.polarization_power import (
     CatalogMetadata,
@@ -132,27 +128,20 @@ def _build_analysis_inputs(
 ) -> AnalysisInputs:
     """Reproduce the standard setup block against an in-memory catalog.
 
-    Unpack the catalog, prepare the importance arrays from its own recorded
-    population, contract with unit weights, load the network effective PSD,
-    and mask out-of-band and non-finite bins.
+    Bind the reference catalog to the target, inject its prediction at the
+    fiducials, load the network effective PSD, and mask out-of-band and
+    non-finite bins.
     """
     frequencies = jnp.asarray(data["frequencies"])
-    polarization_power = jnp.asarray(data["polarization_power"])
-    samples = catalog_samples(data)
-    num_sources = polarization_power.shape[1]
 
-    # The injection rate comes from the catalog's own recorded population, at
-    # the parameters it was drawn at -- which is also what the weights
-    # divide by, so every fiducial log-weight is exactly zero and the
-    # unit-weight injection below is the same quantity the target reproduces.
-    total_merger_rate, _, _ = reference_merger_rate_distance_and_logprob(
-        POPULATION_PARAMS, samples["redshift"], redshift_grid=make_redshift_grid()
+    # The reference catalog is its own proposal and the injection is its
+    # prediction at the fiducials, so every log-weight there is exactly zero
+    # and the template equals the data.
+    full_estimator, _ = build_reference_spectrum(
+        data, metadata, population=pinned_target
     )
-    observed_spectral_density = spectral_density(
-        polarization_power,
-        jnp.ones(num_sources),
-        total_merger_rate,
-    )
+    observed_spectral_density, extras = full_estimator(FIDUCIALS)
+    total_merger_rate = jnp.asarray(extras["total_merger_rate"])
 
     sensitivities = load_sensitivity_map(DETECTORS)
     network_psd = jnp.asarray(effective_psd(frequencies, DETECTORS, sensitivities))
@@ -189,26 +178,14 @@ def _build_analysis_inputs(
     )
     np.testing.assert_allclose(snr, target_snr, rtol=1e-6)
     scale = gaussian_bin_scale(network_psd, observation_time, frequencies)
-    frequencies, polarization_power, observed_spectral_density, network_psd, scale = (
-        apply_frequency_mask(
-            mask,
-            frequencies,
-            polarization_power,
-            observed_spectral_density,
-            network_psd,
-            scale,
-        )
+    frequencies, observed_spectral_density, network_psd, scale = apply_frequency_mask(
+        mask, frequencies, observed_spectral_density, network_psd, scale
     )
 
-    # Prepared after masking, from the catalog's own population record. The
-    # band mask reaches the power and nothing else -- masking the sources would
-    # silently truncate the population.
-    estimator = build_importance_spectrum(
-        data,
-        metadata,
-        population=pinned_target,
-        density_sites=DEFAULT_DENSITY_SITES,
-        frequency_mask=mask,
+    # Built on the masked grid: the band only chooses where the spectrum is
+    # predicted, and the catalog's sources and weights are untouched.
+    estimator = build_reference_spectrum(
+        data, metadata, frequencies=frequencies, population=pinned_target
     )[0]
 
     return AnalysisInputs(
@@ -299,9 +276,9 @@ def _reconstruct_h0(posterior: dict) -> dict:
 
 
 @pytest.fixture(scope="module")
-def analysis_inputs(mock_catalog_factory) -> AnalysisInputs:
+def analysis_inputs() -> AnalysisInputs:
     """Build the deterministic masked catalog inputs once for this module."""
-    return _build_analysis_inputs(*mock_catalog_factory())
+    return _build_analysis_inputs(*build_reference_catalog())
 
 
 @pytest.fixture(scope="module")
@@ -449,7 +426,9 @@ def _count_compilations(run) -> int:
 
     class _Counter(logging.Handler):
         def emit(self, record: logging.LogRecord) -> None:
-            records.append(record.getMessage())
+            message = record.getMessage()
+            if message.startswith("Compiling"):
+                records.append(message)
 
     logger = logging.getLogger("jax")
     handler = _Counter()
@@ -474,7 +453,7 @@ def test_one_compiled_sampler_serves_several_frequency_bands(
     arrays: compressing makes the bin count a *shape*, so every band is a new
     signature and a fresh sampler. Here one ``MCMC`` object is run twice with
     the same shapes and a different mask value, and the second run's
-    compilations are counted against the first's.
+    compilations are counted.
     """
     inputs = analysis_inputs
     kwargs = _model_kwargs(inputs)
@@ -507,8 +486,10 @@ def test_one_compiled_sampler_serves_several_frequency_bands(
     first, wide_h0 = run(wide, SEED)
     second, narrow_h0 = run(narrow, SEED)
 
-    assert first > 0
-    assert second < first / 10, (first, second)
+    assert first > 0, "the first run compiled nothing: nothing was counted"
+    # NumPyro rebuilds the sampler loop itself on every run; the model, the
+    # spectrum and everything else in it must come from the first run's cache.
+    assert second <= 1, (first, second)
     # A narrower band is less informative, so the two chains are genuinely
     # different -- the reused program is not one that ignores its mask.
     assert float(jnp.std(narrow_h0)) > float(jnp.std(wide_h0))

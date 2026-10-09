@@ -5,13 +5,19 @@ from __future__ import annotations
 from typing import Any
 
 import jax
+import jax.numpy as jnp
 import numpy as np
+import numpyro
+import numpyro.distributions as dist
 import pytest
 
+from astrogwb.cosmology import luminosity_distance
+from astrogwb.distributions.rates import madau_dickinson_rate, total_merger_rate
 from astrogwb.gwb.importance import (
     EFFECTIVE_INCLINATION,
     _pin_redshift_and_inclination,
     build_rescaled_spectrum,
+    phinney_kernel,
     redshift_quadrature,
     reference_catalog,
 )
@@ -61,7 +67,9 @@ def reference_metadata() -> CatalogMetadata:
                 "mass_model": "uniform",
                 "minimum_redshift": 0.1,
                 "maximum_redshift": 5.0,
-                "n_grid": 64,
+                # Fine: the brute force reads the table, the spectrum the closed
+                # form, and they agree only to the table's interpolation error.
+                "n_grid": 8192,
             },
         ),
         fiducials={
@@ -291,3 +299,62 @@ def test_rescaled_spectrum_as_a_jit_argument_traces_once_per_shape(
 
     assert len(traces) == 1
     assert not np.allclose(results[0], results[1], rtol=1e-6, atol=0.0)
+
+
+@pytest.mark.parametrize("xi_0", [1.0, 0.8])
+def test_phinney_kernel_times_the_distance_ratio_squared_is_the_rate_density(
+    xi_0: float,
+) -> None:
+    """Undoing the distance factor leaves ``psi / (1 + z) dV_c/dz`` per second."""
+    redshift, weights = redshift_quadrature(0.1, 5.0, 24)
+    hubble_constant, omega_m, reference_distance = 67.66, 0.3096, 700.0
+    merger_rate = np.asarray(madau_dickinson_rate(redshift, 1.42, 4.62, 1.84, 770.0))
+    distance_ratio = xi_0 + (1.0 - xi_0) * (1.0 + redshift) ** -2.0
+
+    kernel = phinney_kernel(
+        redshift,
+        merger_rate,
+        distance_ratio,
+        hubble_constant,
+        omega_m,
+        reference_distance,
+    )
+    distance = distance_ratio * luminosity_distance(redshift, hubble_constant, omega_m)
+    undone = np.asarray(kernel) * (np.asarray(distance) / reference_distance) ** 2
+
+    np.testing.assert_allclose(
+        np.sum(weights * undone),
+        total_merger_rate(redshift, weights, merger_rate, hubble_constant, omega_m),
+        rtol=1e-12,
+    )
+
+
+@pytest.mark.integration
+def test_the_redshift_site_must_be_a_redshift_distribution(
+    reference_metadata: CatalogMetadata,
+) -> None:
+    data = reference_catalog(reference_metadata, batch_keys(41, 1)[0])
+    real = build_population(
+        reference_metadata.population.model_name,
+        **reference_metadata.population.model_kwargs,
+    )
+
+    def foreign(params: Any) -> Any:
+        rate, _ = real(params)
+
+        def uniform_redshift() -> Any:
+            numpyro.sample("redshift", dist.Uniform(0.1, 5.0))
+            return {"luminosity_distance": jnp.ones(())}
+
+        return rate, uniform_redshift
+
+    fn, _ = build_rescaled_spectrum(
+        data,
+        reference_metadata,
+        population=foreign,
+        frequencies=data["frequencies"][:10],
+        num_redshift_nodes=3,
+        density_sites=(),
+    )
+    with pytest.raises(TypeError, match="RedshiftDistribution"):
+        fn(reference_metadata.fiducials)

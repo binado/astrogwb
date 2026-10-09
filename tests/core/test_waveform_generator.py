@@ -702,6 +702,57 @@ def test_generate_batch_still_rejects_names_and_shapes(
         jax.jit(ripple_generator.generate_batch)(sources)
 
 
+def _source_frame_sources(redshift: np.ndarray) -> dict[str, np.ndarray]:
+    """``_ripple_sources`` with its masses restated in the source frame."""
+    sources = _ripple_sources()
+    scale = 1.0 + redshift
+    return {
+        "source_frame_mass_1": sources.pop("detector_frame_mass_1") / scale,
+        "source_frame_mass_2": sources.pop("detector_frame_mass_2") / scale,
+        "redshift": redshift,
+        **sources,
+    }
+
+
+def test_source_frame_masses_and_redshift_give_the_detector_frame_power(
+    ripple_generator: RippleGenerator,
+) -> None:
+    """Either form of the masses reaches the same waveform."""
+    derived = _source_frame_sources(np.array([0.1, 0.5]))
+
+    np.testing.assert_allclose(
+        ripple_generator.generate_batch(derived),
+        ripple_generator.generate_batch(_ripple_sources()),
+    )
+
+
+def test_explicit_detector_frame_masses_take_precedence(
+    ripple_generator: RippleGenerator,
+) -> None:
+    """A stray source-frame column does not override a given detector-frame one."""
+    sources = _ripple_sources() | {
+        "source_frame_mass_1": np.array([9.0, 9.0]),
+        "source_frame_mass_2": np.array([9.0, 9.0]),
+        "redshift": np.array([0.3, 0.3]),
+    }
+
+    np.testing.assert_allclose(
+        ripple_generator.generate_batch(sources),
+        ripple_generator.generate_batch(_ripple_sources()),
+    )
+
+
+@pytest.mark.parametrize("dropped", ["redshift", "source_frame_mass_2"])
+def test_derived_masses_name_what_is_missing(
+    ripple_generator: RippleGenerator, dropped: str
+) -> None:
+    sources = _source_frame_sources(np.array([0.1, 0.5]))
+    del sources[dropped]
+
+    with pytest.raises(ValueError, match=dropped):
+        ripple_generator.generate_batch(sources)
+
+
 def test_unsupported_approximant_is_rejected_at_construction() -> None:
     with pytest.raises(ValueError, match="unsupported approximant"):
         RippleGenerator(

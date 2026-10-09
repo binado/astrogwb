@@ -32,8 +32,8 @@ pip install astrogwb[io]
   addressed by registered name. One declaration serves both generation and
   density evaluation, so a catalog and the weights that reweight it can never
   disagree about the law behind it.
-- `astrogwb.importance` reweights a fixed catalog to a target population and
-  contracts it into a spectrum.
+- `astrogwb.gwb.importance` reweights the intrinsic draws of a reference catalog
+  to a target population and integrates redshift by closed-form quadrature.
 - `astrogwb.inference` exposes the caller-prepared NumPyro model.
 - `astrogwb.catalog` provides an array-native catalog that records the
   population that drew it, and reads and writes it as HDF5 behind the `io`
@@ -89,18 +89,19 @@ population = build_population("bns_coba", **model_kwargs)
 _, model = population(params)
 source_parameters = sample_sources(model, jax.random.PRNGKey(42), num_samples=1024)
 
+generator = AnalyticInspiralGenerator(
+    WaveformMetadata(
+        approximant="AnalyticInspiral",
+        minimum_frequency=2.0,
+        maximum_frequency=2048.0,
+        reference_frequency=2.0,
+        sampling_frequency=4096.0,
+        frequency_resolution=1.0,
+    )
+)
 catalog = PolarizationPowerCatalog.from_generator(
     source_parameters,
-    generator=AnalyticInspiralGenerator(
-        WaveformMetadata(
-            approximant="AnalyticInspiral",
-            minimum_frequency=2.0,
-            maximum_frequency=2048.0,
-            reference_frequency=2.0,
-            sampling_frequency=4096.0,
-            frequency_resolution=1.0,
-        )
-    ),
+    generator=generator,
     population=PopulationMetadata(
         model_name="bns_coba",
         model_kwargs=model_kwargs,
@@ -111,19 +112,36 @@ catalog = PolarizationPowerCatalog.from_generator(
 catalog.save("catalog.h5")
 ```
 
-Reweighting it to a target population needs nothing else: the file says what
-drew it, so the proposal density is recovered rather than restated. A
-population is one registered name whose one call yields the merger rate and the
-source model, so a target's rate and density cannot be paired by mistake.
+A spectrum prediction starts from a *reference catalog* instead: the same
+draw, with every source placed at the lower edge of the redshift window, so that
+a source at any redshift is a rescaling of its reference power. Intrinsic
+parameters are reweighted to a target population; redshift is integrated by
+closed-form quadrature, so it needs no weights at all.
 
 ```python
-from astrogwb.importance.spectral import build_importance_spectrum
+import jax
+import numpy as np
+
+from astrogwb.gwb.importance import build_rescaled_spectrum, reference_catalog
+from astrogwb.metadata import CatalogMetadata
+
+metadata = CatalogMetadata(
+    waveform=generator.metadata,
+    population=PopulationMetadata(model_name="bns_coba", model_kwargs=model_kwargs),
+    fiducials=params,
+    num_samples=1024,
+)
+reference = reference_catalog(metadata, jax.random.PRNGKey(42))
 
 target = build_population("bns_coba", **model_kwargs)
-spectrum_fn = build_importance_spectrum(
-    PolarizationPowerCatalog.load("catalog.h5"),
+spectrum_fn, log_weights_fn = build_rescaled_spectrum(
+    reference,
+    metadata,
     population=target,
-)[0]
+    frequencies=np.arange(10.0, 1000.0, 1.0),
+    num_redshift_nodes=32,
+    density_sites=("source_frame_mass_1", "source_frame_mass_2"),
+)
 spectrum, extras = spectrum_fn({**params, "H0": 70.0, "xi_0": 1.2, "xi_n": 1.91})
 ```
 

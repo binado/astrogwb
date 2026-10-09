@@ -25,7 +25,7 @@ PACK_RATIO = 1.5
 
 #: The source output naming the effective distance governing waveform
 #: amplitude. Required in every source model's returned mapping; see
-#: :mod:`astrogwb.importance.spectral`, which checks the same key.
+#: :mod:`astrogwb.gwb.importance`, which reads the same key.
 _LUMINOSITY_DISTANCE = "luminosity_distance"
 
 

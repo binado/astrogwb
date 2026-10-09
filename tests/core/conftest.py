@@ -15,7 +15,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
-from typing import Any
 
 import jax
 import numpy as np
@@ -32,7 +31,6 @@ from astrogwb_mock_population import (
     F_MAX,
     F_MIN,
     build_mock_catalog,
-    build_synthetic_importance,
     load_mock_population,
 )
 
@@ -80,11 +78,3 @@ def mock_catalog_factory(
     # `partial` rather than a **kwargs passthrough, so the returned factory
     # keeps build_mock_catalog's real keyword signature for type checkers.
     return partial(build_mock_catalog, mock_population)
-
-
-@pytest.fixture
-def synthetic_importance() -> Callable[
-    ..., tuple[dict[str, Any], dict[str, jax.Array]]
-]:
-    """Expose the synthetic self-proposal importance-kwargs builder as a fixture."""
-    return build_synthetic_importance

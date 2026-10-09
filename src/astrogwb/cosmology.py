@@ -148,18 +148,88 @@ def distance_and_volume_grid(
     quadrature_points, quadrature_weights = gauss_legendre_nodes_weights(
         extended[..., :-1], extended[..., 1:], GAUSS_LEGENDRE_ORDER
     )
-    e_quadrature = normalized_hubble_parameter(
-        redshift=quadrature_points, omega_m=omega_m[..., None]
+    interval_integrals = jnp.sum(
+        quadrature_weights
+        * _inverse_hubble_parameter(quadrature_points, omega_m[..., None]),
+        axis=-1,
     )
-    interval_integrals = jnp.sum(quadrature_weights / e_quadrature, axis=-1)
     integral = jnp.cumsum(interval_integrals, axis=-1)
-    inv_e = 1.0 / normalized_hubble_parameter(redshift=redshift, omega_m=omega_m)
-    comoving_distance = hubble_distance(hubble_constant) * integral
-    luminosity_distance = (1.0 + redshift) * comoving_distance
-    differential_comoving_volume = (
-        4.0 * jnp.pi * comoving_distance**2 * inv_e * hubble_distance(hubble_constant)
+    comoving_distance_grid = hubble_distance(hubble_constant) * integral
+    return (
+        (1.0 + redshift) * comoving_distance_grid,
+        _comoving_volume_element(
+            comoving_distance_grid, redshift, hubble_constant, omega_m
+        ),
     )
-    return luminosity_distance, differential_comoving_volume
+
+
+def _inverse_hubble_parameter(redshift: ArrayLike, omega_m: ArrayLike) -> jax.Array:
+    """The integrand :math:`1 / E(z)` of the comoving distance."""
+    return 1.0 / normalized_hubble_parameter(redshift, omega_m)
+
+
+def _comoving_volume_element(
+    comoving_distance: jax.Array,
+    redshift: ArrayLike,
+    hubble_constant: ArrayLike,
+    omega_m: ArrayLike,
+) -> jax.Array:
+    r"""All-sky :math:`4 \pi D_H \chi^2 / E(z)` in :math:`\mathrm{Mpc}^3`."""
+    return (
+        4.0
+        * jnp.pi
+        * comoving_distance**2
+        * _inverse_hubble_parameter(redshift, omega_m)
+        * hubble_distance(hubble_constant)
+    )
+
+
+#: Gauss-Legendre order of the pointwise comoving distance. Each point is one
+#: interval ``[0, z]`` reaching ``z`` of order 10, not a grid cell, so it needs
+#: far more nodes than :data:`GAUSS_LEGENDRE_ORDER`.
+POINTWISE_GAUSS_LEGENDRE_ORDER: int = 48
+
+
+def comoving_distance(
+    redshift: ArrayLike, hubble_constant: ArrayLike, omega_m: ArrayLike
+) -> jax.Array:
+    r"""Comoving distance in Mpc at each redshift, for flat :math:`\Lambda`CDM.
+
+    Unlike :func:`distance_and_volume_grid` the points need not form a sorted
+    grid: each is integrated on its own :math:`[0, z]` with a fixed
+    :data:`POINTWISE_GAUSS_LEGENDRE_ORDER`-point rule. The three arguments
+    broadcast.
+    """
+    redshift = jnp.asarray(redshift)
+    points, weights = gauss_legendre_nodes_weights(
+        jnp.zeros_like(redshift), redshift, POINTWISE_GAUSS_LEGENDRE_ORDER
+    )
+    integral = jnp.sum(
+        weights * _inverse_hubble_parameter(points, jnp.asarray(omega_m)[..., None]),
+        axis=-1,
+    )
+    return hubble_distance(hubble_constant) * integral
+
+
+def luminosity_distance(
+    redshift: ArrayLike, hubble_constant: ArrayLike, omega_m: ArrayLike
+) -> jax.Array:
+    r"""Luminosity distance in Mpc, :math:`(1 + z)\,\chi(z)`; see :func:`comoving_distance`."""
+    return (1.0 + jnp.asarray(redshift)) * comoving_distance(
+        redshift, hubble_constant, omega_m
+    )
+
+
+def differential_comoving_volume(
+    redshift: ArrayLike, hubble_constant: ArrayLike, omega_m: ArrayLike
+) -> jax.Array:
+    r"""All-sky :math:`\mathrm{d}V_c/\mathrm{d}z` in :math:`\mathrm{Mpc}^3`."""
+    return _comoving_volume_element(
+        comoving_distance(redshift, hubble_constant, omega_m),
+        redshift,
+        hubble_constant,
+        omega_m,
+    )
 
 
 def hubble_time_gyr(h0: ArrayLike) -> jax.Array:
