@@ -99,10 +99,18 @@ def _():
     $\sqrt{1 + (\rho s)^2}$ detector widths. The detector-only posterior is
     one width wide and under-covers; with shot noise it is
     $\sqrt{1 + (\rho s)^2}$ wide. With $\rho s \approx 0.48$ the 68%
-    interval covers about 63% without the term. That gap is close to the
-    binomial error at $M = 200$, so the sharper statistic is the variance of
-    $z = (\bar H_0 - H_0^{\mathrm{true}}) / \mathrm{sd}(H_0)$, which is one
-    for a calibrated posterior and about $1.23$ without the term.
+    interval covers about 63% without the term. The sharper statistic is the
+    variance of $z = (\bar H_0 - H_0^{\mathrm{true}}) / \mathrm{sd}(H_0)$,
+    which is one for a calibrated posterior and about $1.23$ without the
+    term.
+
+    $\mathrm{Var}(z)$ is the sum of a shot part, $(\rho s)^2$, and a detector
+    part, one. With a single noise draw per injection the detector part alone
+    has a sampling error of $\sqrt{2/M} \approx 0.1$ at $M = 200$, as large as
+    the effect. Detector noise is free next to an injection, so each injection
+    gets $R$ draws; the error is then set by the $M$ shot draws, and every
+    error is a bootstrap over injections, since the $R$ draws of one injection
+    share its shot noise.
 
     Only $H_0$ is swept. Its predictions on the grid do not depend on the
     data, so they are computed once and every injection reuses them.
@@ -126,6 +134,9 @@ def _():
     num_injections = 200
     injection_base_seed = 1000  # injection i draws at batch_keys(base, M)[i]
     noise_seed = 2000  # detector noise, one stream per network
+    # Detector-noise draws per injection: noise is free next to an injection,
+    # and one draw each leaves var(z) dominated by its own sampling error.
+    noise_draws = 20
     catalog_seed = 42  # the grid notebook's reference catalog
     num_samples = 2**17
     redshift_nodes = 32
@@ -145,6 +156,7 @@ def _():
     cache_name_prefix = ""
     if SMOKE:
         num_injections = 4
+        noise_draws = 2
         num_samples = 64
         redshift_nodes = 8
         catalog_chunk_size = 512
@@ -208,6 +220,7 @@ def _():
         maximum_frequency,
         minimum_frequency,
         network_names,
+        noise_draws,
         noise_seed,
         num_injections,
         observation_time,
@@ -357,31 +370,41 @@ def posterior_statistics(
 @app.function(hide_code=True)
 def coverage_row(
     statistics: dict[str, NDArray[np.float64]],
+    num_injections: int,
     *,
     n_bootstrap: int = 2000,
     seed: int = 0,
 ) -> dict[str, float]:
-    """Interval coverage with binomial errors, and the mean and variance of ``z``.
+    """Interval coverage and the mean and variance of ``z``, with errors.
 
-    The variance of ``z`` gets a bootstrap standard error: its sampling law
-    depends on the tails of ``z``, which the shot noise may make heavy.
+    The statistics are ``(num_injections * R,)``, injection-major: ``R``
+    detector-noise draws per injection. Those draws share their injection's
+    shot noise, so they are not independent, and every error is a bootstrap
+    over injections, each resampled with all of its noise draws.
     """
-    pit, z = statistics["pit"], statistics["z"]
-    count = pit.size
+
+    def summary(pit: NDArray[np.float64], z: NDArray[np.float64]) -> dict:
+        axes = (-2, -1)
+        values = {
+            f"cover {mass:.0%}": np.mean(
+                (pit > (1.0 - mass) / 2.0) & (pit < (1.0 + mass) / 2.0), axis=axes
+            )
+            for mass in (0.68, 0.95)
+        }
+        values["mean z"] = np.mean(z, axis=axes)
+        values["var z"] = np.var(z, axis=axes)
+        return values
+
+    pit = statistics["pit"].reshape(num_injections, -1)
+    z = statistics["z"].reshape(num_injections, -1)
+    index = np.random.default_rng(seed).integers(
+        0, num_injections, size=(n_bootstrap, num_injections)
+    )
+    point, resampled = summary(pit, z), summary(pit[index], z[index])
     row: dict[str, float] = {}
-    for mass in (0.68, 0.95):
-        tail = (1.0 - mass) / 2.0
-        covered = float(np.mean((pit > tail) & (pit < 1.0 - tail)))
-        row[f"cover {mass:.0%}"] = covered
-        row[f"cover {mass:.0%} err"] = float(
-            np.sqrt(max(covered * (1.0 - covered), 1.0 / count) / count)
-        )
-    rng = np.random.default_rng(seed)
-    resampled = rng.choice(z, size=(n_bootstrap, count), replace=True)
-    row["mean z"] = float(np.mean(z))
-    row["mean z err"] = float(np.std(z, ddof=1) / np.sqrt(count))
-    row["var z"] = float(np.var(z, ddof=1))
-    row["var z err"] = float(np.std(np.var(resampled, axis=-1, ddof=1)))
+    for name, value in point.items():
+        row[name] = float(value)
+        row[f"{name} err"] = float(np.std(resampled[name]))
     return row
 
 
@@ -517,7 +540,7 @@ def _():
     mo.md(r"""
     ## Coverage
 
-    Per network: one detector-noise draw per injection, then the $H_0$
+    Per network: $R$ detector-noise draws per injection, then the $H_0$
     posterior on the grid under each likelihood variant, with the uniform
     $H_0$ prior.
     """)
@@ -533,20 +556,26 @@ def _(
     grid_variance,
     h0_grid,
     injections,
+    noise_draws,
     noise_seed,
     per_network,
 ):
     _label = dict(DETECTOR_NETWORKS)
     _log_prior = np.asarray(PRIORS["H0"].log_prob(jnp.asarray(h0_grid)))
+    _count, _bins = injections.shape
     statistics: dict[tuple[str, str], dict[str, NDArray[np.float64]]] = {}
     _rows = []
     for _k, (_name, (_scale, _mask)) in enumerate(per_network.items()):
+        # (M, R, F) -> (M R, F), injection-major: R noise draws per injection.
         _noise = np.asarray(
             jax.random.normal(
-                jax.random.fold_in(jax.random.key(noise_seed), _k), injections.shape
+                jax.random.fold_in(jax.random.key(noise_seed), _k),
+                (_count, noise_draws, _bins),
             )
         )
-        _data = jnp.asarray(injections + _noise * _scale)
+        _data = jnp.asarray(
+            (injections[:, None, :] + _noise * _scale).reshape(-1, _bins)
+        )
         _s2_fixed = amplitude_shot_noise_variance(
             fiducial_prediction, fiducial_variance, _scale, _mask
         )
@@ -578,7 +607,7 @@ def _(
                 {
                     "network": _label[_name],
                     "likelihood": _variant,
-                    **coverage_row(statistics[_name, _variant]),
+                    **coverage_row(statistics[_name, _variant], _count),
                 }
             )
     coverage = pd.DataFrame(_rows)
