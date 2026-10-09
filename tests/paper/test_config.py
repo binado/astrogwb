@@ -10,9 +10,9 @@ from pydantic import ValidationError
 from repo import REPO_ROOT
 
 from astrogwb.constants import ISCO_ALPHA
+from astrogwb.distributions.config import DistributionConfig
 from astrogwb.paper.config import fiducials, networks, priors, waveform_generator
 from astrogwb.paper.config.detectors import load_detector_config
-from astrogwb.paper.config.priors import materialize_prior, prior_to_spec
 from astrogwb.paper.config.runs import load_base
 from astrogwb.paper.utils import deep_merge, load_mapping
 from astrogwb.waveform import (
@@ -104,25 +104,11 @@ def test_load_mapping_rejects_a_non_toml_layer(tmp_path: Path) -> None:
         load_mapping(path)
 
 
-# --------------------------------------------------------------------------- #
-# Prior specs
-# --------------------------------------------------------------------------- #
-@pytest.mark.parametrize(
-    ("spec", "message"),
-    [
-        (
-            {"dist": "Normal", "kwargs": {"loc": 0.0, "scale": 1.0, "low": 0.0}},
-            "Extra inputs are not permitted",
-        ),
-        ({"dist": "Lognormal", "kwargs": {"loc": 1.0}}, "not a numpyro distribution"),
-        ({"dist": "constraints", "kwargs": {}}, "not a numpyro distribution"),
-        ({"dist": "Normal", "kwargs": {"loc": 0.0, "scal": 1.0}}, "scale"),
-    ],
-    ids=["stale-key", "unknown-name", "not-a-distribution", "missing-key"],
-)
-def test_materialize_prior_rejects_a_malformed_spec(spec: dict, message: str) -> None:
-    with pytest.raises(ValueError, match=message):
-        materialize_prior(spec)
+def test_priors_materialize_to_live_distributions() -> None:
+    materialized = priors(REPO_ROOT)
+
+    assert isinstance(materialized["H0"], dist.Uniform)
+    assert isinstance(materialized["Omega_m"], dist.Normal)
 
 
 def test_waveform_generator_defaults_to_the_committed_ripple() -> None:
@@ -252,7 +238,7 @@ def test_priors_kwargs_accept_a_wire_spec() -> None:
         H0={"dist": "Uniform", "kwargs": {"low": 21.0, "high": 139.0}},
     )
 
-    assert prior_to_spec(overridden["H0"]) == {
+    assert DistributionConfig.from_distribution(overridden["H0"]).model_dump() == {
         "dist": "Uniform",
         "kwargs": {"low": 21.0, "high": 139.0},
     }
@@ -274,7 +260,9 @@ def test_accessor_kwargs_do_not_poison_the_cache() -> None:
 
     assert fiducials(REPO_ROOT)["H0"] == 67.66
     assert networks(REPO_ROOT)["ET-2L-aligned"] == ("S1", "R1")
-    assert prior_to_spec(priors(REPO_ROOT)["H0"]) == {
+    assert DistributionConfig.from_distribution(
+        priors(REPO_ROOT)["H0"]
+    ).model_dump() == {
         "dist": "Uniform",
         "kwargs": {"low": 20.0, "high": 140.0},
     }

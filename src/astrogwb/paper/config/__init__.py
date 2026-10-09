@@ -1,8 +1,7 @@
 """Configuration support modules, and the shared scientific values themselves.
 
 The leaf modules (:mod:`~astrogwb.paper.config.runs`,
-:mod:`~astrogwb.paper.config.priors`, :mod:`~astrogwb.paper.config.detectors`)
-are not re-exported; import them explicitly.
+:mod:`~astrogwb.paper.config.detectors`) are not re-exported; import them explicitly.
 
 What this package *does* expose is the tables the shared layers declare --
 ``[fiducials]``, ``[priors]`` and ``[networks]`` -- plus the accessors that build something from the
@@ -54,10 +53,12 @@ from __future__ import annotations
 import copy
 from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+import numpyro.distributions as dist
+
+from astrogwb.distributions.config import DistributionConfig
 from astrogwb.paper.config.detectors import DetectorRegistry
-from astrogwb.paper.config.priors import materialize_prior
 from astrogwb.paper.config.runs import load_base
 from astrogwb.paper.utils import deep_merge
 from astrogwb.populations import PopulationMetadata
@@ -66,9 +67,6 @@ from astrogwb.waveform import (
     PolarizationPowerGenerator,
     WaveformMetadata,
 )
-
-if TYPE_CHECKING:
-    from numpyro.distributions import Distribution
 
 __all__ = [
     "detector_registry",
@@ -120,7 +118,7 @@ def fiducials(root: Path | None = None, **kwargs: float) -> dict[str, float]:
     return {name: float(value) for name, value in table.items()}
 
 
-def priors(root: Path | None = None, **kwargs: Any) -> dict[str, Distribution]:
+def priors(root: Path | None = None, **kwargs: Any) -> dict[str, dist.Distribution]:
     """The prior for each parameter, materialized from the shared ``[priors]``.
 
     One entry per fiducial. The returned distributions hold plain Python
@@ -133,10 +131,15 @@ def priors(root: Path | None = None, **kwargs: Any) -> dict[str, Distribution]:
     Keyword arguments override the file, and may name a parameter the file does
     not declare. A value may be a wire-format spec
     (``{"dist": ..., "kwargs": {...}}``) or an already-built ``numpyro``
-    distribution, which ``materialize_prior`` passes through unchanged.
+    distribution, which is passed through unchanged.
     """
     table = {**_table(root, "priors"), **kwargs}
-    return {name: materialize_prior(spec) for name, spec in table.items()}
+    return {
+        name: spec
+        if isinstance(spec, dist.Distribution)
+        else DistributionConfig.model_validate(spec).build()
+        for name, spec in table.items()
+    }
 
 
 def networks(root: Path | None = None, **kwargs: Any) -> dict[str, tuple[str, ...]]:
