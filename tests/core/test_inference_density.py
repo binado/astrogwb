@@ -14,7 +14,7 @@ and ``scale`` vary between calls.
 
 from collections.abc import Callable, Mapping
 from functools import partial
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
 
 import jax
 import jax.numpy as jnp
@@ -573,3 +573,138 @@ def test_batched_likelihood_with_a_pytree_spectrum_matches_its_closure(
     )
 
     np.testing.assert_allclose(traced, closed, rtol=1e-12)
+
+
+def _shot_noise_variance(
+    params: Mapping[str, ArrayLike], *, relative_sd: ArrayLike
+) -> jax.Array:
+    """A per-bin variance with a tilted relative scatter, so modes differ."""
+    tilt = jnp.array([1.0, 1.4, 0.7])
+    return (jnp.asarray(relative_sd) * tilt * _analytic(params)[0]) ** 2
+
+
+@pytest.mark.parametrize("direction", ["amplitude", "per_frequency"])
+def test_batched_likelihood_with_shot_noise_matches_the_dense_gaussian(
+    priors: dict[str, dist.Distribution],
+    observed: jax.Array,
+    networks: Networks,
+    direction: Literal["amplitude", "per_frequency"],
+) -> None:
+    grids = {"h0": jnp.linspace(60.0, 80.0, 3)}
+    fixed = {"tilt": jnp.array(0.3)}
+    variance_fn = Partial(_shot_noise_variance, relative_sd=jnp.array(0.05))
+
+    batched = GaussianGWBBatchedLikelihood(priors)(
+        grids,
+        spectral_density_fn=_analytic,
+        fixed=fixed,
+        observed_spectral_density=observed,
+        shot_noise_variance_fn=variance_fn,
+        shot_noise_direction=direction,
+        **networks,
+    )
+
+    expected = np.empty(batched.shape)
+    for k in range(networks["scale"].shape[0]):
+        keep = np.asarray(networks["frequency_mask"][k])
+        scale_k = np.asarray(networks["scale"][k])[keep]
+        for g, h0 in enumerate(np.asarray(grids["h0"])):
+            params = {"h0": h0, **fixed}
+            prediction = np.asarray(_analytic(params)[0])[keep]
+            variance = np.asarray(variance_fn(params))[keep]
+            if direction == "amplitude":
+                weight = prediction**2 / scale_k**2
+                scatter = np.sum(weight * np.sqrt(variance) / prediction)
+                u = scatter / np.sum(weight) * prediction
+            else:
+                u = np.sqrt(variance)
+            covariance = np.diag(scale_k**2) + np.outer(u, u)
+            log_prior = sum(
+                float(np.asarray(p.log_prob(params[n]))) for n, p in priors.items()
+            )
+            expected[k, g] = log_prior + float(
+                dist.MultivariateNormal(
+                    jnp.asarray(prediction), jnp.asarray(covariance)
+                ).log_prob(jnp.asarray(observed)[keep])
+            )
+
+    np.testing.assert_allclose(batched, expected, rtol=1e-10)
+
+
+@pytest.mark.parametrize("direction", ["amplitude", "per_frequency"])
+def test_batched_likelihood_with_a_flat_relative_scatter_matches_a_fixed_one(
+    priors: dict[str, dist.Distribution],
+    observed: jax.Array,
+    networks: Networks,
+    direction: Literal["amplitude", "per_frequency"],
+) -> None:
+    def flat(params: Mapping[str, ArrayLike]) -> jax.Array:
+        return (0.05 * _analytic(params)[0]) ** 2
+
+    lp = GaussianGWBBatchedLikelihood(priors)
+    common: dict[str, Any] = {
+        "spectral_density_fn": _analytic,
+        "fixed": {"tilt": jnp.array(0.3)},
+        "observed_spectral_density": observed,
+        **networks,
+    }
+    grids = {"h0": jnp.linspace(60.0, 80.0, 4)}
+
+    evaluated = lp(
+        grids,
+        shot_noise_variance_fn=flat,
+        shot_noise_direction=direction,
+        **common,
+    )
+    pinned = lp(grids, amplitude_shot_noise_variance=0.05**2, **common)
+
+    np.testing.assert_allclose(evaluated, pinned, rtol=1e-12)
+
+
+def test_batched_likelihood_with_zero_shot_noise_is_the_diagonal_gaussian(
+    priors: dict[str, dist.Distribution],
+    observed: jax.Array,
+    networks: Networks,
+) -> None:
+    lp = GaussianGWBBatchedLikelihood(priors)
+    common: dict[str, Any] = {
+        "spectral_density_fn": _analytic,
+        "fixed": {"tilt": jnp.array(0.3)},
+        "observed_spectral_density": observed,
+        **networks,
+    }
+    grids = {"h0": jnp.linspace(60.0, 80.0, 4)}
+
+    np.testing.assert_allclose(
+        lp(grids, amplitude_shot_noise_variance=jnp.zeros(3), **common),
+        lp(grids, **common),
+        rtol=1e-12,
+    )
+
+
+def test_batched_likelihood_traces_a_pytree_variance_once_per_shape(
+    priors: dict[str, dist.Distribution],
+    observed: jax.Array,
+    networks: Networks,
+) -> None:
+    traces: list[None] = []
+
+    def counted(params: Mapping[str, ArrayLike], *, relative_sd: jax.Array) -> Any:
+        traces.append(None)
+        return _shot_noise_variance(params, relative_sd=relative_sd)
+
+    lp = GaussianGWBBatchedLikelihood(priors)
+    results = [
+        lp(
+            {"h0": jnp.linspace(60.0, 80.0, 4)},
+            spectral_density_fn=_analytic,
+            fixed={"tilt": jnp.array(0.3)},
+            observed_spectral_density=observed,
+            shot_noise_variance_fn=Partial(counted, relative_sd=jnp.array(sd)),
+            **networks,
+        )
+        for sd in (0.05, 0.2)
+    ]
+
+    assert len(traces) == 1
+    assert not np.allclose(results[0], results[1])
