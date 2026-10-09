@@ -1,8 +1,0 @@
-# z_peak alone: one scalar, so NUTS gets a diagonal mass matrix and a shorter
-# warmup.
-[sampler]
-num_warmup = 500
-dense_mass = false
-
-[analysis]
-sampled_params = ["z_peak"]

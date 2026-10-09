@@ -1,6 +1,0 @@
-# A 16384-source seed-42 proposal.
-[analysis.proposal]
-num_samples = 16384
-
-[analysis.seeds]
-proposal = 42
