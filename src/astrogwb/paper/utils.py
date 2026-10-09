@@ -1,8 +1,7 @@
 """Small shared config-I/O helpers: merge semantics and mapping file loading.
 
-stdlib only, so every consumer -- the config layer, the CLI entrypoints, and
-the ``Snakefile`` -- can import this without paying for pydantic, xarray, or
-JAX.
+stdlib only, so every consumer can import this without paying for pydantic,
+xarray, or JAX.
 """
 
 from __future__ import annotations
@@ -37,7 +36,7 @@ def require_toml(path: Path) -> None:
     second format should arrive as one deliberate migration, not a stray file.
     ``astrogwb.detector``'s packaged ``geometry.toml`` and ``sensitivity.toml``
     are also TOML: core reads them with ``tomllib`` and the paper application
-    merges their registry tables with its run layers through ``knf``.
+    merges their registry tables with its config layers through ``knf``.
     """
     if path.suffix.lower() != ".toml":
         raise ValueError(f"config layers are TOML; got {path.suffix!r} for {path}")

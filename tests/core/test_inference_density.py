@@ -5,7 +5,7 @@ model's ``numpyro.factor`` branch.
 
 Uses a small analytic ``spectral_density_fn``, the same pattern
 ``tests/core/test_spectral_inference.py`` already uses, so these tests stay
-fast and need no catalog. As in production (``astrogwb.paper.inference.build_model``),
+fast and need no catalog. As in the MCMC entrypoints,
 ``spectral_density_fn`` and ``priors`` are baked into the model with
 ``functools.partial`` -- they are static, not part of the per-call
 ``model_kwargs`` a ``LogDensityFn`` sweeps over. Only ``observed_spectral_density``

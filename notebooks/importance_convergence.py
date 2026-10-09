@@ -226,8 +226,8 @@ def cached_catalog(
 ) -> PolarizationPowerData:
     """The catalog at ``path``, drawn with ``draw(batch_keys(seed, 1)[0])`` on a miss.
 
-    A hit is checked against ``metadata`` and ``seed``, as
-    ``paper.catalogs.ensure_catalog`` checks a plain catalog.
+    A hit is checked against ``metadata`` and ``seed``, against the
+    request it records.
 
     Raises
     ------

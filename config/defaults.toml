@@ -1,61 +1,27 @@
-# The shared run layer: every top-level block of a run config, with the value
-# every run inherits unless its experiment's _base.toml or its own file
-# overrides it. A run is six layers merged in order:
+# The shared layer: the values every notebook and simulation inherits unless a
+# later layer overrides them. Layers merge in order:
 #
 #   config/defaults.toml -> config/waveforms.toml -> config/populations.toml
-#   -> config/detectors.toml -> config/runs/<experiment>/_base.toml -> <run>.toml
+#   -> config/detectors.toml -> (optional simulation layer)
 #
 # Tables merge key by key; arrays and values replace. The one exception is
 # [priors]: an overridden [priors.<param>] replaces the inherited one whole.
 #
 # After the merge, every "${a.b}" string is replaced by the merged value at
 # a.b. A reference to a table merges as that table: a later layer that sets a
-# key *under* one overrides just that field and keeps the rest, so a role
-# names its population as one reference and a run changes its seed alone.
+# key *under* one overrides just that field and keeps the rest.
 # A table that is a base plus a few additions is written `extends = "${a.b}"`
 # (config.runs.MERGE_KEY): the base's fields, then the local ones on top.
 
-# Observing time, frequency band, the target population, and the two catalogs
-# every run uses.
-#
-# Neither a network nor a detector list is ever a shared default: a run that
-# names no analysis.network must fail rather than silently inherit someone
-# else's, which is why none is declared here.
+# Observing time and frequency band.
 [analysis]
 observation_time = 1.0
 minimum_frequency = 2.0
 maximum_frequency = 2048.0
-# The analysis target the weights are evaluated at -- not a catalog's
-# population, which is [catalog].population below.
-population = "${populations.target}"
-
-# Both roles default to the [catalog] draw. That catalog is the injection --
-# the "observed" data -- of every run except time-delay, and the proposal of
-# cosmological-parameters, modified-propagation and
-# waveform-approximant/IMRPhenom. A run changes one field of a role -- its
-# size, its population or waveform -- by setting just that field.
-[analysis.injection]
-waveform = "${catalog.waveform}"
-fiducials = "${catalog.fiducials}"
-num_samples = "${catalog.num_samples}"
-population = "${catalog.population}"
-
-[analysis.proposal]
-waveform = "${catalog.waveform}"
-fiducials = "${catalog.fiducials}"
-num_samples = "${catalog.num_samples}"
-population = "${catalog.population}"
-
-# The seed each role is drawn at, a simulator input beside the role's metadata:
-# the same metadata at another seed is an independent realization. A run
-# overrides one role's seed alone.
-[analysis.seeds]
-injection = 41
-proposal = 41
 
 # The default draw, shaped like astrogwb.simulators.polarization_power.CatalogMetadata: a 32768-source
 # draw from the cosmological population with the default waveform. It is
-# drawn at the run's own [fiducials], so editing [fiducials] re-keys every
+# drawn at the shared [fiducials], so editing [fiducials] re-keys every
 # catalog. The record's version is the installed astrogwb's, never the config's.
 [catalog]
 waveform = "${waveforms.default}"
@@ -63,8 +29,8 @@ fiducials = "${fiducials}"
 num_samples = 32768
 population = "${populations.cosmological}"
 
-# The fiducial value of every parameter: where NUTS initializes, and what a
-# run's catalogs are drawn at.
+# The fiducial value of every parameter: the point catalogs are drawn at and
+# spectra are evaluated at.
 [fiducials]
 H0 = 67.66
 Omega_m = 0.3096
@@ -90,16 +56,3 @@ z_peak = { dist = "Uniform", kwargs = { low = 0.0, high = 2.5 } }
 local_merger_rate = { dist = "Normal", kwargs = { loc = 770.0, scale = 7.7 } }
 minimum_mass = { dist = "Uniform", kwargs = { low = 0.5, high = 1.5 } }
 mass_width = { dist = "Uniform", kwargs = { low = 0.5, high = 3.0 } }
-
-# The sampling RNG seed and the NUTS defaults.
-[sampler]
-seed = 42
-num_warmup = 1000
-num_samples = 2000
-num_chains = 4
-target_accept = 0.9
-dense_mass = true
-max_tree_depth = 10
-forward_mode_differentiation = false
-progress_bar = true
-jit_model_args = true

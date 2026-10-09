@@ -352,8 +352,7 @@ def ensure_reference_catalog(
     """The reference catalog of ``metadata`` at ``seed``, drawn on a miss.
 
     The file is ``<directory>/reference_catalog-<key>-<seed>.h5``. A hit is
-    checked against the request, as ``paper.catalogs.ensure_catalog`` checks a
-    plain catalog; a miss is drawn at ``batch_keys(seed, 1)[0]`` and written.
+    checked against the request it records; a miss is drawn at ``batch_keys(seed, 1)[0]`` and written.
 
     Parameters
     ----------

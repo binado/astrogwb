@@ -1,12 +1,10 @@
 """Configuration support modules, and the shared scientific values themselves.
 
 The leaf modules (:mod:`~astrogwb.paper.config.runs`,
-:mod:`~astrogwb.paper.config.mcmc`, :mod:`~astrogwb.paper.config.catalogs`) are
-not re-exported; import them explicitly.
+:mod:`~astrogwb.paper.config.detectors`) are not re-exported; import them explicitly.
 
 What this package *does* expose is the tables the shared layers declare --
-``[fiducials]``, ``[priors]`` and ``[networks]``, the same bytes the workflow
-merges into every run -- plus the accessors that build something from the
+``[fiducials]``, ``[priors]`` and ``[networks]`` -- plus the accessors that build something from the
 default draw every run inherits, ``[catalog]``: :func:`waveform_generator`
 from its waveform, and :func:`population_model` / :func:`population_metadata`
 from its population. Before the tables lived here, the notebook and the figure
@@ -21,8 +19,8 @@ Consume them from here instead::
     generator = waveform_generator()
 
 There is deliberately no accessor for the hyperparameters a catalog is drawn
-at: that is :func:`fiducials`, which a run's catalogs inherit from the run
-itself. One table, one place.
+at: that is :func:`fiducials`, which the catalogs inherit. One table, one
+place.
 
 Every accessor also takes keyword overrides, merged over the file, so a
 notebook can vary one entry without editing TOML or retyping the table::
@@ -31,18 +29,14 @@ notebook can vary one entry without editing TOML or retyping the table::
     priors(xi_0={"dist": "Uniform", "kwargs": {"low": 0.1, "high": 5.0}})
     networks(**{"ET-2L-aligned": ("S1", "R1", "C1")})
 
-**These are functions, not module-level dicts, and that is load-bearing.** The
-``Snakefile`` imports :mod:`astrogwb.paper.config.runs` to build the DAG, which
-executes this module; eager dicts would mean file I/O at import (failing from
-any working directory but the repository root) and, for the priors, a numpyro
-import on every ``--dry-run``. :func:`priors` therefore imports
-:func:`~astrogwb.paper.config.mcmc.materialize_prior` inside its own body;
-:func:`waveform_generator` imports
-:class:`~astrogwb.waveform.WaveformMetadata` the same way. A
-subprocess test in ``tests/paper/test_cli.py`` pins both halves.
+**These are functions, not module-level dicts.** Eager dicts would mean file
+I/O at import, failing from any working directory but the repository root, and
+would leave no place for keyword overrides. A subprocess test in
+``tests/paper/test_cli.py`` pins that :func:`priors` leaves the XLA backend
+uninitialized.
 
-Paths are relative to the working directory, which for the workflow and every
-script is the repository root -- the same contract as
+Paths are relative to the working directory, which for every script and
+notebook is the repository root -- the same contract as
 :mod:`astrogwb.paper.config.runs`. Tests, which pytest may invoke from
 anywhere, pass ``root=`` explicitly.
 
@@ -59,17 +53,20 @@ from __future__ import annotations
 import copy
 from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+import numpyro.distributions as dist
+
+from astrogwb.distributions.config import DistributionConfig
+from astrogwb.paper.config.detectors import DetectorRegistry
 from astrogwb.paper.config.runs import load_base
-
-if TYPE_CHECKING:
-    from numpyro.distributions import Distribution
-
-    from astrogwb.paper.config.detectors import DetectorRegistry
-    from astrogwb.populations import PopulationMetadata
-    from astrogwb.populations.registry import Population
-    from astrogwb.waveform import PolarizationPowerGenerator, WaveformMetadata
+from astrogwb.paper.utils import deep_merge
+from astrogwb.populations import PopulationMetadata
+from astrogwb.populations.registry import Population
+from astrogwb.waveform import (
+    PolarizationPowerGenerator,
+    WaveformMetadata,
+)
 
 __all__ = [
     "detector_registry",
@@ -107,24 +104,21 @@ def fiducials(root: Path | None = None, **kwargs: float) -> dict[str, float]:
 
     These are **not** the injection: what was injected is recorded in the
     injection catalog file, which is where the observed spectrum's rate and
-    density come from. These are where NUTS initializes each sampled parameter,
-    what the non-sampled sites are conditioned at, and the reference point an
-    amplitude-marginalized run forms its ratio against. Nothing cross-checks
-    them against a catalog, because nothing needs to.
+    density come from. These are the point catalogs are drawn at and spectra are
+    evaluated at. Nothing cross-checks them against a catalog, because nothing
+    needs to.
 
-    Every fiducial carries a prior in :func:`priors`; ``RunConfig`` retains the
-    complete table and ``analysis.sampled_params`` selects the NUTS latents,
-    leaving the remaining sites to be fixed by NumPyro effect handlers.
+    Every fiducial carries a prior in :func:`priors`.
 
     Keyword arguments override the file, and may name a fiducial the file does
     not declare. An added fiducial is the caller's to keep consistent with
-    :func:`priors` -- only ``RunConfig`` cross-checks the two tables.
+    :func:`priors` -- nothing cross-checks the two tables.
     """
     table = {**_table(root, "fiducials"), **kwargs}
     return {name: float(value) for name, value in table.items()}
 
 
-def priors(root: Path | None = None, **kwargs: Any) -> dict[str, Distribution]:
+def priors(root: Path | None = None, **kwargs: Any) -> dict[str, dist.Distribution]:
     """The prior for each parameter, materialized from the shared ``[priors]``.
 
     One entry per fiducial. The returned distributions hold plain Python
@@ -132,28 +126,26 @@ def priors(root: Path | None = None, **kwargs: Any) -> dict[str, Distribution]:
     initialize the XLA backend -- ``configure_runtime`` may still run after it.
 
     Note this is the *inference* prior. A diagnostic that scans a parameter is
-    free to scan wider (see ``GRID_SCAN_RANGES`` in
-    ``scripts/importance_weights_grid.py``); it just has to say so.
+    free to scan wider; it just has to say so.
 
     Keyword arguments override the file, and may name a parameter the file does
     not declare. A value may be a wire-format spec
     (``{"dist": ..., "kwargs": {...}}``) or an already-built ``numpyro``
-    distribution, which ``materialize_prior`` passes through unchanged.
+    distribution, which is passed through unchanged.
     """
-    # Imported here, not at module scope: `mcmc` reaches pydantic, and the
-    # Snakefile's DAG construction imports this package via `config.runs`.
-    from astrogwb.paper.config.mcmc import materialize_prior
-
     table = {**_table(root, "priors"), **kwargs}
-    return {name: materialize_prior(spec) for name, spec in table.items()}
+    return {
+        name: spec
+        if isinstance(spec, dist.Distribution)
+        else DistributionConfig.model_validate(spec).build()
+        for name, spec in table.items()
+    }
 
 
 def networks(root: Path | None = None, **kwargs: Any) -> dict[str, tuple[str, ...]]:
     """Detector networks by name: the shared ``[networks]`` table.
 
-    Each run names one of these keys as ``analysis.network``; ``RunConfig``
-    resolves it to the detector list recorded in the chain's own config. The
-    :func:`detector_registry` resolves the geometry and sensitivity settings.
+    The :func:`detector_registry` resolves the geometry and sensitivity settings.
 
     Membership and content live here; *order* does not. The ordered legend of
     the network-comparison figures is
@@ -178,9 +170,6 @@ def detector_registry(root: Path | None = None, **overrides: Any) -> DetectorReg
     Overrides may contain ``detectors`` and ``networks`` tables, deep-merged
     over the shared file. Runtime objects are built only by its build methods.
     """
-    from astrogwb.paper.config.detectors import DetectorRegistry
-    from astrogwb.paper.utils import deep_merge
-
     shared = {name: _table(root, name) for name in ("detectors", "networks")}
     settings = deep_merge(shared, overrides)
     unknown = settings.keys() - {"detectors", "networks"}
@@ -203,10 +192,8 @@ def waveform_generator(
     field by field here, so this accessor and a catalog request reach a generator
     down the same path and an override is checked instead of trusted.
 
-    Imported here, not at module scope: ``catalogs`` reaches pydantic and
-    ``build`` reaches JAX, while the Snakefile's DAG construction imports this
-    package via ``config.runs``. Ripple construction initializes the XLA
-    backend, so this is not safe to call before ``configure_runtime``.
+    Ripple construction initializes the XLA backend, so this is not safe to
+    call before ``configure_runtime``.
     """
     return waveform_metadata(root, **kwargs).build()
 
@@ -219,8 +206,6 @@ def waveform_metadata(root: Path | None = None, **kwargs: Any) -> WaveformMetada
     Keyword arguments override the file and are validated, not trusted.
     Touches no JAX, so it is safe before ``configure_runtime``.
     """
-    from astrogwb.waveform import WaveformMetadata
-
     settings = {**_table(root, "catalog", "waveform"), **kwargs}
     return WaveformMetadata.model_validate(settings)
 
@@ -241,10 +226,7 @@ def population_model(
     A key the named population does not take raises here rather than being
     filtered away, which is the same contract a catalog request gets.
 
-    Imports the registry in its own body: populating it means importing the
-    population models, which reaches JAX, so this is not safe to call before
-    ``configure_runtime``. Keeping the import here is what lets the ``Snakefile``
-    import this package to build its DAG.
+    Building the population is not safe before ``configure_runtime``.
     """
     return population_metadata(root).with_model_kwargs(**kwargs).build()
 
@@ -262,8 +244,6 @@ def population_metadata(
     Touches no JAX, so it is safe before ``configure_runtime``; building the
     record's population is not, for the reason :func:`population_model` gives.
     """
-    from astrogwb.populations import PopulationMetadata
-
     table = _table(root, "catalog", "population")
     table["model_kwargs"] = {**table.get("model_kwargs", {}), **kwargs}
     return PopulationMetadata.model_validate(table)

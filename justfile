@@ -31,10 +31,10 @@ test-core:
         --extra io --group test \
         pytest tests/core -m "not integration"
 
-# Paper application tests: configuration, CLI, runtime, IO, paths, workflows.
+# Paper application tests: configuration, CLI, runtime, plotting.
 test-paper:
     uv run --frozen --isolated --no-default-groups \
-        --extra notebook --group test --group workflow \
+        --extra notebook --group test \
         pytest tests/paper -m "not integration"
 
 # The end-to-end NUTS runs, slow enough to be their own CI job. These are also
@@ -42,17 +42,13 @@ test-paper:
 # `simulation` -- which test-core deliberately does not have, since core must
 # work without it.
 #
-# The second line is the paper half: the pipeline's parity checks against the
-# hand-written grid formula, and the generation tests that actually run Ripple.
-# They were dark before -- marked `integration` but reachable from no recipe --
-# so a change to catalog generation or to the prepared estimator could pass CI
-# with nothing having exercised either end to end.
+# The second line is the paper half: its integration-marked tests.
 test-integration:
     uv run --frozen --isolated --no-default-groups \
         --extra io --extra simulation --group test \
         pytest tests/core -m integration
     uv run --frozen --isolated --no-default-groups \
-        --extra notebook --group test --group workflow \
+        --extra notebook --group test \
         pytest tests/paper -m integration
 
 # Both fast suites.
@@ -60,27 +56,20 @@ test: test-core test-paper
 
 # Execution *is* the test: nbclient fails the run on any raised exception, so
 # the notebooks carry no assertion cells. Set ASTROGWB_NOTEBOOK_SMOKE=1 to
-# shrink the chains, the catalog, and the convergence sweeps.
+# shrink the catalogs and the convergence sweeps.
 
 # Convert and execute the root notebooks.
 test-notebooks:
     uv run --extra notebook --group jupyter \
-        jupytext --to notebook --execute notebooks/catalog_convergence.py
+        jupytext --to notebook --execute notebooks/waveform_approximant_spectra.py
 
 # Convert the py:percent notebooks to .ipynb. Marimo notebooks stay as Python.
 convert-notebooks:
     uv run --group jupyter jupytext --to notebook \
-        notebooks/catalog_convergence.py \
-        notebooks/mcmc.py \
         notebooks/waveform_approximant_spectra.py
 
 run-notebook notebook:
     uv run --group jupyter marimo edit {{ notebook }}
-
-# Map catalog keys back to what they draw and which runs use them. Pass
-# `--orphans` to list built catalogs no committed run asks for.
-catalogs *args:
-    uv run --extra paper python scripts/catalogs.py ls {{ args }}
 
 # The publishable distribution. `astrogwb.paper` ships inside it but is
 # unimportable without the `paper` extra, whose dependencies stay out of the

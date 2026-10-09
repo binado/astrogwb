@@ -1,4 +1,0 @@
-# H0 on the ET-2L-aligned-CE-Hanford network.
-[analysis]
-sampled_params = ["H0"]
-network = "ET-2L-aligned-CE-Hanford"

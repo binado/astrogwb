@@ -4,10 +4,8 @@ Presentation-only helpers: colorblind-safe palettes, the neutral truth-line
 style (solid), a loader for ``paper.mplstyle``, the LaTeX parameter labels
 and savefig settings that ``config/plotting.toml`` carries, and
 :func:`save_figures`, the single writer that applies them. This module is
-independent of the ``astrogwb`` package and of the config layer: it imports
-nothing from either, at module scope or inside a function body -- it reads that
-one TOML file with stdlib ``tomllib``, lazily, so the ``Snakefile`` can import
-``DETECTOR_NETWORK_RUNS`` while building the DAG without paying for any of it.
+independent of the ``astrogwb`` package and of the config layer: it reads that
+one TOML file with stdlib ``tomllib``, lazily.
 
 Convention:
 - category accents are the default color for single-posterior figures;
@@ -54,10 +52,9 @@ if TYPE_CHECKING:
 
 _STYLE_PATH = Path(__file__).parent / "paper.mplstyle"
 
-#: Relative to the working directory -- the repository root for the workflow
-#: and every script -- matching `astrogwb.paper.config.runs`. Read lazily, never
-#: at import: the `Snakefile` imports this module for `DETECTOR_NETWORK_RUNS`
-#: while building the DAG, and that import must stay free of file I/O.
+#: Relative to the working directory -- the repository root for every script
+#: and notebook -- matching `astrogwb.paper.config.runs`. Read lazily, never at
+#: import, so importing this module does no file I/O.
 _SETTINGS_PATH = Path("config/plotting.toml")
 
 
@@ -85,10 +82,8 @@ def figure_format(root: Path | None = None) -> str:
     """Default savefig container format. Applied by :func:`use_paper_style`.
 
     Near-inert in practice: ``savefig.format`` only decides anything when
-    ``savefig`` is handed a path with no extension, and every figure script
-    receives an explicit ``.pdf`` path from a ``Snakefile`` ``output:``
-    declaration. It records intent; changing it does not re-target the
-    workflow.
+    ``savefig`` is handed a path with no extension, and every figure is saved
+    to an explicit ``.pdf`` path. It records intent.
     """
     return str(_figure_settings(root)["figure_format"])
 
@@ -116,9 +111,8 @@ class Network:
     """One detector network: its run name, LaTeX label, and detector list.
 
     The name and label are presentation, owned here alongside
-    ``DETECTOR_NETWORKS``. The detector list is scientific and is filled in
-    from the run's own config by
-    :func:`astrogwb.paper.config.runs.resolve_networks`.
+    ``DETECTOR_NETWORKS``. The detector list is scientific and comes from the
+    shared ``[networks]`` table.
     """
 
     name: str
@@ -166,15 +160,13 @@ MERGER_RATE_LEGEND: dict[str, object] = {
     "frameon": False,
 }
 
-# The detector networks compared in every network figure, as (run name, LaTeX
-# label) in legend order. Declaration order is load-bearing: it drives chain
-# order on argv, legend order, and the color/linestyle assignment made by
+# The detector networks compared in every network figure, as (network name,
+# LaTeX label) in legend order. Declaration order is load-bearing: it drives
+# legend order and the color/linestyle assignment made by
 # `detector_network_styles`.
 #
-# Only the label is owned here. Each run's *detector list* is read back out of
-# that run's own config layers by
-# `astrogwb.paper.config.runs.resolve_networks`, so the detectors a figure
-# reports an SNR for are always the ones its chain was sampled with.
+# Only the label is owned here; the detector list behind each name is the
+# shared `[networks]` table.
 DETECTOR_NETWORKS: tuple[tuple[str, str], ...] = (
     ("ET-triangular", r"ET-$\Delta$"),
     ("ET-triangular-CE-Hanford", r"ET-$\Delta$ $+$ CE"),
@@ -183,8 +175,6 @@ DETECTOR_NETWORKS: tuple[tuple[str, str], ...] = (
     ("ET-2L-misaligned", "ET-2L"),
     ("ET-2L-misaligned-CE-Hanford", r"ET-2L $+$ CE"),
 )
-
-DETECTOR_NETWORK_RUNS: tuple[str, ...] = tuple(name for name, _ in DETECTOR_NETWORKS)
 
 
 def use_paper_style(root: Path | None = None) -> None:

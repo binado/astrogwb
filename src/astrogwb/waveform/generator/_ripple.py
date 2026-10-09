@@ -338,7 +338,7 @@ def build_power_kernel(
     called from inside a NumPyro model, which NumPyro already jits under
     inference, so an inner jit would only add a boundary for XLA to inline.
     Callers that evaluate eagerly at catalog scale supply their own jit, where
-    it is visible -- see ``scripts/generate_catalog.py``.
+    it is visible.
 
     ``nan_to_num`` guards the summed spectrum against a NaN from one event.
     It is not what makes the gradient finite, and it never was: a NaN reaching

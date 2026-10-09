@@ -82,14 +82,8 @@ repository root as the working directory.
   Smoke test:
   `ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/importance_convergence.py`.
 
-The paper notebooks merge a run's config layers with
-`assemble_run(*REFERENCE_RUN)` — the by-name convenience wrapper over the same
-merge the workflow performs by passing layer paths on argv. None of them reads
-an intermediate assembled-config artifact, so they run against a fresh clone.
-
-`fiducial_spectrum.py` and `spectrum_snrs.py` stand in for no particular run.
-They read the shared fiducials, detector registry, and default draw's waveform
-and population through `astrogwb.paper.config`, rather than merging run layers.
+`fiducial_spectrum.py` and `spectrum_snrs.py` read the shared fiducials, detector registry, and default draw's waveform
+and population through `astrogwb.paper.config`.
 Their analysis window, draw seed, and plotting choices live in editable
 configuration cells. Editing the shared analysis table does not update those
 local controls; mirror the change there by hand.
@@ -131,8 +125,6 @@ is hyphenated, so override one by unpacking a mapping
 (`networks(**{"ET-2L-aligned": ("S1", "R1", "C1")})`). Each accessor returns
 fresh settings from one cached merge of the shared layers. To see file edits
 in a long-lived kernel, call `astrogwb.paper.config._shared.cache_clear()`.
-Run-specific notebooks use `RunConfig.detector_registry` so their geometry
-and PSD overrides match inference.
 
 ## Running them
 

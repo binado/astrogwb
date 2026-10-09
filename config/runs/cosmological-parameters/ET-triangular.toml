@@ -1,4 +1,0 @@
-# H0 on the ET-triangular network.
-[analysis]
-sampled_params = ["H0"]
-network = "ET-triangular"

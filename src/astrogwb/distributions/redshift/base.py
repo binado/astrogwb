@@ -52,8 +52,7 @@ class RedshiftDistribution(InterpolatedDistribution):
         Hyperparameters. Must include ``H0`` (in
         :math:`\mathrm{km\,s^{-1}\,Mpc^{-1}}`) and ``Omega_m``, plus whatever
         ``source_frame_distribution`` reads. The keys match
-        :data:`~astrogwb.paper.config.catalogs.MD_FIDUCIAL_NAMES` and the
-        reference callback's, so one fiducials mapping feeds both with no
+        the reference callback's, so one fiducials mapping feeds both with no
         translation layer.
     source_frame_distribution:
         Callable returning the unnormalized source-frame merger-rate shape
