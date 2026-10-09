@@ -129,9 +129,8 @@ spectrum, extras = spectrum_fn({**params, "H0": 70.0, "xi_0": 1.2, "xi_n": 1.91}
 
 ## The manuscript application
 
-The reproducibility application -- the MCMC runner, catalog generation, campaign
-configuration, cluster profiles, and the Snakemake workflow that drives them --
-ships inside this package as `astrogwb.paper`, behind an extra:
+The reproducibility application -- the shared configuration, plotting style,
+and runtime setup behind the paper notebooks -- ships inside this package as `astrogwb.paper`, behind an extra:
 
 ```bash
 pip install "astrogwb[paper]"
@@ -141,8 +140,7 @@ Installing `astrogwb` alone leaves it inert: the subpackage is present but its
 dependencies are not, which is how the one-way dependency (`astrogwb.paper`
 may import `astrogwb`, never the reverse) is kept honest.
 
-Its committed assets -- `config/`, `scripts/`, `notebooks/`, `profiles/` and
-the `Snakefile` -- live at the root of the source repository and are not part
+Its committed assets -- `config/`, `scripts/` and `notebooks/` -- live at the root of the source repository and are not part
 of the wheel; the application is meant to be run from a checkout, with the
 repository root as the working directory. See [`docs/`](docs/) for catalog
-generation, running inference, the workflow, and the paper figures.
+generation and the paper figures.

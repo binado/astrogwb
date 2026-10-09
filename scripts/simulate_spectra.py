@@ -3,8 +3,7 @@
 The draws are determined by a :class:`~astrogwb.simulators.spectra.BackgroundSpectralDensityMetadata`
 -- waveform, population, each hyperparameter's fixed value or prior,
 observation time, count mode and fixed source count -- declared as the
-``[spectra]`` table of the ``--config`` layers, merged in process exactly as
-``run_mcmc`` merges a run, and by the seeds the sibling ``[draws]`` table names
+``[spectra]`` table of the ``--config`` layers, merged in process, and by the seeds the sibling ``[draws]`` table names
 (``seed`` expanded into ``num_draws`` keys by
 :func:`~astrogwb.simulators.core.batch_keys`). This script runs a
 :class:`~astrogwb.simulators.spectra.BackgroundSpectralDensitySimulator` on them and writes

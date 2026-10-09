@@ -9,15 +9,11 @@ data
 notebooks/*.h5
 notebooks/convergence_catalogs*/
 
-# Generated MCMC run artifacts. Snakemake's cwd is the repository root, so
-# outputs/ is where every chain, bank, and figure lands.
+# Generated artifacts. The working directory is the repository root, so
+# outputs/ is where every catalog, spectrum, and figure lands.
 /out/
 /outputs/
-chains/
 logs/
-
-# Generated paper-figure workflow state/artifacts.
-.snakemake/
 figures/
 grids/
 

@@ -2,54 +2,31 @@
 
 A **catalog** is one persisted waveform draw: a population drawn from a
 registered NumPyro model, with its frequency-domain polarization power reduced
-and written to `outputs/catalogs/polarization_power-<key>-<digest>.h5`. Catalogs are the only expensive
-artifact in the workflow and the only generated input a run consumes.
-
-There is no separate "bank" any more. Catalogs used to be split in two: banks
-were persisted single-component draws, and a catalog was a cheap in-memory
-prefix or mixture over them, composed at run time. Storing only polarization
-power made every catalog cheap enough to persist, so the composition step and
-its plumbing went away.
+and written to `outputs/catalogs/polarization_power-<key>-<digest>.h5`.
+Catalogs are the expensive artifact of the analysis.
 
 ## Catalogs are content-addressed
 
-A run declares *what* each of its two catalogs draws, and at which seed; the
-file is named by a hash of each:
+A catalog is named by a hash of what it draws, and at which seed:
 
 ```text
-config/runs/<experiment>/<run>.toml [analysis.<role>] + [analysis.seeds]
-    -> (CatalogMetadata, seed)
+(CatalogMetadata, seed)
     -> outputs/catalogs/polarization_power-<metadata.key()>-<digest of seed>.h5
 ```
 
-There is no catalog config tree and no name for a catalog. Two runs that ask
-for the same draw resolve to the same file name and share one file; a run that
-changes anything about its draw -- a seed, a kwarg, a fiducial -- gets a new
-one. `just catalogs` maps the names back to what they draw, at which seed, and
-which runs use them.
+There is no catalog config tree and no name for a catalog. Two callers that ask
+for the same draw resolve to the same file name and share one file; changing
+anything about a draw -- a seed, a kwarg, a fiducial -- gives a new one.
 
-### What a run declares
+### What a catalog declares
 
-Each role, `[analysis.injection]` and `[analysis.proposal]`, is a complete
-`CatalogMetadata` once the merge resolves its `${...}` references (see
-[references](running-inference.md#references)). Both default to the shared
-draw, `[catalog]` in `config/defaults.toml`, field by field, and a run
-overrides only what differs:
+`CatalogMetadata` (in `astrogwb.simulators.polarization_power`) carries:
 
-```toml
-[analysis.proposal]
-population = "${populations.guard}"
-num_samples = 16384
-```
-
-The fields a role resolves to:
-
-1. `waveform` — a named `[waveforms.<name>]` from `config/waveforms.toml`,
-   `default` unless the role names another. Only
-   `waveform-approximant/TaylorF2` does (`"${waveforms.TaylorF2}"`). The stored
-   band matches `[analysis]`'s `minimum_frequency` and `maximum_frequency`: the
-   catalog grid *is* the array every model is evaluated on, and a run's band
-   selects bins on it with a mask rather than compressing it.
+1. `waveform` -- a `WaveformMetadata`, by default the named
+   `[waveforms.default]` from `config/waveforms.toml`. The stored band matches
+   `[analysis]`'s `minimum_frequency` and `maximum_frequency`: the catalog grid
+   *is* the array every model is evaluated on, and an analysis band selects
+   bins on it with a mask rather than compressing it.
    The grid is `frequency_spacing` over that band: `"loglinear"` (the default) is
    uniform at `frequency_resolution` up to `turnover_frequency` and geometric
    above it, with the bin width continuous at the turn, which is ~400 bins for
@@ -68,66 +45,38 @@ The fields a role resolves to:
    alongside a Ripple approximant is rejected.
    `astrogwb.paper.config.waveform_generator()` builds the default draw's
    generator for a notebook.
-2. `population` — a `PopulationMetadata`: `model_name`, a key in the
+2. `population` -- a `PopulationMetadata`: `model_name`, a key in the
    `astrogwb.populations` registry, `model_kwargs`, the construction settings
-   bound into it. The named populations live in `config/populations.toml`; a
-   run that changes a named population overrides it at its source
-   (`[populations.guard.model_kwargs] uniform_mixing_fraction = 0.01`). The
-   analysis target is `analysis.population`, a separate record. There is no
-   seed in it: a seed picks a realization of the density, so it is an input
-   beside the metadata, stated per role in `[analysis.seeds]` (default 41 for
-   both; `config/defaults.toml`). A run that wants another realization of a
-   role sets `[analysis.seeds] proposal = 62`.
-3. `fiducials` — the hyperparameters the draw is made at: `"${fiducials}"`, the
-   run's own merged table, so the injection is drawn at exactly the values the
-   run initializes at. `time-delay` sets `delay_slope = -1` once, as a run
-   fiducial, and its injection inherits it.
-4. `num_samples` — the draw's size.
+   bound into it. The named populations live in `config/populations.toml`.
+   There is no seed in it: a seed picks a realization of the density, so it is
+   an input beside the metadata.
+3. `fiducials` -- the hyperparameters the draw is made at, `"${fiducials}"`.
+4. `num_samples` -- the draw's size.
 
-Every named population states the redshift window by reference to
-`[populations.cosmological]`, so a guarded proposal keeps the shared window and
-grid and adds the one setting it takes. `RunConfig` validates the roles as
-`CatalogMetadata` and the workflow keys the same merged tables, and a test pins
-the two agreeing for every run.
-
-Drawing at the run's fiducials has one visible cost: a run-level fiducial
-override also changes the proposal's key, even for a population that never
-reads it. `time-delay`'s proposal is therefore its own copy of the eps = 0.1
-guard catalog. The draws are identical; only the recorded fiducials differ.
+The shared default draw is `[catalog]` in `config/defaults.toml`;
+`astrogwb.paper.config.waveform_metadata()` and `population_metadata()` return
+its records.
 
 ### The key, and what invalidates it
 
-`CatalogMetadata` (in `astrogwb.simulators.polarization_power`) is the waveform
-settings, the population record, the fiducials, the sample count, and the
-`astrogwb` version. Its `key()` is the first 16 hex digits of a SHA-256 over
-its canonical JSON; the file name adds the same 16 digits of a SHA-256 over the
-seed input. Anything in the record or the seed invalidates the file by
-renaming it, so the workflow's catalog rule declares no config inputs at all.
-
-The record used to be called `CatalogRequest` and nested the waveform and
-population under a `metadata` field. `key()` still hashes that nested shape,
-so flattening it renamed no file.
+`CatalogMetadata` is the waveform settings, the population record, the
+fiducials, the sample count, and the `astrogwb` version. Its `key()` is the
+first 16 hex digits of a SHA-256 over its canonical JSON; the file name adds
+the same 16 digits of a SHA-256 over the seed input. Anything in the record or
+the seed invalidates the file by renaming it.
 
 The version is in the key so that *code* changes invalidate catalogs too -- but
 only if it is bumped. **Bump `version` in `pyproject.toml` whenever a change
 alters what a population draw or a waveform generator produces.** Every key
-changes with it, so the next `snakemake catalogs` regenerates everything.
-`just catalogs --orphans` lists the files no run asks for any more.
+changes with it, and the next draw regenerates everything.
 
 ## The population is a registered model
 
 A catalog names a population by its key in the `astrogwb.populations`
-registry, and supplies the construction kwargs it takes -- the guarded proposal
-above, for example. The redshift window and grid resolution are referenced
-from `[populations.cosmological]` and the hyperparameters from the run's
-`[fiducials]`; `model_kwargs` is one mapping, passed whole to the factory. The
+registry, and supplies the construction kwargs it takes. The redshift window
+and grid resolution are referenced from `[populations.cosmological]` and the
+hyperparameters from the shared `[fiducials]`; `model_kwargs` is one mapping, passed whole to the factory. The
 population declares its density factors and source outputs.
-
-A role inherits every field it does not name, whether or not the population it
-names reads all of it: the guard inherits `[fiducials]` whole,
-`local_merger_rate` included, even though a guard mixture's rate is never used.
-That is right: it is a sampling density, and nothing reads a rate off a
-proposal (see below).
 
 **A registry key, not an import path.** Registry keys change only on purpose;
 module paths move as collateral whenever a module is reorganized, so a
@@ -187,7 +136,7 @@ accepts, rather than being silently dropped.
 - `density_sites` selects the density factors included in importance
   weighting. It is an argument, not a stored field: no sample depends on it, so
   the analysis that reweights a draw states it — `DEFAULT_DENSITY_SITES`,
-  redshift and the ordered mass pair, for every committed run — and one value
+  redshift and the ordered mass pair -- and one value
   is used for both sides of every weight. Omitting factors does not
   marginalize variables.
 - `evaluate_sources` runs the model once, under a `sources` plate, with every
@@ -219,8 +168,8 @@ Two mass laws share the rest of the BNS Madau-Dickinson declaration:
   The joint density `2 N(m1) N(m2)` lives on the half-plane `m1 >= m2`, with
   no compact mass support, so moving `(mass_mean, mass_sigma)` never zeros a
   weight. Galactic BNS masses motivate the shape (a Gaussian around
-  `1.33 Msun` with width `~0.09 Msun`). Default catalogs and run configs still
-  use the uniform triangle.
+  `1.33 Msun` with width `~0.09 Msun`). The default catalog still
+  uses the uniform triangle.
 
 ### Guard mixtures are one density, not two draws
 
@@ -242,11 +191,11 @@ caller's to honour.
 
 ### Prefix stability across sizes
 
-The three seed-42 `variable-catalog-size` proposals are generated independently and their
-*source parameters* are still exact nested draws, which is what makes
-`variable-catalog-size` a clean series rather than three unrelated runs.
+Draws of different sizes at one seed are exact nested draws of the *source
+parameters*, which makes a catalog-size series a clean sweep rather than
+unrelated draws.
 `Predictive` allocates its per-draw keys with `jax.random.split`, which is
-prefix-stable — a property of the installed JAX rather than an API promise, so
+prefix-stable -- a property of the installed JAX rather than an API promise, so
 `tests/core/test_populations.py` checks it directly.
 
 Prefix stability is a property of the population draw, not of the waveforms.
@@ -254,53 +203,37 @@ Generation is exactly reproducible at a fixed sample count, but the same source
 generated in a batch of 8192 and a batch of 32768 gets polarization power
 agreeing only to ~1e-14 relative: XLA picks different reduction orders at
 different batch sizes and floating-point addition is not associative. The
-differences land on the deep tail of the spectrum — values some three orders of
-magnitude below the array peak — so they are numerically irrelevant, but the
+differences land on the deep tail of the spectrum -- values some three orders of
+magnitude below the array peak -- so they are numerically irrelevant, but the
 catalogs are not byte-identical to one another.
 
 ## Generate a catalog
 
-Through the workflow, from the repository root:
-
-```bash
-# every catalog any run asks for
-snakemake --snakefile Snakefile --cores 1 \
-  --allowed-rules waveform_catalog catalogs catalogs
-
-# one catalog, by file stem (`just catalogs` lists them)
-snakemake --snakefile Snakefile --cores 1 --allowed-rules waveform_catalog \
-  outputs/catalogs/polarization_power-<key>-<digest>.h5
-```
-
-`rule waveform_catalog` hands `scripts/generate_catalog.py` the resolved
-`CatalogMetadata` as JSON, the `--seed`, and the output path. The script refuses
-a path that is not `polarization_power.path(...)` of that metadata and seed, so
-one draw cannot be filed under another's address, then calls the cached node,
-which writes atomically so an interrupted job never leaves a partial file.
-
-The `--allowed-rules` filter keeps catalog generation explicit. MCMC commands
-omit these rules, so a missing catalog stops the run with a
-`MissingInputException` rather than silently scheduling waveform generation.
-
-From Python the same node sits behind the same cache:
+From Python, the cached node draws on a miss and reads on a hit:
 
 ```python
 import numpy as np
 
-from astrogwb.paper.catalogs import run_catalog
-from astrogwb.simulators.polarization_power import polarization_power
+from astrogwb.paper.config import fiducials, population_metadata, waveform_metadata
+from astrogwb.simulators.polarization_power import (
+    CatalogMetadata,
+    polarization_power,
+)
 
-# a committed run's catalog: resolved from its config, generated on a miss
-data, metadata = run_catalog("variable-proposal-guard", "eps1e-2", "proposal")
-
-# or any CatalogMetadata at any seed, against any cache directory
+metadata = CatalogMetadata(
+    waveform=waveform_metadata(),
+    population=population_metadata(),
+    fiducials=fiducials(),
+    num_samples=32768,
+)
 data = polarization_power(
     {"seed": np.uint64(41)}, metadata, cache_dir="outputs/catalogs"
 )
 ```
 
 A hit is read and checked against the metadata it was asked for; a miss is
-generated and saved under the name `polarization_power.path` gives.
+generated and saved under the name `polarization_power.path` gives, written
+atomically so an interrupted job never leaves a partial file.
 
 ## Catalogs record the density that drew them
 
@@ -324,8 +257,8 @@ recompile on every call).
 
 That is enough to reconstruct the exact map from hyperparameters to source
 density. With the version, it is the file's whole `CatalogMetadata` --
-the `metadata` half of the `(data, metadata)` pair -- which is what `run_mcmc` checks each
-catalog against before sampling.
+the `metadata` half of the `(data, metadata)` pair -- which a loader checks
+against the request it was handed.
 
 The density factors are deliberately *not* part of the record. They change no
 sample: the stored columns and power are the same whichever of their densities
@@ -373,9 +306,7 @@ Persistence and cache locations belong to the callers. The core `write` and
 Catalog files are `polarization_power-<key>-<seed>.h5`; spectra files are
 `spectra-<key>-<seed>-<num_draws>.h5`. A miss generates data and writes atomically;
 a hit is loaded and its recorded metadata compared with the request.
-`ensure_catalog(..., generate=False)` serves hits only and raises
-`FileNotFoundError` on a miss; `run_mcmc` uses this under `--cached-only`.
-The SNR notebook similarly supports `cache_only`. Settings such as
+The SNR notebook supports `cache_only`, which serves hits only. Settings such as
 `chunk_size` are bound in the simulator and kept out of the path.
 
 Seeds are inputs because they pick a realization rather than describe a
@@ -429,15 +360,7 @@ population record and the version are part of the key.
 
 Version **0.6.0** replaces the `bns_md_*` populations with `bns_coba`. Both
 catalog and spectrum artifacts therefore receive new keys; older artifacts are
-not reused. From the repository root, regenerate workflow catalogs and chains
-with:
-
-```bash
-uv run --group workflow snakemake --snakefile Snakefile --dry-run --cores 1 experiments
-uv run --group workflow snakemake --snakefile Snakefile --cores 1 experiments
-```
-
-Regenerate spectra with the existing CLI, choosing either the `fixed` or
+not reused. Regenerate spectra with the existing CLI, choosing either the `fixed` or
 `poisson` simulation layer:
 
 ```bash
@@ -585,7 +508,7 @@ catalog draws and waveform algorithms are unchanged, so this does not bump the
 package version or invalidate polarization-power catalog caches.
 
 `scripts/simulate_spectra.py` runs the same simulator from a shell. It takes
-config layers like `run_mcmc` does -- the four shared `config/*.toml` layers,
+config layers on argv -- the four shared `config/*.toml` layers,
 then `config/simulations/spectrum/<name>.toml` -- and validates the merged
 `[spectra]` table as the `BackgroundSpectralDensityMetadata`. In that table a hyperparameter is a
 `"${fiducials.X}"` reference (fixed) or a `"${priors.X}"` one (sampled). The
@@ -595,8 +518,7 @@ sibling `[draws]` table (`seed`, `num_draws`) names the seeds, through
 worktrees: `~/Library/Caches/astrogwb/spectra` on macOS or
 `~/.cache/astrogwb/spectra` on Linux, with `XDG_CACHE_HOME` taking precedence
 on both. `--output-dir` overrides it. Cache locations are outside the
-scientific metadata and its key; workflow catalog outputs remain under
-`outputs/catalogs`. A second invocation with the same layers is a cache hit;
+scientific metadata and its key; catalogs live under `outputs/catalogs`. A second invocation with the same layers is a cache hit;
 `--force` draws again and replaces the file:
 
 ```bash
@@ -616,7 +538,7 @@ uv run --extra paper python scripts/simulate_spectra.py \
     --config config/simulations/spectrum/fixed.toml
 ```
 
-The spectrum layers are not run layers: no chain reads `[spectra]`. Callers
+Callers
 using custom source-model compositions can still build a
 `PopulationSimulator` from a registered population and reduce its draws with
 `ChunkedPowerSum` (or `BackgroundSpectralDensitySimulator.reduce`). Sampled inclination is already part of the
@@ -657,7 +579,7 @@ remains unchanged because the scientific draws and waveform values are unchanged
 
 The recorded settings are the *generation* window, `[0.0, 20.0]`. The analysis
 window is narrower — `analysis.population.model_kwargs.minimum_redshift = 0.3`
-in the shared `[analysis]` table — so the per-sample log density cannot be
+in the analysis setup — so the per-sample log density cannot be
 baked into the catalog: it depends on a truncation the run chooses, not on
 anything generation knows.
 

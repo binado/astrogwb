@@ -8,8 +8,8 @@ One package, `astrogwb`, with the reproducibility application inside it:
   contractions, NumPyro source populations, importance weighting, waveform power
   reduction, HDF5 catalog serialization).
 - `src/astrogwb/paper/`: the reproducibility application (configuration, runtime
-  setup, console commands, plotting style, SNR/inference helpers).
-- `config/`, `scripts/`, `notebooks/`, `profiles/`, `docs/`, `Snakefile`: the
+  setup, plotting style).
+- `config/`, `scripts/`, `notebooks/`, `docs/`: the
   application's committed assets, at the repository root.
 - `tests/core/` and `tests/paper/`.
 

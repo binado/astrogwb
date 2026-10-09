@@ -1,140 +1,34 @@
 # Paper figures
 
-Experiment figures are part of the same DAG as their chains. The split for
+Paper figures are drawn by marimo notebooks under `notebooks/`. The split for
 presentation is that *order and structure* are code, *values* are data.
 
-Order and structure stay hard-coded in the script that draws each figure: the
-run IDs it compares, and the sequence they appear in. Changing that is a code
-change, reviewed alongside the plot it affects. The six detector networks
-compared by more than one figure are the one shared piece, and they live in
-`astrogwb.paper.plotting.DETECTOR_NETWORKS` as ordered
-`(run name, LaTeX label)` pairs -- a network's label stays there because
-nothing reads it without also needing the order it sits in.
+Order and structure stay hard-coded in the notebook that draws each figure.
+The six detector networks compared by more than one figure are the one shared
+piece, and they live in `astrogwb.paper.plotting.DETECTOR_NETWORKS` as ordered
+`(network name, LaTeX label)` pairs -- a network's label stays there because
+nothing reads it without also needing the order it sits in. The detectors of
+each network come from the shared `[networks]` table in
+[`config/detectors.toml`](../config/detectors.toml), through
+`astrogwb.paper.config.networks()` and `detector_registry()`.
 
 Values live in [`config/plotting.toml`](../config/plotting.toml): the LaTeX
-label for each *parameter*, plus `figure_dpi` and `figure_format`. Scripts
-reach them through `astrogwb.paper.plotting.parameter_label`,
-`figure_dpi` and `figure_format`. Parameter labels used to be declared
-separately in three scripts; `figure_dpi` was a literal `300` in four of them
-*and* in `paper.mplstyle`. `use_paper_style()` applies the dpi and format as
-rcParams, so `paper.mplstyle` no longer declares either and no figure script
-takes a `--figure-dpi` flag.
+label for each *parameter*, plus `figure_dpi` and `figure_format`. Notebooks
+reach them through `astrogwb.paper.plotting.parameter_label`, `figure_dpi` and
+`figure_format`. `use_paper_style()` applies the dpi and format as rcParams, so
+`paper.mplstyle` declares neither.
 
-Input and output paths are both named literally in
-[`Snakefile`](../Snakefile), and every output is a valid Snakemake target.
-Shared scientific values -- fiducials, priors, detector networks, frequency
-bounds, the target population and its redshift grid -- arrive on argv as
-repeated `--config` layer files, the same list the rule declares as `input:`, so a figure reports exactly
-what was sampled and a layer edit retriggers the figure. A script that needs
-one of the top-level tables outside a run context can also call
-`astrogwb.paper.config.fiducials()` / `priors()` / `networks()` directly; both
-paths read the same files.
-
-Detector *lists* are never hard-coded next to a label. The rule passes
-`--network-run <experiment>/<run>` once per network, in legend order, and
-`astrogwb.paper.config.runs.resolve_networks` merges each run's own config
-layers, reads the `analysis.network` that run names, and resolves it through
-the `[networks]` table those same layers carry. The detectors a figure reports
-an SNR for are therefore always the ones its chain was sampled with.
-
-That indirection is deliberate. Every network run happens to be named after the
-network it uses, so looking the legend name up in the shared `[networks]` table
-directly would give the same answer today -- but that is a property of the
-current tree, not a derivation. Going through the run means a run that changed
-its `network` moves the figure with it, instead of the figure quietly
-reporting one network's SNRs beside another network's chain.
-
-`resolve_networks` matches the `--network-run` list against the legend
-*positionally* and rejects a mismatch. That check matters more than it looks:
-declaration order drives chain order, legend order, and colour assignment, so a
-swapped pair would render a perfectly good figure with the wrong labels on the
-wrong curves rather than failing.
-
-The workflow imports that same tuple and expands its chain paths from it, so
-chain order and legend order are one list rather than two that have to be kept
-in step:
-
-```python
-from astrogwb.paper.plotting import DETECTOR_NETWORK_RUNS
-
-chains=expand("outputs/chains/cosmological-parameters/{run}.nc",
-              run=DETECTOR_NETWORK_RUNS),
-```
-
-## Experiment figures
-
-The detector-network, merger-rate, and Omega-m analyses form one paper section.
-The `plot_cosmological_parameters` rule consumes all eight chains and produces their
-five figures and two CSV/LaTeX table pairs in one script invocation. All
-artifacts live under `outputs/figures/cosmological-parameters/`.
-
-Preview or build the section (from the repository root):
-
-```bash
-snakemake --snakefile Snakefile \
-  --allowed-rules run_mcmc plot_cosmological_parameters \
-  --profile profiles/local --cores 8 --dry-run plot_cosmological_parameters
-snakemake --snakefile Snakefile \
-  --allowed-rules run_mcmc plot_cosmological_parameters \
-  --profile profiles/slurm plot_cosmological_parameters
-```
-
-Every artifact remains a valid Snakemake target, but because the rule has
-multiple outputs, requesting one builds the complete section:
-
-```bash
-snakemake --snakefile Snakefile \
-  --allowed-rules run_mcmc plot_cosmological_parameters \
-  --profile profiles/local --cores 8 \
-  outputs/figures/cosmological-parameters/H0-by-detector.pdf
-```
-
-With a SLURM profile, sampling runs remotely and figure rules run locally on the
-submit host after their chains finish. The submit host must remain attached,
-share the output filesystem, and provide plotting dependencies.
-
-Use `run_experiment_cosmological_parameters` to sample the constituent
-experiment without running post-processing.
-
-The modified-propagation section works the same way:
-`plot_modified_propagation` builds its propagation figures and tables from the
-chains of `run_experiment_modified_propagation`.
-
-## Standalone figures
-
-The importance-weight grids are the standalone figure rules in the unified
-workflow. `importance_weights_grid` reads its proposal *density* from the
-catalog file it is handed, the same way `scripts/run_mcmc.py` does -- so the
-weights it plots divide by the same denominator the chains did.
+Shared scientific values -- fiducials, priors, detector networks -- come from
+`astrogwb.paper.config.fiducials()` / `priors()` / `networks()`, which read the
+same files. Each notebook keeps its analysis window (`observation_time`, the
+frequency band, the redshift bounds) and local plotting choices as literals in
+its configuration cell. These mirror the `[analysis]` table in
+`config/defaults.toml`, so editing that table does not change the figures --
+update the notebook's configuration cell too.
 
 The fiducial injection spectrum, network $S_{\mathrm{eff}}$, $\sigma$ overlay,
 and per-network SNR figures live in
-[`notebooks/fiducial_spectrum.py`](../notebooks/fiducial_spectrum.py) rather
-than the DAG. That notebook resolves no run config: it reads the shared
-fiducials and detector networks from the shared `[fiducials]` and `[networks]`
-tables through `astrogwb.paper.config`, and the ordered network
-legend from `astrogwb.paper.plotting.DETECTOR_NETWORKS`, but keeps its analysis
-window (`observation_time`, the frequency band, and the redshift bounds) and
-local plotting choices as literals of its own. Those mirror
-the shared `[analysis]` table, so editing that table does not change these figures --
-update the notebook's configuration cell too.
-
-```bash
-snakemake --snakefile Snakefile --cores 1 \
-  --allowed-rules importance_weights_grid \
-  outputs/figures/standalone/importance_weights_grid_H0_Omega_m.pdf \
-  outputs/figures/standalone/importance_weights_grid_Xi0_n.pdf
-```
-
-Or build any one of them directly:
-
-```bash
-snakemake --snakefile Snakefile --cores 1 \
-  --allowed-rules importance_weights_grid \
-  outputs/figures/standalone/importance_weights_grid_H0_Omega_m.pdf
-```
-
-Standalone workflow figure products are written under `outputs/figures/`.
+[`notebooks/fiducial_spectrum.py`](../notebooks/fiducial_spectrum.py).
 
 ## Spectrum-realization shot-noise analysis
 
@@ -154,7 +48,7 @@ frequency band, draw count, seed, batch size, cache directory, sweep values,
 `tolerance` and `n_bootstrap`. Scientific fiducials, waveform settings,
 population settings, and the detector registry come from the shared
 configuration accessors, as in `fiducial_spectrum.py`. There are no CLI
-configuration flags or Snakemake rules for this analysis.
+configuration flags for this analysis.
 
 ### Ensembles
 
@@ -292,16 +186,3 @@ cached in `outputs/catalogs/`; figures go to
 uv run --extra notebook --group dev marimo check --strict notebooks/importance_convergence.py
 ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/importance_convergence.py
 ```
-
-## Scripts
-
-Figure entry points are plain Python scripts under `scripts/`. Each reads its
-own fiducials and analysis settings from an assembled run config, whose path the
-library owns, and hard-codes its own labels and run order. Snakemake passes only
-what it owns: the chain and catalog paths it built, and the output paths it
-declared.
-
-The assembled config is a declared input of each rule, so editing a fiducial or
-a detector list rebuilds the figure; editing a label is a code change and
-rebuilds it the same way. Config parsing stays free of JAX, so `--help` and
-config errors stay cheap.
