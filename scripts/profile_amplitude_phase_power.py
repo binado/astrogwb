@@ -26,7 +26,7 @@ import numpy as np
 import ripplegw
 from ripplegw.interfaces import AmplitudePhaseWaveform
 
-from astrogwb.populations import build_population
+from astrogwb.populations import build_population, joint_model
 from astrogwb.populations.evaluation import sample_sources
 from astrogwb.waveform import RippleGenerator, WaveformMetadata
 from astrogwb.waveform.generator._ripple import ripple_parameters
@@ -146,7 +146,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         maximum_redshift=20.0,
         n_grid=256,
     )
-    _, model = population(_PARAMETERS)
+    model = joint_model(*population(_PARAMETERS))
     source_parameters = sample_sources(
         model,
         jax.random.key(20250314),

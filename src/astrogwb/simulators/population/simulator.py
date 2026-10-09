@@ -38,7 +38,7 @@ from numpy.typing import NDArray
 from numpyro import handlers
 
 from astrogwb import __version__
-from astrogwb.populations import Population
+from astrogwb.populations import Population, joint_model
 from astrogwb.populations.evaluation import evaluate_sources
 from astrogwb.simulators.population.metadata import PopulationDrawMetadata
 from astrogwb.utils import years_to_seconds
@@ -104,7 +104,7 @@ def sample_sources_by_key(
     )
     # Built once, outside the vmap: the hyperparameters are unbatched, so the
     # redshift grid is computed once, not once per event.
-    _, model = population(params)
+    model = joint_model(*population(params))
     sampled = jax.vmap(lambda k: sample_model(model, k))(event_keys)
     _, outputs = evaluate_sources(model, sampled, density_sites=())
     return outputs
@@ -121,8 +121,8 @@ def _hyperparameters_and_count(
     """Stage one: hyperparameters, merger rate and source count of one draw."""
     theta_key, count_key, _ = jax.random.split(key, 3)
     theta = dict(handlers.seed(prior_model, theta_key)())
-    merger_rate, _ = population(theta)
-    rate = jnp.reshape(merger_rate, ())
+    redshift_distribution, _ = population(theta)
+    rate = jnp.reshape(redshift_distribution.total_merger_rate(), ())
     if num_events is not None:
         count = jnp.asarray(num_events, dtype=jnp.int64)
     else:

@@ -13,6 +13,7 @@ from numpyro import handlers
 from numpyro.infer import Predictive
 
 from astrogwb.constants import ISCO_ALPHA
+from astrogwb.populations import joint_model
 from astrogwb.simulators.spectra import (
     poisson_counts_forward_model,
     validate_source_model,
@@ -68,7 +69,8 @@ def _ripple_generator() -> RippleGenerator:
 
 def _observation_time_for(expected_events: float) -> float:
     """Years of observation such that ``R * T = expected_events``."""
-    rate, _ = mock_population()(POPULATION_PARAMS)
+    redshift_distribution, _ = mock_population()(POPULATION_PARAMS)
+    rate = redshift_distribution.total_merger_rate()
     return expected_events / (float(rate) * years_to_seconds(1.0))
 
 
@@ -465,12 +467,12 @@ def test_vmap_over_draws_shares_one_static_event_count() -> None:
 # Validation the traced model cannot do for itself
 # --------------------------------------------------------------------- #
 def test_validate_source_model_accepts_a_matched_population() -> None:
-    _, model = mock_population()(_jax_params())
+    model = joint_model(*mock_population()(_jax_params()))
     validate_source_model(model, generator=_generator(), rng_key=jax.random.key(0))
 
 
 def test_validate_source_model_requires_luminosity_distance() -> None:
-    _, model = mock_population()(_jax_params())
+    model = joint_model(*mock_population()(_jax_params()))
 
     def no_distance():
         sources = dict(model())

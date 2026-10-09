@@ -216,7 +216,7 @@ def population_model(
     """Build the population the default draw, ``[catalog]``, is drawn from.
 
     Returns the registered :class:`~astrogwb.populations.registry.Population` --
-    a callable ``parameters -> (merger_rate, model)`` -- with its construction
+    a callable ``parameters -> (redshift_distribution, source_model)`` -- with its construction
     settings bound. Keyword arguments override ``model_kwargs``, which is how a notebook
     studies the committed population on a coarser grid or a narrower redshift
     window without editing the file::

@@ -25,6 +25,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from astrogwb import __version__
+from astrogwb.populations import joint_model
 from astrogwb.simulators.population.simulator import (
     PopulationData,
     PopulationSimulator,
@@ -117,14 +118,16 @@ class BackgroundSpectralDensitySimulator:
         self._reducer = ChunkedPowerSum(self._generator, chunk_size=chunk_size)
 
         if validate_sources:
-            _, model = metadata.population.build()(
-                {
-                    **metadata.fixed,
-                    **{
-                        name: float(prior.build().mean)
-                        for name, prior in metadata.sampled.items()
-                    },
-                }
+            model = joint_model(
+                *metadata.population.build()(
+                    {
+                        **metadata.fixed,
+                        **{
+                            name: float(prior.build().mean)
+                            for name, prior in metadata.sampled.items()
+                        },
+                    }
+                )
             )
             validate_source_model(
                 model,

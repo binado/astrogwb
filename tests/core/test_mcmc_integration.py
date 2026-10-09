@@ -49,6 +49,7 @@ from astrogwb.detector import (
     load_sensitivity_map,
 )
 from astrogwb.distributions.amplitude import AmplitudeConditional, amplitude_prior
+from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_snr
 from astrogwb.inference import (
@@ -57,7 +58,7 @@ from astrogwb.inference import (
     gwb_amplitude_marginalized_model,
     gwb_spectral_density_model,
 )
-from astrogwb.populations._types import PopulationModel
+from astrogwb.populations._types import SourceModel
 from astrogwb.simulators.polarization_power import (
     CatalogMetadata,
     PolarizationPowerData,
@@ -108,7 +109,7 @@ _TARGET = mock_population()
 
 def pinned_target(
     params: Mapping[str, ArrayLike],
-) -> tuple[jax.Array, PopulationModel]:
+) -> tuple[RedshiftDistribution, SourceModel]:
     """The target population, unsampled hyperparameters pinned at the fiducials."""
     return _TARGET({**FIDUCIALS, **params})
 

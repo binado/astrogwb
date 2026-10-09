@@ -84,14 +84,20 @@ persisted `module:function` string is a reference that silently rots. An
 unknown key fails when the population is built, listing what is registered.
 
 A registered population is a *factory*: it takes the construction kwargs and
-returns a callable `parameters -> (merger_rate, model)`. One call builds the
-redshift distribution once, so the rate and the source density come from the
-same grid; `model()` is a no-argument NumPyro model. Hyperparameters are what
-the callable is called with, and source arrays are what `evaluate_sources`
-conditions in.
+returns a callable `parameters -> (redshift_distribution, source_model)`. One
+call builds the redshift distribution once, so the rate and the redshift
+density come from the same grid. `source_model()` is a no-argument NumPyro
+model of the intrinsic parameters alone, in the source frame; it never sees
+redshift. `joint_model` composes the two halves into the model a catalog is
+drawn from. Hyperparameters are what the callable is called with, and source
+arrays are what `evaluate_sources` conditions in.
 
 ```python
-from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
+from astrogwb.populations import (
+    DEFAULT_DENSITY_SITES,
+    build_population,
+    joint_model,
+)
 from astrogwb.populations.evaluation import evaluate_sources, sample_sources
 
 population = build_population(
@@ -101,7 +107,9 @@ population = build_population(
     maximum_redshift=20.0,
     n_grid=4096,
 )
-total_merger_rate, model = population(params)  # rate: shape ()
+redshift_distribution, source_model = population(params)
+total_merger_rate = redshift_distribution.total_merger_rate()  # shape ()
+model = joint_model(redshift_distribution, source_model)
 
 sources = sample_sources(model, key, num_samples=1024)
 log_prob, outputs = evaluate_sources(
@@ -109,11 +117,12 @@ log_prob, outputs = evaluate_sources(
 )  # log_prob: shape (1024,); outputs["luminosity_distance"]: shape (1024,)
 ```
 
-One call, not two. The source model and its merger rate are both
-normalizations of the same redshift law, so they are built together. The
-`redshift` site always draws from a
-`~astrogwb.distributions.redshift.base.RedshiftDistribution`, which the
-quadrature in `astrogwb.gwb.importance` reads the rate off.
+One call, not two. The redshift density and the merger rate are both
+normalizations of the same redshift law, so they come from one
+`~astrogwb.distributions.redshift.base.RedshiftDistribution`. Its
+`distance_model()` samples `redshift` and registers the GW `luminosity_distance`
+(modified propagation included), and the quadrature in `astrogwb.gwb.importance`
+reads the rate and the distances off it directly.
 
 `bns_coba` is the one shipped population, and its variants are construction
 kwargs: `mass_model` (`"uniform"` or `"gaussian"`), `time_delay` (with
@@ -128,8 +137,10 @@ The factory's signature *is* the construction-settings schema. A key the named
 population does not take raises `TypeError` naming the population and what it
 accepts, rather than being silently dropped.
 
-- The source model's returned mapping defines the stored columns, including
-  spins, detector-frame masses, and `luminosity_distance`. Its sample sites are
+- The joint model's returned mapping defines the stored columns, including
+  redshift, source-frame masses, spins, and `luminosity_distance`. Detector-frame
+  masses are not stored: the waveform layer derives them from the source-frame
+  masses and redshift. Its sample sites are
   exactly the inputs needed to replay it; a missing one raises `KeyError`.
 - `density_sites` selects the density factors included in importance
   weighting. It is an argument, not a stored field: no sample depends on it, so

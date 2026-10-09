@@ -20,10 +20,11 @@ from collections.abc import Callable, Mapping
 
 import jax
 import jax.numpy as jnp
+import numpyro
 from jax.typing import ArrayLike
 
 from astrogwb.constants import SECONDS_PER_YEAR
-from astrogwb.cosmology import distance_and_volume_grid
+from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
 from astrogwb.distributions.interpolated import InterpolatedDistribution
 
 type SourceFrameDistributionFn = Callable[
@@ -182,6 +183,41 @@ class RedshiftDistribution(InterpolatedDistribution):
     def luminosity_distance(self, redshift: ArrayLike) -> jax.Array:
         """Luminosity distance in Mpc at redshift(s), clamped outside the grid."""
         return jnp.interp(jnp.asarray(redshift), self.x, self.luminosity_distance_grid)
+
+    def gw_luminosity_distance(self, redshift: ArrayLike) -> jax.Array:
+        r"""Gravitational-wave luminosity distance in Mpc at redshift(s).
+
+        The electromagnetic distance, times :math:`\Xi(z)` when ``xi_0`` is in
+        the hyperparameters (``xi_n`` must then be too). Without ``xi_0`` it is
+        :meth:`luminosity_distance`.
+        """
+        redshift = jnp.asarray(redshift)
+        distance = self.luminosity_distance(redshift)
+        if "xi_0" in self.params:
+            distance = distance * jnp.exp(
+                log_gw_em_ratio(redshift, self.params["xi_0"], self.params["xi_n"])
+            )
+        return distance
+
+    def distance_model(self) -> Callable[[], dict[str, jax.Array]]:
+        """A no-argument NumPyro model of the source's redshift and GW distance.
+
+        Samples ``redshift`` from this distribution and registers
+        ``luminosity_distance`` (:meth:`gw_luminosity_distance`) as a
+        deterministic. Returns both, so a population composes it with a source
+        model that never sees redshift.
+        """
+
+        def model() -> dict[str, jax.Array]:
+            redshift = jnp.asarray(numpyro.sample("redshift", self))
+            distance = jnp.asarray(
+                numpyro.deterministic(
+                    "luminosity_distance", self.gw_luminosity_distance(redshift)
+                )
+            )
+            return {"redshift": redshift, "luminosity_distance": distance}
+
+        return model
 
     def differential_comoving_volume(self, redshift: ArrayLike) -> jax.Array:
         r"""All-sky :math:`\mathrm{d}V_c/\mathrm{d}z` in :math:`\mathrm{Mpc}^3`.

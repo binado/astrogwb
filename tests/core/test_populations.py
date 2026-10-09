@@ -47,6 +47,7 @@ from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
     Population,
     build_population,
+    joint_model,
     known_populations,
     register_population,
 )
@@ -86,8 +87,6 @@ STOCHASTIC_SITES = frozenset(
 )
 DETERMINISTIC_SITES = frozenset(
     {
-        "detector_frame_mass_1",
-        "detector_frame_mass_2",
         LUMINOSITY_DISTANCE_SITE,
         "coa_phase",
         "coa_time",
@@ -117,15 +116,15 @@ def evaluate(
     density_sites: Sequence[str] = DEFAULT_DENSITY_SITES,
 ) -> tuple[jax.Array, jax.Array]:
     """Selected ``(N,)`` density and recomputed distance, in one isolated pass."""
-    _, model = population(params)
+    model = joint_model(*population(params))
     log_prob, outputs = evaluate_sources(model, values, density_sites=density_sites)
     return log_prob, outputs[LUMINOSITY_DISTANCE_SITE]
 
 
 def merger_rate(population: Population, params: Mapping[str, ArrayLike]) -> jax.Array:
     """The observer-frame rate, from the same call that builds the model."""
-    rate, _ = population(params)
-    return rate
+    redshift_distribution, _ = population(params)
+    return redshift_distribution.total_merger_rate()
 
 
 GAUSSIAN_PARAMS: dict[str, float] = {
@@ -237,7 +236,7 @@ def test_time_delay_without_a_delay_floor_is_rejected() -> None:
 # Explicit site metadata and recomputation
 # --------------------------------------------------------------------------- #
 def test_source_call_returns_every_declared_site() -> None:
-    _, model = mock_population()(POPULATION_PARAMS)
+    model = joint_model(*mock_population()(POPULATION_PARAMS))
     sources = handlers.seed(model, 0)()
     assert set(sources) == STOCHASTIC_SITES | DETERMINISTIC_SITES
     for name in sources:
@@ -260,12 +259,12 @@ def test_stored_deterministics_are_recomputed_from_sampled_values() -> None:
     stored = {
         **sample_values(),
         LUMINOSITY_DISTANCE_SITE: jnp.ones_like(SAMPLE_REDSHIFTS),
-        "detector_frame_mass_1": jnp.zeros_like(SAMPLE_REDSHIFTS),
     }
     clean = derived_columns(population, POPULATION_PARAMS, sample_values())
     tampered = derived_columns(population, POPULATION_PARAMS, stored)
-    for name in (LUMINOSITY_DISTANCE_SITE, "detector_frame_mass_1"):
-        np.testing.assert_array_equal(tampered[name], clean[name])
+    np.testing.assert_array_equal(
+        tampered[LUMINOSITY_DISTANCE_SITE], clean[LUMINOSITY_DISTANCE_SITE]
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -288,16 +287,17 @@ def test_one_execution_supplies_per_sample_density_distance_and_scalar_rate() ->
     np.testing.assert_allclose(float(rate), float(expected_rate), rtol=1e-15)
 
 
-def test_derived_columns_match_the_declared_transforms() -> None:
-    values = sample_values()
-    columns = derived_columns(mock_population(), POPULATION_PARAMS, values)
-    one_plus_z = 1.0 + SAMPLE_REDSHIFTS
-    np.testing.assert_array_equal(
-        columns["detector_frame_mass_1"], values["source_frame_mass_1"] * one_plus_z
-    )
-    np.testing.assert_array_equal(
-        columns["detector_frame_mass_2"], values["source_frame_mass_2"] * one_plus_z
-    )
+def test_the_detector_frame_is_left_to_the_waveform_layer() -> None:
+    columns = derived_columns(mock_population(), POPULATION_PARAMS, sample_values())
+
+    assert not {"detector_frame_mass_1", "detector_frame_mass_2"} & set(columns)
+
+
+def test_source_model_never_sees_redshift() -> None:
+    _, source_model = mock_population()(POPULATION_PARAMS)
+    trace = handlers.trace(handlers.seed(source_model, 0)).get_trace()
+
+    assert not {REDSHIFT_SITE, LUMINOSITY_DISTANCE_SITE} & set(trace)
 
 
 # --------------------------------------------------------------------------- #
@@ -348,11 +348,6 @@ def test_density_selection_preserves_supplied_values_and_deterministics() -> Non
         selected_log_prob, log_prob + expected_spin - expected_mass
     )
     np.testing.assert_array_equal(luminosity_distance, selected_distance)
-    columns = derived_columns(model, POPULATION_PARAMS, values)
-    np.testing.assert_array_equal(
-        columns["detector_frame_mass_1"],
-        values["source_frame_mass_1"] * (1 + values["redshift"]),
-    )
 
 
 def test_empty_density_selection_returns_per_source_zeros() -> None:
@@ -439,7 +434,7 @@ def draw(
     num_samples: int,
 ) -> dict[str, jax.Array]:
     """``num_samples`` sources from ``population`` at ``params``."""
-    _, model = population(params)
+    model = joint_model(*population(params))
     return sample_sources(model, key, num_samples=num_samples)
 
 
@@ -515,10 +510,6 @@ def test_sampling_is_jittable_and_isolated_from_outer_handlers() -> None:
     assert outer == {}
     assert set(sources) == STOCHASTIC_SITES | DETERMINISTIC_SITES
     assert sources["spin_1z"].shape == (8,)
-    np.testing.assert_allclose(
-        sources["detector_frame_mass_1"],
-        sources["source_frame_mass_1"] * (1 + sources["redshift"]),
-    )
 
     def log_prob(
         params: Mapping[str, ArrayLike], values: Mapping[str, ArrayLike]

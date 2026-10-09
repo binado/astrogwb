@@ -42,16 +42,16 @@ builder's, not the catalog's, so changing it needs no new waveforms.
 
 Contracts the caller is trusted to honour (nothing here checks them):
 
-- The population's intrinsic sites are independent of redshift and
-  inclination, and inclination is isotropic.
+- The population's source model is independent of inclination, which is
+  isotropic. It is independent of redshift by construction: it never sees it.
 - The waveform is :math:`(2, 2)`-mode, aligned-spin and quasi-circular: its
   power is a function of :math:`M_d f` times :math:`M_d^2`.
 - ``density_sites`` names intrinsic sites only: redshift is integrated, never
   weighted.
-- The population's ``redshift`` site is a
-  :class:`~astrogwb.distributions.redshift.base.RedshiftDistribution`: the
-  spectrum reads its rate and cosmology off that distribution, and a
-  :class:`TypeError` names anything else.
+- The spectrum reads the rate, the cosmology and both distances off the
+  population's
+  :class:`~astrogwb.distributions.redshift.base.RedshiftDistribution` directly:
+  no model is run at the nodes.
 - The catalog is never narrowed with
   :func:`~astrogwb.simulators.polarization_power.restrict_redshift`: its
   reference redshift is the population window's lower edge.
@@ -79,11 +79,11 @@ from astrogwb import __version__
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import hubble_distance, normalized_hubble_parameter
 from astrogwb.distributions.rates import total_merger_rate
-from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.inference.protocol import SpectralDensityFn
-from astrogwb.populations._types import Population, PopulationModel
+from astrogwb.populations._types import Population, PopulationModel, SourceModel
 from astrogwb.populations.evaluation import evaluate_sources, sample_sources
+from astrogwb.populations.joint import joint_model
 from astrogwb.populations.metadata import PopulationMetadata
 from astrogwb.simulators.polarization_power.metadata import CatalogMetadata
 from astrogwb.simulators.polarization_power.restrict import (
@@ -95,7 +95,6 @@ from astrogwb.simulators.polarization_power.simulator import (
     polarization_power_data,
 )
 from astrogwb.utils import gauss_legendre_nodes_weights
-from astrogwb.utils.numpyro import SiteDistribution
 
 __all__ = [
     "EFFECTIVE_INCLINATION",
@@ -148,13 +147,14 @@ def redshift_quadrature(
 
 
 def _intrinsic_log_prob(
-    model: PopulationModel,
+    source_model: SourceModel,
     intrinsic: Mapping[str, jax.Array],
-    redshift: jax.Array,
     density_sites: Sequence[str],
 ) -> jax.Array:
     log_prob, _ = evaluate_sources(
-        _pin_redshift_and_inclination(model, redshift),
+        handlers.condition(
+            source_model, data={INCLINATION_SITE: EFFECTIVE_INCLINATION}
+        ),
         intrinsic,
         density_sites=density_sites,
     )
@@ -199,13 +199,12 @@ def evaluate_log_weights(
     *,
     population: Population,
     intrinsic: Mapping[str, jax.Array],
-    redshift: jax.Array,
     proposal_log_prob: jax.Array,
     density_sites: Sequence[str],
 ) -> jax.Array:
     """Per-draw intrinsic log importance weights at ``params``, shape ``(N,)``."""
-    _, model = population(params)
-    target = _intrinsic_log_prob(model, intrinsic, redshift[0], density_sites)
+    _, source_model = population(params)
+    target = _intrinsic_log_prob(source_model, intrinsic, density_sites)
     return target - proposal_log_prob
 
 
@@ -321,7 +320,7 @@ def reference_catalog(
         metadata.population.model_name,
         metadata.num_samples,
     )
-    _, model = metadata.population.build()(metadata.fiducials)
+    model = joint_model(*metadata.population.build()(metadata.fiducials))
     minimum_redshift, _ = _redshift_window(metadata.population)
     samples = sample_sources(
         _pin_redshift_and_inclination(model, minimum_redshift),
@@ -356,39 +355,21 @@ def rescaled_spectral_density(
     ``extras`` holds ``total_merger_rate`` (observer frame, mergers per second)
     and ``importance_relative_ess`` over the intrinsic draws, both shape ``()``.
     """
-    _, model = population(params)
+    distribution, source_model = population(params)
     log_weights = (
-        _intrinsic_log_prob(model, intrinsic, redshift[0], density_sites)
-        - proposal_log_prob
+        _intrinsic_log_prob(source_model, intrinsic, density_sites) - proposal_log_prob
     )
     mean_power = polarization_power @ jnp.exp(log_weights) / log_weights.shape[0]
     node_power = amplitude * jnp.interp(
         query_log_frequencies, log_reference_frequencies, mean_power, right=0.0
     )
-    first = {name: values[0] for name, values in intrinsic.items()}
-    # The model is run for the node distances (the redshift column is
-    # conditioned in) and to hand over its redshift site's own distribution,
-    # which knows the rate and the cosmology: no density is evaluated.
-    recorded = SiteDistribution(
-        handlers.condition(
-            model, data={**first, INCLINATION_SITE: EFFECTIVE_INCLINATION}
-        ),
-        REDSHIFT_SITE,
-    )
-    _, outputs = evaluate_sources(recorded, {REDSHIFT_SITE: redshift}, density_sites=())
-    distribution = recorded.distribution
-    if not isinstance(distribution, RedshiftDistribution):
-        raise TypeError(
-            f"the {REDSHIFT_SITE!r} site must be a RedshiftDistribution, got "
-            f"{type(distribution).__name__}"
-        )
     hubble_constant = distribution.params["H0"]
     omega_m = distribution.params["Omega_m"]
     merger_rate = distribution.merger_rate(redshift)
-    # The model's distance over its own table's: modified propagation alone.
-    distance_ratio = outputs[_LUMINOSITY_DISTANCE] / distribution.luminosity_distance(
+    # The GW distance over the electromagnetic one: modified propagation alone.
+    distance_ratio = distribution.gw_luminosity_distance(
         redshift
-    )
+    ) / distribution.luminosity_distance(redshift)
     kernel = redshift_weights * phinney_kernel(
         redshift,
         merger_rate,
@@ -452,16 +433,15 @@ def build_rescaled_spectrum(
     intrinsic = {
         name: jnp.asarray(np.asarray(values))
         for name, values in columns.items()
-        if name not in (REDSHIFT_SITE, INCLINATION_SITE)
+        if name not in (REDSHIFT_SITE, INCLINATION_SITE, _LUMINOSITY_DISTANCE)
     }
     redshift_nodes = jnp.asarray(redshift)
-    _, fiducial_model = metadata.population.build()(metadata.fiducials)
+    _, fiducial_source_model = metadata.population.build()(metadata.fiducials)
     proposal_log_prob = _intrinsic_log_prob(
-        fiducial_model, intrinsic, redshift_nodes[0], density_sites
+        fiducial_source_model, intrinsic, density_sites
     )
     shared: dict[str, Any] = {
         "intrinsic": intrinsic,
-        "redshift": redshift_nodes,
         "proposal_log_prob": proposal_log_prob,
     }
     spectral_density_fn = _bind(
@@ -476,6 +456,7 @@ def build_rescaled_spectrum(
         reference_distance=jnp.asarray(
             np.asarray(columns[_LUMINOSITY_DISTANCE], dtype=np.float64)[0]
         ),
+        redshift=redshift_nodes,
         **shared,
     )
     return spectral_density_fn, _bind(

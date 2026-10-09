@@ -63,12 +63,13 @@ against a generator's waveform family::
 
     from numpyro.infer import Predictive
 
+    from astrogwb.populations import joint_model
     from astrogwb.simulators.spectra import (
         poisson_counts_forward_model,
         validate_source_model,
     )
 
-    _, model = population(params)
+    model = joint_model(*population(params))
     validate_source_model(model, generator=generator, rng_key=jax.random.key(0))
     simulate = Predictive(
         partial(
@@ -94,7 +95,7 @@ import numpyro
 import numpyro.distributions as dist
 from jax.typing import ArrayLike
 
-from astrogwb.populations import Population
+from astrogwb.populations import Population, joint_model
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import PolarizationPowerGenerator
 
@@ -149,8 +150,9 @@ def poisson_counts_forward_model(
     """
     observation_time_sec = years_to_seconds(observation_time)
 
-    merger_rate, model = population(params)
-    total_merger_rate = jnp.reshape(jnp.asarray(merger_rate), ())
+    redshift_distribution, source_model = population(params)
+    model = joint_model(redshift_distribution, source_model)
+    total_merger_rate = jnp.reshape(redshift_distribution.total_merger_rate(), ())
     numpyro.deterministic(_TOTAL_MERGER_RATE_SITE, total_merger_rate)
     n_events = numpyro.sample(
         "n_events",

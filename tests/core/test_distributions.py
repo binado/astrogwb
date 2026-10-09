@@ -18,6 +18,7 @@ from typing import cast
 import jax
 import jax.numpy as jnp
 import numpy as np
+import numpyro
 import numpyro.distributions as dist
 import pytest
 
@@ -606,3 +607,51 @@ def test_total_merger_rate_by_quadrature_matches_the_distribution(
     # The distribution's own normalization is a trapezoid rule on the mock
     # grid; the nodes are the more accurate side, so this bounds that error.
     np.testing.assert_allclose(quadrature, distribution.total_merger_rate(), rtol=1e-3)
+
+
+# --------------------------------------------------------------------------- #
+# GW distance and the model that samples it
+# --------------------------------------------------------------------------- #
+def test_gw_distance_is_the_electromagnetic_one_without_modified_propagation() -> None:
+    distribution = _distribution()
+
+    np.testing.assert_array_equal(
+        np.asarray(distribution.gw_luminosity_distance(SAMPLE_REDSHIFTS)),
+        np.asarray(distribution.luminosity_distance(SAMPLE_REDSHIFTS)),
+    )
+
+
+def test_gw_distance_at_unit_xi_0_is_the_electromagnetic_one() -> None:
+    distribution = _distribution(xi_0=1.0, xi_n=1.91)
+
+    np.testing.assert_allclose(
+        np.asarray(distribution.gw_luminosity_distance(SAMPLE_REDSHIFTS)),
+        np.asarray(distribution.luminosity_distance(SAMPLE_REDSHIFTS)),
+    )
+
+
+def test_gw_distance_follows_xi_0_away_from_unity() -> None:
+    distribution = _distribution(xi_0=1.2, xi_n=1.91)
+
+    ratio = distribution.gw_luminosity_distance(
+        SAMPLE_REDSHIFTS
+    ) / distribution.luminosity_distance(SAMPLE_REDSHIFTS)
+    assert bool(jnp.all(ratio > 1.0))
+
+
+@pytest.mark.parametrize("overrides", [{}, {"xi_0": 1.2, "xi_n": 1.91}])
+def test_distance_model_samples_redshift_and_registers_the_gw_distance(
+    overrides: dict[str, float],
+) -> None:
+    distribution = _distribution(**overrides)
+    trace = numpyro.handlers.trace(
+        numpyro.handlers.seed(distribution.distance_model(), 0)
+    ).get_trace()
+
+    assert set(trace) == {"redshift", "luminosity_distance"}
+    assert trace["redshift"]["type"] == "sample"
+    assert trace["luminosity_distance"]["type"] == "deterministic"
+    np.testing.assert_array_equal(
+        np.asarray(trace["luminosity_distance"]["value"]),
+        np.asarray(distribution.gw_luminosity_distance(trace["redshift"]["value"])),
+    )

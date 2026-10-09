@@ -3,10 +3,14 @@ r"""BNS population: one NumPyro model for every Madau-Dickinson variant.
 The redshift law, the mass law and the propagation law are
 construction settings of one model rather than separate registered functions,
 so the variants cannot disagree about the source density they share. A
-population is a callable ``parameters -> (merger_rate, model)``: the redshift
-distribution is built once per call, so the rate and the source density come
-from the same grid, and ``model()`` is a no-argument NumPyro model whose sample
-sites are exactly the columns a catalog stores.
+population is a callable ``parameters -> (redshift_distribution, source_model)``:
+the redshift distribution is built once per call, so the rate and the redshift
+density come from the same grid. ``source_model()`` is a no-argument NumPyro
+model of the intrinsic parameters alone, in the source frame; redshift, GW
+distance and the detector-frame masses are not its business (the latter are
+derived from source-frame masses and redshift by the waveform layer).
+:func:`~astrogwb.populations.joint.joint_model` composes the halves into the
+model whose returned columns a catalog stores.
 
 Contracts the caller is trusted to honour (nothing here checks them):
 
@@ -26,7 +30,8 @@ Contracts the caller is trusted to honour (nothing here checks them):
   uniform law has compact support, so a hyperparameter step that moves its
   edges can send catalog samples outside it; the Gaussian law has none.
 - Inclination is always sampled, isotropically, and the intrinsic sites (masses,
-  spins, tidal deformabilities) are independent of redshift and inclination;
+  spins, tidal deformabilities) are independent of inclination; independence
+  of redshift is structural, since the source model never sees it.
   :mod:`astrogwb.gwb.importance` relies on both.
 """
 
@@ -41,7 +46,7 @@ import numpyro
 import numpyro.distributions as dist
 from jax.typing import ArrayLike
 
-from astrogwb.cosmology import log_gw_em_ratio, lookback_time
+from astrogwb.cosmology import lookback_time
 from astrogwb.distributions import UniformCosineDistribution
 from astrogwb.distributions.delay import PowerLawDelayDistribution
 from astrogwb.distributions.redshift import MadauDickinsonRedshiftDistribution
@@ -49,7 +54,7 @@ from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.distributions.redshift.madau_dickinson import (
     madau_dickinson_time_delayed_redshift_distribution,
 )
-from astrogwb.populations._types import Parameters, Population, PopulationModel
+from astrogwb.populations._types import Parameters, Population, SourceModel
 from astrogwb.populations.mass.gaussian_mass_pair import gaussian_mass_pair_model
 from astrogwb.populations.mass.uniform_mass_pair import uniform_mass_pair_model
 from astrogwb.populations.registry import register_population
@@ -166,9 +171,12 @@ def bns_coba_population_fn(
     Returns
     -------
     Population
-        ``parameters -> (merger_rate, model)``. The rate is the observer-frame
-        total merger rate in mergers per second, shape ``()``; ``model()``
-        declares the source sites and returns the columns a catalog stores.
+        ``parameters -> (redshift_distribution, source_model)``. The
+        distribution's ``total_merger_rate()`` is the observer-frame rate in
+        mergers per second, shape ``()``, and its ``distance_model()`` samples
+        redshift and GW distance; ``source_model()`` declares the intrinsic
+        sites only. :func:`~astrogwb.populations.joint.joint_model` composes
+        the two.
 
     Raises
     ------
@@ -181,9 +189,9 @@ def bns_coba_population_fn(
         )
     draw_masses = _MASS_MODELS[mass_model]
 
-    def _merger_rate_and_population_model(
+    def _redshift_distribution_and_source_model(
         parameters: Parameters,
-    ) -> tuple[jax.Array, PopulationModel]:
+    ) -> tuple[RedshiftDistribution, SourceModel]:
         redshift_distribution = _redshift_distribution(
             parameters,
             minimum_redshift=minimum_redshift,
@@ -195,15 +203,7 @@ def bns_coba_population_fn(
             n_delay_nodes=n_delay_nodes,
         )
 
-        def _population_model() -> dict[str, jax.Array]:
-            redshift = jnp.asarray(numpyro.sample("redshift", redshift_distribution))
-            distance = redshift_distribution.luminosity_distance(redshift)
-            if "xi_0" in parameters:
-                distance = distance * jnp.exp(
-                    log_gw_em_ratio(redshift, parameters["xi_0"], parameters["xi_n"])
-                )
-            luminosity_distance = numpyro.deterministic("luminosity_distance", distance)
-
+        def _source_model() -> dict[str, jax.Array]:
             mass_1, mass_2 = draw_masses(parameters)
 
             spin_dist = dist.Uniform(
@@ -220,16 +220,8 @@ def bns_coba_population_fn(
             lambda_1 = numpyro.sample("lambda_1", lambda_dist)
             lambda_2 = numpyro.sample("lambda_2", lambda_dist)
 
-            one_plus_z = 1.0 + redshift
-            detector_frame_mass_1 = numpyro.deterministic(
-                "detector_frame_mass_1", mass_1 * one_plus_z
-            )
-            detector_frame_mass_2 = numpyro.deterministic(
-                "detector_frame_mass_2", mass_2 * one_plus_z
-            )
-
             # Phase- and time-aligned; inclination is a separate stochastic site.
-            zeros = jnp.zeros_like(redshift)
+            zeros = jnp.zeros_like(mass_1)
             coa_phase = numpyro.deterministic("coa_phase", zeros)
             coa_time = numpyro.deterministic("coa_time", zeros)
             inclination = numpyro.sample(
@@ -237,22 +229,18 @@ def bns_coba_population_fn(
             )
 
             sources: dict[str, ArrayLike] = {
-                "redshift": redshift,
                 "source_frame_mass_1": mass_1,
                 "source_frame_mass_2": mass_2,
                 "spin_1z": spin_1z,
                 "spin_2z": spin_2z,
                 "lambda_1": lambda_1,
                 "lambda_2": lambda_2,
-                "detector_frame_mass_1": detector_frame_mass_1,
-                "detector_frame_mass_2": detector_frame_mass_2,
-                "luminosity_distance": luminosity_distance,
                 "coa_phase": coa_phase,
                 "coa_time": coa_time,
                 "inclination": inclination,
             }
             return {name: jnp.asarray(values) for name, values in sources.items()}
 
-        return redshift_distribution.total_merger_rate(), _population_model
+        return redshift_distribution, _source_model
 
-    return _merger_rate_and_population_model
+    return _redshift_distribution_and_source_model

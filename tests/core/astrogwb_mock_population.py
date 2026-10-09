@@ -37,6 +37,7 @@ from astrogwb.populations import (
     Population,
     PopulationMetadata,
     build_population,
+    joint_model,
 )
 from astrogwb.populations.evaluation import evaluate_sources, sample_sources
 from astrogwb.simulators.polarization_power import (
@@ -61,7 +62,7 @@ def derived_columns(
     never trusted over the recomputation, and no static site-name list is
     needed.
     """
-    _, model = population(params)
+    model = joint_model(*population(params))
     _, outputs = evaluate_sources(model, sources, density_sites=())
     return outputs
 
@@ -135,7 +136,7 @@ def mock_population(n_grid: int = N_GRID) -> Population:
 
 def load_mock_population(num_sources: int = 1024) -> dict[str, np.ndarray]:
     """Draw the mock population as plain ``(N,)`` float64 arrays."""
-    _, model = mock_population()(POPULATION_PARAMS)
+    model = joint_model(*mock_population()(POPULATION_PARAMS))
     samples = sample_sources(
         model,
         jax.random.PRNGKey(MOCK_POPULATION_SEED),

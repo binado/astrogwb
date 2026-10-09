@@ -63,7 +63,7 @@ import jax
 
 from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.metadata import PopulationMetadata, WaveformMetadata
-from astrogwb.populations import build_population
+from astrogwb.populations import build_population, joint_model
 from astrogwb.inference.utils import sample_sources
 from astrogwb.waveform import AnalyticInspiralGenerator
 
@@ -83,10 +83,11 @@ params = {
     "minimum_mass": 1.0,
     "mass_width": 1.5,
 }
-# A population maps hyperparameters to (merger rate, model); model() is a
-# no-argument NumPyro model. Isotropic inclination is always sampled.
+# A population maps hyperparameters to (redshift distribution, source model);
+# joint_model composes them into a no-argument NumPyro model. Isotropic
+# inclination is always sampled.
 population = build_population("bns_coba", **model_kwargs)
-_, model = population(params)
+model = joint_model(*population(params))
 source_parameters = sample_sources(model, jax.random.PRNGKey(42), num_samples=1024)
 
 generator = AnalyticInspiralGenerator(

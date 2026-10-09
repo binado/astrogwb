@@ -5,10 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import jax
-import jax.numpy as jnp
 import numpy as np
-import numpyro
-import numpyro.distributions as dist
 import pytest
 
 from astrogwb.cosmology import luminosity_distance
@@ -21,7 +18,7 @@ from astrogwb.gwb.importance import (
     redshift_quadrature,
     reference_catalog,
 )
-from astrogwb.populations import PopulationMetadata, build_population
+from astrogwb.populations import PopulationMetadata, build_population, joint_model
 from astrogwb.populations.evaluation import evaluate_sources, sample_sources
 from astrogwb.simulators.core import batch_keys
 from astrogwb.simulators.polarization_power import (
@@ -153,7 +150,7 @@ def _spectrum_on_nodes(
         for name in ("minimum_redshift", "maximum_redshift")
     )
     redshift, weights = redshift_quadrature(minimum, maximum, NUM_NODES)
-    _, fiducial_model = population.build()(metadata.fiducials)
+    fiducial_model = joint_model(*population.build()(metadata.fiducials))
     samples = sample_sources(
         _pin_redshift_and_inclination(fiducial_model, minimum),
         key,
@@ -161,7 +158,7 @@ def _spectrum_on_nodes(
     )
     # Every source at every node, node-major: row ``j * N + k`` is source ``k``
     # at node ``j``, replayed through the model so redshift-derived columns
-    # (luminosity distance, detector-frame masses) are recomputed.
+    # (the luminosity distance) are recomputed.
     count = metadata.num_samples
     tiled = {
         name: np.tile(np.asarray(values), redshift.size)
@@ -174,7 +171,9 @@ def _spectrum_on_nodes(
     power = polarization_power_data(OBSERVED_WAVEFORM.build(), rows)
     power = np.asarray(power["polarization_power"]).reshape(-1, NUM_NODES, 6)
 
-    merger_rate, model = population.build()(params)
+    redshift_distribution, source_model = population.build()(params)
+    merger_rate = redshift_distribution.total_merger_rate()
+    model = joint_model(redshift_distribution, source_model)
     log_density, outputs = evaluate_sources(model, rows, density_sites=("redshift",))
     distance_ratio = rows["luminosity_distance"] / outputs["luminosity_distance"]
     kernel = weights * np.exp(log_density[::6]) * distance_ratio[::6] ** 2
@@ -327,34 +326,3 @@ def test_phinney_kernel_times_the_distance_ratio_squared_is_the_rate_density(
         total_merger_rate(redshift, weights, merger_rate, hubble_constant, omega_m),
         rtol=1e-12,
     )
-
-
-@pytest.mark.integration
-def test_the_redshift_site_must_be_a_redshift_distribution(
-    reference_metadata: CatalogMetadata,
-) -> None:
-    data = reference_catalog(reference_metadata, batch_keys(41, 1)[0])
-    real = build_population(
-        reference_metadata.population.model_name,
-        **reference_metadata.population.model_kwargs,
-    )
-
-    def foreign(params: Any) -> Any:
-        rate, _ = real(params)
-
-        def uniform_redshift() -> Any:
-            numpyro.sample("redshift", dist.Uniform(0.1, 5.0))
-            return {"luminosity_distance": jnp.ones(())}
-
-        return rate, uniform_redshift
-
-    fn, _ = build_rescaled_spectrum(
-        data,
-        reference_metadata,
-        population=foreign,
-        frequencies=data["frequencies"][:10],
-        num_redshift_nodes=3,
-        density_sites=(),
-    )
-    with pytest.raises(TypeError, match="RedshiftDistribution"):
-        fn(reference_metadata.fiducials)
