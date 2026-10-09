@@ -63,13 +63,22 @@ generator's (`WaveformMetadata.build().generate_batch(sources, chunk_size=)`,
 trace-safe, chunked with `lax.map`); `polarization_power_data(generator,
 sources)` checks the sources once, jits it and packs `PolarizationPowerData`.
 `draw_catalog(metadata, key)` is the plain catalog (sources drawn at the
-fiducials, then that packaging), and `astrogwb.gwb.importance` places the same
-draw at redshift nodes:
-`importance_catalog(ImportanceCatalogMetadata, key)` places every intrinsic
-draw at each Gauss-Legendre node in `ln(1+z)` at a fixed effective
-inclination, and `build_importance_spectrum` integrates redshift on those nodes
-and reweights only the intrinsic draws. It is meant to replace the
-redshift-sampled `astrogwb.importance.spectral` estimator.
+fiducials, then that packaging), and `astrogwb.gwb.importance` integrates
+redshift on Gauss-Legendre nodes in the scale factor `1/(1+z)` at a fixed
+effective inclination, reweighting only the intrinsic draws. It is meant to
+replace the redshift-sampled `astrogwb.importance.spectral` estimator.
+`reference_catalog(CatalogMetadata, key)` makes one waveform per draw, at the
+population's minimum redshift (file stem `reference_catalog-<key>-<seed>`,
+apart from the plain catalog's), and `build_rescaled_spectrum` rescales the
+weighted mean power to the nodes in each call -- `s**4` and `f * s`, with
+`s = (1+z)/(1+z_min)`, exact for a (2,2)-only aligned-spin, quasi-circular
+waveform, the only kind it supports -- so the node count is a builder argument
+and costs no waveforms. The builder returns
+pytree callables (`jax.tree_util.Partial` over a by-value static half): pass one
+*as an argument* to a jitted function -- `GaussianGWBBatchedLikelihood` takes
+`spectral_density_fn` per call for this -- and the catalog is a traced input,
+held once and shared by every compilation, instead of a constant each closure
+bakes in.
 Anything static is bound in the
 constructor. The output `D`
 is a per-simulator `TypedDict` of array-like leaves (`PopulationData`,
@@ -104,9 +113,7 @@ at `batch_keys(seed, 1)[0]` -- unless `generate=False`, which the workflow's
 is no catalog wrapper class, and `restrict_redshift(data, metadata, zmin, zmax)`
 (`astrogwb.simulators.polarization_power`) narrows samples and recorded
 population window together. There is
-no `config/catalogs/` and no catalog name. The version is part of the key, so
-**bump `version` in `pyproject.toml` whenever a change alters what a population
-draw or a waveform generator produces**, or stale catalogs keep being served.
+no `config/catalogs/` and no catalog name. The version is part of the key.
 `just catalogs` maps stems back to what they draw, at which seed, and which runs
 use them.
 Forward-model spectra: a `BackgroundSpectralDensityMetadata` (each hyperparameter

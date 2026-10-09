@@ -31,8 +31,7 @@ class CatalogMetadata(BaseModel):
     with the same ones still differ if they were drawn at other
     hyperparameters or at another size, and both differ if the code that drew
     them changed. ``fiducials`` and ``num_samples`` close the first gap and
-    ``version`` the second -- as far as the package version is bumped when a
-    population or waveform change alters a draw.
+    ``version`` the second.
 
     Every caller -- the workflow, the generator script, a notebook -- derives
     the key from this one record, so there is one canonical form and no second

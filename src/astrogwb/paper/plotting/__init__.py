@@ -47,6 +47,7 @@ import numpy as np
 from matplotlib.colors import to_hex
 from matplotlib.figure import Figure
 from numpy.typing import ArrayLike
+from scipy.interpolate import CubicSpline
 
 if TYPE_CHECKING:
     from astrogwb.paper.config.detectors import DetectorRegistry
@@ -251,6 +252,20 @@ def get_corner_kwargs(**overrides: object) -> dict[str, object]:
     return kwargs | overrides
 
 
+def _smooth_marginal(
+    grid: np.ndarray, marginal: np.ndarray, *, points: int = 1000
+) -> tuple[np.ndarray, np.ndarray]:
+    """Cubic-spline curve through a 1D marginal, peak-normalized to 1.
+
+    The spline runs through the grid-center values and is sampled on a dense
+    grid spanning the centers. Its tails can dip slightly below zero between
+    samples, so the curve is clipped at zero.
+    """
+    x_fine = np.linspace(grid[0], grid[-1], points)
+    y_fine = np.maximum(CubicSpline(grid, marginal)(x_fine), 0.0)
+    return x_fine, y_fine / y_fine.max()
+
+
 def plot_corner_for_posterior_grid(
     grids: Sequence[ArrayLike],
     log_density: ArrayLike,
@@ -302,7 +317,9 @@ def plot_corner_for_posterior_grid(
         to ``corner.corner()``.
     corner_kwargs
         Additional keyword arguments forwarded to ``corner.corner()``; they
-        take precedence over this function's defaults.
+        take precedence over this function's defaults. ``smooth1d`` has no
+        effect: the diagonal panels are a cubic spline through the grid's
+        marginal density (peak-normalized), not corner's histogram.
 
     Returns
     -------
@@ -357,7 +374,8 @@ def plot_corner_for_posterior_grid(
         if len(truths) != ndim:
             raise ValueError(f"expected {ndim} truths, got {len(truths)}")
 
-    weights = np.exp(log_density - log_density.max()).ravel()
+    density = np.exp(log_density - log_density.max())
+    weights = density.ravel()
     # corner requires 2D (nsamples, ndim) input; the pinned revision's 1D
     # ndarray path reshapes as data[None, :, :] and crashes, so present the
     # 1D grid as (npoints, 1).
@@ -384,9 +402,31 @@ def plot_corner_for_posterior_grid(
         "labels": list(labels) if labels is not None else None,
     }
     kwargs |= corner_kwargs
+    # The diagonal panels are drawn from the spline below, not from corner's
+    # histogram, so corner's own 1D smoothing (which would only blur bin counts)
+    # is switched off here whatever the caller passed.
+    kwargs["smooth1d"] = None
     fig = corner.corner(data, **kwargs)  # type: ignore[arg-type]
     if fig is None:  # pragma: no cover - corner always creates a figure here
         raise RuntimeError("corner did not create a figure")
+
+    # Marginal densities on the grid: integrate out the other dimension. The
+    # spline then runs through the marginal values at the grid centers.
+    if ndim == 1:
+        marginals = [density]
+    else:
+        marginals = [
+            np.trapezoid(density, grids[1], axis=1),
+            np.trapezoid(density, grids[0], axis=0),
+        ]
+    diagonal = np.asarray(fig.axes).reshape(ndim, ndim)
+    for index, (grid, marginal) in enumerate(zip(grids, marginals, strict=True)):
+        ax = diagonal[index, index]
+        for patch in list(ax.patches):
+            patch.remove()
+        x_fine, y_fine = _smooth_marginal(grid, marginal)
+        ax.plot(x_fine, y_fine, color="k")
+        ax.set_ylim(0.0, 1.05)
 
     # Expand the visible axes to include out-of-grid truths after rendering:
     # corner's truth artists (truly spanning axvline/axhline plus square

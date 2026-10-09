@@ -1,12 +1,11 @@
 from collections.abc import Callable, Mapping
-from functools import cache, wraps
+from functools import wraps
 
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax.typing import ArrayLike, DTypeLike
+from jax.typing import ArrayLike
 from numpy.polynomial.legendre import leggauss
-from numpy.typing import NDArray
 
 from astrogwb.constants import SECONDS_PER_YEAR
 
@@ -68,71 +67,52 @@ def cumulative_trapezoid(y: jax.Array, x: jax.Array) -> jax.Array:
     return jnp.concatenate([zeros, jnp.cumsum(segments, axis=-1)], axis=-1)
 
 
-@cache
-def gauss_legendre_rule(
-    order: int,
-) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Return cached host-side float64 nodes and weights on ``[-1, 1]``.
-
-    The rule is built on the host with :func:`numpy.polynomial.legendre.leggauss`
-    and memoized on ``order``, so repeated tracing of the same quadrature order
-    costs nothing after the first call.
-    """
-    nodes, weights = leggauss(order)
-    return nodes.astype(np.float64), weights.astype(np.float64)
-
-
-def mapped_gauss_legendre_rule(
-    order: int,
-    lower: ArrayLike,
-    upper: ArrayLike,
-    *,
-    dtype: DTypeLike = jnp.float64,
+def gauss_legendre_nodes_weights(
+    a: ArrayLike, b: ArrayLike, n: int
 ) -> tuple[jax.Array, jax.Array]:
-    r"""Map an ``order``-point Gauss-Legendre rule onto one or many intervals.
+    r"""Map an ``n``-point Gauss-Legendre rule onto one or many intervals.
 
-    An ``order``-point rule integrates polynomials of degree ``2 * order - 1``
-    exactly. ``lower`` and ``upper`` may be scalars or arrays; both returned
-    arrays have the broadcast shape of ``lower`` and ``upper`` followed by a
-    trailing ``order`` axis, so a single call covers every interval of a grid.
+    An ``n``-point rule integrates polynomials of degree ``2 * n - 1``
+    exactly. ``a`` and ``b`` may be scalars or arrays; both returned arrays
+    have the broadcast shape of ``a`` and ``b`` followed by a trailing ``n``
+    axis, so a single call covers every interval of a grid.
 
-    The returned weights already carry the affine Jacobian ``(upper - lower) / 2``
-    of each interval, so the integral of ``f`` over every interval is
+    The returned weights already carry the affine Jacobian ``(b - a) / 2`` of
+    each interval, so the integral of ``f`` over every interval is
 
     .. code-block:: python
 
-        points, weights = mapped_gauss_legendre_rule(order, lower, upper)
+        points, weights = gauss_legendre_nodes_weights(a, b, n)
         integral = jnp.sum(weights * f(points), axis=-1)
 
-    ``order`` is a static Python integer and is never extracted from a traced
-    value, so this helper is safe to call inside jitted code.
+    ``n`` is a static Python integer and is never extracted from a traced
+    value, so this helper is safe to call inside jitted code, and it is
+    differentiable in ``a`` and ``b``.
 
     Parameters
     ----------
-    order:
-        Number of quadrature nodes per interval.
-    lower, upper:
+    a, b:
         Integration bounds, broadcast against each other.
-    dtype:
-        Working floating-point dtype. Defaults to ``float64``, which requires
-        JAX x64 mode. Callers that must also work in float32, or that accept
-        integer bounds, should pass ``jnp.result_type(bounds, float)``: the
-        bounds are cast to ``dtype`` here, so an integer grid promotes instead
-        of truncating the nodes and weights to zeros.
+    n:
+        Number of quadrature nodes per interval.
 
     Returns
     -------
     tuple[jax.Array, jax.Array]
         ``(points, weights)``, each of shape
-        ``jnp.broadcast_shapes(lower.shape, upper.shape) + (order,)``.
+        ``jnp.broadcast_shapes(a.shape, b.shape) + (n,)``. The dtype is
+        ``jnp.result_type(a, b, float)``: float32 bounds stay float32, integer
+        bounds promote to floating point instead of truncating the nodes and
+        weights to zeros, and Python floats need JAX x64 mode for float64.
     """
-    host_nodes, host_weights = gauss_legendre_rule(order)
+    dtype = jnp.result_type(a, b, float)
+    host_nodes, host_weights = leggauss(n)
     nodes = jnp.asarray(host_nodes, dtype=dtype)
     weights = jnp.asarray(host_weights, dtype=dtype)
-    lower = jnp.asarray(lower, dtype=dtype)
-    upper = jnp.asarray(upper, dtype=dtype)
-    midpoint = 0.5 * (lower + upper)
-    half_width = 0.5 * (upper - lower)
+    a = jnp.asarray(a, dtype=dtype)
+    b = jnp.asarray(b, dtype=dtype)
+    midpoint = 0.5 * (a + b)
+    half_width = 0.5 * (b - a)
     return (
         midpoint[..., None] + half_width[..., None] * nodes,
         half_width[..., None] * weights,

@@ -184,6 +184,24 @@ def test_plot_corner_for_posterior_grid_1d_truth() -> None:
     matplotlib.pyplot.close(fig)
 
 
+def test_plot_corner_for_posterior_grid_diagonal_is_spline_marginal() -> None:
+    x, y, log_density = _gaussian_grids_and_log_density()
+    fig = plotting.plot_corner_for_posterior_grid((x, y), log_density)
+    diagonal = np.asarray(fig.axes).reshape(2, 2)
+    for index in range(2):
+        ax = diagonal[index, index]
+        # No histogram bars left; one dense curve, peak-normalized to the mode
+        # of the gaussian marginal at zero.
+        assert not ax.patches
+        (curve,) = ax.lines
+        xs, ys = curve.get_data()
+        assert xs.size == 1000
+        assert ys.max() == pytest.approx(1.0)
+        assert xs[np.argmax(ys)] == pytest.approx(0.0, abs=1e-2)
+        assert np.all(ys >= 0.0)
+    matplotlib.pyplot.close(fig)
+
+
 def test_plot_corner_for_posterior_grid_validation() -> None:
     x, y, log_density = _gaussian_grids_and_log_density()
 

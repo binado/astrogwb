@@ -59,7 +59,7 @@ from astrogwb.distributions.redshift.base import (
     RedshiftDistribution,
     SourceFrameDistributionFn,
 )
-from astrogwb.utils import mapped_gauss_legendre_rule
+from astrogwb.utils import gauss_legendre_nodes_weights
 
 
 class TimeDelayedRedshiftDistribution(RedshiftDistribution):
@@ -155,11 +155,10 @@ class TimeDelayedRedshiftDistribution(RedshiftDistribution):
         )
         # The weights carry the Jacobian F(tau_avail) / 2, so the probability
         # mass of the available delays is built in.
-        quantiles, weights = mapped_gauss_legendre_rule(
-            self.n_delay_nodes,
+        quantiles, weights = gauss_legendre_nodes_weights(
             jnp.zeros_like(available_probability),
             available_probability,
-            dtype=jnp.result_type(merger_time, float),
+            self.n_delay_nodes,
         )
         # Every node forms at or before the cut-off, which precedes the age of
         # the universe, so no redshift here is infinite.

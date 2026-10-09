@@ -61,6 +61,26 @@ repository root as the working directory.
   cache and writes three paper figures (A1-A3) and eleven supporting
   figures. Smoke test:
   `ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/spectrum_snrs.py`.
+- **`cosmology_grid_posteriors.py`** — marimo notebook. Grid posteriors for
+  $H_0$, $(H_0, \Omega_m)$ and $(\Xi_0, n)$ across the six detector networks,
+  from a zero-noise Poisson injection, modeled with the rescaled
+  reference-redshift spectrum (`astrogwb.gwb.importance`: $2^{19}$ intrinsic
+  draws, one waveform each at the window's lower edge, rescaled to 32 redshift
+  nodes; a different seed). The log densities are cached under
+  `default_cache_dir() / "posteriors"`, keyed by a hash of their settings, so
+  the figures iterate without recomputing. Each grid point is predicted once
+  and shared by all six networks (`GaussianGWBBatchedLikelihood`); the numbers
+  equal the per-network evaluation, so existing cache files stay valid. Writes per-problem marginals and
+  corner plots. Smoke test:
+  `ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/cosmology_grid_posteriors.py`.
+- **`importance_convergence.py`** — marimo notebook. Chooses the grid
+  posteriors' $(N, Z)$: redshift-quadrature convergence on a $Z = 2^i$
+  ladder over one fixed set of draws, and Monte
+  Carlo noise as the scatter of $M$ fixed-seed catalogs about their mean, with
+  every $N = 2^k$ read off as a prefix. Errors are in units of the most
+  sensitive network's per-bin noise and of each parameter's Fisher width.
+  Smoke test:
+  `ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/importance_convergence.py`.
 
 The paper notebooks merge a run's config layers with
 `assemble_run(*REFERENCE_RUN)` — the by-name convenience wrapper over the same

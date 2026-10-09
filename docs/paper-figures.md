@@ -246,6 +246,53 @@ stand-in for the Poisson option, and no figure saving. A full run
 (`N = 2^18`, 100 draws, three cutoffs) is expensive the first time, until the
 spectrum cache is populated.
 
+## Grid posteriors
+
+`notebooks/cosmology_grid_posteriors.py` is a marimo notebook that evaluates
+the posteriors of `H0`, `(H0, Omega_m)` and `(xi_0, xi_n)` on a grid for all six
+networks, with no sampler. The data are a zero-noise Poisson injection
+(`data_seed = 41`); the model spectrum is the rescaled reference-redshift
+spectrum of `astrogwb.gwb.importance` (`catalog_seed = 42`): `2^19` intrinsic
+draws, each generated once at the window's lower edge by `reference_catalog`,
+and `build_rescaled_spectrum` rescaling their mean power to 32 Gauss-Legendre
+nodes in the scale factor `1/(1 + z)` at each grid point, with no intrinsic
+reweighting. The log densities are cached in `default_cache_dir() /
+"posteriors"`, in a file
+whose name carries a hash of the seeds, grids, band, observing time, version
+and catalog keys, so a stale cache is never served. The first run generates the
+reference catalog (`outputs/catalogs/reference_catalog-<key>-42.h5`, chunked
+by `reference_catalog(..., chunk_size=...)`).
+Figures go to `outputs/figures/cosmology_grid_posteriors/` when the
+`Write figures` switch is on:
+
+```bash
+uv run --extra notebook --group dev marimo check --strict notebooks/cosmology_grid_posteriors.py
+ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/cosmology_grid_posteriors.py
+```
+
+## Importance convergence
+
+`notebooks/importance_convergence.py` measures the two errors of the
+rescaled reference-redshift spectrum separately, to choose the grid posteriors'
+`(N, Z)`. The rescaling itself holds for the (2,2)-mode aligned-spin waveforms
+used; `tests/core/test_gwb_importance.py` checks it against waveforms generated
+at every node. The redshift quadrature runs a `Z = 2^i` ladder (4 to 1024 nodes) on one
+reference catalog -- the node count is a builder argument, so the ladder costs
+no waveforms. The Monte Carlo noise is the scatter of `M`
+catalogs at fixed seeds about their mean; each `N = 2^k` is the first `N`
+draws of every catalog, so the `N` ladder costs no extra waveforms. Errors are
+reported in units of the most sensitive network's per-bin `sigma` and as each
+parameter's likelihood-peak shift in Fisher widths, at the fiducials and the
+grid windows' edges. A recommendation cell reports the cheapest pair below
+tolerance and the `N` the `1/N` variance law extrapolates to. Catalogs are
+cached in `outputs/catalogs/`; figures go to
+`outputs/figures/importance_convergence/` when `Write figures` is on:
+
+```bash
+uv run --extra notebook --group dev marimo check --strict notebooks/importance_convergence.py
+ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/importance_convergence.py
+```
+
 ## Scripts
 
 Figure entry points are plain Python scripts under `scripts/`. Each reads its
