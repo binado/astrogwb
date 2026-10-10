@@ -19,7 +19,7 @@ with app.setup(hide_code=True):
     import pandas as pd
     from numpy.typing import NDArray
 
-    from astrogwb.detector import effective_psd
+    from astrogwb.detector import effective_psd, gaussian_bin_scale
     from astrogwb.frequency import frequency_mask
     from astrogwb.gwb import spectral_snr
     from astrogwb.paper.cache import default_cache_dir
@@ -31,11 +31,9 @@ with app.setup(hide_code=True):
     )
     from astrogwb.paper.config.detectors import DetectorRegistry
     from astrogwb.paper.plotting import DETECTOR_NETWORKS
-    from astrogwb.simulators.core import batch_keys
     from astrogwb.simulators.spectra import (
         BackgroundSpectralDensityMetadata,
-        BackgroundSpectralDensitySimulator,
-        stack_spectra,
+        spectra_ensemble,
     )
     from astrogwb.utils import years_to_seconds
 
@@ -47,10 +45,17 @@ def _():
 
     How much SNR does each detector network lose as the lower edge of the
     analysis band moves up? This notebook draws a Poisson ensemble of
-    background spectra with `IMRPhenomXAS`, averages it (cached on disk),
-    computes the mean spectrum's SNR for each paper network at several
-    values of $f_{\min}$, and prints LaTeX tables (networks $\times$ cuts),
-    one with the ET-COBA PSD for ET-$\Delta$ and one with the ET-D PSD.
+    background spectra with `IMRPhenomXAS`, averages it, computes the mean
+    spectrum's SNR for each paper network at several values of $f_{\min}$,
+    and prints LaTeX tables (networks $\times$ cuts), one with the ET-COBA
+    PSD for ET-$\Delta$ and one with the ET-D PSD. The same draws give the
+    shot noise of a single realization about the mean.
+
+    The ensemble is cached one draw per file
+    (`astrogwb.simulators.spectra.spectra_ensemble`) under
+    `default_cache_dir() / "ensembles"`, shared with
+    `notebooks/shot_noise_coverage.py`, which uses the same record and seed
+    as its injections.
     """)
     return
 
@@ -112,18 +117,14 @@ def _():
     minimum_frequencies = [2.0, 5.0, 10.0, 20.0]
     minimum_redshift = 0.35
     maximum_redshift = 20.0
-    mean_spectra_outfile = (
-        default_cache_dir() / "spectra" / "mean_spectra_IMRPhenomXAS.npz"
-    )
+    # Shared with shot_noise_coverage.py: same record, seed and directory.
+    ensemble_dir = default_cache_dir() / "ensembles"
 
     # Execution smoke tests exercise the same code with tiny draws.
     SMOKE = os.environ.get("ASTROGWB_NOTEBOOK_SMOKE") == "1"
     if SMOKE:
         num_draws = 3
         chunk_size = 8
-        mean_spectra_outfile = (
-            default_cache_dir() / "spectra" / "smoke_mean_spectra_IMRPhenomXAS.npz"
-        )
 
     metadata = BackgroundSpectralDensityMetadata(
         count="fixed" if SMOKE else "poisson",
@@ -167,7 +168,7 @@ def _():
         etd_registry,
         etd_rows,
         chunk_size,
-        mean_spectra_outfile,
+        ensemble_dir,
         maximum_frequency,
         metadata,
         minimum_frequencies,
@@ -187,48 +188,74 @@ def _():
 
 
 @app.function(hide_code=True)
-def mean_spectrum(
-    metadata: BackgroundSpectralDensityMetadata,
-    num_draws: int,
-    seed: int,
-    chunk_size: int,
-    outfile: Path,
-) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Return the frequency grid and the mean spectrum of an ensemble.
+def shot_noise_table(
+    registry: DetectorRegistry,
+    rows: Sequence[tuple[str, str]],
+    frequencies: NDArray[np.float64],
+    draws: NDArray[np.float64],
+    observation_time: float,
+    minimum_frequency: float,
+    maximum_frequency: float,
+) -> pd.DataFrame:
+    r"""The shot noise of one draw about the ensemble mean, per network.
 
-    The mean is served from ``outfile`` when it exists; otherwise the
-    ensemble is drawn at ``batch_keys(seed, num_draws)``, averaged over the
-    draw axis, and saved. The file records neither the metadata nor the seed,
-    so delete it when either changes.
+    Each draw's relative amplitude offset is its projection on the mean,
+    :math:`\epsilon_i = (m | S_i - m) / (m | m)`, with the per-bin Gaussian
+    scale of the network as the inner product's weight, so
+    :math:`\rho\,\mathrm{sd}(\epsilon)` is the shot noise in units of the
+    detector's amplitude error. The correlation column is the SNR-weighted
+    mean correlation of the relative residuals across bins: one when the shot
+    noise is a single amplitude mode.
 
     Parameters
     ----------
-    metadata
-        Spectrum record to draw.
-    num_draws
-        Number of draws to average.
-    seed
-        Seed of the draw keys.
-    chunk_size
-        Events reduced per chunk; a cost setting only.
-    outfile
-        ``.npz`` cache holding ``frequencies`` and ``mean``.
+    registry
+        Source of the networks.
+    rows
+        ``(network name, row label)`` pairs, in row order.
+    frequencies, draws
+        Frequency grid ``(F,)`` and the ensemble ``(M, F)``.
+    observation_time
+        Observing time in years.
+    minimum_frequency, maximum_frequency
+        Analysis band in Hz.
 
     Returns
     -------
-    tuple
-        Frequencies ``(F,)`` and mean spectral density ``(F,)``.
+    pandas.DataFrame
+        ``rho``, ``rho sd(eps)`` and its error, and the correlation, by row.
     """
-    if outfile.is_file():
-        with np.load(outfile) as cached:
-            return cached["frequencies"], cached["mean"]
-    simulator = BackgroundSpectralDensitySimulator(metadata, chunk_size=chunk_size)
-    data = stack_spectra([simulator(key) for key in batch_keys(seed, num_draws)])
-    frequencies = np.asarray(data["frequencies"], dtype=np.float64)
-    mean = np.mean(np.asarray(data["spectral_density"], dtype=np.float64), axis=0)
-    outfile.parent.mkdir(parents=True, exist_ok=True)
-    np.savez(outfile, frequencies=frequencies, mean=mean)
-    return frequencies, mean
+    grid = jnp.asarray(frequencies)
+    mean = draws.mean(axis=0)
+    residual = (draws - mean) / np.where(mean > 0, mean, 1.0)
+    count = draws.shape[0]
+    records = {}
+    for name, label in rows:
+        geometry, sensitivities = registry.build_network(name)
+        noise = jnp.asarray(effective_psd(grid, geometry, sensitivities))
+        keep = np.asarray(
+            frequency_mask(grid, fmin=minimum_frequency, fmax=maximum_frequency)
+            & jnp.isfinite(noise)
+            & (noise > 0.0)
+        )
+        sigma = np.asarray(gaussian_bin_scale(noise, observation_time, grid))
+        weight = np.where(
+            keep & (mean > 0), (mean / np.where(keep, sigma, 1.0)) ** 2, 0
+        )
+        rho = float(np.sqrt(weight.sum()))
+        eps = residual @ weight / weight.sum()
+        spread = float(np.std(eps, ddof=1))
+        top = np.argsort(-weight)[: min(200, int(np.count_nonzero(weight)))]
+        pair = weight[top][:, None] * weight[top][None, :]
+        records[label] = {
+            "rho": rho,
+            "rho sd(eps)": rho * spread,
+            "error": rho * spread / np.sqrt(2.0 * (count - 1)),
+            "bin correlation": float(
+                np.sum(pair * np.corrcoef(residual[:, top].T)) / pair.sum()
+            ),
+        }
+    return pd.DataFrame.from_dict(records, orient="index")
 
 
 @app.function(hide_code=True)
@@ -307,18 +334,21 @@ def _():
     mo.md(r"""
     ## 3. Draw and average
 
-    The Poisson ensemble is averaged over the draw axis and cached next to
-    the other spectra, together with the frequency grid the SNR needs.
+    The Poisson ensemble, one cached file per draw, averaged over the draw
+    axis.
     """)
     return
 
 
 @app.cell
-def _(chunk_size, mean_spectra_outfile, metadata, num_draws, seed):
-    frequencies, mean = mean_spectrum(
-        metadata, num_draws, seed, chunk_size, mean_spectra_outfile
+def _(chunk_size, ensemble_dir, metadata, num_draws, seed):
+    _ensemble = spectra_ensemble(
+        metadata, seed, num_draws, ensemble_dir, chunk_size=chunk_size
     )
-    return frequencies, mean
+    frequencies = np.asarray(_ensemble["frequencies"], dtype=np.float64)
+    draws = _ensemble["spectral_density"]
+    mean = draws.mean(axis=0)
+    return draws, frequencies, mean
 
 
 @app.cell(hide_code=True)
@@ -406,6 +436,47 @@ def _():
     lose the most when the cut rises. The two tables differ only in the
     ET-$\\Delta$ rows (ET-COBA vs. ET-D noise curve); the 2L rows are identical.
     """)
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## 7. Shot noise of one draw
+
+    One realization of the background scatters about the mean: a finite
+    Poisson sum over mergers. Projected on the mean spectrum, the scatter is
+    an amplitude offset $\epsilon$; $\rho\,\mathrm{sd}(\epsilon)$ compares
+    it with the detector's amplitude error $1/\rho$, over the widest band
+    ($f_{\min}$ = the first cut). The likelihood models it with
+    `astrogwb.gwb.importance.build_rescaled_shot_noise`;
+    `notebooks/shot_noise_coverage.py` checks the two against each other on
+    these draws. A bin correlation of one means the shot noise is a single
+    amplitude mode, which is what the rank-one likelihood assumes.
+    """)
+    return
+
+
+@app.cell
+def _(
+    coba_rows,
+    draws,
+    frequencies,
+    maximum_frequency,
+    minimum_frequencies,
+    observation_time,
+    registry,
+):
+    shot_noise = shot_noise_table(
+        registry,
+        coba_rows,
+        frequencies,
+        draws,
+        observation_time,
+        minimum_frequencies[0],
+        maximum_frequency,
+    )
+    shot_noise
     return
 
 
