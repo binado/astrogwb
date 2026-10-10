@@ -1,6 +1,6 @@
 r"""Per-frequency Fisher information of the diagonal Gaussian spectrum likelihood.
 
-:func:`~astrogwb.inference.models.gaussian_gwb_model.gwb_spectral_density_model`
+:func:`~astrogwb.inference.models.gaussian_gwb_model.gwb_likelihood_model`
 compares a predicted spectrum to data bin by bin,
 :math:`d_i \sim \mathcal{N}(S_i(\theta),
 \sigma_i)`, with a scale that does not depend on :math:`\theta`. Its Fisher
@@ -87,7 +87,7 @@ def fisher_matrix_per_bin(
         ``scale`` is the per-bin standard deviation the likelihood uses, normally
         ``gaussian_bin_scale(psd, time_years, frequencies)``. ``frequency_mask`` selects
         bins as in
-    :func:`~astrogwb.inference.models.gaussian_gwb_model.gwb_spectral_density_model`:
+    :func:`~astrogwb.inference.models.gaussian_gwb_model.gwb_likelihood_model`:
         an excluded bin contributes exactly zero, even where its scale is
         infinite. Sum over the leading axis for the total Fisher matrix.
     """

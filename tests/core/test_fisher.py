@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from functools import partial
 
 import jax
 import jax.numpy as jnp
@@ -15,12 +14,12 @@ from astrogwb_mock_population import (
     build_reference_spectrum,
 )
 from jax.typing import ArrayLike
-from numpyro.infer.util import log_density
 
 from astrogwb.inference import (
+    GaussianLikelihood,
+    Network,
     SpectralDensityFn,
     fisher_matrix_per_bin,
-    gwb_spectral_density_model,
     spectral_density_jacobian,
 )
 
@@ -111,23 +110,13 @@ def test_summed_fisher_is_the_hessian_of_the_model_likelihood(
 ) -> None:
     names = ("amplitude", "index", "offset")
     observed, _ = power_law(power_law_params)
-    model = partial(
-        gwb_spectral_density_model,
-        spectral_density_fn=power_law,
-        observed_spectral_density=observed,
-        priors={},
-        scale=scale,
-    )
 
     def negative_log_likelihood(free: dict[str, jax.Array]) -> jax.Array:
-        # The model samples nothing, so the parameters enter through the spectrum.
-        def at_free(
-            params: Mapping[str, ArrayLike],
-        ) -> tuple[jax.Array, Mapping[str, ArrayLike]]:
-            return power_law(free)
-
-        conditioned = partial(model, spectral_density_fn=at_free)
-        return -log_density(conditioned, (), {}, {})[0]
+        # Nothing is sampled, so the parameters enter through the spectrum.
+        likelihood = GaussianLikelihood(
+            lambda params: power_law(free), observed, Network(scale)
+        )
+        return -likelihood({})[0]
 
     free = {name: jnp.asarray(power_law_params[name]) for name in names}
     hessian = jax.hessian(negative_log_likelihood)(free)

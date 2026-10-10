@@ -10,8 +10,8 @@ populations exist. The forward models that draw sources live in
 :mod:`astrogwb.simulators.spectra`.
 """
 
-from .gaussian_gwb_model import gwb_spectral_density_model
+from .gaussian_gwb_model import gwb_likelihood_model
 
 __all__ = [
-    "gwb_spectral_density_model",
+    "gwb_likelihood_model",
 ]

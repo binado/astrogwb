@@ -51,8 +51,10 @@ from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_snr
 from astrogwb.inference import (
+    GaussianLikelihood,
+    Network,
     SpectralDensityFn,
-    gwb_spectral_density_model,
+    gwb_likelihood_model,
 )
 from astrogwb.populations._types import SourceModel
 from astrogwb.simulators.polarization_power import (
@@ -188,11 +190,16 @@ def _build_analysis_inputs(
     )
 
 
-def _model_kwargs(inputs: AnalysisInputs) -> dict[str, object]:
+def _model_kwargs(
+    inputs: AnalysisInputs, mask: jax.Array | None = None
+) -> dict[str, object]:
     """Expose same-shaped data as dynamic arguments to NumPyro's JIT cache."""
     return {
-        "observed_spectral_density": inputs.observed_spectral_density,
-        "scale": inputs.scale,
+        "likelihood": GaussianLikelihood(
+            inputs.estimator,
+            inputs.observed_spectral_density,
+            Network(inputs.scale, mask),
+        )
     }
 
 
@@ -225,11 +232,7 @@ def _run_nuts(
 
 
 def _direct_h0_model(inputs: AnalysisInputs, priors: dict[str, dist.Distribution]):
-    return partial(
-        gwb_spectral_density_model,
-        spectral_density_fn=inputs.estimator,
-        priors=priors,
-    )
+    return partial(gwb_likelihood_model, priors=priors)
 
 
 @pytest.fixture(scope="module")
@@ -244,7 +247,7 @@ def analysis_inputs() -> AnalysisInputs:
 def test_h0_model_recovers_the_fiducial_and_the_fisher_width(
     analysis_inputs: AnalysisInputs,
 ) -> None:
-    """NUTS on ``gwb_spectral_density_model`` lands on H0_fid with the Fisher width."""
+    """NUTS on ``gwb_likelihood_model`` lands on H0_fid with the Fisher width."""
     inputs = analysis_inputs
 
     posterior = _run_nuts(
@@ -311,7 +314,6 @@ def test_one_compiled_sampler_serves_several_frequency_bands(
     compilations are counted.
     """
     inputs = analysis_inputs
-    kwargs = _model_kwargs(inputs)
     midpoint = float(jnp.median(inputs.frequencies))
     wide = jnp.ones_like(inputs.frequencies, dtype=bool)
     narrow = inputs.frequencies <= midpoint
@@ -333,7 +335,7 @@ def test_one_compiled_sampler_serves_several_frequency_bands(
 
     def run(mask: jax.Array, seed: int):
         def go() -> None:
-            mcmc.run(jax.random.PRNGKey(seed), **kwargs, frequency_mask=mask)
+            mcmc.run(jax.random.PRNGKey(seed), **_model_kwargs(inputs, mask))
 
         compilations = _count_compilations(go)
         return compilations, mcmc.get_samples()["H0"]

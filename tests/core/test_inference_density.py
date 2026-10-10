@@ -26,9 +26,30 @@ from numpyro.infer.util import log_density
 
 from astrogwb.inference import (
     GaussianGWBBatchedLikelihood,
+    GaussianLikelihood,
     LogDensityFn,
-    gwb_spectral_density_model,
+    Network,
+    gwb_likelihood_model,
 )
+
+
+def _gwb_model(
+    observed_spectral_density: jax.Array,
+    scale: jax.Array,
+    *,
+    spectral_density_fn: Callable[..., Any],
+    priors: Mapping[str, dist.Distribution],
+    frequency_mask: jax.Array | None = None,
+) -> None:
+    """The shell around a Gaussian likelihood, with the data as keyword arguments."""
+    gwb_likelihood_model(
+        likelihood=GaussianLikelihood(
+            spectral_density_fn,
+            observed_spectral_density,
+            Network(scale, frequency_mask),
+        ),
+        priors=priors,
+    )
 
 
 @pytest.fixture
@@ -65,7 +86,7 @@ def model_factory(
         priors: Mapping[str, dist.Distribution] = priors,
     ) -> Callable[..., None]:
         return partial(
-            gwb_spectral_density_model,
+            _gwb_model,
             spectral_density_fn=spectral_density_fn,
             priors=priors,
         )
@@ -92,7 +113,7 @@ def _positional_model(
     priors: Mapping[str, dist.Distribution],
     spectral_density_fn: Callable[..., Any] = _analytic,
 ) -> None:
-    gwb_spectral_density_model(
+    _gwb_model(
         spectral_density_fn=spectral_density_fn,
         observed_spectral_density=observed_spectral_density,
         priors=priors,

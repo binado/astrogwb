@@ -398,8 +398,8 @@ class _SharedTerms(NamedTuple):
     log_weights: jax.Array
     kernel: jax.Array
     distance_ratio: jax.Array
-    hubble_constant: jax.Array
-    omega_m: jax.Array
+    hubble_constant: ArrayLike
+    omega_m: ArrayLike
     total_rate: jax.Array
 
 
