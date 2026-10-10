@@ -27,4 +27,15 @@ class SpectralDensityFn(Protocol):
     ) -> tuple[jax.Array, Mapping[str, ArrayLike]]: ...
 
 
-__all__ = ["SpectralDensityFn"]
+class SpectralVarianceFn(Protocol):
+    """Predict the per-bin shot-noise variance of a spectrum, shape ``(F,)``.
+
+    The variance of a catalog realization about the spectrum a matching
+    :class:`SpectralDensityFn` predicts at the same ``params`` and on the same
+    grid. Bound to data, it is a pytree for the same reason.
+    """
+
+    def __call__(self, params: Mapping[str, ArrayLike]) -> jax.Array: ...
+
+
+__all__ = ["SpectralDensityFn", "SpectralVarianceFn"]

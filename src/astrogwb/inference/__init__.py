@@ -6,12 +6,13 @@ from .models import (
     gwb_amplitude_marginalized_model,
     gwb_spectral_density_model,
 )
-from .protocol import SpectralDensityFn
+from .protocol import SpectralDensityFn, SpectralVarianceFn
 
 __all__ = [
     "GaussianGWBBatchedLikelihood",
     "LogDensityFn",
     "SpectralDensityFn",
+    "SpectralVarianceFn",
     "amplitude_H0_transform",
     "amplitude_local_merger_rate_transform",
     "fisher_matrix_per_bin",

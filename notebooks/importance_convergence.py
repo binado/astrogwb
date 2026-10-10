@@ -26,6 +26,7 @@ with app.setup(hide_code=True):
     from astrogwb.detector import effective_psd, gaussian_bin_scale
     from astrogwb.frequency import frequency_mask
     from astrogwb.gwb.importance import (
+        build_rescaled_shot_noise,
         build_rescaled_spectrum,
         reference_catalog,
         reference_catalog_stem,
@@ -613,6 +614,122 @@ def _(evaluation_points, peak_parameters, quadrature, tolerance):
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
+    ## 1b. Shot-noise variance: $Z = 2^i$
+
+    The per-bin variance of a Poisson catalog about the spectrum squares
+    every factor of the quadrature, so near $z_{\min}$ its redshift integrand
+    grows like $z^{-2}$ in $a$ while the mean's is roughly flat: it needs its
+    own node count. The likelihood sees it through the relative amplitude
+    scatter $s$, the SNR-weighted mean of $\sqrt{V_f}/S_f$ with weights
+    $S_f^2/\sigma_f^2$; the ladder reports its relative change against the
+    top rung, and $\rho s$ for the yardstick network ($\rho$ the spectrum's
+    optimal SNR). At small $N$ the value of $\rho s$ is Monte Carlo noisy; the
+    convergence in $Z$ is not, since the draws are fixed.
+    """)
+
+
+@app.function(hide_code=True)
+def amplitude_scatter(
+    spectrum: NDArray[np.float64],
+    variance: NDArray[np.float64],
+    sigma: NDArray[np.float64],
+    mask: NDArray[np.bool_],
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """The relative amplitude scatter ``s`` and the optimal SNR ``rho``.
+
+    ``s`` is the SNR-weighted mean of ``sqrt(variance) / spectrum`` over usable
+    bins with signal, exact when the shot noise is fully correlated across
+    bins. Arrays are ``(..., F)``; both results are ``(...)``.
+    """
+    usable = mask & (spectrum > 0.0)
+    weight = np.where(usable, spectrum**2 / sigma**2, 0.0)
+    ratio = np.sqrt(variance) / np.where(usable, spectrum, 1.0)
+    scatter = np.sum(weight * ratio, axis=-1) / np.sum(weight, axis=-1)
+    return scatter, np.sqrt(np.sum(weight, axis=-1))
+
+
+@app.cell
+def _(
+    evaluation_points,
+    frequencies,
+    ladder_nodes,
+    ladder_reference,
+    ladder_reference_metadata,
+    ladder_spectra,
+    mask,
+    observation_time,
+    sigma,
+    target,
+):
+    _variance = jax.jit(lambda fn, params: fn(params))
+    ladder_scatter = {}
+    for _nodes in ladder_nodes:
+        _fn = build_rescaled_shot_noise(
+            ladder_reference,
+            ladder_reference_metadata,
+            population=target,
+            frequencies=frequencies,
+            num_redshift_nodes=_nodes,
+            density_sites=(),
+            observation_time=observation_time,
+        )
+        _variances = np.stack(
+            [np.asarray(_variance(_fn, dict(p))) for p in evaluation_points.values()]
+        )
+        ladder_scatter[_nodes] = amplitude_scatter(
+            ladder_spectra[_nodes], _variances, sigma, mask
+        )
+    _top_scatter, _top_snr = ladder_scatter[ladder_nodes[-1]]
+    shot_noise_quadrature = pd.DataFrame(
+        [
+            {
+                "Z": _nodes,
+                "point": _point,
+                "s": float(ladder_scatter[_nodes][0][p]),
+                "rho s": float(ladder_scatter[_nodes][0][p] * _top_snr[p]),
+                "|ds|/s": float(
+                    abs(ladder_scatter[_nodes][0][p] / _top_scatter[p] - 1.0)
+                ),
+            }
+            for _nodes in ladder_nodes
+            for p, _point in enumerate(evaluation_points)
+        ]
+    )
+    _worst = shot_noise_quadrature.groupby("Z")["|ds|/s"].max()
+    _converged = _worst[(_worst < 1e-3) & (_worst.index < ladder_nodes[-1])]
+    shot_noise_nodes = (
+        ladder_nodes[-1] if _converged.empty else int(_converged.index.min())
+    )
+    print(f"smallest Z with |ds|/s < 1e-3 at every point: {shot_noise_nodes}")
+    shot_noise_quadrature
+    return (shot_noise_quadrature,)
+
+
+@app.cell
+def _(evaluation_points, shot_noise_quadrature):
+    shot_noise_figure, _ax = plt.subplots(figsize=(4.5, 3.6))
+    for _point in evaluation_points:
+        _rows = shot_noise_quadrature[
+            (shot_noise_quadrature["point"] == _point)
+            & (shot_noise_quadrature["|ds|/s"] > 0.0)
+        ]
+        _ax.plot(_rows["Z"], _rows["|ds|/s"], marker="o", lw=1)
+    _ax.axhline(1e-3, color="0.5", ls="--", lw=1)
+    _ax.set(
+        xscale="log",
+        yscale="log",
+        xlabel="Redshift nodes $Z$",
+        ylabel=r"$|s_Z / s_\mathrm{ref} - 1|$",
+    )
+    _ax.set_title("every evaluation point", fontsize="small")
+    shot_noise_figure.tight_layout()
+    shot_noise_figure
+    return (shot_noise_figure,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
     ## 2. Monte Carlo noise: $M$ seeds, residuals about the mean
 
     $M$ independent reference catalogs at $N_\mathrm{max}$. Each
@@ -851,12 +968,14 @@ def _(
     quadrature_figure,
     residual_figure,
     shift_figure,
+    shot_noise_figure,
     write_figures,
 ):
     if write_figures.value:
         save_figures(
             {
                 FIGURES / "quadrature_convergence.pdf": quadrature_figure,
+                FIGURES / "shot_noise_quadrature.pdf": shot_noise_figure,
                 FIGURES / "monte_carlo_residuals.pdf": residual_figure,
                 FIGURES / "monte_carlo_peak_shift.pdf": shift_figure,
             }
