@@ -85,7 +85,9 @@ repository root as the working directory.
   ladder over one fixed set of draws (for the spectrum and, separately, for
   its shot-noise amplitude scatter $s$), and Monte
   Carlo noise as the scatter of $M$ fixed-seed catalogs about their mean, with
-  every $N = 2^k$ read off as a prefix. Errors are in units of the most
+  every $N = 2^k$ read off as a prefix; the same ladder for $M$ scrambled
+  Sobol catalogs (`CatalogMetadata(sampling="sobol")`), compared at equal $N$
+  (`sampling_comparison.pdf`). Errors are in units of the most
   sensitive network's per-bin noise and of each parameter's Fisher width.
   Smoke test:
   `ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/importance_convergence.py`.
