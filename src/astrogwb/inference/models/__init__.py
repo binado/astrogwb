@@ -1,12 +1,10 @@
 """The NumPyro models this package exposes, one module per model family.
 
-- :mod:`~astrogwb.inference.models.gaussian_gwb_model` -- the per-frequency
-  Gaussian likelihood over any spectrum callable
+- :mod:`~astrogwb.inference.models.gaussian_gwb_model` -- the priors around any
+  pure :data:`~astrogwb.inference.protocol.LogLikelihood`
 
-Every function here returns ``None``; each is handed to NUTS or
-:class:`~numpyro.infer.Predictive` through a ``functools.partial``. The Gaussian
-likelihoods take a ``SpectralDensityFn`` and know nothing about which
-populations exist. The forward models that draw sources live in
+Every function here returns ``None``; each is handed to NUTS through a
+``functools.partial``. The shell knows nothing about which populations exist. The forward models that draw sources live in
 :mod:`astrogwb.simulators.spectra`.
 """
 

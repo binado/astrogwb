@@ -18,7 +18,7 @@ from jax.typing import ArrayLike
 from astrogwb.inference import (
     GaussianLikelihood,
     Network,
-    SpectralDensityFn,
+    SpectrumFn,
     fisher_matrix_per_bin,
     spectral_density_jacobian,
 )
@@ -41,20 +41,18 @@ def power_law_params() -> dict[str, float]:
 
 
 @pytest.fixture
-def power_law(bin_frequencies: jax.Array) -> SpectralDensityFn:
-    def spectrum(
-        params: Mapping[str, ArrayLike],
-    ) -> tuple[jax.Array, dict[str, jax.Array]]:
+def power_law(bin_frequencies: jax.Array) -> SpectrumFn:
+    def spectrum(params: Mapping[str, ArrayLike]) -> jax.Array:
         ratio = bin_frequencies / 10.0
         return jnp.asarray(
             params["amplitude"] * ratio ** params["index"] + params["offset"]
-        ), {}
+        )
 
     return spectrum
 
 
 def test_jacobian_and_fisher_match_the_closed_form(
-    power_law: SpectralDensityFn,
+    power_law: SpectrumFn,
     power_law_params: dict[str, float],
     bin_frequencies: jax.Array,
     scale: jax.Array,
@@ -79,7 +77,7 @@ def test_jacobian_and_fisher_match_the_closed_form(
 
 
 def test_columns_follow_the_requested_order_and_others_stay_fixed(
-    power_law: SpectralDensityFn, power_law_params: dict[str, float]
+    power_law: SpectrumFn, power_law_params: dict[str, float]
 ) -> None:
     forward = spectral_density_jacobian(
         power_law, power_law_params, ("amplitude", "index")
@@ -97,19 +95,19 @@ def test_columns_follow_the_requested_order_and_others_stay_fixed(
 
 
 def test_an_unknown_parameter_is_rejected(
-    power_law: SpectralDensityFn, power_law_params: dict[str, float]
+    power_law: SpectrumFn, power_law_params: dict[str, float]
 ) -> None:
     with pytest.raises(KeyError, match="missing"):
         spectral_density_jacobian(power_law, power_law_params, ("missing",))
 
 
 def test_summed_fisher_is_the_hessian_of_the_model_likelihood(
-    power_law: SpectralDensityFn,
+    power_law: SpectrumFn,
     power_law_params: dict[str, float],
     scale: jax.Array,
 ) -> None:
     names = ("amplitude", "index", "offset")
-    observed, _ = power_law(power_law_params)
+    observed = power_law(power_law_params)
 
     def negative_log_likelihood(free: dict[str, jax.Array]) -> jax.Array:
         # Nothing is sampled, so the parameters enter through the spectrum.
@@ -127,7 +125,7 @@ def test_summed_fisher_is_the_hessian_of_the_model_likelihood(
 
 
 def test_masked_bins_contribute_zero_even_with_infinite_scale(
-    power_law: SpectralDensityFn,
+    power_law: SpectrumFn,
     power_law_params: dict[str, float],
     scale: jax.Array,
 ) -> None:
@@ -147,15 +145,17 @@ def test_masked_bins_contribute_zero_even_with_infinite_scale(
 
 
 def test_importance_jacobian_matches_finite_differences() -> None:
-    spectrum, _ = build_reference_spectrum(*build_reference_catalog(num_sources=256))
+    spectrum = build_reference_spectrum(
+        *build_reference_catalog(num_sources=256)
+    ).spectrum
     names = ("H0", "xi_0", "gamma")
     jacobian = spectral_density_jacobian(spectrum, FIDUCIALS, names)
     assert np.all(np.isfinite(jacobian))
 
     for column, name in enumerate(names):
         step = 1e-5 * abs(FIDUCIALS[name])
-        upper = spectrum({**FIDUCIALS, name: FIDUCIALS[name] + step})[0]
-        lower = spectrum({**FIDUCIALS, name: FIDUCIALS[name] - step})[0]
+        upper = spectrum({**FIDUCIALS, name: FIDUCIALS[name] + step})
+        lower = spectrum({**FIDUCIALS, name: FIDUCIALS[name] - step})
         finite_difference = (upper - lower) / (2.0 * step)
         np.testing.assert_allclose(
             jacobian[:, column],

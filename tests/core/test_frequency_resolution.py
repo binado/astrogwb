@@ -181,10 +181,10 @@ def resolutions(
         # One estimator per observed grid, all predicting from the same
         # sources. The injection is its own fiducial prediction, so the
         # chi^2 term vanishes at the fiducials and every log-weight is zero.
-        run["estimator"], run["log_weights_fn"] = build_reference_spectrum(
+        run["estimator"] = build_reference_spectrum(
             *reference, frequencies=run["frequencies"]
         )
-        run["observed"] = run["estimator"](FIDUCIALS)[0]
+        run["observed"] = run["estimator"].spectrum(FIDUCIALS)
         run["snr_squared"] = float(
             spectral_snr_squared(
                 run["observed"],
@@ -200,7 +200,7 @@ def resolutions(
 
 def _log_likelihood(run: dict[str, Any], hubble_constant: float) -> float:
     """Gaussian log-density of the injection under the H0-shifted template."""
-    model, _ = run["estimator"]({**FIDUCIALS, "H0": hubble_constant})
+    model = run["estimator"].spectrum({**FIDUCIALS, "H0": hubble_constant})
     log_prob = dist.Normal(model, run["noise_scale"]).log_prob(run["observed"])
     return float(jnp.sum(jnp.where(run["mask"], log_prob, 0.0)))
 
@@ -282,6 +282,6 @@ def test_every_log_weight_is_exactly_zero_at_the_fiducials(
 ) -> None:
     """The premise the identity above rests on, stated on its own."""
     run = resolutions[1]
-    log_weights = run["log_weights_fn"](dict(FIDUCIALS))
+    log_weights = run["estimator"].log_weights(dict(FIDUCIALS))
     assert isinstance(log_weights, jax.Array)
     np.testing.assert_array_equal(np.asarray(log_weights), 0.0)

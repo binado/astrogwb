@@ -71,11 +71,11 @@ repository root as the working directory.
   nodes; a different seed). The log densities are cached under
   `default_cache_dir() / "posteriors"`, keyed by a hash of their settings, so
   the figures iterate without recomputing. Each grid point is predicted once
-  and shared by all six networks (`GaussianGWBBatchedLikelihood`); the numbers
+  and shared by all six networks (`grid_log_posterior`); the numbers
   equal the per-network evaluation, so existing cache files stay valid. The
   injection is one catalog realization, so its physical shot noise is modeled
   as a rank-one covariance term from the same reference catalog
-  (`build_rescaled_shot_noise`); each problem is evaluated with every
+  (`ImportanceGaussianLikelihood`'s `shot_noise` mode); each problem is evaluated with every
   likelihood variant (`detector`, `amplitude`, `fixed`, `per_frequency`), the
   figures show `likelihood_variant`, and a comparison section reports the
   widening, the fixed vs per-point $s^2$ verdict, and the per-frequency

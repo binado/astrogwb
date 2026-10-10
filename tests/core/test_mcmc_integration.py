@@ -20,6 +20,7 @@ linear regime instead of silently drifting out of it.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from collections.abc import Mapping
 from functools import partial
@@ -51,9 +52,8 @@ from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_snr
 from astrogwb.inference import (
-    GaussianLikelihood,
+    ImportanceGaussianLikelihood,
     Network,
-    SpectralDensityFn,
     gwb_likelihood_model,
 )
 from astrogwb.populations._types import SourceModel
@@ -94,7 +94,7 @@ class AnalysisInputs(NamedTuple):
     effective_psd: jax.Array
     observation_time: float
     scale: jax.Array
-    estimator: SpectralDensityFn
+    estimator: ImportanceGaussianLikelihood
     frequencies: jax.Array
     total_merger_rate: jax.Array
     snr: float
@@ -127,10 +127,8 @@ def _build_analysis_inputs(
     # The reference catalog is its own proposal and the injection is its
     # prediction at the fiducials, so every log-weight there is exactly zero
     # and the template equals the data.
-    full_estimator, _ = build_reference_spectrum(
-        data, metadata, population=pinned_target
-    )
-    observed_spectral_density, extras = full_estimator(FIDUCIALS)
+    full_estimator = build_reference_spectrum(data, metadata, population=pinned_target)
+    observed_spectral_density, _, extras = full_estimator.predict(FIDUCIALS)
     total_merger_rate = jnp.asarray(extras["total_merger_rate"])
 
     sensitivities = load_sensitivity_map(DETECTORS)
@@ -176,7 +174,7 @@ def _build_analysis_inputs(
     # predicted, and the catalog's sources and weights are untouched.
     estimator = build_reference_spectrum(
         data, metadata, frequencies=frequencies, population=pinned_target
-    )[0]
+    )
 
     return AnalysisInputs(
         observed_spectral_density=observed_spectral_density,
@@ -195,10 +193,10 @@ def _model_kwargs(
 ) -> dict[str, object]:
     """Expose same-shaped data as dynamic arguments to NumPyro's JIT cache."""
     return {
-        "likelihood": GaussianLikelihood(
+        "likelihood": dataclasses.replace(
             inputs.estimator,
-            inputs.observed_spectral_density,
-            Network(inputs.scale, mask),
+            observed=inputs.observed_spectral_density,
+            network=Network(inputs.scale, mask),
         )
     }
 

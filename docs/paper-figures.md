@@ -152,7 +152,7 @@ networks, with no sampler. The data are a zero-noise Poisson injection
 (`data_seed = 41`); the model spectrum is the rescaled reference-redshift
 spectrum of `astrogwb.gwb.importance` (`catalog_seed = 42`): `2^19` intrinsic
 draws, each generated once at the window's lower edge by `reference_catalog`,
-and `build_rescaled_spectrum` rescaling their mean power to 32 Gauss-Legendre
+and `ImportanceGaussianLikelihood` rescaling their mean power to 32 Gauss-Legendre
 nodes in the scale factor `1/(1 + z)` at each grid point, with no intrinsic
 reweighting. The log densities are cached in `default_cache_dir() /
 "posteriors"`, in a file
