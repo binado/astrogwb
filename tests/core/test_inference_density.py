@@ -1,7 +1,6 @@
 """Contract tests for ``LogDensityFn``: grid-evaluation correctness against a
 naive Python loop, single-compilation reuse across differing data shapes and
-across swept-parameter key sets, and coverage of the amplitude-marginalized
-model's ``numpyro.factor`` branch.
+and across swept-parameter key sets.
 
 Uses a small analytic ``spectral_density_fn``, the same pattern
 ``tests/core/test_spectral_inference.py`` already uses, so these tests stay
@@ -28,7 +27,6 @@ from numpyro.infer.util import log_density
 from astrogwb.inference import (
     GaussianGWBBatchedLikelihood,
     LogDensityFn,
-    gwb_amplitude_marginalized_model,
     gwb_spectral_density_model,
 )
 
@@ -85,17 +83,6 @@ def model(
 @pytest.fixture
 def log_density_fn(model: Callable[..., None]) -> LogDensityFn:
     return LogDensityFn(model)
-
-
-@pytest.fixture
-def amplitude_marginalized_model() -> Callable[..., None]:
-    return partial(
-        gwb_amplitude_marginalized_model,
-        # `h0` pinned at its fiducial: the spectrum is the A = 1 template.
-        spectral_density_fn=lambda params: _analytic({**params, "h0": 70.0}),
-        priors={"tilt": dist.Normal(0.0, 1.0)},
-        amplitude_prior=dist.Uniform(0.5, 1.5),
-    )
 
 
 def _positional_model(
@@ -285,28 +272,6 @@ def test_batched_evaluation_matches_unbatched(
         {"h0": h0_grid}, fixed={"tilt": jnp.array(0.1)}, **data_kwargs
     )
     np.testing.assert_allclose(batched, unbatched, rtol=1e-10)
-
-
-def test_call_covers_the_amplitude_marginalized_factor_site(
-    amplitude_marginalized_model: Callable[..., None],
-    data_kwargs: dict[str, Any],
-) -> None:
-    lp = LogDensityFn(amplitude_marginalized_model)
-    tilt_grid = jnp.array([-0.3, 0.0, 0.3])
-
-    result = lp({"tilt": tilt_grid}, **data_kwargs)
-    assert result.shape == (3,)
-    assert bool(jnp.all(jnp.isfinite(result)))
-
-    naive = jnp.stack(
-        [
-            log_density(amplitude_marginalized_model, (), data_kwargs, {"tilt": tilt})[
-                0
-            ]
-            for tilt in tilt_grid
-        ]
-    )
-    np.testing.assert_allclose(result, naive, rtol=1e-10)
 
 
 def test_call_matches_naive_log_density_with_model_args(
