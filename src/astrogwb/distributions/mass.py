@@ -3,7 +3,12 @@ r"""Component-mass distributions used by the BNS population models.
 :class:`MaxOfTwoNormalsDistribution` is the primary-mass marginal of two
 i.i.d. Gaussians after ordering. Paired with a ``TruncatedNormal(..., high=m1)``
 secondary it gives the joint ``2\,\mathcal{N}(m_1)\,\mathcal{N}(m_2)`` on
-``m_1 \ge m_2``.
+``m_1 \ge m_2``. :class:`MaxOfTwoUniformsDistribution` is the same for two
+i.i.d. uniforms, paired with a ``Uniform(low, m1)`` secondary.
+
+Both have a closed-form inverse CDF, so a population built from them can be
+drawn through :class:`~astrogwb.utils.numpyro.InverseCDF` on quasi-random
+points.
 """
 
 from __future__ import annotations
@@ -80,3 +85,66 @@ class MaxOfTwoNormalsDistribution(dist.Distribution):
 
     def icdf(self, q: ArrayLike) -> jax.Array:
         return jnp.asarray(self.loc + self.scale * ndtri(jnp.sqrt(q)))
+
+
+class MaxOfTwoUniformsDistribution(dist.Distribution):
+    r"""Larger of two i.i.d. uniforms on :math:`[a, a + w]`.
+
+    The law of :math:`\max(X, Y)` for :math:`X, Y \sim \mathcal{U}(a, a + w)`
+    independently: :math:`\mathrm{Beta}(2, 1)` scaled to the interval. The
+    density is :math:`2 (x - a) / w^2`, the CDF :math:`((x - a)/w)^2`, and the
+    inverse CDF :math:`a + w \sqrt{q}`, in closed form where NumPyro's
+    ``Beta.icdf`` needs TensorFlow Probability. Sampling inverts a uniform draw.
+
+    Parameters
+    ----------
+    low:
+        Lower edge :math:`a` of each component.
+    width:
+        Width :math:`w` of each component's interval.
+    validate_args:
+        Forwarded to :class:`~numpyro.distributions.Distribution`.
+    """
+
+    arg_constraints = {  # noqa: RUF012
+        "low": dist.constraints.real,
+        "width": dist.constraints.positive,
+    }
+    reparametrized_params = ["low", "width"]  # noqa: RUF012
+    pytree_data_fields = ("low", "width")
+
+    def __init__(
+        self,
+        low: ArrayLike = 0.0,
+        width: ArrayLike = 1.0,
+        *,
+        validate_args: bool | None = None,
+    ) -> None:
+        self.low, self.width = promote_shapes(low, width)
+        batch_shape = jnp.broadcast_shapes(jnp.shape(low), jnp.shape(width))
+        super().__init__(batch_shape=batch_shape, validate_args=validate_args)
+
+    @dist.constraints.dependent_property(is_discrete=False, event_dim=0)
+    def support(self) -> dist.constraints.Constraint:
+        return dist.constraints.interval(self.low, self.low + self.width)
+
+    def sample(
+        self, key: jax.Array | None, sample_shape: tuple[int, ...] = ()
+    ) -> jax.Array:
+        """Inverse-CDF draw from one uniform per element."""
+        # `None` only exists to match the base-class signature; handlers
+        # always pass a real key.
+        assert key is not None
+        return self.icdf(jax.random.uniform(key, shape=sample_shape + self.batch_shape))
+
+    @validate_sample
+    def log_prob(self, value: ArrayLike) -> jax.Array:
+        return jnp.asarray(
+            jnp.log(2.0) + jnp.log(value - self.low) - 2.0 * jnp.log(self.width)
+        )
+
+    def cdf(self, value: ArrayLike) -> jax.Array:
+        return jnp.asarray(((jnp.asarray(value) - self.low) / self.width) ** 2)
+
+    def icdf(self, q: ArrayLike) -> jax.Array:
+        return jnp.asarray(self.low + self.width * jnp.sqrt(q))

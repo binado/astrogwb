@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal, Self
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from astrogwb import __version__
 from astrogwb.populations.metadata import PopulationMetadata, widen_model_kwargs
@@ -36,6 +36,12 @@ class CatalogMetadata(BaseModel):
     Every caller -- the workflow, the generator script, a notebook -- derives
     the key from this one record, so there is one canonical form and no second
     hash to drift.
+
+    ``sampling`` is how a reference catalog
+    (:func:`~astrogwb.gwb.importance.reference_catalog`) draws its intrinsic
+    parameters: ``"random"`` i.i.d., or ``"sobol"`` on a scrambled Sobol net
+    (:func:`~astrogwb.populations.evaluation.sample_sources_qmc`), which needs a
+    power-of-two ``num_samples``. A plain catalog is always random.
     """
 
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
@@ -44,7 +50,17 @@ class CatalogMetadata(BaseModel):
     population: PopulationMetadata
     fiducials: dict[str, float]
     num_samples: Annotated[int, Field(gt=0)]
+    sampling: Literal["random", "sobol"] = "random"
     version: str = __version__
+
+    @model_validator(mode="after")
+    def _sobol_needs_a_power_of_two(self) -> Self:
+        if self.sampling == "sobol" and self.num_samples & (self.num_samples - 1):
+            raise ValueError(
+                "sampling='sobol' needs a power-of-two num_samples, "
+                f"got {self.num_samples}"
+            )
+        return self
 
     def key(self) -> str:
         """The content hash this catalog is cached under.
@@ -56,9 +72,12 @@ class CatalogMetadata(BaseModel):
 
         The payload nests ``waveform`` and ``population`` under ``metadata``,
         the shape this record had before it was flattened, so every catalog
-        already on disk keeps its key.
+        already on disk keeps its key. For the same reason the default
+        ``sampling="random"`` is left out of the payload.
         """
         payload = self.model_dump(mode="json")
+        if payload["sampling"] == "random":
+            del payload["sampling"]
         widen_model_kwargs(payload["population"])
         payload["metadata"] = {
             "waveform": payload.pop("waveform"),

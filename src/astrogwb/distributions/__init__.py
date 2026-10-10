@@ -13,11 +13,15 @@
 """
 
 from astrogwb.distributions.delay import PowerLawDelayDistribution
-from astrogwb.distributions.mass import MaxOfTwoNormalsDistribution
+from astrogwb.distributions.mass import (
+    MaxOfTwoNormalsDistribution,
+    MaxOfTwoUniformsDistribution,
+)
 from astrogwb.distributions.orientation import UniformCosineDistribution
 
 __all__ = [
     "MaxOfTwoNormalsDistribution",
+    "MaxOfTwoUniformsDistribution",
     "PowerLawDelayDistribution",
     "UniformCosineDistribution",
 ]
