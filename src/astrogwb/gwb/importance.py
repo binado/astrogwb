@@ -83,7 +83,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
 import jax
 import jax.numpy as jnp
@@ -392,6 +392,58 @@ def _node_power(
     )
 
 
+class _SharedTerms(NamedTuple):
+    """What the spectrum and its variance both take from ``population(params)``."""
+
+    log_weights: jax.Array
+    kernel: jax.Array
+    distance_ratio: jax.Array
+    hubble_constant: jax.Array
+    omega_m: jax.Array
+    total_rate: jax.Array
+
+
+def _shared_terms(
+    params: Mapping[str, ArrayLike],
+    *,
+    population: Population,
+    intrinsic: Mapping[str, jax.Array],
+    proposal_log_prob: jax.Array,
+    density_sites: Sequence[str],
+    redshift: jax.Array,
+    redshift_weights: jax.Array,
+    reference_distance: jax.Array,
+) -> _SharedTerms:
+    """The front half of the spectrum and of its variance, from one population call.
+
+    ``kernel`` is the quadrature weights times :func:`phinney_kernel`, ``(Z,)``;
+    ``total_rate`` is the observer-frame merger rate in mergers per second.
+    """
+    distribution, source_model = population(params)
+    log_weights = (
+        _intrinsic_log_prob(source_model, intrinsic, density_sites) - proposal_log_prob
+    )
+    hubble_constant = distribution.params["H0"]
+    omega_m = distribution.params["Omega_m"]
+    merger_rate = distribution.merger_rate(redshift)
+    # The GW distance over the electromagnetic one: modified propagation alone.
+    distance_ratio = distribution.distance_ratio(redshift)
+    kernel = redshift_weights * phinney_kernel(
+        redshift,
+        merger_rate,
+        distance_ratio,
+        hubble_constant,
+        omega_m,
+        reference_distance,
+    )
+    total_rate = total_merger_rate(
+        redshift, redshift_weights, merger_rate, hubble_constant, omega_m
+    )
+    return _SharedTerms(
+        log_weights, kernel, distance_ratio, hubble_constant, omega_m, total_rate
+    )
+
+
 def rescaled_spectral_density(
     params: Mapping[str, ArrayLike],
     *,
@@ -415,36 +467,26 @@ def rescaled_spectral_density(
     ``extras`` holds ``total_merger_rate`` (observer frame, mergers per second)
     and ``importance_relative_ess`` over the intrinsic draws, both shape ``()``.
     """
-    distribution, source_model = population(params)
-    log_weights = (
-        _intrinsic_log_prob(source_model, intrinsic, density_sites) - proposal_log_prob
+    shared = _shared_terms(
+        params,
+        population=population,
+        intrinsic=intrinsic,
+        proposal_log_prob=proposal_log_prob,
+        density_sites=density_sites,
+        redshift=redshift,
+        redshift_weights=redshift_weights,
+        reference_distance=reference_distance,
     )
     node_power = _node_power(
         polarization_power,
-        log_weights,
+        shared.log_weights,
         log_reference_frequencies,
         query_log_frequencies,
         amplitude,
     )
-    hubble_constant = distribution.params["H0"]
-    omega_m = distribution.params["Omega_m"]
-    merger_rate = distribution.merger_rate(redshift)
-    # The GW distance over the electromagnetic one: modified propagation alone.
-    distance_ratio = distribution.distance_ratio(redshift)
-    kernel = redshift_weights * phinney_kernel(
-        redshift,
-        merger_rate,
-        distance_ratio,
-        hubble_constant,
-        omega_m,
-        reference_distance,
-    )
-    total_rate = total_merger_rate(
-        redshift, redshift_weights, merger_rate, hubble_constant, omega_m
-    )
-    return node_power @ kernel, {
-        "total_merger_rate": total_rate,
-        "importance_relative_ess": relative_ess(log_weights),
+    return node_power @ shared.kernel, {
+        "total_merger_rate": shared.total_rate,
+        "importance_relative_ess": relative_ess(shared.log_weights),
     }
 
 
@@ -477,35 +519,27 @@ def rescaled_spectral_variance(
     :func:`~astrogwb.cosmology.luminosity_distance` rather than the
     distribution's table, as the kernel does.
     """
-    distribution, source_model = population(params)
-    log_weights = (
-        _intrinsic_log_prob(source_model, intrinsic, density_sites) - proposal_log_prob
+    shared = _shared_terms(
+        params,
+        population=population,
+        intrinsic=intrinsic,
+        proposal_log_prob=proposal_log_prob,
+        density_sites=density_sites,
+        redshift=redshift,
+        redshift_weights=redshift_weights,
+        reference_distance=reference_distance,
     )
     node_power = _node_power(
         squared_polarization_power,
-        log_weights,
+        shared.log_weights,
         log_reference_frequencies,
         query_log_frequencies,
         amplitude**2,
     )
-    hubble_constant = distribution.params["H0"]
-    omega_m = distribution.params["Omega_m"]
-    distance_ratio = distribution.distance_ratio(redshift)
-    gw_distance = distance_ratio * luminosity_distance(
-        redshift, hubble_constant, omega_m
+    gw_distance = shared.distance_ratio * luminosity_distance(
+        redshift, shared.hubble_constant, shared.omega_m
     )
-    kernel = (
-        redshift_weights
-        * phinney_kernel(
-            redshift,
-            distribution.merger_rate(redshift),
-            distance_ratio,
-            hubble_constant,
-            omega_m,
-            reference_distance,
-        )
-        * (reference_distance / gw_distance) ** 2
-    )
+    kernel = shared.kernel * (reference_distance / gw_distance) ** 2
     return INCLINATION_SECOND_MOMENT * (node_power @ kernel) / observation_seconds
 
 
