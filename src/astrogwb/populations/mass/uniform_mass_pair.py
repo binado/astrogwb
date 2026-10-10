@@ -6,6 +6,8 @@ import numpyro
 import numpyro.distributions as dist
 from jaxtyping import ArrayLike
 
+from astrogwb.distributions.mass import MaxOfTwoUniformsDistribution
+
 
 def uniform_mass_pair_model(
     parameters: Mapping[str, ArrayLike],
@@ -13,14 +15,11 @@ def uniform_mass_pair_model(
     """Ordered pair of i.i.d. uniforms on ``[minimum_mass, minimum_mass + width]``."""
     minimum_mass: jax.Array = jnp.asarray(parameters["minimum_mass"])
     mass_width: jax.Array = jnp.asarray(parameters["mass_width"])
-    # For two ordered iid uniforms, Beta(2, 1) is the primary mass marginal.
+    # The primary is the larger of the pair; its closed-form inverse CDF lets
+    # the pair be drawn on quasi-random points.
     mass_1 = numpyro.sample(
         "source_frame_mass_1",
-        dist.TransformedDistribution(
-            dist.Beta(2.0, 1.0, validate_args=True),
-            dist.transforms.AffineTransform(minimum_mass, mass_width),
-            validate_args=True,
-        ),
+        MaxOfTwoUniformsDistribution(minimum_mass, mass_width, validate_args=True),
     )
     mass_2 = numpyro.sample(
         "source_frame_mass_2",

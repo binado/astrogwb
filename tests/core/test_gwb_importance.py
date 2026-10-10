@@ -10,6 +10,7 @@ import pytest
 
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import luminosity_distance
+from astrogwb.distributions.mass import MaxOfTwoUniformsDistribution
 from astrogwb.distributions.rates import madau_dickinson_rate, total_merger_rate
 from astrogwb.gwb.importance import (
     EFFECTIVE_INCLINATION,
@@ -148,6 +149,31 @@ def test_reference_catalog_places_every_draw_at_the_minimum_redshift(
     )
 
 
+@pytest.mark.integration
+def test_sobol_reference_catalog_stratifies_the_primary_mass(
+    reference_metadata: CatalogMetadata,
+) -> None:
+    """Pinned sites take no coordinate, so the primary mass takes the first."""
+    metadata = CatalogMetadata.model_validate(
+        {**reference_metadata.model_dump(), "num_samples": 8, "sampling": "sobol"}
+    )
+    data = reference_catalog(metadata, batch_keys(41, 1)[0])
+
+    columns = data["source_parameters"]
+    np.testing.assert_array_equal(columns["redshift"], np.full(8, 0.1))
+    np.testing.assert_array_equal(
+        columns["inclination"], np.full(8, EFFECTIVE_INCLINATION)
+    )
+    fiducials = metadata.fiducials
+    primary = MaxOfTwoUniformsDistribution(
+        fiducials["minimum_mass"], fiducials["mass_width"]
+    )
+    cells = np.floor(
+        np.asarray(primary.cdf(np.asarray(columns["source_frame_mass_1"]))) * 8
+    )
+    np.testing.assert_array_equal(np.sort(cells), np.arange(8))
+
+
 def _spectrum_on_nodes(
     metadata: CatalogMetadata,
     key: jax.Array,
@@ -267,7 +293,7 @@ def test_rescaled_spectrum_reweights_like_waveforms_generated_at_every_node(
     reference_metadata: CatalogMetadata,
 ) -> None:
     sites = ("source_frame_mass_1", "source_frame_mass_2")
-    points = [{**reference_metadata.fiducials, "mass_width": 1.8}]
+    points = [{**reference_metadata.fiducials, "minimum_mass": 0.9, "mass_width": 1.6}]
     rescaled, brute_force = _rescaled_and_brute_force(reference_metadata, sites, points)
 
     np.testing.assert_allclose(rescaled, brute_force, rtol=1e-5)
@@ -297,7 +323,7 @@ def test_rescaled_shot_noise_reweights_like_waveforms_generated_at_every_node(
     reference_metadata: CatalogMetadata,
 ) -> None:
     sites = ("source_frame_mass_1", "source_frame_mass_2")
-    points = [{**reference_metadata.fiducials, "mass_width": 1.8}]
+    points = [{**reference_metadata.fiducials, "minimum_mass": 0.9, "mass_width": 1.6}]
     rescaled, brute_force = _rescaled_and_brute_force(
         reference_metadata, sites, points, variance=True
     )
@@ -379,7 +405,13 @@ def test_rescaled_log_weights_vanish_at_the_fiducials(
     assert (
         np.ptp(
             np.asarray(
-                log_weights_fn({**reference_metadata.fiducials, "mass_width": 1.8})
+                log_weights_fn(
+                    {
+                        **reference_metadata.fiducials,
+                        "minimum_mass": 0.9,
+                        "mass_width": 1.6,
+                    }
+                )
             )
         )
         > 0.0

@@ -53,6 +53,7 @@ with app.setup(hide_code=True):
     # a pytree argument, so its catalog is a traced input, not a constant, and
     # catalogs of one shape share the compilation.
     evaluate_spectrum = jax.jit(lambda fn, params: fn(params)[0])
+    evaluate_variance = jax.jit(lambda fn, params: fn(params))
 
 
 @app.cell(hide_code=True)
@@ -126,6 +127,11 @@ def _():
     # None takes the smallest converged Z from the ladder.
     mc_redshift_nodes: int | None = None
 
+    # Scrambled Sobol: M scrambles at a smaller N_max, against the random
+    # catalogs' prefixes of the same sizes.
+    qmc_catalogs = 16
+    qmc_max_samples = 2**15
+
     catalog_chunk_size = 4096  # waveforms per lax.map batch
     tolerance = 0.1  # |b| and max |dS| / sigma, in sigma units
     observation_time = 1.0  # years
@@ -151,6 +157,8 @@ def _():
         mc_catalogs = 3
         mc_max_samples = 64
         mc_min_exponent = 3
+        qmc_catalogs = 3
+        qmc_max_samples = 64
         catalog_chunk_size = 512
         edges = {}
         write_figures_default = False
@@ -201,6 +209,8 @@ def _():
         observation_time,
         peak_parameters,
         population,
+        qmc_catalogs,
+        qmc_max_samples,
         reference_waveform,
         registry,
         target,
@@ -727,6 +737,65 @@ def _(evaluation_points, shot_noise_quadrature):
     return (shot_noise_figure,)
 
 
+@app.function(hide_code=True)
+def catalog_ladder(
+    metadata: CatalogMetadata,
+    seeds: list[int],
+    sizes: list[int],
+    target: Population,
+    frequencies: NDArray[np.float64],
+    num_redshift_nodes: int,
+    points: Mapping[str, Mapping[str, float]],
+    *,
+    chunk_size: int,
+    observation_time: float,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Spectra and the fiducial shot-noise variance of every catalog and prefix.
+
+    One reference catalog of ``metadata`` per seed, drawn in memory and
+    released before the next; every size in ``sizes`` is its first ``N``
+    draws. A Sobol catalog's base-2 prefixes are nets themselves.
+
+    Returns
+    -------
+    tuple
+        Spectra ``(M, sizes, points, F)``, and the shot-noise variance at the
+        first point ``(M, sizes, F)``.
+    """
+    fiducial = dict(next(iter(points.values())))
+    spectra, variances = [], []
+    for seed in seeds:
+        data = reference_catalog(
+            metadata, batch_keys(seed, 1)[0], chunk_size=chunk_size
+        )
+        row_spectra, row_variances = [], []
+        for size in sizes:
+            prefix, prefix_metadata = prefix_catalog(data, metadata, size)
+            row_spectra.append(
+                spectra_at(
+                    rescaled_fn(
+                        prefix, prefix_metadata, target, frequencies, num_redshift_nodes
+                    ),
+                    points,
+                )
+            )
+            shot_noise = build_rescaled_shot_noise(
+                prefix,
+                prefix_metadata,
+                population=target,
+                frequencies=frequencies,
+                num_redshift_nodes=num_redshift_nodes,
+                density_sites=(),
+                observation_time=observation_time,
+            )
+            row_variances.append(np.asarray(evaluate_variance(shot_noise, fiducial)))
+        spectra.append(row_spectra)
+        variances.append(row_variances)
+        # Release this catalog before the next is drawn.
+        del data
+    return np.asarray(spectra), np.asarray(variances)
+
+
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
@@ -755,6 +824,7 @@ def _(
     mc_max_samples,
     mc_min_exponent,
     mc_redshift_nodes,
+    observation_time,
     population,
     reference_waveform,
     target,
@@ -765,7 +835,7 @@ def _(
         for k in range(mc_min_exponent, int(np.log2(mc_max_samples)) + 1)
         if 2**k <= mc_max_samples
     ]
-    _metadata = CatalogMetadata(
+    mc_metadata = CatalogMetadata(
         waveform=reference_waveform,
         population=population,
         fiducials=FIDUCIALS,
@@ -775,37 +845,20 @@ def _(
         f"Monte Carlo: {mc_catalogs} catalogs x {mc_max_samples:,} draws = "
         f"{mc_catalogs * mc_max_samples:,} waveforms, Z = {mc_nodes}"
     )
-    # (M, sizes, points, F)
-    _spectra = []
-    for _m in range(mc_catalogs):
-        # Drawn in memory, not cached: each regenerates from its seed in
-        # seconds, and M of them would take M * 0.8 GB of disk.
-        _data = reference_catalog(
-            _metadata,
-            batch_keys(mc_base_seed + _m, 1)[0],
-            chunk_size=catalog_chunk_size,
-        )
-        if _m == 0:
-            _gb = np.asarray(_data["polarization_power"]).nbytes / 1e9
-            print(f"  {_gb:.2f} GB of power per catalog")
-        _spectra.append(
-            [
-                spectra_at(
-                    rescaled_fn(
-                        *prefix_catalog(_data, _metadata, _n),
-                        target,
-                        frequencies,
-                        mc_nodes,
-                    ),
-                    evaluation_points,
-                )
-                for _n in mc_sizes
-            ]
-        )
-        # Release this catalog before the next is drawn.
-        del _data
-    mc_spectra = np.asarray(_spectra)
-    return mc_nodes, mc_sizes, mc_spectra
+    # Drawn in memory, not cached: each regenerates from its seed, and M of
+    # them would take M * 0.8 GB of disk.
+    mc_spectra, mc_variances = catalog_ladder(
+        mc_metadata,
+        [mc_base_seed + _m for _m in range(mc_catalogs)],
+        mc_sizes,
+        target,
+        frequencies,
+        mc_nodes,
+        evaluation_points,
+        chunk_size=catalog_chunk_size,
+        observation_time=observation_time,
+    )
+    return mc_metadata, mc_nodes, mc_sizes, mc_spectra, mc_variances
 
 
 @app.cell
@@ -908,6 +961,167 @@ def _(mc_shift_std, mc_sizes, peak_parameters, tolerance):
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
+    ## 2b. Scrambled Sobol: $M$ scrambles
+
+    The same ladder with the intrinsic parameters drawn on a scrambled Sobol
+    net (`CatalogMetadata(sampling="sobol")`): each catalog is one independent
+    scrambling, so the spread of the $M$ estimates is the randomized
+    quasi-Monte Carlo error, unbiased like the random one. The per-draw
+    contribution to the template is a smooth, nearly one-dimensional function
+    of chirp mass, where the error falls faster than $N^{-1/2}$; merger-cutoff
+    discontinuities at high frequency set the floor. The table compares the
+    worst std of $b_a$ and of the shot-noise scatter $s$ at equal $N$.
+    """)
+
+
+@app.cell
+def _(
+    evaluation_points,
+    frequencies,
+    mc_base_seed,
+    mc_metadata,
+    mc_min_exponent,
+    mc_nodes,
+    observation_time,
+    qmc_catalogs,
+    qmc_max_samples,
+    catalog_chunk_size,
+    target,
+):
+    qmc_sizes = [
+        2**k for k in range(mc_min_exponent, int(np.log2(qmc_max_samples)) + 1)
+    ]
+    qmc_metadata = CatalogMetadata.model_validate(
+        {
+            **mc_metadata.model_dump(),
+            "num_samples": qmc_max_samples,
+            "sampling": "sobol",
+        }
+    )
+    print(
+        f"Sobol: {qmc_catalogs} scrambles x {qmc_max_samples:,} draws = "
+        f"{qmc_catalogs * qmc_max_samples:,} waveforms"
+    )
+    qmc_spectra, qmc_variances = catalog_ladder(
+        qmc_metadata,
+        [mc_base_seed + _m for _m in range(qmc_catalogs)],
+        qmc_sizes,
+        target,
+        frequencies,
+        mc_nodes,
+        evaluation_points,
+        chunk_size=catalog_chunk_size,
+        observation_time=observation_time,
+    )
+    return qmc_sizes, qmc_spectra, qmc_variances
+
+
+@app.function(hide_code=True)
+def ladder_errors(
+    spectra: NDArray[np.float64],
+    variances: NDArray[np.float64],
+    jacobian: NDArray[np.float64],
+    sigma: NDArray[np.float64],
+    mask: NDArray[np.bool_],
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Worst std of ``b_a`` over points and parameters, and the std of ``s``.
+
+    ``spectra`` is ``(M, sizes, points, F)`` and ``variances`` ``(M, sizes,
+    F)``; both results are ``(sizes,)``, the second relative to the mean ``s``.
+    """
+    residuals = spectra - spectra.mean(axis=0)
+    worst_shift = (
+        peak_shift(residuals, jacobian, sigma, mask)
+        .std(axis=0, ddof=1)
+        .max(axis=(1, 2))
+    )
+    scatter, _ = amplitude_scatter(spectra[:, :, 0], variances, sigma, mask)
+    return worst_shift, scatter.std(axis=0, ddof=1) / scatter.mean(axis=0)
+
+
+@app.cell
+def _(
+    jacobian,
+    mask,
+    mc_sizes,
+    mc_spectra,
+    mc_variances,
+    qmc_sizes,
+    qmc_spectra,
+    qmc_variances,
+    sigma,
+    tolerance,
+):
+    _random_shift, _random_s = ladder_errors(
+        mc_spectra, mc_variances, jacobian, sigma, mask
+    )
+    _sobol_shift, _sobol_s = ladder_errors(
+        qmc_spectra, qmc_variances, jacobian, sigma, mask
+    )
+    sampling_comparison = pd.DataFrame(
+        [
+            {
+                "N": _n,
+                "random: worst std b": _random_shift[mc_sizes.index(_n)],
+                "sobol: worst std b": _sobol_shift[_k],
+                "gain in std b": _random_shift[mc_sizes.index(_n)] / _sobol_shift[_k],
+                "random: std s / s": _random_s[mc_sizes.index(_n)],
+                "sobol: std s / s": _sobol_s[_k],
+            }
+            for _k, _n in enumerate(qmc_sizes)
+            if _n in mc_sizes
+        ]
+    )
+    _meets = [
+        _n
+        for _n, _worst in zip(qmc_sizes, _sobol_shift, strict=True)
+        if _worst < tolerance
+    ]
+    print(
+        f"smallest Sobol N with worst std b < {tolerance}: "
+        f"{_meets[0] if _meets else 'none drawn'}"
+    )
+    sampling_comparison
+    return (sampling_comparison,)
+
+
+@app.cell
+def _(sampling_comparison, tolerance):
+    sampling_figure, _ax = plt.subplots(figsize=(5, 3.6))
+    _n = sampling_comparison["N"].to_numpy(dtype=float)
+    for _column, _label, _marker in (
+        ("random: worst std b", "random", "o"),
+        ("sobol: worst std b", "scrambled Sobol", "s"),
+    ):
+        _ax.plot(_n, sampling_comparison[_column], marker=_marker, label=_label)
+    _anchor = sampling_comparison["random: worst std b"].to_numpy()[0]
+    _ax.plot(
+        _n,
+        _anchor * np.sqrt(_n[0] / _n),
+        color="0.5",
+        lw=1,
+        ls=":",
+        label=r"$\propto N^{-1/2}$",
+    )
+    _ax.plot(
+        _n, _anchor * _n[0] / _n, color="0.5", lw=1, ls="-.", label=r"$\propto N^{-1}$"
+    )
+    _ax.axhline(tolerance, color="0.5", ls="--", lw=1)
+    _ax.set(
+        xscale="log",
+        yscale="log",
+        xlabel="Intrinsic draws $N$",
+        ylabel=r"worst std of $b_a$ [$\sigma_a$]",
+    )
+    _ax.legend(fontsize="small")
+    sampling_figure.tight_layout()
+    sampling_figure
+    return (sampling_figure,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
     ## 3. Recommendation
 
     The cheapest drawn $N$ whose worst Monte Carlo shift is below tolerance,
@@ -967,6 +1181,7 @@ def _(
     FIGURES,
     quadrature_figure,
     residual_figure,
+    sampling_figure,
     shift_figure,
     shot_noise_figure,
     write_figures,
@@ -974,6 +1189,7 @@ def _(
     if write_figures.value:
         save_figures(
             {
+                FIGURES / "sampling_comparison.pdf": sampling_figure,
                 FIGURES / "quadrature_convergence.pdf": quadrature_figure,
                 FIGURES / "shot_noise_quadrature.pdf": shot_noise_figure,
                 FIGURES / "monte_carlo_residuals.pdf": residual_figure,

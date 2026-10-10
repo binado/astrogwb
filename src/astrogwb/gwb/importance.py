@@ -104,7 +104,11 @@ from astrogwb.distributions.rates import total_merger_rate
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.inference.protocol import SpectralDensityFn, SpectralVarianceFn
 from astrogwb.populations._types import Population, PopulationModel, SourceModel
-from astrogwb.populations.evaluation import evaluate_sources, sample_sources
+from astrogwb.populations.evaluation import (
+    evaluate_sources,
+    sample_sources,
+    sample_sources_qmc,
+)
 from astrogwb.populations.joint import joint_model
 from astrogwb.populations.metadata import PopulationMetadata
 from astrogwb.simulators.polarization_power.metadata import CatalogMetadata
@@ -336,7 +340,12 @@ def reference_catalog(
     """Every draw of ``metadata`` placed at the window's lower edge: power ``(F, N)``.
 
     The model is conditioned on the population's ``minimum_redshift`` and
-    :data:`EFFECTIVE_INCLINATION` before the draw. ``chunk_size`` is
+    :data:`EFFECTIVE_INCLINATION` before the draw. The intrinsic parameters are
+    drawn i.i.d., or on a scrambled Sobol net seeded by ``key`` when
+    ``metadata.sampling`` is ``"sobol"``
+    (:func:`~astrogwb.populations.evaluation.sample_sources_qmc`): the only
+    Monte Carlo left in the rescaled spectrum is this intrinsic average, and its
+    integrand is smooth and dominated by the chirp mass. ``chunk_size`` is
     :meth:`~astrogwb.waveform.PolarizationPowerGenerator.generate_batch`'s.
     """
     # x64 before the draw, as for a plain catalog: see draw_catalog.
@@ -354,7 +363,8 @@ def reference_catalog(
     )
     model = joint_model(*metadata.population.build()(metadata.fiducials))
     minimum_redshift, _ = _redshift_window(metadata.population)
-    samples = sample_sources(
+    draw = sample_sources_qmc if metadata.sampling == "sobol" else sample_sources
+    samples = draw(
         _pin_redshift_and_inclination(model, minimum_redshift),
         key,
         num_samples=metadata.num_samples,

@@ -12,8 +12,10 @@ from numpyro import handlers
 from numpyro.distributions.util import is_identically_one
 from numpyro.infer import Predictive
 from numpyro.primitives import Messenger
+from scipy.stats import qmc
 
 from astrogwb.populations._types import PopulationModel
+from astrogwb.utils.numpyro import InverseCDF
 
 #: The plate :func:`evaluate_sources` executes a source model under.
 _SOURCES_PLATE = "sources"
@@ -187,9 +189,59 @@ def sample_sources(
     return outputs
 
 
+def sample_sources_qmc(
+    model: PopulationModel,
+    key: jax.Array,
+    *,
+    num_samples: int,
+) -> dict[str, jax.Array]:
+    """Draw ``num_samples`` sources on a scrambled Sobol net, then replay them.
+
+    The quasi-random counterpart of :func:`sample_sources`. A probe trace names
+    the free sample sites, ``D`` of them; ``key`` seeds one Owen scrambling of a
+    ``D``-dimensional Sobol sequence, whose first ``num_samples`` points (a
+    base-2 net) drive the sites through their inverse CDFs under
+    :class:`~astrogwb.utils.numpyro.InverseCDF`. The model runs once with every
+    point at once, and the draws are then replayed through
+    :func:`evaluate_sources` exactly as :func:`sample_sources` replays its own.
+
+    The sources are distributed as the model's law, so an average over them is
+    an unbiased estimate of the same expectation, with an error that falls
+    faster than ``num_samples ** -0.5`` for a smooth integrand of few effective
+    dimensions. The caller is trusted to pass a model meeting
+    :class:`~astrogwb.utils.numpyro.InverseCDF`'s contracts, with any
+    conditioning already applied; sites it conditions take no coordinate.
+
+    Raises
+    ------
+    ValueError
+        If ``num_samples`` is not a power of two: only those prefixes of a Sobol
+        sequence are balanced nets.
+    """
+    exponent = int(num_samples).bit_length() - 1
+    if num_samples <= 0 or 1 << exponent != num_samples:
+        raise ValueError(
+            f"num_samples must be a power of two for a Sobol net, got {num_samples}"
+        )
+    with handlers.block():
+        probe = handlers.trace(handlers.seed(model, jax.random.PRNGKey(0))).get_trace()
+    samples = [name for name, site in probe.items() if site["type"] == "sample"]
+    free = [name for name in samples if not probe[name]["is_observed"]]
+    scramble = int(jax.random.randint(key, (), 0, jnp.iinfo(jnp.int32).max))
+    points = qmc.Sobol(len(free), scramble=True, seed=scramble).random_base2(exponent)
+    with handlers.block():
+        trace = handlers.trace(InverseCDF(model, points=points)).get_trace()
+    sampled = {
+        name: jnp.broadcast_to(trace[name]["value"], (num_samples,)) for name in samples
+    }
+    _, outputs = evaluate_sources(model, sampled, density_sites=())
+    return outputs
+
+
 __all__ = [
     "DensityAccumulator",
     "compute_model_and_log_probs",
     "evaluate_sources",
     "sample_sources",
+    "sample_sources_qmc",
 ]

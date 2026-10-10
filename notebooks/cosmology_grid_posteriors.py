@@ -172,7 +172,10 @@ def _():
     # Different seeds: the injection must not be a subset of the catalog.
     data_seed = 41
     catalog_seed = 42
-    num_samples = 2**17  # intrinsic draws, one waveform each
+    # Intrinsic draws on a scrambled Sobol net, one waveform each: at 2^14 the
+    # template error is ~5e-5 sigma (importance_convergence.py), where i.i.d.
+    # draws would need ~3e5 for 0.1 sigma.
+    num_samples = 2**14
     redshift_nodes = 32  # Gauss-Legendre nodes in 1/(1 + z); costs no waveforms
     catalog_chunk_size = 4096  # reference waveforms per lax.map batch
     chunk_size = 16_384  # injection waveforms per reduced chunk
@@ -261,6 +264,7 @@ def _():
         population=population,
         fiducials=FIDUCIALS,
         num_samples=num_samples,
+        sampling="sobol",
     )
     injection_metadata = BackgroundSpectralDensityMetadata(
         count="fixed" if SMOKE else "poisson",

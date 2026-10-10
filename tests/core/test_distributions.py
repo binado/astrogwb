@@ -32,7 +32,10 @@ from numpyro.distributions.transforms import biject_to
 from reference_population import reference_merger_rate_distance_and_logprob
 
 from astrogwb.distributions.interpolated import InterpolatedDistribution
-from astrogwb.distributions.mass import MaxOfTwoNormalsDistribution
+from astrogwb.distributions.mass import (
+    MaxOfTwoNormalsDistribution,
+    MaxOfTwoUniformsDistribution,
+)
 from astrogwb.distributions.orientation import UniformCosineDistribution
 from astrogwb.distributions.rates import madau_dickinson_rate, total_merger_rate
 from astrogwb.distributions.redshift.base import RedshiftDistribution
@@ -485,6 +488,63 @@ def test_max_of_two_normals_survives_jit_as_a_pytree_argument() -> None:
     np.testing.assert_allclose(
         np.asarray(jitted),
         np.asarray(distribution.log_prob(_MASS_VALUES)),
+        rtol=1e-14,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# MaxOfTwoUniformsDistribution
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def max_of_two_uniforms() -> MaxOfTwoUniformsDistribution:
+    return MaxOfTwoUniformsDistribution(1.0, 1.5, validate_args=True)
+
+
+def test_max_of_two_uniforms_log_prob_is_the_scaled_beta_2_1(
+    max_of_two_uniforms: MaxOfTwoUniformsDistribution,
+) -> None:
+    scaled_beta = dist.TransformedDistribution(
+        dist.Beta(2.0, 1.0), dist.transforms.AffineTransform(1.0, 1.5)
+    )
+    values = jnp.array([1.1, 1.75, 2.4])
+    np.testing.assert_allclose(
+        np.asarray(max_of_two_uniforms.log_prob(values)),
+        np.asarray(scaled_beta.log_prob(values)),
+        rtol=1e-12,
+    )
+
+
+def test_max_of_two_uniforms_icdf_inverts_the_cdf(
+    max_of_two_uniforms: MaxOfTwoUniformsDistribution,
+) -> None:
+    np.testing.assert_allclose(
+        np.asarray(max_of_two_uniforms.icdf(_MASS_QUANTILES)),
+        np.asarray(1.0 + 1.5 * jnp.sqrt(_MASS_QUANTILES)),
+        rtol=0.0,
+        atol=0.0,
+    )
+    np.testing.assert_allclose(
+        np.asarray(max_of_two_uniforms.cdf(max_of_two_uniforms.icdf(_MASS_QUANTILES))),
+        np.asarray(_MASS_QUANTILES),
+        rtol=1e-14,
+    )
+
+
+def test_max_of_two_uniforms_samples_stay_in_the_support(
+    max_of_two_uniforms: MaxOfTwoUniformsDistribution,
+) -> None:
+    draws = max_of_two_uniforms.sample(jax.random.PRNGKey(0), (4096,))
+    assert bool(jnp.all(max_of_two_uniforms.support(draws)))
+
+
+def test_max_of_two_uniforms_survives_jit_as_a_pytree_argument(
+    max_of_two_uniforms: MaxOfTwoUniformsDistribution,
+) -> None:
+    values = jnp.array([1.1, 1.75, 2.4])
+    jitted = jax.jit(lambda d, x: d.log_prob(x))(max_of_two_uniforms, values)
+    np.testing.assert_allclose(
+        np.asarray(jitted),
+        np.asarray(max_of_two_uniforms.log_prob(values)),
         rtol=1e-14,
     )
 

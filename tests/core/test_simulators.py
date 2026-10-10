@@ -100,6 +100,27 @@ def test_polarization_power_round_trips_through_a_file(tmp_path: Path) -> None:
     assert attrs["seed"] == 41
 
 
+def test_catalog_key_of_random_sampling_is_the_key_without_it() -> None:
+    """Existing catalogs predate the field: the default must not change keys."""
+    explicit = CatalogMetadata.model_validate(
+        {**CATALOG.model_dump(), "sampling": "random"}
+    )
+    assert explicit.key() == CATALOG.key()
+
+
+def test_catalog_key_tells_sobol_from_random() -> None:
+    sobol = CatalogMetadata.model_validate(
+        {**CATALOG.model_dump(), "num_samples": 8, "sampling": "sobol"}
+    )
+    random = CatalogMetadata.model_validate({**CATALOG.model_dump(), "num_samples": 8})
+    assert sobol.key() != random.key()
+
+
+def test_sobol_catalog_needs_a_power_of_two_size() -> None:
+    with pytest.raises(ValueError, match="power-of-two"):
+        CatalogMetadata.model_validate({**CATALOG.model_dump(), "sampling": "sobol"})
+
+
 @pytest.mark.integration
 def test_polarization_power_key_picks_the_realization() -> None:
     one = draw_catalog(CATALOG, batch_keys(41, 1)[0])

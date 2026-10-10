@@ -30,6 +30,7 @@ from astrogwb.populations.evaluation import (
     compute_model_and_log_probs,
     evaluate_sources,
     sample_sources,
+    sample_sources_qmc,
 )
 
 FIXED: dict[str, ArrayLike] = {
@@ -255,3 +256,53 @@ def test_sample_sources_is_isolated_from_enclosing_handlers() -> None:
     with handlers.trace() as outer:
         sample_sources(_source_model(0.5), jax.random.PRNGKey(0), num_samples=4)
     assert outer == {}
+
+
+@pytest.mark.parametrize("exponent", [3, 8])
+def test_sample_sources_qmc_puts_one_point_in_every_dyadic_interval(
+    exponent: int,
+) -> None:
+    """The first coordinate of a base-2 Sobol net is exactly stratified."""
+    count = 2**exponent
+    sources = sample_sources_qmc(
+        _source_model(0.5), jax.random.PRNGKey(3), num_samples=count
+    )
+    # z ~ Uniform(0, 2) takes the first coordinate, and z / 2 recovers it exactly.
+    cells = np.floor(np.asarray(sources["z"]) / 2.0 * count)
+    np.testing.assert_array_equal(np.sort(cells), np.arange(count))
+
+
+def test_sample_sources_qmc_replays_through_evaluation_bit_for_bit() -> None:
+    sources = sample_sources_qmc(
+        _source_model(0.5), jax.random.PRNGKey(3), num_samples=32
+    )
+    _, replay = evaluate_sources(
+        _source_model(0.5), {"z": sources["z"], "m": sources["m"]}, density_sites=()
+    )
+
+    for name in sources:
+        np.testing.assert_array_equal(sources[name], replay[name])
+
+
+def test_sample_sources_qmc_gives_a_conditioned_site_no_coordinate() -> None:
+    model = handlers.condition(_source_model(0.5), data={"z": 0.7})
+    sources = sample_sources_qmc(model, jax.random.PRNGKey(3), num_samples=16)
+
+    np.testing.assert_array_equal(sources["z"], np.full(16, 0.7))
+    # m now takes the first coordinate: one point per cell of its CDF.
+    cells = np.floor(np.asarray(dist.Normal(0.5, 1.5).cdf(sources["m"])) * 16)
+    np.testing.assert_array_equal(np.sort(cells), np.arange(16))
+
+
+def test_sample_sources_qmc_scramble_is_fixed_by_the_key() -> None:
+    draw = lambda seed: sample_sources_qmc(
+        _source_model(0.5), jax.random.PRNGKey(seed), num_samples=8
+    )
+    np.testing.assert_array_equal(draw(1)["m"], draw(1)["m"])
+    assert not np.array_equal(draw(1)["m"], draw(2)["m"])
+
+
+@pytest.mark.parametrize("count", [0, 3, 24])
+def test_sample_sources_qmc_rejects_a_non_power_of_two(count: int) -> None:
+    with pytest.raises(ValueError, match="power of two"):
+        sample_sources_qmc(_source_model(0.5), jax.random.PRNGKey(0), num_samples=count)
