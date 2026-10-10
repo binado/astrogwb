@@ -24,6 +24,8 @@ from astrogwb.simulators.population import PopulationSimulator
 from astrogwb.simulators.spectra import (
     BackgroundSpectralDensityMetadata,
     BackgroundSpectralDensitySimulator,
+    spectra_ensemble,
+    spectra_ensemble_path,
     stack_spectra,
 )
 from astrogwb.waveform import WaveformMetadata
@@ -141,6 +143,47 @@ def test_spectra_round_trip_through_a_file(tmp_path: Path, num_draws: int) -> No
     assert attrs["seed"] == 41
     assert fresh["spectral_density"].shape == (num_draws, fresh["frequencies"].size)
     assert np.all(fresh["n_events"] == 4)
+
+
+@pytest.mark.integration
+def test_spectra_ensemble_is_the_stack_of_single_draws(tmp_path: Path) -> None:
+    simulator = BackgroundSpectralDensitySimulator(SPECTRA, chunk_size=4)
+    direct = stack_spectra([simulator(key) for key in batch_keys(41, 3)])
+
+    ensemble = spectra_ensemble(SPECTRA, 41, 3, tmp_path, chunk_size=4)
+
+    np.testing.assert_array_equal(
+        ensemble["spectral_density"], direct["spectral_density"]
+    )
+    np.testing.assert_array_equal(ensemble["n_events"], direct["n_events"])
+
+
+@pytest.mark.integration
+def test_spectra_ensemble_reads_a_smaller_ensemble_as_a_prefix(tmp_path: Path) -> None:
+    large = spectra_ensemble(SPECTRA, 41, 3, tmp_path, chunk_size=4)
+    # A cached draw is read, not redrawn: removing one forces exactly one draw.
+    spectra_ensemble_path(tmp_path, SPECTRA, 41, 2).unlink()
+
+    small = spectra_ensemble(SPECTRA, 41, 2, tmp_path, chunk_size=4)
+
+    np.testing.assert_array_equal(
+        small["spectral_density"], large["spectral_density"][:2]
+    )
+    assert not spectra_ensemble_path(tmp_path, SPECTRA, 41, 2).exists()
+
+
+@pytest.mark.integration
+def test_spectra_ensemble_rejects_a_file_of_another_seed(tmp_path: Path) -> None:
+    simulator = BackgroundSpectralDensitySimulator(SPECTRA, chunk_size=4)
+    write(
+        spectra_ensemble_path(tmp_path, SPECTRA, 41, 0),
+        simulator(batch_keys(42, 1)[0]),
+        SPECTRA,
+        seed=42,
+    )
+
+    with pytest.raises(ValueError, match="seed 42"):
+        spectra_ensemble(SPECTRA, 41, 1, tmp_path, chunk_size=4)
 
 
 @pytest.mark.integration

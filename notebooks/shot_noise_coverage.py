@@ -59,7 +59,7 @@ with app.setup(hide_code=True):
     )
     from astrogwb.simulators.spectra import (
         BackgroundSpectralDensityMetadata,
-        BackgroundSpectralDensitySimulator,
+        spectra_ensemble,
     )
 
     # Log-likelihood of every injection at every grid point, (M, G): data is
@@ -131,13 +131,18 @@ def _():
     ROOT_DIR = Path(__file__).resolve().parents[1]
     FIGURES = ROOT_DIR / FIGURES_DIR / "shot_noise_coverage"
 
+    # The injections are the Poisson ensemble of mean_spectrum_snr_table.py:
+    # the same record, seed and cache, so the draws are made once for both.
     num_injections = 200
-    injection_base_seed = 1000  # injection i draws at batch_keys(base, M)[i]
+    ensemble_seed = 41
     noise_seed = 2000  # detector noise, one stream per network
     # Detector-noise draws per injection: noise is free next to an injection,
     # and one draw each leaves var(z) dominated by its own sampling error.
     noise_draws = 20
-    catalog_seed = 42  # the grid notebook's reference catalog
+    # IMRPhenomXAS, like the injections; tides are negligible in band.
+    approximant = "IMRPhenomXAS"
+    minimum_redshift, maximum_redshift = 0.35, 20.0
+    catalog_seed = 42  # independent of the injections' seed
     num_samples = 2**17
     redshift_nodes = 32
     catalog_chunk_size = 4096
@@ -153,7 +158,6 @@ def _():
 
     SMOKE = os.environ.get("ASTROGWB_NOTEBOOK_SMOKE") == "1"
     write_figures_default = True
-    cache_name_prefix = ""
     if SMOKE:
         num_injections = 4
         noise_draws = 2
@@ -164,17 +168,21 @@ def _():
         grid_chunk_size = 4
         h0_window, h0_size = (40.0, 100.0), 31
         write_figures_default = False
-        cache_name_prefix = "smoke_"
 
     FIDUCIALS = fiducials(root=ROOT_DIR)
     PRIORS = priors(root=ROOT_DIR)
     registry = detector_registry(root=ROOT_DIR)
-    waveform = waveform_metadata(root=ROOT_DIR)
+    waveform = waveform_metadata(root=ROOT_DIR, approximant=approximant)
     frequencies = np.asarray(waveform.build().frequencies)
-    population = population_metadata(root=ROOT_DIR)
+    population = population_metadata(
+        root=ROOT_DIR,
+        minimum_redshift=minimum_redshift,
+        maximum_redshift=maximum_redshift,
+    )
     catalog_metadata = CatalogMetadata(
         waveform=waveform_metadata(
             root=ROOT_DIR,
+            approximant=approximant,
             frequency_spacing="log",
             minimum_frequency=minimum_frequency,
             maximum_frequency=4000.0,
@@ -193,7 +201,7 @@ def _():
         waveform=waveform,
         population=population,
     )
-    cache_dir = default_cache_dir() / "coverage"
+    ensemble_dir = default_cache_dir() / "ensembles"
 
     write_figures = mo.ui.switch(value=write_figures_default, label="Write figures")
     write_figures
@@ -204,8 +212,6 @@ def _():
         FIDUCIALS,
         FIGURES,
         PRIORS,
-        cache_dir,
-        cache_name_prefix,
         catalog_chunk_size,
         catalog_metadata,
         catalog_seed,
@@ -215,7 +221,8 @@ def _():
         grid_chunk_size,
         h0_size,
         h0_window,
-        injection_base_seed,
+        ensemble_dir,
+        ensemble_seed,
         injection_metadata,
         maximum_frequency,
         minimum_frequency,
@@ -268,50 +275,6 @@ def ensure_reference_catalog(
     data = reference_catalog(metadata, batch_keys(seed, 1)[0], chunk_size=chunk_size)
     write(path, data, metadata, seed=seed)
     return data
-
-
-@app.function(hide_code=True)
-def ensure_injections(
-    metadata: BackgroundSpectralDensityMetadata,
-    base_seed: int,
-    count: int,
-    directory: Path,
-    *,
-    chunk_size: int,
-) -> tuple[NDArray[np.float64], NDArray[np.int64]]:
-    """``count`` injections of ``metadata``, one cached file per injection.
-
-    Injection ``i`` is drawn at ``batch_keys(base_seed, count)[i]`` and kept
-    in ``<directory>/<key>/<base_seed>_<i>.npz``, so an interrupted run
-    resumes where it stopped.
-
-    Returns
-    -------
-    tuple
-        Spectra ``(count, F)`` and event counts ``(count,)``.
-    """
-    folder = directory / metadata.key()
-    folder.mkdir(parents=True, exist_ok=True)
-    keys = batch_keys(base_seed, count)
-    simulator = None
-    spectra, events = [], []
-    for index in range(count):
-        path = folder / f"{base_seed}_{index}.npz"
-        if not path.is_file():
-            if simulator is None:
-                simulator = BackgroundSpectralDensitySimulator(
-                    metadata, chunk_size=chunk_size
-                )
-            drawn = simulator(keys[index])
-            np.savez(
-                path,
-                spectral_density=np.asarray(drawn["spectral_density"][0]),
-                n_events=int(drawn["n_events"][0]),
-            )
-        with np.load(path) as cached:
-            spectra.append(np.asarray(cached["spectral_density"], dtype=np.float64))
-            events.append(int(cached["n_events"]))
-    return np.stack(spectra), np.asarray(events)
 
 
 @app.function(hide_code=True)
@@ -506,33 +469,84 @@ def _():
     mo.md(r"""
     ## Injections
 
-    $M$ Poisson spectra at the fiducials, one cached file each.
+    $M$ Poisson spectra at the fiducials: the ensemble of
+    `notebooks/mean_spectrum_snr_table.py`, read from the shared cache
+    (`spectra_ensemble`, one file per draw).
     """)
 
 
 @app.cell
 def _(
-    cache_dir,
-    cache_name_prefix,
     chunk_size,
+    ensemble_dir,
+    ensemble_seed,
     frequencies,
-    injection_base_seed,
     injection_metadata,
     num_injections,
 ):
-    injections, injected_events = ensure_injections(
+    _ensemble = spectra_ensemble(
         injection_metadata,
-        injection_base_seed,
+        ensemble_seed,
         num_injections,
-        cache_dir / f"{cache_name_prefix}injections",
+        ensemble_dir,
         chunk_size=chunk_size,
     )
+    injections = _ensemble["spectral_density"]
+    injected_events = np.asarray(_ensemble["n_events"])
+    print(f"injection record {injection_metadata.key()}, seed {ensemble_seed}")
     assert injections.shape[1] == frequencies.size
     print(
         f"{num_injections} injections, events {injected_events.min():,} to "
         f"{injected_events.max():,}"
     )
     return (injections,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## Model against the injections
+
+    The model's amplitude scatter $\rho s$, from the reference catalog's
+    second moment, against the scatter the injections realize, $\rho\,
+    \mathrm{sd}(\epsilon)$ with $\epsilon_i = (m | S_i - m)/(m | m)$ projected
+    on the model template $m$. The empirical sd has a sampling error of about
+    $1/\sqrt{2M}$, and the shot noise is one amplitude mode, so every network
+    measures the same ratio.
+    """)
+
+
+@app.cell
+def _(fiducial_prediction, fiducial_variance, injections, per_network):
+    _label = dict(DETECTOR_NETWORKS)
+    _template = np.asarray(fiducial_prediction)
+    _rows = []
+    for _name, (_scale, _mask) in per_network.items():
+        _weight = np.where(_mask, 1.0 / _scale**2, 0.0)
+        _norm = np.sum(_template**2 * _weight)
+        _rho = np.sqrt(_norm)
+        _model = _rho * np.sqrt(
+            float(
+                amplitude_shot_noise_variance(
+                    fiducial_prediction, fiducial_variance, _scale, _mask
+                )
+            )
+        )
+        _eps = (injections - _template) @ (_template * _weight) / _norm
+        _empirical = _rho * np.std(_eps, ddof=1)
+        _rows.append(
+            {
+                "network": _label[_name],
+                "rho": _rho,
+                "model rho s": _model,
+                "empirical rho sd(eps)": _empirical,
+                "error": _empirical / np.sqrt(2.0 * (_eps.size - 1)),
+                "empirical / model": _empirical / _model,
+            }
+        )
+    model_against_injections = pd.DataFrame(_rows)
+    model_against_injections
+    return (model_against_injections,)
 
 
 @app.cell(hide_code=True)
@@ -660,11 +674,14 @@ def _(fiducial_network, statistics):
 
 
 @app.cell
-def _(FIGURES, coverage, coverage_figure, write_figures):
+def _(FIGURES, coverage, coverage_figure, model_against_injections, write_figures):
     if write_figures.value:
         save_figures({FIGURES / "coverage_H0.pdf": coverage_figure})
         FIGURES.mkdir(parents=True, exist_ok=True)
         coverage.to_csv(FIGURES / "coverage_H0.csv", index=False)
+        model_against_injections.to_csv(
+            FIGURES / "shot_noise_model_vs_injections.csv", index=False
+        )
 
 
 if __name__ == "__main__":

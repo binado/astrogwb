@@ -1,5 +1,9 @@
 """Background spectral-density data, metadata and simulator."""
 
+from astrogwb.simulators.spectra.ensemble import (
+    spectra_ensemble,
+    spectra_ensemble_path,
+)
 from astrogwb.simulators.spectra.forward import (
     ChunkedPowerSum,
     normalize_spectra,
@@ -24,6 +28,8 @@ __all__ = [
     "Hyperparameter",
     "normalize_spectra",
     "poisson_counts_forward_model",
+    "spectra_ensemble",
+    "spectra_ensemble_path",
     "stack_spectra",
     "validate_source_model",
 ]
