@@ -143,7 +143,7 @@ def _():
     approximant = "IMRPhenomXAS"
     minimum_redshift, maximum_redshift = 0.35, 20.0
     catalog_seed = 42  # independent of the injections' seed
-    num_samples = 2**17
+    num_samples = 2**14  # on a scrambled Sobol net; see importance_convergence.py
     redshift_nodes = 32
     catalog_chunk_size = 4096
     chunk_size = 16_384  # injection waveforms per reduced chunk
@@ -192,6 +192,7 @@ def _():
         population=population,
         fiducials=FIDUCIALS,
         num_samples=num_samples,
+        sampling="sobol",
     )
     injection_metadata = BackgroundSpectralDensityMetadata(
         count="fixed" if SMOKE else "poisson",

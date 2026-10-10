@@ -64,8 +64,8 @@ repository root as the working directory.
 - **`cosmology_grid_posteriors.py`** — marimo notebook. Grid posteriors for
   $H_0$, $(H_0, \Omega_m)$ and $(\Xi_0, n)$ across the six detector networks,
   from a zero-noise Poisson injection, modeled with the rescaled
-  reference-redshift spectrum (`astrogwb.gwb.importance`: $2^{19}$ intrinsic
-  draws, one waveform each at the window's lower edge, rescaled to 32 redshift
+  reference-redshift spectrum (`astrogwb.gwb.importance`: $2^{14}$ intrinsic
+  draws on a scrambled Sobol net, one waveform each at the window's lower edge, rescaled to 32 redshift
   nodes; a different seed). The log densities are cached under
   `default_cache_dir() / "posteriors"`, keyed by a hash of their settings, so
   the figures iterate without recomputing. Each grid point is predicted once
