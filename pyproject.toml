@@ -53,7 +53,7 @@ paper = [
     "astrogwb[io,simulation]",
     "arviz[h5netcdf]>=1.2.0",
     # Merges the config layers (astrogwb.paper.config.runs).
-    "pyknf>=0.6,<0.7",
+    "pyknf>=0.6,<0.8",
     # User cache paths, including XDG overrides on macOS.
     "platformdirs>=4.11.12",
 ]
