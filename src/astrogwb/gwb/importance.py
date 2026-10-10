@@ -36,9 +36,10 @@ redshift,
 
 with :math:`d^{\mathrm{ref}} = d_L(z_{\min})` at the fiducials.
 :func:`reference_catalog` generates one waveform per draw there, and
-:func:`build_rescaled_spectrum` rescales the weighted mean of those to the
-nodes in each call, interpolating it in :math:`\ln f`. Its node count is the
-builder's, not the catalog's, so changing it needs no new waveforms.
+:class:`~astrogwb.inference.likelihood.ImportanceGaussianLikelihood` rescales the
+weighted mean of those to the nodes in each call, interpolating it in
+:math:`\ln f`. Its node count is the likelihood's, not the catalog's, so changing
+it needs no new waveforms.
 
 A catalog realization over an observation time :math:`T` is a Poisson sum
 :math:`\sum_i P_i / T` over the real mergers, so it scatters about the spectrum
@@ -53,8 +54,8 @@ enters squared:
         \frac{1}{N} \sum_k \omega_k(\Lambda)\, P_{\mathrm{ref}}^2(f s_j; \theta_k),
 
 with :math:`c_\iota` = :data:`INCLINATION_SECOND_MOMENT` restoring the
-inclination scatter the pinned catalog lacks. :func:`build_rescaled_shot_noise`
-binds it as :func:`build_rescaled_spectrum` binds the spectrum. Its redshift
+inclination scatter the pinned catalog lacks. The likelihood predicts it next to
+the spectrum. Its redshift
 integrand is steeper than the mean's near :math:`z_{\min}`, so its node count
 needs its own convergence check.
 
@@ -81,14 +82,12 @@ Contracts the caller is trusted to honour (nothing here checks them):
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
-from typing import Any
+from collections.abc import Mapping, Sequence
+from typing import Any, NamedTuple
 
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax.tree_util import Partial
 from jax.typing import ArrayLike
 from numpy.typing import NDArray
 from numpyro import handlers
@@ -97,12 +96,9 @@ from astrogwb import __version__
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import (
     hubble_distance,
-    luminosity_distance,
     normalized_hubble_parameter,
 )
 from astrogwb.distributions.rates import total_merger_rate
-from astrogwb.importance.diagnostics import relative_ess
-from astrogwb.inference.protocol import SpectralDensityFn, SpectralVarianceFn
 from astrogwb.populations._types import Population, PopulationModel, SourceModel
 from astrogwb.populations.evaluation import (
     evaluate_sources,
@@ -125,14 +121,10 @@ from astrogwb.utils import gauss_legendre_nodes_weights
 __all__ = [
     "EFFECTIVE_INCLINATION",
     "INCLINATION_SECOND_MOMENT",
-    "LogWeightsFn",
-    "build_rescaled_shot_noise",
-    "build_rescaled_spectrum",
     "phinney_kernel",
     "redshift_quadrature",
     "reference_catalog",
     "reference_catalog_stem",
-    "rescaled_spectral_variance",
 ]
 
 logger = logging.getLogger(__name__)
@@ -154,9 +146,6 @@ INCLINATION_SECOND_MOMENT = 355.0 / 252.0
 
 #: The luminosity distance a source model returns.
 _LUMINOSITY_DISTANCE = "luminosity_distance"
-
-#: Per-draw log importance weights from hyperparameters alone, shape ``(N,)``.
-type LogWeightsFn = Callable[[Mapping[str, ArrayLike]], jax.Array]
 
 
 def redshift_quadrature(
@@ -195,53 +184,6 @@ def _intrinsic_log_prob(
         density_sites=density_sites,
     )
     return log_prob
-
-
-@dataclass(frozen=True)
-class _Bound:
-    """The static half of a bound estimator: its function and non-array settings.
-
-    Compared by value, so two builds with the same population object and sites
-    are equal: :func:`_bind` wraps it in a :class:`jax.tree_util.Partial` whose
-    leaves are the arrays, and a ``jit`` taking that callable as an argument
-    traces once for every catalog of the same shapes.
-    """
-
-    function: Callable[..., Any]
-    population: Population
-    density_sites: tuple[str, ...]
-
-    def __call__(self, params: Mapping[str, ArrayLike], /, **arrays: Any) -> Any:
-        return self.function(
-            params,
-            population=self.population,
-            density_sites=self.density_sites,
-            **arrays,
-        )
-
-
-def _bind(
-    function: Callable[..., Any],
-    population: Population,
-    density_sites: Sequence[str],
-    **arrays: Any,
-) -> Any:
-    """``function`` as a pytree callable: ``arrays`` are its leaves, the rest static."""
-    return Partial(_Bound(function, population, tuple(density_sites)), **arrays)
-
-
-def evaluate_log_weights(
-    params: Mapping[str, ArrayLike],
-    *,
-    population: Population,
-    intrinsic: Mapping[str, jax.Array],
-    proposal_log_prob: jax.Array,
-    density_sites: Sequence[str],
-) -> jax.Array:
-    """Per-draw intrinsic log importance weights at ``params``, shape ``(N,)``."""
-    _, source_model = population(params)
-    target = _intrinsic_log_prob(source_model, intrinsic, density_sites)
-    return target - proposal_log_prob
 
 
 def phinney_kernel(
@@ -392,39 +334,36 @@ def _node_power(
     )
 
 
-def rescaled_spectral_density(
+class _SharedTerms(NamedTuple):
+    """What the spectrum and its variance both take from ``population(params)``."""
+
+    log_weights: jax.Array
+    kernel: jax.Array
+    distance_ratio: jax.Array
+    hubble_constant: ArrayLike
+    omega_m: ArrayLike
+    total_rate: jax.Array
+
+
+def _shared_terms(
     params: Mapping[str, ArrayLike],
     *,
     population: Population,
-    polarization_power: jax.Array,
-    log_reference_frequencies: jax.Array,
-    query_log_frequencies: jax.Array,
-    amplitude: jax.Array,
     intrinsic: Mapping[str, jax.Array],
+    proposal_log_prob: jax.Array,
+    density_sites: Sequence[str],
     redshift: jax.Array,
     redshift_weights: jax.Array,
     reference_distance: jax.Array,
-    proposal_log_prob: jax.Array,
-    density_sites: Sequence[str],
-) -> tuple[jax.Array, dict[str, jax.Array]]:
-    """The spectrum at ``params``, shape ``(F,)``, with its diagnostics.
+) -> _SharedTerms:
+    """The front half of the spectrum and of its variance, from one population call.
 
-    The weighted mean reference power ``(F_ref,)`` is interpolated in
-    :math:`\\ln f` at every ``f s_j`` (``query_log_frequencies``, ``(F, Z)``),
-    scaled by ``s_j**4`` (``amplitude``), and integrated over the nodes.
-    ``extras`` holds ``total_merger_rate`` (observer frame, mergers per second)
-    and ``importance_relative_ess`` over the intrinsic draws, both shape ``()``.
+    ``kernel`` is the quadrature weights times :func:`phinney_kernel`, ``(Z,)``;
+    ``total_rate`` is the observer-frame merger rate in mergers per second.
     """
     distribution, source_model = population(params)
     log_weights = (
         _intrinsic_log_prob(source_model, intrinsic, density_sites) - proposal_log_prob
-    )
-    node_power = _node_power(
-        polarization_power,
-        log_weights,
-        log_reference_frequencies,
-        query_log_frequencies,
-        amplitude,
     )
     hubble_constant = distribution.params["H0"]
     omega_m = distribution.params["Omega_m"]
@@ -442,71 +381,9 @@ def rescaled_spectral_density(
     total_rate = total_merger_rate(
         redshift, redshift_weights, merger_rate, hubble_constant, omega_m
     )
-    return node_power @ kernel, {
-        "total_merger_rate": total_rate,
-        "importance_relative_ess": relative_ess(log_weights),
-    }
-
-
-def rescaled_spectral_variance(
-    params: Mapping[str, ArrayLike],
-    *,
-    population: Population,
-    squared_polarization_power: jax.Array,
-    log_reference_frequencies: jax.Array,
-    query_log_frequencies: jax.Array,
-    amplitude: jax.Array,
-    intrinsic: Mapping[str, jax.Array],
-    redshift: jax.Array,
-    redshift_weights: jax.Array,
-    reference_distance: jax.Array,
-    proposal_log_prob: jax.Array,
-    density_sites: Sequence[str],
-    observation_seconds: jax.Array,
-) -> jax.Array:
-    r"""The shot-noise variance of the spectrum at ``params``, shape ``(F,)``.
-
-    The variance of a Poisson catalog realization about
-    :func:`rescaled_spectral_density`, from the module's Campbell sum: the
-    weighted mean of ``squared_polarization_power`` ``(F_ref, N)`` is
-    rescaled with ``amplitude**2`` (:math:`s_j^8`), integrated with the
-    spectrum's kernel times :math:`(d^{\mathrm{ref}}/d_{GW})^2`, and multiplied
-    by :data:`INCLINATION_SECOND_MOMENT` over ``observation_seconds``.
-
-    The extra distance factor uses the pointwise
-    :func:`~astrogwb.cosmology.luminosity_distance` rather than the
-    distribution's table, as the kernel does.
-    """
-    distribution, source_model = population(params)
-    log_weights = (
-        _intrinsic_log_prob(source_model, intrinsic, density_sites) - proposal_log_prob
+    return _SharedTerms(
+        log_weights, kernel, distance_ratio, hubble_constant, omega_m, total_rate
     )
-    node_power = _node_power(
-        squared_polarization_power,
-        log_weights,
-        log_reference_frequencies,
-        query_log_frequencies,
-        amplitude**2,
-    )
-    hubble_constant = distribution.params["H0"]
-    omega_m = distribution.params["Omega_m"]
-    distance_ratio = distribution.distance_ratio(redshift)
-    gw_distance = distance_ratio * luminosity_distance(
-        redshift, hubble_constant, omega_m
-    )
-    kernel = (
-        redshift_weights
-        * phinney_kernel(
-            redshift,
-            distribution.merger_rate(redshift),
-            distance_ratio,
-            hubble_constant,
-            omega_m,
-            reference_distance,
-        )
-        * (reference_distance / gw_distance) ** 2
-    )
-    return INCLINATION_SECOND_MOMENT * (node_power @ kernel) / observation_seconds
 
 
 def _rescaling_arrays(
@@ -553,90 +430,3 @@ def _rescaling_arrays(
             np.asarray(columns[_LUMINOSITY_DISTANCE], dtype=np.float64)[0]
         ),
     }
-
-
-def build_rescaled_shot_noise(
-    data: PolarizationPowerData,
-    metadata: CatalogMetadata,
-    *,
-    population: Population,
-    frequencies: ArrayLike,
-    num_redshift_nodes: int,
-    density_sites: Sequence[str],
-    observation_time: float,
-) -> SpectralVarianceFn:
-    """Bind a :func:`reference_catalog` to a target's shot-noise variance.
-
-    The counterpart of :func:`build_rescaled_spectrum`, with the same arguments
-    and contracts plus ``observation_time`` in years: ``params -> (F,)``, the
-    per-bin variance of a Poisson catalog realization over that time about the
-    spectrum on ``frequencies``. Call outside JAX transformations.
-
-    The squared power is formed once here and held as a leaf, so the returned
-    pytree carries a second ``(F_ref, N)`` array next to the spectrum's: binding
-    both doubles the catalog's device memory, where squaring per call would
-    allocate it on every evaluation.
-    """
-    power = np.asarray(data["polarization_power"], dtype=np.float64)
-    return _bind(
-        rescaled_spectral_variance,
-        population,
-        density_sites,
-        squared_polarization_power=jnp.asarray(power * power),
-        observation_seconds=jnp.asarray(observation_time * SECONDS_PER_YEAR),
-        **_rescaling_arrays(
-            data, metadata, frequencies, num_redshift_nodes, density_sites
-        ),
-    )
-
-
-def build_rescaled_spectrum(
-    data: PolarizationPowerData,
-    metadata: CatalogMetadata,
-    *,
-    population: Population,
-    frequencies: ArrayLike,
-    num_redshift_nodes: int,
-    density_sites: Sequence[str],
-) -> tuple[SpectralDensityFn, LogWeightsFn]:
-    """Bind a :func:`reference_catalog` to a target, as both callables at once.
-
-    The spectrum is predicted on ``frequencies``, the observed grid, which need
-    not be the catalog's own; redshift is integrated on ``num_redshift_nodes``
-    nodes of :func:`redshift_quadrature` over the catalog population's window.
-    Every step -- weights, mean power, interpolation, rescaling, quadrature --
-    runs per call. Call outside JAX transformations.
-
-    The drawn intrinsic density is the catalog's own population at its
-    fiducials, evaluated once here. ``density_sites`` names the intrinsic
-    factors the weights include; leave it empty when no intrinsic
-    hyperparameter varies, and every weight is one. ``population`` is the
-    target's bound :class:`~astrogwb.populations.Population`; build it once per
-    run.
-
-    Both callables are pytrees (:class:`jax.tree_util.Partial`): the catalog's
-    arrays are their leaves, so passing one *as an argument* to a jitted
-    function traces it as input buffers instead of baking it in as constants,
-    and the compiled function serves every catalog of the same shapes built
-    with the same ``population`` and ``density_sites``.
-
-    The caller is trusted to pass a reference catalog of ``metadata`` and a
-    waveform the module's contracts hold for; nothing here checks either.
-    """
-    arrays = _rescaling_arrays(
-        data, metadata, frequencies, num_redshift_nodes, density_sites
-    )
-    spectral_density_fn = _bind(
-        rescaled_spectral_density,
-        population,
-        density_sites,
-        polarization_power=jnp.asarray(data["polarization_power"]),
-        **arrays,
-    )
-    return spectral_density_fn, _bind(
-        evaluate_log_weights,
-        population,
-        density_sites,
-        intrinsic=arrays["intrinsic"],
-        proposal_log_prob=arrays["proposal_log_prob"],
-    )

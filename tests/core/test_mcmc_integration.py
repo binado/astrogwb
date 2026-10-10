@@ -20,6 +20,7 @@ linear regime instead of silently drifting out of it.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from collections.abc import Mapping
 from functools import partial
@@ -51,8 +52,9 @@ from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_snr
 from astrogwb.inference import (
-    SpectralDensityFn,
-    gwb_spectral_density_model,
+    ImportanceGaussianLikelihood,
+    Network,
+    gwb_likelihood_model,
 )
 from astrogwb.populations._types import SourceModel
 from astrogwb.simulators.polarization_power import (
@@ -92,7 +94,7 @@ class AnalysisInputs(NamedTuple):
     effective_psd: jax.Array
     observation_time: float
     scale: jax.Array
-    estimator: SpectralDensityFn
+    estimator: ImportanceGaussianLikelihood
     frequencies: jax.Array
     total_merger_rate: jax.Array
     snr: float
@@ -125,10 +127,8 @@ def _build_analysis_inputs(
     # The reference catalog is its own proposal and the injection is its
     # prediction at the fiducials, so every log-weight there is exactly zero
     # and the template equals the data.
-    full_estimator, _ = build_reference_spectrum(
-        data, metadata, population=pinned_target
-    )
-    observed_spectral_density, extras = full_estimator(FIDUCIALS)
+    full_estimator = build_reference_spectrum(data, metadata, population=pinned_target)
+    observed_spectral_density, _, extras = full_estimator.predict(FIDUCIALS)
     total_merger_rate = jnp.asarray(extras["total_merger_rate"])
 
     sensitivities = load_sensitivity_map(DETECTORS)
@@ -174,7 +174,7 @@ def _build_analysis_inputs(
     # predicted, and the catalog's sources and weights are untouched.
     estimator = build_reference_spectrum(
         data, metadata, frequencies=frequencies, population=pinned_target
-    )[0]
+    )
 
     return AnalysisInputs(
         observed_spectral_density=observed_spectral_density,
@@ -188,11 +188,16 @@ def _build_analysis_inputs(
     )
 
 
-def _model_kwargs(inputs: AnalysisInputs) -> dict[str, object]:
+def _model_kwargs(
+    inputs: AnalysisInputs, mask: jax.Array | None = None
+) -> dict[str, object]:
     """Expose same-shaped data as dynamic arguments to NumPyro's JIT cache."""
     return {
-        "observed_spectral_density": inputs.observed_spectral_density,
-        "scale": inputs.scale,
+        "likelihood": dataclasses.replace(
+            inputs.estimator,
+            observed=inputs.observed_spectral_density,
+            network=Network(inputs.scale, mask),
+        )
     }
 
 
@@ -225,11 +230,7 @@ def _run_nuts(
 
 
 def _direct_h0_model(inputs: AnalysisInputs, priors: dict[str, dist.Distribution]):
-    return partial(
-        gwb_spectral_density_model,
-        spectral_density_fn=inputs.estimator,
-        priors=priors,
-    )
+    return partial(gwb_likelihood_model, priors=priors)
 
 
 @pytest.fixture(scope="module")
@@ -244,7 +245,7 @@ def analysis_inputs() -> AnalysisInputs:
 def test_h0_model_recovers_the_fiducial_and_the_fisher_width(
     analysis_inputs: AnalysisInputs,
 ) -> None:
-    """NUTS on ``gwb_spectral_density_model`` lands on H0_fid with the Fisher width."""
+    """NUTS on ``gwb_likelihood_model`` lands on H0_fid with the Fisher width."""
     inputs = analysis_inputs
 
     posterior = _run_nuts(
@@ -311,7 +312,6 @@ def test_one_compiled_sampler_serves_several_frequency_bands(
     compilations are counted.
     """
     inputs = analysis_inputs
-    kwargs = _model_kwargs(inputs)
     midpoint = float(jnp.median(inputs.frequencies))
     wide = jnp.ones_like(inputs.frequencies, dtype=bool)
     narrow = inputs.frequencies <= midpoint
@@ -333,7 +333,7 @@ def test_one_compiled_sampler_serves_several_frequency_bands(
 
     def run(mask: jax.Array, seed: int):
         def go() -> None:
-            mcmc.run(jax.random.PRNGKey(seed), **kwargs, frequency_mask=mask)
+            mcmc.run(jax.random.PRNGKey(seed), **_model_kwargs(inputs, mask))
 
         compilations = _count_compilations(go)
         return compilations, mcmc.get_samples()["H0"]

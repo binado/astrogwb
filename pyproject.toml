@@ -68,6 +68,9 @@ notebook = [
     "pandas>=2.0",
     "scipy>=1.10",
 ]
+blackjax = [
+    "blackjax>=1.2",
+]
 
 [project.urls]
 Homepage = "https://github.com/binado/astrogwb"
