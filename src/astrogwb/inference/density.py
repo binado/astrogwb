@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, Literal
 
 import jax
 import jax.numpy as jnp
@@ -12,7 +12,18 @@ import numpyro.distributions as dist
 from jax.typing import ArrayLike
 from numpyro.infer.util import log_density
 
-from .protocol import SpectralDensityFn
+from .protocol import SpectralDensityFn, SpectralVarianceFn
+from .shot_noise import (
+    amplitude_direction,
+    amplitude_shot_noise_variance,
+    per_frequency_direction,
+    rank_one_gaussian_log_likelihood,
+)
+
+#: The shot-noise term of :class:`GaussianGWBBatchedLikelihood`: an amplitude
+#: mode with :math:`s^2` per point, the same with a fixed :math:`s^2`, or the
+#: per-frequency mode.
+type _ShotNoiseMode = Literal["amplitude", "fixed", "per_frequency"]
 
 
 class LogDensityFn:
@@ -138,7 +149,9 @@ class GaussianGWBBatchedLikelihood:
     It duplicates the Gaussian likelihood of
     :func:`astrogwb.inference.gwb_spectral_density_model` for speed; the
     equivalence test against :class:`LogDensityFn` keeps the two in sync. The
-    amplitude-marginalized likelihood is not covered.
+    amplitude-marginalized likelihood is not covered. Physical shot noise
+    enters as a rank-one term of each network's covariance when a variance
+    is given (see :meth:`__call__` and :mod:`astrogwb.inference.shot_noise`).
 
     Parameters
     ----------
@@ -166,23 +179,39 @@ class GaussianGWBBatchedLikelihood:
         def evaluate(
             names: tuple[str, ...],
             structure: _Structure,
+            mode: _ShotNoiseMode | None,
+            variance_structure: _Structure | None,
             arrays: list[Any],
+            variance_arrays: list[Any],
             grids: tuple[jax.Array, ...],
             fixed: dict[str, ArrayLike],
             observed: jax.Array,
             scale: jax.Array,
             mask: jax.Array,
+            relative_variance: jax.Array,
         ) -> jax.Array:
             spectral_density_fn = _combine(arrays, structure)
             mesh = jnp.meshgrid(*grids, indexing="ij")
             points = {
                 name: values.ravel() for name, values in zip(names, mesh, strict=True)
             }
-            pred = jax.lax.map(
-                lambda point: spectral_density_fn(point | fixed)[0],
-                points,
-                batch_size=chunk_size,
-            )
+            if variance_structure is None:
+                pred = jax.lax.map(
+                    lambda point: spectral_density_fn(point | fixed)[0],
+                    points,
+                    batch_size=chunk_size,
+                )
+                variance = None
+            else:
+                variance_fn = _combine(variance_arrays, variance_structure)
+                pred, variance = jax.lax.map(
+                    lambda point: (
+                        spectral_density_fn(point | fixed)[0],
+                        variance_fn(point | fixed),
+                    ),
+                    points,
+                    batch_size=chunk_size,
+                )
 
             values = points | fixed
             log_prior = jnp.asarray(
@@ -192,18 +221,41 @@ class GaussianGWBBatchedLikelihood:
                 )
             )
 
-            def likelihood(scale_k: jax.Array, mask_k: jax.Array) -> jax.Array:
-                logp = dist.Normal(pred, scale_k).log_prob(observed)
-                return jnp.where(mask_k, logp, 0.0).sum(-1)
+            def likelihood(
+                scale_k: jax.Array, mask_k: jax.Array, relative_k: jax.Array
+            ) -> jax.Array:
+                if mode is None:
+                    logp = dist.Normal(pred, scale_k).log_prob(observed)
+                    return jnp.where(mask_k, logp, 0.0).sum(-1)
+                if mode == "fixed":
+                    direction = amplitude_direction(pred, relative_k)
+                    return rank_one_gaussian_log_likelihood(
+                        observed, pred, scale_k, direction, mask_k
+                    )
+                # Every other mode predicted a variance next to the spectrum.
+                assert variance is not None
+                if mode == "amplitude":
+                    direction = amplitude_direction(
+                        pred,
+                        amplitude_shot_noise_variance(pred, variance, scale_k, mask_k),
+                    )
+                else:
+                    direction = per_frequency_direction(variance)
+                return rank_one_gaussian_log_likelihood(
+                    observed, pred, scale_k, direction, mask_k
+                )
 
-            total = log_prior[None] + jax.vmap(likelihood)(scale, mask)
+            total = log_prior[None] + jax.vmap(likelihood)(
+                scale, mask, relative_variance
+            )
             sizes = tuple(grid.size for grid in grids)
             return jnp.asarray(total).reshape(scale.shape[0], *sizes)
 
         # `names` is static and `grids` a tuple: a dict argument would be
         # flattened in sorted-key order, losing the insertion order of the axes.
-        # `structure` is the spectral density function's static half.
-        self._evaluator = jax.jit(evaluate, static_argnums=(0, 1))
+        # `structure` and `variance_structure` are the static halves of the two
+        # callables, and `mode` selects the shot-noise term.
+        self._evaluator = jax.jit(evaluate, static_argnums=(0, 1, 2, 3))
 
     def __call__(
         self,
@@ -214,6 +266,9 @@ class GaussianGWBBatchedLikelihood:
         observed_spectral_density: jax.Array,
         scale: jax.Array,
         frequency_mask: jax.Array | None = None,
+        shot_noise_variance_fn: SpectralVarianceFn | None = None,
+        shot_noise_direction: Literal["amplitude", "per_frequency"] = "amplitude",
+        amplitude_shot_noise_variance: ArrayLike | None = None,
     ) -> jax.Array:
         """Log density over the cartesian product of 1-2 grids, per network.
 
@@ -235,6 +290,24 @@ class GaussianGWBBatchedLikelihood:
             Boolean ``(K, F)`` of the bins each network counts; ``None``
             counts all. Masked bins contribute exactly zero, whatever their
             ``scale``.
+        shot_noise_variance_fn:
+            ``params -> (F,)``, the per-bin shot-noise variance of the
+            spectrum (:mod:`astrogwb.inference.shot_noise`). Evaluated once
+            per grid point next to the spectrum, and traced like it. With it,
+            each network's likelihood has covariance
+            :math:`D + \\mathbf{u}\\mathbf{u}^T` along ``shot_noise_direction``:
+            ``"amplitude"`` takes :math:`\\mathbf{u} = s\\,\\mathbf{S}` with
+            :math:`s^2` from
+            :func:`~astrogwb.inference.shot_noise.amplitude_shot_noise_variance`
+            at that point and network; ``"per_frequency"`` takes
+            :math:`u_f = \\sqrt{V_f}`. ``None`` and no
+            ``amplitude_shot_noise_variance`` is the diagonal Gaussian.
+        shot_noise_direction:
+            Static: changing it compiles anew.
+        amplitude_shot_noise_variance:
+            A fixed :math:`s^2`, scalar or ``(K,)`` per network: the amplitude
+            direction without evaluating any variance. Takes precedence over
+            ``shot_noise_variance_fn``, which is then ignored.
 
         Returns
         -------
@@ -253,15 +326,32 @@ class GaussianGWBBatchedLikelihood:
             else jnp.asarray(frequency_mask)
         )
         arrays, structure = _partition(spectral_density_fn)
+        mode: _ShotNoiseMode | None = None
+        variance_arrays: list[Any] = []
+        variance_structure: _Structure | None = None
+        relative_variance = jnp.zeros(scale.shape[0])
+        if amplitude_shot_noise_variance is not None:
+            mode = "fixed"
+            relative_variance = jnp.broadcast_to(
+                jnp.asarray(amplitude_shot_noise_variance, dtype=scale.dtype),
+                (scale.shape[0],),
+            )
+        elif shot_noise_variance_fn is not None:
+            mode = shot_noise_direction
+            variance_arrays, variance_structure = _partition(shot_noise_variance_fn)
         return self._evaluator(
             tuple(grids),
             structure,
+            mode,
+            variance_structure,
             arrays,
+            variance_arrays,
             tuple(jnp.asarray(grid) for grid in grids.values()),
             dict(fixed) if fixed is not None else {},
             jnp.asarray(observed_spectral_density),
             scale,
             mask,
+            relative_variance,
         )
 
 
