@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from functools import partial
 
-import blackjax
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -15,6 +14,9 @@ from jax.typing import ArrayLike
 
 from astrogwb.inference import GaussianLikelihood, Network, gwb_likelihood_model
 from astrogwb.inference.blackjax import potential_from_model
+
+# Optional extra: `just test-core` does not install it, `just test-integration` does.
+blackjax = pytest.importorskip("blackjax")
 
 pytestmark = pytest.mark.integration
 
@@ -50,11 +52,10 @@ def test_blackjax_nuts_recovers_the_analytic_gaussian_posterior(
     )
 
     warmup = blackjax.window_adaptation(blackjax.nuts, logdensity_fn)
-    # blackjax annotates `RunFn.__call__` without its `num_steps` argument.
     (state, parameters), _ = warmup.run(
         jax.random.key(1),
         initial_position,
-        300,  # ty: ignore[too-many-positional-arguments]
+        300,
     )
     kernel = blackjax.nuts(logdensity_fn, **parameters)
 
