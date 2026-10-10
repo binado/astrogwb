@@ -7,8 +7,6 @@
 - :mod:`astrogwb.distributions.mass` — ordered component-mass densities
 - :mod:`astrogwb.distributions.delay` — merger delay-time densities
 - :mod:`astrogwb.distributions.orientation` — isotropic polar-angle densities
-- :mod:`astrogwb.distributions.amplitude` — conditional posterior of a
-  marginalized amplitude parameter
 - :mod:`astrogwb.distributions.config` — serializable distribution configurations
 """
 

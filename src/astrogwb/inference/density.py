@@ -148,8 +148,7 @@ class GaussianGWBBatchedLikelihood:
 
     It duplicates the Gaussian likelihood of
     :func:`astrogwb.inference.gwb_spectral_density_model` for speed; the
-    equivalence test against :class:`LogDensityFn` keeps the two in sync. The
-    amplitude-marginalized likelihood is not covered. Physical shot noise
+    equivalence test against :class:`LogDensityFn` keeps the two in sync. Physical shot noise
     enters as a rank-one term of each network's covariance when a variance
     is given (see :meth:`__call__` and :mod:`astrogwb.inference.shot_noise`).
 

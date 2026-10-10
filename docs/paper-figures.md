@@ -32,6 +32,10 @@ and per-network SNR figures live in
 
 ## Spectrum-realization shot-noise analysis
 
+> **Deprecated.** `notebooks/spectrum_snrs.py` depends on the removed
+> amplitude-marginalized model and no longer imports; it will be resolved in a
+> follow-up.
+
 `notebooks/spectrum_snrs.py` is a marimo notebook that justifies two choices of
 the appendix, the number of injections `N` (128k-256k recommended) and the
 minimum redshift `z_min`, by one criterion: **catalog shot noise stays below

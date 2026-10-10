@@ -159,7 +159,6 @@ include = [
     "src",
     "tests",
     "scripts/simulate_spectra.py",
-    "notebooks/spectrum_snrs.py",
     "notebooks/cosmology_grid_posteriors.py",
 ]
 

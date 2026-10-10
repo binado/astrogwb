@@ -51,7 +51,9 @@ repository root as the working directory.
 - **`fiducial_spectrum.py`** — marimo notebook. One seeded forward-model draw
   of the fiducial $S_h$ / $\Omega_{\mathrm{GW}}$, network $S_{\mathrm{eff}}$,
   $\sigma$, and per-network SNR. No catalog file.
-- **`spectrum_snrs.py`** — marimo notebook for the appendix's shot-noise
+- **`spectrum_snrs.py`** — **deprecated**: it depends on the removed
+  amplitude-marginalized model and fails at import; to be resolved in a
+  follow-up. Marimo notebook for the appendix's shot-noise
   argument. A physics-first walkthrough of how catalog shot noise scales with
   the number of injections $N$ and the minimum redshift $z_{\min}$, judged
   against the expected $\sigma(H_0)$. It fits every template to a common
