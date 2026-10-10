@@ -89,6 +89,16 @@ repository root as the working directory.
   sensitive network's per-bin noise and of each parameter's Fisher width.
   Smoke test:
   `ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/importance_convergence.py`.
+- **`shot_noise_coverage.py`** — marimo notebook. Calibration of the
+  shot-noise likelihood for $H_0$: $M$ independent Poisson injections at the
+  fiducials (cached one file each under `default_cache_dir() / "coverage"`),
+  plus Gaussian detector noise per network, scored on an $H_0$ grid against
+  the grid notebook's reference catalog with the `detector`, `amplitude` and
+  `fixed` likelihoods. Reports 68%/95% coverage with binomial errors, the mean
+  and variance of $z = (\bar H_0 - H_0^{\mathrm{true}})/\mathrm{sd}$, and a
+  PIT/$z$ figure at the fiducial network; writes `coverage_H0.pdf` and
+  `coverage_H0.csv`. Smoke test:
+  `ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/shot_noise_coverage.py`.
 
 `fiducial_spectrum.py` and `spectrum_snrs.py` read the shared fiducials, detector registry, and default draw's waveform
 and population through `astrogwb.paper.config`.
