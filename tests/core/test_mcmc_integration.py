@@ -5,7 +5,7 @@ injection and the importance-sampling proposal, so every log-weight is exactly
 zero and the "observed" spectrum is the unweighted catalog contraction. With
 only :math:`H_0` free, the predicted spectrum is
 :math:`S_h(H_0) = A\,S_h(H_0^{\rm fid})` with :math:`A = H_0^{\rm fid}/H_0`
-(because the amplitude transform is :math:`H_0^{\rm fid}/H_0`), so the log-likelihood is
+(the spectrum scales as :math:`1/H_0`), so the log-likelihood is
 exactly :math:`-\tfrac{1}{2}(1 - A)^2\rho^2`. Hence :math:`A \sim N(1,
 1/\rho^2)` truncated by the prior, giving :math:`\sigma_{H_0}/H_0^{\rm fid} =
 1/\rho` and a mean biased high by only :math:`1/\rho^2` (~4e-4 at
@@ -39,7 +39,6 @@ from astrogwb_mock_population import (
     mock_population,
 )
 from jax.typing import ArrayLike
-from numpyro import handlers
 from numpyro.infer import MCMC, NUTS, init_to_value
 
 from astrogwb.constants import SECONDS_PER_YEAR
@@ -48,14 +47,11 @@ from astrogwb.detector import (
     gaussian_bin_scale,
     load_sensitivity_map,
 )
-from astrogwb.distributions.amplitude import AmplitudeConditional, amplitude_prior
 from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_snr
 from astrogwb.inference import (
     SpectralDensityFn,
-    amplitude_H0_transform,
-    gwb_amplitude_marginalized_model,
     gwb_spectral_density_model,
 )
 from astrogwb.populations._types import SourceModel
@@ -86,8 +82,6 @@ NUM_WARMUP = 500
 NUM_SAMPLES = 1000
 
 H0_PRIOR = dist.Uniform(20.0, 140.0)
-H0_TRANSFORM = amplitude_H0_transform(FIDUCIALS["H0"])
-AMPLITUDE_PRIOR = amplitude_prior(H0_PRIOR, H0_TRANSFORM)
 OMEGA_M_PRIOR = dist.Normal(0.3096, 0.006)
 
 
@@ -112,13 +106,6 @@ def pinned_target(
 ) -> tuple[RedshiftDistribution, SourceModel]:
     """The target population, unsampled hyperparameters pinned at the fiducials."""
     return _TARGET({**FIDUCIALS, **params})
-
-
-class MarginalizedResult(NamedTuple):
-    """One shared marginalized chain and its reconstructed H0 draws."""
-
-    posterior: dict
-    reconstructed: dict
 
 
 def _build_analysis_inputs(
@@ -245,55 +232,10 @@ def _direct_h0_model(inputs: AnalysisInputs, priors: dict[str, dist.Distribution
     )
 
 
-def _marginalized_model(
-    inputs: AnalysisInputs,
-    priors: dict[str, dist.Distribution],
-):
-    """H0 is a ``priors`` site pinned at its fiducial: the spectrum is the template."""
-    return handlers.block(
-        handlers.condition(
-            partial(
-                gwb_amplitude_marginalized_model,
-                spectral_density_fn=inputs.estimator,
-                amplitude_prior=AMPLITUDE_PRIOR,
-                priors={"H0": H0_PRIOR, **priors},
-            ),
-            data={"H0": FIDUCIALS["H0"]},
-        ),
-        hide=["H0"],
-    )
-
-
-def _reconstruct_h0(posterior: dict) -> dict:
-    """Draw H0 back from the chain's sufficient statistics."""
-    conditional = AmplitudeConditional(
-        posterior["amplitude_mle"],
-        posterior["template_optimal_snr"],
-        prior=AMPLITUDE_PRIOR,
-    )
-    # fold_in keeps the reconstruction key distinct from the chain's.
-    amplitude = conditional.sample(jax.random.fold_in(jax.random.PRNGKey(SEED), 1))
-    return {"H0": H0_TRANSFORM.inv(amplitude)}
-
-
 @pytest.fixture(scope="module")
 def analysis_inputs() -> AnalysisInputs:
     """Build the deterministic masked catalog inputs once for this module."""
     return _build_analysis_inputs(*build_reference_catalog())
-
-
-@pytest.fixture(scope="module")
-def marginalized_result(analysis_inputs: AnalysisInputs) -> MarginalizedResult:
-    """Run the marginalized chain once for both tests that inspect it."""
-    posterior = _run_nuts(
-        _marginalized_model(analysis_inputs, {"Omega_m": OMEGA_M_PRIOR}),
-        model_kwargs=_model_kwargs(analysis_inputs),
-        init_values={"Omega_m": FIDUCIALS["Omega_m"]},
-    )
-    return MarginalizedResult(
-        posterior=posterior,
-        reconstructed=_reconstruct_h0(posterior),
-    )
 
 
 # --------------------------------------------------------------------------- #
@@ -327,94 +269,6 @@ def test_h0_model_recovers_the_fiducial_and_the_fisher_width(
     np.testing.assert_allclose(float(np.mean(h0)), FIDUCIALS["H0"], rtol=0.01)
     np.testing.assert_allclose(
         np.std(h0), FIDUCIALS["H0"] / inputs.snr, rtol=0.15, atol=0.0
-    )
-
-
-# --------------------------------------------------------------------------- #
-# The amplitude-marginalized model
-# --------------------------------------------------------------------------- #
-def test_amplitude_marginalized_model_reconstructs_h0(
-    analysis_inputs: AnalysisInputs,
-    marginalized_result: MarginalizedResult,
-) -> None:
-    """H0 is marginalized out of the chain and drawn back to the same posterior."""
-    inputs = analysis_inputs
-    posterior = marginalized_result.posterior
-
-    assert set(posterior) >= {
-        "Omega_m",
-        "total_merger_rate_at_unit_amplitude",
-        "amplitude_mle",
-        "template_optimal_snr",
-        "importance_relative_ess",
-    }
-    # A numpyro.factor publishes no draws, so neither the marginalized
-    # parameter nor the likelihood site can appear in the chain.
-    assert "H0" not in posterior
-    assert "spectral_density_obs" not in posterior
-
-    # The template equals the data at the fiducial, so the best-fit amplitude
-    # ratio averages to 1 and the template's optimal SNR to the injection's.
-    # Per draw they scatter by ~1%: Omega_m is sampled, so an individual
-    # template is not the injection.
-    np.testing.assert_allclose(
-        float(np.mean(posterior["amplitude_mle"])), 1.0, rtol=5e-3
-    )
-    np.testing.assert_allclose(
-        np.mean(posterior["template_optimal_snr"]),
-        inputs.snr,
-        rtol=5e-3,
-        atol=0.0,
-    )
-
-    reconstructed = marginalized_result.reconstructed
-    assert set(reconstructed) == {"H0"}
-    for values in reconstructed.values():
-        assert values.shape == (1, NUM_SAMPLES)
-
-    h0 = np.asarray(reconstructed["H0"])
-    np.testing.assert_allclose(float(np.mean(h0)), FIDUCIALS["H0"], rtol=0.01)
-    np.testing.assert_allclose(
-        np.std(h0), FIDUCIALS["H0"] / inputs.snr, rtol=0.15, atol=0.0
-    )
-
-
-def test_marginalized_and_direct_h0_posteriors_agree(
-    analysis_inputs: AnalysisInputs,
-    marginalized_result: MarginalizedResult,
-) -> None:
-    """The two models give the same H0 marginal on realistic data.
-
-    ``test_spectral_inference.py::test_amplitude_marginalized_model_matches_the_general_model``
-    already pins the *exact* log-density equivalence at ``rtol=1e-3`` by
-    numerical quadrature, which is far sharper than any MCMC comparison. What
-    this adds is coverage of the full pipeline -- NUTS, the
-    reconstruction conditional -- on realistic data, which is where a
-    mismatched conditional would actually bite.
-    """
-    inputs = analysis_inputs
-
-    direct = _run_nuts(
-        _direct_h0_model(inputs, {"H0": H0_PRIOR, "Omega_m": OMEGA_M_PRIOR}),
-        model_kwargs=_model_kwargs(inputs),
-        init_values={"H0": FIDUCIALS["H0"], "Omega_m": FIDUCIALS["Omega_m"]},
-    )
-    reconstructed = marginalized_result.reconstructed
-
-    direct_h0 = np.asarray(direct["H0"])
-    marginalized_h0 = np.asarray(reconstructed["H0"])
-    # Both marginals are ~1.4 wide with an effective sample size of a few
-    # hundred, so the Monte-Carlo error on each mean is ~0.1: agreement is
-    # asserted at the level MCMC can support, not at the level the log-density
-    # comparison already pins.
-    np.testing.assert_allclose(
-        float(np.mean(marginalized_h0)),
-        float(np.mean(direct_h0)),
-        rtol=0.0,
-        atol=0.5,
-    )
-    np.testing.assert_allclose(
-        np.std(marginalized_h0), np.std(direct_h0), rtol=0.2, atol=0.0
     )
 
 

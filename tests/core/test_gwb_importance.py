@@ -7,6 +7,11 @@ from typing import Any
 import jax
 import numpy as np
 import pytest
+from astrogwb_mock_population import (
+    FIDUCIALS,
+    build_reference_catalog,
+    build_reference_spectrum,
+)
 
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import luminosity_distance
@@ -508,4 +513,23 @@ def test_phinney_kernel_times_the_distance_ratio_squared_is_the_rate_density(
         np.sum(weights * undone),
         total_merger_rate(redshift, weights, merger_rate, hubble_constant, omega_m),
         rtol=1e-12,
+    )
+
+
+@pytest.mark.parametrize(
+    ("parameter", "exponent"), [("H0", -1.0), ("local_merger_rate", 1.0)]
+)
+@pytest.mark.parametrize("factor", [0.5, 1.3, 2.0])
+def test_spectrum_scales_as_a_power_of_h0_and_the_local_merger_rate(
+    parameter: str, exponent: float, factor: float
+) -> None:
+    """``S ~ 1/H0`` and ``S ~ R0``: the exponents the cosmology and kernel imply."""
+    spectrum, _ = build_reference_spectrum(*build_reference_catalog(num_sources=16))
+    fiducial = FIDUCIALS[parameter]
+
+    baseline, _ = spectrum(FIDUCIALS)
+    scaled, _ = spectrum({**FIDUCIALS, parameter: factor * fiducial})
+
+    np.testing.assert_allclose(
+        np.asarray(scaled), factor**exponent * np.asarray(baseline), rtol=1e-8
     )

@@ -146,7 +146,7 @@ extend-select = ["TID"]
 # F401: the setup cell is imports only; later cells are what use those names.
 # PLR1711: marimo writes a bare `return` on cells that export nothing.
 "notebooks/fiducial_spectrum.py" = ["F811", "F401", "PLR1711"]
-"notebooks/spectrum_snrs.py" = ["F811", "F401", "PLR1711"]
+"notebooks/spectrum_snrs.py" = ["F811", "F401", "I001", "PLR1711"]
 "notebooks/mean_spectrum_snr_table.py" = ["PLR1711"]
 "notebooks/cosmology_grid_posteriors.py" = ["PLR1711"]
 
@@ -159,7 +159,6 @@ include = [
     "src",
     "tests",
     "scripts/simulate_spectra.py",
-    "notebooks/spectrum_snrs.py",
     "notebooks/cosmology_grid_posteriors.py",
 ]
 

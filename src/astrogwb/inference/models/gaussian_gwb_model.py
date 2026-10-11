@@ -25,9 +25,6 @@ bound to a target outside inference::
         scale=gaussian_bin_scale(effective_psd, observation_time, frequencies),
     )
 
-:func:`~astrogwb.inference.models.gaussian_gwb_marginalized_amplitude.gwb_amplitude_marginalized_model`
-consumes the same spectrum callable; see that module for the marginalized
-variant and its end-to-end sketch.
 """
 
 from __future__ import annotations
