@@ -1,6 +1,6 @@
 # Notebooks
 
-Workflows in this directory are stored as plain `.py` files. Most are [Jupytext](https://jupytext.readthedocs.io/) **py:percent** notebooks — a way to represent Jupyter notebooks as Python source instead of `.ipynb` JSON. That keeps diffs readable and lets normal Python tooling (Ruff, `ty`) work on notebook code. The `.py` is the source of truth; `*.ipynb` is gitignored.
+Workflows in this directory are stored as plain `.py` files and edited in [marimo](https://docs.marimo.io/). That keeps diffs readable and lets normal Python tooling (Ruff, `ty`) work on notebook code. The `.py` is the source of truth; `*.ipynb` is gitignored.
 
 [`fiducial_spectrum.py`](fiducial_spectrum.py) and [`spectrum_snrs.py`](spectrum_snrs.py) are [marimo](https://docs.marimo.io/) notebooks: plain `.py` files whose cells form a reactive graph.
 
@@ -21,24 +21,6 @@ outside themselves and import nothing from `tests/core`.
   resolution $\Delta f$ is refined. The companion to
   `tests/core/test_frequency_resolution.py`, which owns the
   tolerances; the notebook owns the picture.
-- **`waveform_approximant_spectra.py`** — compare TaylorF2, IMRPhenomXAS,
-  IMRPhenomHM, and IMRPhenomXAS_NRTidalV3 spectra on identical stochastic
-  event draws, including percentile bands and fractional residuals to the
-  tidal reference. Higher-mode spectra use matched isotropic inclination draws
-  from the recorded population, without applying the quadrupole analytic average.
-  It requires the `notebook` extra and the `jupyter` tooling group. It writes
-  `outputs/figures/waveform_approximant_spectra.pdf`; there is no data cache,
-  so every execution deterministically regenerates the draws from its fixed
-  seed. Execute it from the repository root with:
-
-  ```bash
-  uv run --extra notebook --group jupyter jupytext --to notebook --execute \
-      notebooks/waveform_approximant_spectra.py
-  ```
-
-  To convert without executing, omit `--execute`; the resulting sibling
-  `.ipynb` is gitignored.
-
 **Paper analyses** — these drive real waveform catalogs through the
 `astrogwb.paper` configuration layer and are not self-contained by design. They
 need built catalogs under `outputs/catalogs/`, the `notebook` extra, and the
@@ -129,9 +111,9 @@ catalog under `outputs/catalogs/`; their spectra are served or generated through
 Open either notebook from the repository root:
 
 ```bash
-uv run --extra notebook --group jupyter marimo edit notebooks/fiducial_spectrum.py
+uv run --extra notebook --group notebook marimo edit notebooks/fiducial_spectrum.py
 # Or open the SNR distribution sweeps:
-uv run --extra notebook --group jupyter marimo edit notebooks/spectrum_snrs.py
+uv run --extra notebook --group notebook marimo edit notebooks/spectrum_snrs.py
 ```
 
 For the shared scientific values on their own, without standing in for a
@@ -160,15 +142,7 @@ in a long-lived kernel, call `astrogwb.paper.config._shared.cache_clear()`.
 
 ## Running them
 
-The self-contained notebook converts and executes through `just`:
-
-```bash
-just test-notebooks
-```
-
-That recipe installs the `simulation` and `io` extras and the `jupyter` group,
-and nothing else — which is what keeps the notebook's self-containment honest.
-The notebook names the population it draws from and the parameters it draws at,
+The self-contained notebook names the population it draws from and the parameters it draws at,
 then passes `sample_sources`'s output through
 `PolarizationPowerCatalog.from_generator(..., generator=AnalyticInspiralGenerator(...))`.
 The
@@ -181,25 +155,7 @@ changes only how long the notebook runs, never which
 cells execute — there is one code path in both modes:
 
 ```bash
-ASTROGWB_NOTEBOOK_SMOKE=1 just test-notebooks
-```
-
-## Opening in Jupyter
-
-The percent notebooks open in the classic notebook UI after a conversion to `.ipynb`. The two marimo notebooks open in marimo, as above.
-
-To convert a percent notebook:
-
-```bash
-uvx jupytext --to ipynb notebooks/catalog_convergence.py
-```
-
-Jupytext writes a sibling `.ipynb` you can open in JupyterLab. Install the
-environment first — the `notebook` extra is the library stack the notebooks
-import, the `jupyter` group is the tooling that runs them:
-
-```bash
-uv sync --extra notebook --group jupyter
+ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/fiducial_spectrum.py
 ```
 
 ## The catalog cache
