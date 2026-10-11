@@ -26,13 +26,11 @@ with app.setup(hide_code=True):
     from astrogwb.detector import effective_psd, gaussian_bin_scale
     from astrogwb.frequency import frequency_mask
     from astrogwb.gwb.importance import (
-        build_rescaled_shot_noise,
-        build_rescaled_spectrum,
         reference_catalog,
         reference_catalog_stem,
     )
+    from astrogwb.inference import ImportanceGaussianLikelihood
     from astrogwb.inference.fisher import spectral_density_jacobian
-    from astrogwb.inference.protocol import SpectralDensityFn
     from astrogwb.paper.config import (
         detector_registry,
         fiducials,
@@ -49,11 +47,13 @@ with app.setup(hide_code=True):
         PolarizationPowerData,
     )
 
-    # One compiled spectrum for every catalog: the spectral density function is
-    # a pytree argument, so its catalog is a traced input, not a constant, and
-    # catalogs of one shape share the compilation.
-    evaluate_spectrum = jax.jit(lambda fn, params: fn(params)[0])
-    evaluate_variance = jax.jit(lambda fn, params: fn(params))
+    # One compiled spectrum for every catalog: the likelihood is a pytree
+    # argument, so its catalog is a traced input, not a constant, and catalogs
+    # of one shape share the compilation.
+    evaluate_spectrum = jax.jit(lambda likelihood, params: likelihood.spectrum(params))
+    evaluate_variance = jax.jit(
+        lambda likelihood, params: likelihood.predict(params)[1]
+    )
 
 
 @app.cell(hide_code=True)
@@ -329,13 +329,13 @@ def network_data(
 
 @app.function(hide_code=True)
 def spectra_at(
-    spectral_density_fn: SpectralDensityFn,
+    likelihood: ImportanceGaussianLikelihood,
     points: Mapping[str, Mapping[str, float]],
 ) -> NDArray[np.float64]:
     """The spectrum at every evaluation point, shape ``(len(points), F)``."""
     return np.stack(
         [
-            np.asarray(evaluate_spectrum(spectral_density_fn, dict(params)))
+            np.asarray(evaluate_spectrum(likelihood, dict(params)))
             for params in points.values()
         ]
     )
@@ -348,12 +348,12 @@ def rescaled_fn(
     target: Population,
     frequencies: NDArray[np.float64],
     num_redshift_nodes: int,
-) -> SpectralDensityFn:
-    """The rescaled spectrum of one reference catalog.
+) -> ImportanceGaussianLikelihood:
+    """The rescaled spectrum of one reference catalog, as a likelihood.
 
     No swept parameter is intrinsic, so no density factor enters a weight.
     """
-    spectral_density_fn, _ = build_rescaled_spectrum(
+    return ImportanceGaussianLikelihood.from_catalog(
         data,
         metadata,
         population=target,
@@ -361,7 +361,6 @@ def rescaled_fn(
         num_redshift_nodes=num_redshift_nodes,
         density_sites=(),
     )
-    return spectral_density_fn
 
 
 @app.function(hide_code=True)
@@ -508,7 +507,9 @@ def _(
         frequencies,
         2 ** ladder_exponents[-1],
     )
-    jacobian = np.asarray(spectral_density_jacobian(_fn, FIDUCIALS, peak_parameters))
+    jacobian = np.asarray(
+        spectral_density_jacobian(_fn.spectrum, FIDUCIALS, peak_parameters)
+    )
     return (jacobian,)
 
 
@@ -671,20 +672,23 @@ def _(
     sigma,
     target,
 ):
-    _variance = jax.jit(lambda fn, params: fn(params))
     ladder_scatter = {}
     for _nodes in ladder_nodes:
-        _fn = build_rescaled_shot_noise(
+        _fn = ImportanceGaussianLikelihood.from_catalog(
             ladder_reference,
             ladder_reference_metadata,
             population=target,
             frequencies=frequencies,
             num_redshift_nodes=_nodes,
             density_sites=(),
+            shot_noise="amplitude",
             observation_time=observation_time,
         )
         _variances = np.stack(
-            [np.asarray(_variance(_fn, dict(p))) for p in evaluation_points.values()]
+            [
+                np.asarray(evaluate_variance(_fn, dict(p)))
+                for p in evaluation_points.values()
+            ]
         )
         ladder_scatter[_nodes] = amplitude_scatter(
             ladder_spectra[_nodes], _variances, sigma, mask
@@ -779,13 +783,14 @@ def catalog_ladder(
                     points,
                 )
             )
-            shot_noise = build_rescaled_shot_noise(
+            shot_noise = ImportanceGaussianLikelihood.from_catalog(
                 prefix,
                 prefix_metadata,
                 population=target,
                 frequencies=frequencies,
                 num_redshift_nodes=num_redshift_nodes,
                 density_sites=(),
+                shot_noise="amplitude",
                 observation_time=observation_time,
             )
             row_variances.append(np.asarray(evaluate_variance(shot_noise, fiducial)))

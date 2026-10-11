@@ -4,6 +4,7 @@ __generated_with = "0.25.0"
 app = marimo.App()
 
 with app.setup(hide_code=True):
+    import dataclasses
     import hashlib
     import json
     import os
@@ -16,11 +17,11 @@ with app.setup(hide_code=True):
     # Backend configuration precedes waveform construction and array creation.
     configure_runtime(num_chains=1)
 
-    import jax
     import jax.numpy as jnp
     import marimo as mo
     import matplotlib.pyplot as plt
     import numpy as np
+    import numpyro.distributions as dist
     import pandas as pd
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
@@ -32,16 +33,15 @@ with app.setup(hide_code=True):
     from astrogwb.detector import effective_psd, gaussian_bin_scale
     from astrogwb.frequency import frequency_mask
     from astrogwb.gwb.importance import (
-        build_rescaled_shot_noise,
-        build_rescaled_spectrum,
         reference_catalog,
         reference_catalog_stem,
     )
     from astrogwb.inference import (
-        GaussianGWBBatchedLikelihood,
-        SpectralVarianceFn,
+        ImportanceGaussianLikelihood,
         amplitude_shot_noise_variance,
+        grid_log_posterior,
     )
+    from astrogwb.inference import Network as LikelihoodNetwork
     from astrogwb.paper.cache import default_cache_dir
     from astrogwb.paper.catalogs import validate_matching_frequency_grids
     from astrogwb.paper.config import (
@@ -465,21 +465,27 @@ def network_data(
 
 @app.function(hide_code=True)
 def evaluate_grid(
-    log_density_fn: Callable[..., jax.Array],
+    likelihood: ImportanceGaussianLikelihood,
+    priors: Mapping[str, dist.Distribution],
+    chunk_size: int | None,
     axes: Mapping[str, tuple[float, float, int]],
     fixed: Mapping[str, float],
     observed: NDArray[np.float64],
     per_network: Mapping[str, dict[str, object]],
+    relative_variance: NDArray[np.float64] | None,
 ) -> tuple[dict[str, NDArray], dict[str, NDArray]]:
-    """Evaluate one problem's log density on its grid, for every network.
+    """Evaluate one problem's log posterior on its grid, for every network.
 
     Parameters
     ----------
-    log_density_fn
-        The problem's evaluator: a :class:`GaussianGWBBatchedLikelihood` with
-        its ``spectral_density_fn`` bound. One prediction per grid point,
-        shared by all networks, which differ only in ``scale`` and
-        ``frequency_mask``.
+    likelihood
+        The problem's likelihood, with its shot-noise mode set. One prediction
+        per grid point, shared by all networks, which differ only in
+        :class:`~astrogwb.inference.Network`.
+    priors
+        Prior of every parameter.
+    chunk_size
+        Grid points per :func:`jax.lax.map` batch.
     axes
         ``(low, high, size)`` of each swept parameter.
     fixed
@@ -488,6 +494,9 @@ def evaluate_grid(
         Observed spectrum ``(F,)``.
     per_network
         :func:`network_data` by network name.
+    relative_variance
+        :math:`s^2` per network, in ``per_network`` order, for the ``"fixed"``
+        mode; ``None`` otherwise.
 
     Returns
     -------
@@ -498,15 +507,21 @@ def evaluate_grid(
     grids = {name: np.linspace(lo, hi, n) for name, (lo, hi, n) in axes.items()}
     jax_grids = {name: jnp.asarray(grid) for name, grid in grids.items()}
     names = list(per_network)
+    networks = LikelihoodNetwork(
+        scale=jnp.stack([jnp.asarray(per_network[n]["scale"]) for n in names]),
+        mask=jnp.stack([jnp.asarray(per_network[n]["frequency_mask"]) for n in names]),
+        relative_variance=(
+            None if relative_variance is None else jnp.asarray(relative_variance)
+        ),
+    )
     batched = np.asarray(
-        log_density_fn(
+        grid_log_posterior(
+            dataclasses.replace(likelihood, observed=jnp.asarray(observed)),
+            priors,
             jax_grids,
             fixed=fixed,
-            observed_spectral_density=jnp.asarray(observed),
-            scale=jnp.stack([jnp.asarray(per_network[n]["scale"]) for n in names]),
-            frequency_mask=jnp.stack(
-                [jnp.asarray(per_network[n]["frequency_mask"]) for n in names]
-            ),
+            networks=networks,
+            chunk_size=chunk_size,
         )
     )
     log_densities = {network: batched[i] for i, network in enumerate(names)}
@@ -517,8 +532,11 @@ def evaluate_grid(
 def grid_posterior(
     run: str,
     axes: Mapping[str, tuple[float, float, int]],
-    evaluator: Callable[..., jax.Array],
+    likelihood: ImportanceGaussianLikelihood,
+    relative_variance: NDArray[np.float64] | None,
     *,
+    priors: Mapping[str, dist.Distribution],
+    chunk_size: int | None,
     fiducials: Mapping[str, float],
     observed: NDArray[np.float64],
     per_network: Mapping[str, dict[str, object]],
@@ -534,11 +552,15 @@ def grid_posterior(
         Problem name, also in the cache file name.
     axes
         ``(low, high, size)`` of each swept parameter.
-    evaluator
-        The problem's :class:`GaussianGWBBatchedLikelihood`, its
-        ``spectral_density_fn`` bound with :func:`functools.partial`: bound
-        per call, so the catalog stays a traced input of the compiled
-        evaluator rather than a constant baked into it.
+    likelihood
+        The problem's :class:`ImportanceGaussianLikelihood`. Its catalog stays
+        a traced input of the compiled evaluator, not a constant baked into it.
+    relative_variance
+        :math:`s^2` per network for the ``"fixed"`` mode, else ``None``.
+    priors
+        Prior of every parameter.
+    chunk_size
+        Grid points per batch.
     fiducials
         Every parameter; those not in ``axes`` are pinned at their value.
     observed
@@ -560,7 +582,17 @@ def grid_posterior(
     digest = settings_digest(run=run, axes=axes, **settings)
     fixed = {k: v for k, v in fiducials.items() if k not in axes}
     return cached_log_densities(
-        partial(evaluate_grid, evaluator, axes, fixed, observed, per_network),
+        partial(
+            evaluate_grid,
+            likelihood,
+            priors,
+            chunk_size,
+            axes,
+            fixed,
+            observed,
+            per_network,
+            relative_variance,
+        ),
         cache_dir / f"{prefix}{run}_{digest}.npz",
     )
 
@@ -568,17 +600,18 @@ def grid_posterior(
 @app.function(hide_code=True)
 def shot_noise_variant(
     variant: str,
-    variance_fn: SpectralVarianceFn,
+    likelihood: ImportanceGaussianLikelihood,
     fiducial_relative_variance: NDArray[np.float64],
-) -> tuple[dict[str, object], dict[str, object]]:
-    """Evaluator keyword arguments and cache settings of one likelihood variant.
+) -> tuple[ImportanceGaussianLikelihood, NDArray[np.float64] | None, dict[str, object]]:
+    """The likelihood, per-network :math:`s^2` and cache settings of one variant.
 
     Parameters
     ----------
     variant
         ``"detector"``, ``"amplitude"``, ``"fixed"`` or ``"per_frequency"``.
-    variance_fn
-        The per-bin shot-noise variance, a pytree bound to the catalog.
+    likelihood
+        Built with ``shot_noise="amplitude"``, so the squared power is held
+        for every variant.
     fiducial_relative_variance
         :math:`s^2` at the fiducials per network, in ``per_network`` order;
         used by ``"fixed"`` only.
@@ -586,20 +619,23 @@ def shot_noise_variant(
     Returns
     -------
     tuple
-        Keyword arguments for :class:`GaussianGWBBatchedLikelihood`, and the
-        settings that set the variant apart in a cache digest. The detector
-        variant adds none, so its caches predate shot noise and stay valid.
+        The likelihood with the variant's mode, the ``"fixed"`` variant's
+        per-network :math:`s^2` (else ``None``), and the settings that set the
+        variant apart in a cache digest. The detector variant adds none, so
+        its caches predate shot noise and stay valid.
     """
     if variant == "detector":
-        return {}, {}
+        return dataclasses.replace(likelihood, shot_noise=None), None, {}
     if variant == "fixed":
         values = [float(value) for value in fiducial_relative_variance]
         return (
-            {"amplitude_shot_noise_variance": jnp.asarray(values)},
+            dataclasses.replace(likelihood, shot_noise="fixed"),
+            np.asarray(values),
             {"shot_noise": variant, "relative_variance": values},
         )
     return (
-        {"shot_noise_variance_fn": variance_fn, "shot_noise_direction": variant},
+        dataclasses.replace(likelihood, shot_noise=variant),
+        None,
         {"shot_noise": variant},
     )
 
@@ -609,31 +645,26 @@ def problem_posteriors(
     run: str,
     axes: Mapping[str, tuple[float, float, int]],
     variants: Sequence[str],
-    evaluator: GaussianGWBBatchedLikelihood,
-    spectral_density_fn: Callable[..., object],
-    variance_fn: SpectralVarianceFn,
+    likelihood: ImportanceGaussianLikelihood,
     fiducial_relative_variance: NDArray[np.float64],
     settings: Mapping[str, object],
     **kwargs: object,
 ) -> dict[str, tuple[dict[str, NDArray], dict[str, NDArray]]]:
     """:func:`grid_posterior` of one problem for every likelihood variant.
 
-    ``kwargs`` are :func:`grid_posterior`'s remaining arguments. One evaluator
+    ``kwargs`` are :func:`grid_posterior`'s remaining arguments. One catalog
     serves every variant; each variant compiles once.
     """
     posteriors = {}
     for variant in variants:
-        evaluator_kwargs, variant_settings = shot_noise_variant(
-            variant, variance_fn, fiducial_relative_variance
+        variant_likelihood, relative_variance, variant_settings = shot_noise_variant(
+            variant, likelihood, fiducial_relative_variance
         )
         posteriors[variant] = grid_posterior(
             run,
             axes,
-            partial(
-                evaluator,
-                spectral_density_fn=spectral_density_fn,
-                **evaluator_kwargs,
-            ),
+            variant_likelihood,
+            relative_variance,
             settings={**settings, **variant_settings},
             **kwargs,  # ty: ignore[invalid-argument-type]
         )
@@ -800,11 +831,10 @@ def _():
 
     The rescaled spectrum is built in the same cell as the catalog, once.
     The population is built a single time because it hashes by identity. Each
-    problem builds its own `GaussianGWBBatchedLikelihood` in its section, which
-    predicts every grid point once for all six networks. The spectral density
-    function is a pytree passed to it per call, so the catalog is one traced
-    input shared by all three problems rather than a constant compiled into
-    each. The NumPy catalog is dropped there, so only the device copy stays
+    problem evaluates its grid with `grid_log_posterior`, which predicts every
+    grid point once for all six networks. The likelihood is a pytree passed to
+    it per call, so the catalog is one traced input shared by all three
+    problems rather than a constant compiled into each. The NumPy catalog is dropped there, so only the device copy stays
     resident.
     """)
     return
@@ -821,7 +851,7 @@ def _(
     redshift_nodes,
 ):
     # The NumPy catalog is local to this cell, so it is freed once the device
-    # copies made by the two builders exist: the power and its square.
+    # copy made by the likelihood exists: the power and its square.
     catalog_data = ensure_reference_catalog(
         catalog_metadata, catalog_seed, CATALOGS_ROOT, chunk_size=catalog_chunk_size
     )
@@ -833,24 +863,19 @@ def _(
     )
     target = build_population(population.model_name, **population.model_kwargs)
     # No swept parameter is intrinsic, so no density factor enters a weight.
-    spectral_density_fn, _ = build_rescaled_spectrum(
+    # Built with the amplitude mode, so the squared power is held for every
+    # variant `shot_noise_variant` switches to.
+    likelihood = ImportanceGaussianLikelihood.from_catalog(
         catalog_data,
         catalog_metadata,
         population=target,
         frequencies=frequencies,
         num_redshift_nodes=redshift_nodes,
         density_sites=(),
-    )
-    shot_noise_variance_fn = build_rescaled_shot_noise(
-        catalog_data,
-        catalog_metadata,
-        population=target,
-        frequencies=frequencies,
-        num_redshift_nodes=redshift_nodes,
-        density_sites=(),
+        shot_noise="amplitude",
         observation_time=observation_time,
     )
-    return shot_noise_variance_fn, spectral_density_fn
+    return (likelihood,)
 
 
 @app.cell
@@ -948,14 +973,8 @@ def _():
 
 
 @app.cell
-def _(
-    FIDUCIALS,
-    per_network,
-    shot_noise_variance_fn,
-    spectral_density_fn,
-):
-    _spectrum = spectral_density_fn(FIDUCIALS)[0]
-    _variance = shot_noise_variance_fn(FIDUCIALS)
+def _(FIDUCIALS, likelihood, per_network):
+    _spectrum, _variance, _ = likelihood.predict(FIDUCIALS)
     _label = dict(DETECTOR_NETWORKS)
     _rows = []
     for _name, _data in per_network.items():
@@ -1021,18 +1040,17 @@ def _(
     observed,
     per_network,
     problem_variants,
-    shot_noise_variance_fn,
-    spectral_density_fn,
+    likelihood,
 ):
     h0_posteriors = problem_posteriors(
         "H0",
         grid_specs["H0"],
         problem_variants["H0"],
-        GaussianGWBBatchedLikelihood(PRIORS, chunk_size=grid_chunk_size),
-        spectral_density_fn,
-        shot_noise_variance_fn,
+        likelihood,
         fiducial_relative_variance,
         cache_settings,
+        priors=PRIORS,
+        chunk_size=grid_chunk_size,
         fiducials=FIDUCIALS,
         observed=observed,
         per_network=per_network,
@@ -1092,18 +1110,17 @@ def _(
     observed,
     per_network,
     problem_variants,
-    shot_noise_variance_fn,
-    spectral_density_fn,
+    likelihood,
 ):
     h0_omega_m_posteriors = problem_posteriors(
         "H0_Omega_m",
         grid_specs["H0_Omega_m"],
         problem_variants["H0_Omega_m"],
-        GaussianGWBBatchedLikelihood(PRIORS, chunk_size=grid_chunk_size),
-        spectral_density_fn,
-        shot_noise_variance_fn,
+        likelihood,
         fiducial_relative_variance,
         cache_settings,
+        priors=PRIORS,
+        chunk_size=grid_chunk_size,
         fiducials=FIDUCIALS,
         observed=observed,
         per_network=per_network,
@@ -1188,18 +1205,17 @@ def _(
     observed,
     per_network,
     problem_variants,
-    shot_noise_variance_fn,
-    spectral_density_fn,
+    likelihood,
 ):
     xi_posteriors = problem_posteriors(
         "xi_0_xi_n",
         grid_specs["xi_0_xi_n"],
         problem_variants["xi_0_xi_n"],
-        GaussianGWBBatchedLikelihood(PRIORS, chunk_size=grid_chunk_size),
-        spectral_density_fn,
-        shot_noise_variance_fn,
+        likelihood,
         fiducial_relative_variance,
         cache_settings,
+        priors=PRIORS,
+        chunk_size=grid_chunk_size,
         fiducials=FIDUCIALS,
         observed=observed,
         per_network=per_network,

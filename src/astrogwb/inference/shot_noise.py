@@ -28,8 +28,7 @@ Two directions are offered:
   the template.
 
 :math:`V_f` is the per-bin variance a
-:class:`~astrogwb.inference.protocol.SpectralVarianceFn` predicts, for
-example :func:`~astrogwb.gwb.importance.build_rescaled_shot_noise`.
+:class:`~astrogwb.inference.likelihood.ImportanceGaussianLikelihood` predicts.
 
 Everything broadcasts over leading dimensions and contracts over the trailing
 frequency axis.

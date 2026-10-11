@@ -1,6 +1,6 @@
 r"""Per-frequency Fisher information of the diagonal Gaussian spectrum likelihood.
 
-:func:`~astrogwb.inference.models.gaussian_gwb_model.gwb_spectral_density_model`
+:func:`~astrogwb.inference.models.gaussian_gwb_model.gwb_likelihood_model`
 compares a predicted spectrum to data bin by bin,
 :math:`d_i \sim \mathcal{N}(S_i(\theta),
 \sigma_i)`, with a scale that does not depend on :math:`\theta`. Its Fisher
@@ -21,9 +21,9 @@ constrains one direction in parameter space. Per-bin diagonals, or a
 cumulative sum over bins, are meaningful band diagnostics; the inverse of one
 bin's matrix is not.
 
-Any :class:`~astrogwb.inference.SpectralDensityFn` works, as long as it is
+Any :data:`~astrogwb.inference.protocol.SpectrumFn` works, as long as it is
 differentiable in the requested parameters. The importance spectrum from
-:func:`~astrogwb.gwb.importance.build_rescaled_spectrum` is: it
+:meth:`~astrogwb.inference.likelihood.ImportanceGaussianLikelihood.spectrum` is: it
 reweights a fixed catalog without drawing anything. Its derivative is still a
 Monte Carlo estimate over the intrinsic draws -- at the catalog's own fiducials
 it reduces to the score-function estimator, with noise that grows as
@@ -44,13 +44,13 @@ import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 
-from astrogwb.inference.protocol import SpectralDensityFn
+from astrogwb.inference.protocol import SpectrumFn
 
 __all__ = ["fisher_matrix_per_bin", "spectral_density_jacobian"]
 
 
 def spectral_density_jacobian(
-    spectral_density_fn: SpectralDensityFn,
+    spectral_density_fn: SpectrumFn,
     params: Mapping[str, ArrayLike],
     parameter_names: Sequence[str],
 ) -> jax.Array:
@@ -68,14 +68,14 @@ def spectral_density_jacobian(
     }
 
     def spectrum(free_params: dict[str, jax.Array]) -> jax.Array:
-        return spectral_density_fn({**fixed, **free_params})[0]
+        return spectral_density_fn({**fixed, **free_params})
 
     columns = jax.jacfwd(spectrum)(free)
     return jnp.stack([columns[name] for name in parameter_names], axis=-1)
 
 
 def fisher_matrix_per_bin(
-    spectral_density_fn: SpectralDensityFn,
+    spectral_density_fn: SpectrumFn,
     params: Mapping[str, ArrayLike],
     parameter_names: Sequence[str],
     *,
@@ -87,7 +87,7 @@ def fisher_matrix_per_bin(
         ``scale`` is the per-bin standard deviation the likelihood uses, normally
         ``gaussian_bin_scale(psd, time_years, frequencies)``. ``frequency_mask`` selects
         bins as in
-    :func:`~astrogwb.inference.models.gaussian_gwb_model.gwb_spectral_density_model`:
+    :class:`~astrogwb.inference.likelihood.Network`:
         an excluded bin contributes exactly zero, even where its scale is
         infinite. Sum over the leading axis for the total Fisher matrix.
     """

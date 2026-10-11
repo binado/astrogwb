@@ -449,7 +449,7 @@ def _():
     an amplitude offset $\epsilon$; $\rho\,\mathrm{sd}(\epsilon)$ compares
     it with the detector's amplitude error $1/\rho$, over the widest band
     ($f_{\min}$ = the first cut). The likelihood models it with
-    `astrogwb.gwb.importance.build_rescaled_shot_noise`;
+    `astrogwb.inference.ImportanceGaussianLikelihood`;
     `notebooks/shot_noise_coverage.py` checks the two against each other on
     these draws. A bin correlation of one means the shot noise is a single
     amplitude mode, which is what the rank-one likelihood assumes.

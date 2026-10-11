@@ -25,12 +25,11 @@ with app.setup(hide_code=True):
     from astrogwb.detector import effective_psd, gaussian_bin_scale
     from astrogwb.frequency import frequency_mask
     from astrogwb.gwb.importance import (
-        build_rescaled_shot_noise,
-        build_rescaled_spectrum,
         reference_catalog,
         reference_catalog_stem,
     )
     from astrogwb.inference import (
+        ImportanceGaussianLikelihood,
         amplitude_direction,
         amplitude_shot_noise_variance,
         rank_one_gaussian_log_likelihood,
@@ -401,38 +400,30 @@ def _(
         catalog_metadata, catalog_seed, CATALOGS_ROOT, chunk_size=catalog_chunk_size
     )
     target = build_population(population.model_name, **population.model_kwargs)
-    builder_settings = {
-        "population": target,
-        "frequencies": frequencies,
-        "num_redshift_nodes": redshift_nodes,
-        "density_sites": (),
-    }
-    spectral_density_fn, _ = build_rescaled_spectrum(
-        catalog_data, catalog_metadata, **builder_settings
-    )
-    variance_fn = build_rescaled_shot_noise(
+    likelihood = ImportanceGaussianLikelihood.from_catalog(
         catalog_data,
         catalog_metadata,
+        population=target,
+        frequencies=frequencies,
+        num_redshift_nodes=redshift_nodes,
+        density_sites=(),
+        shot_noise="amplitude",
         observation_time=observation_time,
-        **builder_settings,
     )
     h0_grid = np.linspace(*h0_window, h0_size)
 
     @jax.jit
-    def _predict(spectrum_fn, shot_noise_fn, h0):
+    def _predict(likelihood, h0):
         def point(value):
-            params = {**FIDUCIALS, "H0": value}
-            return spectrum_fn(params)[0], shot_noise_fn(params)
+            mean, variance, _ = likelihood.predict({**FIDUCIALS, "H0": value})
+            return mean, variance
 
         return jax.lax.map(point, h0, batch_size=grid_chunk_size)
 
-    grid_prediction, grid_variance = _predict(
-        spectral_density_fn, variance_fn, jnp.asarray(h0_grid)
-    )
+    grid_prediction, grid_variance = _predict(likelihood, jnp.asarray(h0_grid))
     _fiducial = int(np.argmin(np.abs(h0_grid - FIDUCIALS["H0"])))
     print(f"grid: {h0_size} H0 points; fiducial node H0 = {h0_grid[_fiducial]:.3f}")
-    fiducial_prediction, _ = spectral_density_fn(FIDUCIALS)
-    fiducial_variance = variance_fn(FIDUCIALS)
+    fiducial_prediction, fiducial_variance, _ = likelihood.predict(FIDUCIALS)
     return (
         fiducial_prediction,
         fiducial_variance,

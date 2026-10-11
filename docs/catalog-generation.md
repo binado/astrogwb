@@ -257,8 +257,8 @@ a later weight counts, so the choice belongs to the analysis rather than to the
 file. What still matters is that one value covers both sides of a ratio — a
 proposal density computed with the mass factors excluded, reweighted against a
 target that includes them, gives silently wrong weights with no shape error
-anywhere — which is why `build_rescaled_spectrum` takes it once and threads
-that one value into both callables it returns.
+anywhere — which is why `ImportanceGaussianLikelihood.from_catalog` takes it once and uses
+that one value for both the proposal density and the weights.
 
 ### The file format
 

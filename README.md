@@ -123,7 +123,8 @@ closed-form quadrature, so it needs no weights at all.
 import jax
 import numpy as np
 
-from astrogwb.gwb.importance import build_rescaled_spectrum, reference_catalog
+from astrogwb.gwb.importance import reference_catalog
+from astrogwb.inference import ImportanceGaussianLikelihood
 from astrogwb.metadata import CatalogMetadata
 
 metadata = CatalogMetadata(
@@ -135,7 +136,7 @@ metadata = CatalogMetadata(
 reference = reference_catalog(metadata, jax.random.PRNGKey(42))
 
 target = build_population("bns_coba", **model_kwargs)
-spectrum_fn, log_weights_fn = build_rescaled_spectrum(
+likelihood = ImportanceGaussianLikelihood.from_catalog(
     reference,
     metadata,
     population=target,
@@ -143,7 +144,9 @@ spectrum_fn, log_weights_fn = build_rescaled_spectrum(
     num_redshift_nodes=32,
     density_sites=("source_frame_mass_1", "source_frame_mass_2"),
 )
-spectrum, extras = spectrum_fn({**params, "H0": 70.0, "xi_0": 1.2, "xi_n": 1.91})
+spectrum, _, extras = likelihood.predict(
+    {**params, "H0": 70.0, "xi_0": 1.2, "xi_n": 1.91}
+)
 ```
 
 ## The manuscript application

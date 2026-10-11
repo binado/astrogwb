@@ -21,12 +21,11 @@ from astrogwb.gwb.importance import (
     EFFECTIVE_INCLINATION,
     INCLINATION_SECOND_MOMENT,
     _pin_redshift_and_inclination,
-    build_rescaled_shot_noise,
-    build_rescaled_spectrum,
     phinney_kernel,
     redshift_quadrature,
     reference_catalog,
 )
+from astrogwb.inference import ImportanceGaussianLikelihood
 from astrogwb.populations import PopulationMetadata, build_population, joint_model
 from astrogwb.populations.evaluation import evaluate_sources, sample_sources
 from astrogwb.simulators.core import batch_keys
@@ -262,14 +261,14 @@ def _rescaled_and_brute_force(
         "num_redshift_nodes": NUM_NODES,
         "density_sites": density_sites,
     }
-    if variance:
-        variance_fn = build_rescaled_shot_noise(
-            reference, metadata, observation_time=OBSERVATION_TIME, **settings
-        )
-        rescaled = [np.asarray(variance_fn(p)) for p in points]
-    else:
-        spectrum_fn, _ = build_rescaled_spectrum(reference, metadata, **settings)
-        rescaled = [np.asarray(spectrum_fn(p)[0]) for p in points]
+    likelihood = ImportanceGaussianLikelihood.from_catalog(
+        reference,
+        metadata,
+        shot_noise="amplitude" if variance else None,
+        observation_time=OBSERVATION_TIME if variance else None,
+        **settings,
+    )
+    rescaled = [np.asarray(likelihood.predict(p)[int(variance)]) for p in points]
     brute_force = [
         _spectrum_on_nodes(metadata, key, p, density_sites)[int(variance)]
         for p in points
@@ -338,21 +337,22 @@ def test_rescaled_shot_noise_reweights_like_waveforms_generated_at_every_node(
 
 @pytest.fixture
 def shot_noise_builder(reference_metadata: CatalogMetadata) -> Any:
-    """``observation_time -> variance_fn`` on one reference catalog."""
+    """``observation_time -> likelihood`` on one reference catalog."""
     data = reference_catalog(reference_metadata, batch_keys(41, 1)[0])
     target = build_population(
         reference_metadata.population.model_name,
         **reference_metadata.population.model_kwargs,
     )
 
-    def build(observation_time: float) -> Any:
-        return build_rescaled_shot_noise(
+    def build(observation_time: float) -> ImportanceGaussianLikelihood:
+        return ImportanceGaussianLikelihood.from_catalog(
             data,
             reference_metadata,
             population=target,
             frequencies=OBSERVED_WAVEFORM.build().frequencies,
             num_redshift_nodes=NUM_NODES,
             density_sites=(),
+            shot_noise="amplitude",
             observation_time=observation_time,
         )
 
@@ -364,8 +364,8 @@ def test_rescaled_shot_noise_falls_inversely_with_observation_time(
     reference_metadata: CatalogMetadata, shot_noise_builder: Any
 ) -> None:
     fiducials = reference_metadata.fiducials
-    one_year = np.asarray(shot_noise_builder(1.0)(fiducials))
-    four_years = np.asarray(shot_noise_builder(4.0)(fiducials))
+    one_year = np.asarray(shot_noise_builder(1.0).predict(fiducials)[1])
+    four_years = np.asarray(shot_noise_builder(4.0).predict(fiducials)[1])
 
     np.testing.assert_allclose(four_years, one_year / 4.0, rtol=1e-14)
 
@@ -379,9 +379,9 @@ def test_rescaled_shot_noise_grows_linearly_with_the_hubble_constant(
 ) -> None:
     """The squared kernel goes as :math:`D_H / \\chi^2 \\propto H_0`."""
     fiducials = reference_metadata.fiducials
-    variance_fn = shot_noise_builder(OBSERVATION_TIME)
-    shifted = np.asarray(variance_fn({**fiducials, "H0": hubble_constant}))
-    ratio = shifted / np.asarray(variance_fn(fiducials))
+    likelihood = shot_noise_builder(OBSERVATION_TIME)
+    shifted = np.asarray(likelihood.predict({**fiducials, "H0": hubble_constant})[1])
+    ratio = shifted / np.asarray(likelihood.predict(fiducials)[1])
 
     np.testing.assert_allclose(ratio, hubble_constant / fiducials["H0"], rtol=1e-12)
 
@@ -395,7 +395,7 @@ def test_rescaled_log_weights_vanish_at_the_fiducials(
         reference_metadata.population.model_name,
         **reference_metadata.population.model_kwargs,
     )
-    _, log_weights_fn = build_rescaled_spectrum(
+    likelihood = ImportanceGaussianLikelihood.from_catalog(
         data,
         reference_metadata,
         population=target,
@@ -405,12 +405,12 @@ def test_rescaled_log_weights_vanish_at_the_fiducials(
     )
 
     np.testing.assert_array_equal(
-        np.asarray(log_weights_fn(reference_metadata.fiducials)), np.zeros(6)
+        np.asarray(likelihood.log_weights(reference_metadata.fiducials)), np.zeros(6)
     )
     assert (
         np.ptp(
             np.asarray(
-                log_weights_fn(
+                likelihood.log_weights(
                     {
                         **reference_metadata.fiducials,
                         "minimum_mass": 0.9,
@@ -436,13 +436,13 @@ def test_rescaled_spectrum_as_a_jit_argument_traces_once_per_shape(
 
     def body(fn: Any, params: dict[str, float]) -> jax.Array:
         traces.append(None)
-        return fn(params)[0]
+        return fn.spectrum(params)
 
     spectrum = jax.jit(body)
     results = []
     for seed in (41, 42):
         data = reference_catalog(reference_metadata, batch_keys(seed, 1)[0])
-        fn, _ = build_rescaled_spectrum(
+        fn = ImportanceGaussianLikelihood.from_catalog(
             data,
             reference_metadata,
             population=target,
@@ -469,18 +469,19 @@ def test_rescaled_shot_noise_as_a_jit_argument_traces_once_per_shape(
 
     def body(fn: Any, params: dict[str, float]) -> jax.Array:
         traces.append(None)
-        return fn(params)
+        return fn.predict(params)[1]
 
     variance = jax.jit(body)
     for seed in (41, 42):
         data = reference_catalog(reference_metadata, batch_keys(seed, 1)[0])
-        fn = build_rescaled_shot_noise(
+        fn = ImportanceGaussianLikelihood.from_catalog(
             data,
             reference_metadata,
             population=target,
             frequencies=data["frequencies"][:20],
             num_redshift_nodes=4,
             density_sites=(),
+            shot_noise="amplitude",
             observation_time=OBSERVATION_TIME,
         )
         variance(fn, reference_metadata.fiducials)
@@ -524,11 +525,13 @@ def test_spectrum_scales_as_a_power_of_h0_and_the_local_merger_rate(
     parameter: str, exponent: float, factor: float
 ) -> None:
     """``S ~ 1/H0`` and ``S ~ R0``: the exponents the cosmology and kernel imply."""
-    spectrum, _ = build_reference_spectrum(*build_reference_catalog(num_sources=16))
+    spectrum = build_reference_spectrum(
+        *build_reference_catalog(num_sources=16)
+    ).spectrum
     fiducial = FIDUCIALS[parameter]
 
-    baseline, _ = spectrum(FIDUCIALS)
-    scaled, _ = spectrum({**FIDUCIALS, parameter: factor * fiducial})
+    baseline = spectrum(FIDUCIALS)
+    scaled = spectrum({**FIDUCIALS, parameter: factor * fiducial})
 
     np.testing.assert_allclose(
         np.asarray(scaled), factor**exponent * np.asarray(baseline), rtol=1e-8

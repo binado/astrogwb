@@ -1,9 +1,9 @@
-"""A reusable, jit-cached grid evaluator for a NumPyro model's log density."""
+"""Reusable, jit-cached grid evaluators: a NumPyro model's log density, and a likelihood's posterior."""
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import Any, Literal
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -12,18 +12,7 @@ import numpyro.distributions as dist
 from jax.typing import ArrayLike
 from numpyro.infer.util import log_density
 
-from .protocol import SpectralDensityFn, SpectralVarianceFn
-from .shot_noise import (
-    amplitude_direction,
-    amplitude_shot_noise_variance,
-    per_frequency_direction,
-    rank_one_gaussian_log_likelihood,
-)
-
-#: The shot-noise term of :class:`GaussianGWBBatchedLikelihood`: an amplitude
-#: mode with :math:`s^2` per point, the same with a fixed :math:`s^2`, or the
-#: per-frequency mode.
-type _ShotNoiseMode = Literal["amplitude", "fixed", "per_frequency"]
+from .likelihood import Network
 
 
 class LogDensityFn:
@@ -130,228 +119,104 @@ def _combine(arrays: list[Any], structure: _Structure) -> Any:
     )
 
 
-class GaussianGWBBatchedLikelihood:
-    """Grid-evaluate the Gaussian GWB log density for K networks at once.
+def _grid_log_posterior(
+    names: tuple[str, ...],
+    structure: _Structure,
+    priors: tuple[tuple[str, dist.Distribution], ...],
+    chunk_size: int | None,
+    arrays: list[Any],
+    grids: tuple[jax.Array, ...],
+    fixed: dict[str, ArrayLike],
+    networks: Network,
+) -> jax.Array:
+    likelihood = _combine(arrays, structure)
+    mesh = jnp.meshgrid(*grids, indexing="ij")
+    points = {name: values.ravel() for name, values in zip(names, mesh, strict=True)}
 
-    The spectral density is the expensive stage and does not depend on the
-    network; only ``scale`` and ``frequency_mask`` do, at O(F) per point. This
-    evaluator predicts the spectrum once per grid point and applies the
-    likelihood of every network to it.
+    def point_fn(point: dict[str, jax.Array]) -> jax.Array:
+        values = point | fixed
+        log_prior = sum(
+            (prior.log_prob(values[name]) for name, prior in priors),
+            start=jnp.zeros(()),
+        )
+        # The prediction does not depend on the network, so it is not batched:
+        # `out_axes=None` for the extras asserts exactly that.
+        log_likelihood, _ = jax.vmap(
+            likelihood.log_likelihood, in_axes=(None, 0), out_axes=(0, None)
+        )(values, networks)
+        return log_likelihood + log_prior
 
-    The spectral density function is a call argument, not part of the
-    evaluator. Its array leaves -- a catalog bound by
-    :func:`~astrogwb.gwb.importance.build_rescaled_spectrum`, say -- are traced
-    inputs, so they are held once and not baked into the compiled function,
-    and one compilation serves every function with the same static half and
-    array shapes. A plain closure has no array leaves and is static whole: it
-    still works, with whatever it captures compiled in as constants.
+    flat = jax.lax.map(point_fn, points, batch_size=chunk_size)
+    sizes = tuple(grid.size for grid in grids)
+    return flat.T.reshape(flat.shape[1], *sizes)
 
-    It duplicates the Gaussian likelihood of
-    :func:`astrogwb.inference.gwb_spectral_density_model` for speed; the
-    equivalence test against :class:`LogDensityFn` keeps the two in sync. Physical shot noise
-    enters as a rank-one term of each network's covariance when a variance
-    is given (see :meth:`__call__` and :mod:`astrogwb.inference.shot_noise`).
+
+# Built once, so every call with the same static half and array shapes shares
+# one compilation. `names` is static and `grids` a tuple: a dict argument would
+# be flattened in sorted-key order, losing the insertion order of the axes.
+_grid_log_posterior_jit = jax.jit(
+    _grid_log_posterior, static_argnames=("names", "structure", "priors", "chunk_size")
+)
+
+
+def grid_log_posterior(
+    likelihood: Any,
+    priors: Mapping[str, dist.Distribution],
+    grids: Mapping[str, jax.Array],
+    *,
+    fixed: Mapping[str, ArrayLike] | None = None,
+    networks: Network,
+    chunk_size: int | None = None,
+) -> jax.Array:
+    """Log posterior over the cartesian product of 1-2 grids, for K networks.
+
+    The prediction is the expensive stage and does not depend on the network, so
+    it is computed once per grid point and every network's likelihood is applied
+    to it (``jax.vmap`` of ``likelihood.log_likelihood`` over ``networks``).
 
     Parameters
     ----------
+    likelihood:
+        An object with ``log_likelihood(params, network) -> (log L, extras)``, such
+        as :class:`~astrogwb.inference.likelihood.ImportanceGaussianLikelihood`.
+        Its array leaves are traced inputs, held once and not baked into the
+        compiled function; its static half is part of the compilation key.
     priors:
         Prior of every parameter, static. Each contributes its log density at
         the grid or ``fixed`` value, so a pinned site adds a constant, as in
         :class:`LogDensityFn`.
+    grids:
+        Values of each swept parameter.
+    fixed:
+        Values of the remaining prior sites, pinned at every point.
+    networks:
+        K stacked :class:`~astrogwb.inference.likelihood.Network`: each leaf has
+        a leading axis K, and all share one structure.
     chunk_size:
-        Forwarded to :func:`jax.lax.map` as ``batch_size`` for the prediction
-        stage. ``None`` evaluates one point at a time.
+        Forwarded to :func:`jax.lax.map` as ``batch_size``. Peak memory is
+        ``chunk_size * (K, F)``. ``None`` evaluates one point at a time.
 
-    Notes
-    -----
-    Memory is ``(G, F)`` for the predictions plus ``(K, G, F)`` likelihood
-    intermediates. If a larger ``G`` needs it, ``lax.map`` over K instead of
-    ``vmap``.
+    Returns
+    -------
+    jax.Array
+        Shape ``(K, *grid sizes)``, grid axes in ``grids`` order.
+
+    Raises
+    ------
+    KeyError
+        At trace time, if a prior name is in neither ``grids`` nor ``fixed``.
     """
-
-    def __init__(
-        self,
-        priors: Mapping[str, dist.Distribution],
-        *,
-        chunk_size: int | None = None,
-    ) -> None:
-        def evaluate(
-            names: tuple[str, ...],
-            structure: _Structure,
-            mode: _ShotNoiseMode | None,
-            variance_structure: _Structure | None,
-            arrays: list[Any],
-            variance_arrays: list[Any],
-            grids: tuple[jax.Array, ...],
-            fixed: dict[str, ArrayLike],
-            observed: jax.Array,
-            scale: jax.Array,
-            mask: jax.Array,
-            relative_variance: jax.Array,
-        ) -> jax.Array:
-            spectral_density_fn = _combine(arrays, structure)
-            mesh = jnp.meshgrid(*grids, indexing="ij")
-            points = {
-                name: values.ravel() for name, values in zip(names, mesh, strict=True)
-            }
-            if variance_structure is None:
-                pred = jax.lax.map(
-                    lambda point: spectral_density_fn(point | fixed)[0],
-                    points,
-                    batch_size=chunk_size,
-                )
-                variance = None
-            else:
-                variance_fn = _combine(variance_arrays, variance_structure)
-                pred, variance = jax.lax.map(
-                    lambda point: (
-                        spectral_density_fn(point | fixed)[0],
-                        variance_fn(point | fixed),
-                    ),
-                    points,
-                    batch_size=chunk_size,
-                )
-
-            values = points | fixed
-            log_prior = jnp.asarray(
-                sum(
-                    (prior.log_prob(values[name]) for name, prior in priors.items()),
-                    start=jnp.zeros(()),
-                )
-            )
-
-            def likelihood(
-                scale_k: jax.Array, mask_k: jax.Array, relative_k: jax.Array
-            ) -> jax.Array:
-                if mode is None:
-                    logp = dist.Normal(pred, scale_k).log_prob(observed)
-                    return jnp.where(mask_k, logp, 0.0).sum(-1)
-                if mode == "fixed":
-                    direction = amplitude_direction(pred, relative_k)
-                    return rank_one_gaussian_log_likelihood(
-                        observed, pred, scale_k, direction, mask_k
-                    )
-                # Every other mode predicted a variance next to the spectrum.
-                assert variance is not None
-                if mode == "amplitude":
-                    direction = amplitude_direction(
-                        pred,
-                        amplitude_shot_noise_variance(pred, variance, scale_k, mask_k),
-                    )
-                else:
-                    direction = per_frequency_direction(variance)
-                return rank_one_gaussian_log_likelihood(
-                    observed, pred, scale_k, direction, mask_k
-                )
-
-            total = log_prior[None] + jax.vmap(likelihood)(
-                scale, mask, relative_variance
-            )
-            sizes = tuple(grid.size for grid in grids)
-            return jnp.asarray(total).reshape(scale.shape[0], *sizes)
-
-        # `names` is static and `grids` a tuple: a dict argument would be
-        # flattened in sorted-key order, losing the insertion order of the axes.
-        # `structure` and `variance_structure` are the static halves of the two
-        # callables, and `mode` selects the shot-noise term.
-        self._evaluator = jax.jit(evaluate, static_argnums=(0, 1, 2, 3))
-
-    def __call__(
-        self,
-        grids: Mapping[str, jax.Array],
-        *,
-        spectral_density_fn: SpectralDensityFn,
-        fixed: Mapping[str, ArrayLike] | None = None,
-        observed_spectral_density: jax.Array,
-        scale: jax.Array,
-        frequency_mask: jax.Array | None = None,
-        shot_noise_variance_fn: SpectralVarianceFn | None = None,
-        shot_noise_direction: Literal["amplitude", "per_frequency"] = "amplitude",
-        amplitude_shot_noise_variance: ArrayLike | None = None,
-    ) -> jax.Array:
-        """Log density over the cartesian product of 1-2 grids, per network.
-
-        Parameters
-        ----------
-        grids:
-            Values of each swept parameter.
-        spectral_density_fn:
-            ``params -> (prediction, extras)`` with ``prediction`` of shape
-            ``(F,)``; ``extras`` are discarded. Its array leaves are traced, its
-            static rest is part of the compilation key.
-        fixed:
-            Values of the remaining prior sites, pinned at every point.
-        observed_spectral_density:
-            Observed spectrum, ``(F,)``.
-        scale:
-            Per-bin standard deviation of each network, ``(K, F)``.
-        frequency_mask:
-            Boolean ``(K, F)`` of the bins each network counts; ``None``
-            counts all. Masked bins contribute exactly zero, whatever their
-            ``scale``.
-        shot_noise_variance_fn:
-            ``params -> (F,)``, the per-bin shot-noise variance of the
-            spectrum (:mod:`astrogwb.inference.shot_noise`). Evaluated once
-            per grid point next to the spectrum, and traced like it. With it,
-            each network's likelihood has covariance
-            :math:`D + \\mathbf{u}\\mathbf{u}^T` along ``shot_noise_direction``:
-            ``"amplitude"`` takes :math:`\\mathbf{u} = s\\,\\mathbf{S}` with
-            :math:`s^2` from
-            :func:`~astrogwb.inference.shot_noise.amplitude_shot_noise_variance`
-            at that point and network; ``"per_frequency"`` takes
-            :math:`u_f = \\sqrt{V_f}`. ``None`` and no
-            ``amplitude_shot_noise_variance`` is the diagonal Gaussian.
-        shot_noise_direction:
-            Static: changing it compiles anew.
-        amplitude_shot_noise_variance:
-            A fixed :math:`s^2`, scalar or ``(K,)`` per network: the amplitude
-            direction without evaluating any variance. Takes precedence over
-            ``shot_noise_variance_fn``, which is then ignored.
-
-        Returns
-        -------
-        jax.Array
-            Shape ``(K, *grid sizes)``, grid axes in ``grids`` order.
-
-        Raises
-        ------
-        KeyError
-            At trace time, if a prior name is in neither ``grids`` nor ``fixed``.
-        """
-        scale = jnp.asarray(scale)
-        mask = (
-            jnp.ones(scale.shape, dtype=bool)
-            if frequency_mask is None
-            else jnp.asarray(frequency_mask)
-        )
-        arrays, structure = _partition(spectral_density_fn)
-        mode: _ShotNoiseMode | None = None
-        variance_arrays: list[Any] = []
-        variance_structure: _Structure | None = None
-        relative_variance = jnp.zeros(scale.shape[0])
-        if amplitude_shot_noise_variance is not None:
-            mode = "fixed"
-            relative_variance = jnp.broadcast_to(
-                jnp.asarray(amplitude_shot_noise_variance, dtype=scale.dtype),
-                (scale.shape[0],),
-            )
-        elif shot_noise_variance_fn is not None:
-            mode = shot_noise_direction
-            variance_arrays, variance_structure = _partition(shot_noise_variance_fn)
-        return self._evaluator(
-            tuple(grids),
-            structure,
-            mode,
-            variance_structure,
-            arrays,
-            variance_arrays,
-            tuple(jnp.asarray(grid) for grid in grids.values()),
-            dict(fixed) if fixed is not None else {},
-            jnp.asarray(observed_spectral_density),
-            scale,
-            mask,
-            relative_variance,
-        )
+    arrays, structure = _partition(likelihood)
+    return _grid_log_posterior_jit(
+        names=tuple(grids),
+        structure=structure,
+        priors=tuple(priors.items()),
+        chunk_size=chunk_size,
+        arrays=arrays,
+        grids=tuple(jnp.asarray(grid) for grid in grids.values()),
+        fixed=dict(fixed) if fixed is not None else {},
+        networks=networks,
+    )
 
 
-__all__ = ["GaussianGWBBatchedLikelihood", "LogDensityFn"]
+__all__ = ["LogDensityFn", "grid_log_posterior"]
