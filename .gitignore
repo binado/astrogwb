@@ -1,7 +1,7 @@
 data
 .idea/
 
-# Local Jupyter UI only; version-control notebooks/ as Jupytext py:percent .py files.
+# Notebooks are marimo .py files; ignore any stray .ipynb export.
 *.ipynb
 
 # Catalogs the root notebooks build for themselves on first run. Regenerated

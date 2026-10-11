@@ -85,17 +85,13 @@ build-backend = "uv_build"
 [dependency-groups]
 # tomli-w: fixtures write scratch config layers, which are TOML.
 test = ["pytest>=9.0.2", "pytest-xdist>=3.8.0", "tomli-w>=1.2"]
-# Notebook *execution* tooling, as opposed to the `notebook` extra, which is
-# the library stack the notebooks import.
-jupyter = [
-    "ipykernel>=7.3.0",
-    "jupyter>=1.1.1",
-    "jupytext>=1.19",
-    "marimo>=0.24.2",
-    "nbconvert>=7.16",
+# Notebook editor/runner (marimo). The `notebook` extra, by contrast, is the
+# library stack notebooks import.
+notebook = [
+    "marimo>=0.25.1",
 ]
 dev = [
-    { include-group = "jupyter" },
+    { include-group = "notebook" },
     { include-group = "test" },
     "ruff>=0.16.1",
     "ty>=0.0.69",

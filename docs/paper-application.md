@@ -14,12 +14,11 @@ uv sync --extra notebook --group dev
 uv run --extra paper python scripts/simulate_spectra.py --help
 ```
 
-The notebooks are marimo notebooks (and one Jupytext `py:percent` source).
-Open one from the repository root:
+The notebooks are marimo notebooks. Open one from the repository root:
 
 ```bash
-uv sync --extra notebook --group jupyter
-uv run --extra notebook --group jupyter marimo edit notebooks/fiducial_spectrum.py
+uv sync --extra notebook --group notebook
+uv run --extra notebook --group notebook marimo edit notebooks/fiducial_spectrum.py
 ```
 
 Every path is relative to the repository root -- library code names no absolute

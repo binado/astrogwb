@@ -42,7 +42,7 @@ minimum redshift `z_min`, by one criterion: **catalog shot noise stays below
 the expected `sigma(H0)`**. Open it from the repository root:
 
 ```bash
-uv run --extra notebook --group jupyter marimo edit notebooks/spectrum_snrs.py
+uv run --extra notebook --group notebook marimo edit notebooks/spectrum_snrs.py
 ```
 
 The notebook is a physics-first walkthrough: a markdown cell explains each

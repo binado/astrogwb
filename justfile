@@ -54,22 +54,8 @@ test-integration:
 # Both fast suites.
 test: test-core test-paper
 
-# Execution *is* the test: nbclient fails the run on any raised exception, so
-# the notebooks carry no assertion cells. Set ASTROGWB_NOTEBOOK_SMOKE=1 to
-# shrink the catalogs and the convergence sweeps.
-
-# Convert and execute the root notebooks.
-test-notebooks:
-    uv run --extra notebook --group jupyter \
-        jupytext --to notebook --execute notebooks/waveform_approximant_spectra.py
-
-# Convert the py:percent notebooks to .ipynb. Marimo notebooks stay as Python.
-convert-notebooks:
-    uv run --group jupyter jupytext --to notebook \
-        notebooks/waveform_approximant_spectra.py
-
 run-notebook notebook:
-    uv run --group jupyter marimo edit {{ notebook }}
+    uv run --group notebook marimo edit {{ notebook }}
 
 # The publishable distribution. `astrogwb.paper` ships inside it but is
 # unimportable without the `paper` extra, whose dependencies stay out of the
