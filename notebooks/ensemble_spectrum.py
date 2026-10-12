@@ -901,6 +901,53 @@ def _(
     return
 
 
+@app.function(hide_code=True)
+def plot_strain_scatter(
+    frequency: NDArray[np.float64],
+    strain: NDArray[np.float64],
+) -> Figure:
+    r"""Plot the scatter of :math:`h_c` over draws relative to its median.
+
+    The band is the ``(low, high)`` percentile rows of ``strain`` as a
+    percentage deviation from the ``middle`` row, so scatter far below the
+    line width of the amplitude figure stays readable.
+    """
+    fig, ax = plt.subplots()
+    positive = strain[1] > 0.0
+    deviation = 100.0 * (strain[:, positive] / strain[1, positive] - 1.0)
+    ax.fill_between(
+        frequency[positive],
+        deviation[0],
+        deviation[2],
+        color=SPECTRUM["sh"],
+        alpha=0.25,
+        linewidth=0,
+    )
+    ax.plot(frequency[positive], deviation[0], color=SPECTRUM["sh"], linewidth=0.8)
+    ax.plot(frequency[positive], deviation[2], color=SPECTRUM["sh"], linewidth=0.8)
+    ax.axhline(0.0, color=SPECTRUM["sh"], linewidth=0.5, linestyle=":")
+    ax.set_xscale("log")
+    ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
+    ax.set_ylabel(r"$h_c / \mathrm{median}(h_c) - 1\ (\%)$")
+    ax.set_axisbelow(True)
+    ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
+    format_axis_ticks(ax)
+    fig.tight_layout()
+    return fig
+
+
+@app.cell
+def _(BASE_DIR, ROOT_DIR, band_frequency, band_strain, write_figures):
+    _fig = plot_strain_scatter(band_frequency, band_strain)
+    if write_figures:
+        save_figures(
+            {BASE_DIR / "characteristic_strain_scatter.pdf": _fig},
+            root=ROOT_DIR,
+        )
+    _fig
+    return
+
+
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
