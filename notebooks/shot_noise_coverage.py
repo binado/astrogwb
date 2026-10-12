@@ -277,7 +277,7 @@ def _():
     ### What the notebook does
 
     - $M$ independent Poisson catalogs at $\Lambda_t$ are the injections
-      $S_h^{\rm cat}$, shared with `notebooks/mean_spectrum_snr_table.py`.
+      $S_h^{\rm cat}$, shared with `notebooks/ensemble_spectrum.py`.
     - Each gets $R$ detector-noise draws $n_{\rm det}$. Detector noise is free next
       to an injection, and the error on $\mathrm{Var}(z)$ is then set by the $M$
       shot-noise draws rather than by $\sqrt{2/M}$ of a single detector draw.
@@ -305,7 +305,7 @@ def _():
     ROOT_DIR = Path(__file__).resolve().parents[1]
     FIGURES = ROOT_DIR / FIGURES_DIR / "shot_noise_coverage"
 
-    # The injections are the Poisson ensemble of mean_spectrum_snr_table.py:
+    # The injections are the Poisson ensemble of ensemble_spectrum.py:
     # the same record, seed and cache, so the draws are made once for both.
     num_injections = 200
     ensemble_seed = 41
@@ -346,7 +346,15 @@ def _():
     FIDUCIALS = fiducials(root=ROOT_DIR)
     PRIORS = priors(root=ROOT_DIR)
     registry = detector_registry(root=ROOT_DIR)
-    waveform = waveform_metadata(root=ROOT_DIR, approximant=approximant)
+    # Same 1024-point grid as ensemble_spectrum.py, whose draws these injections
+    # read. Keep this waveform record in sync with that notebook.
+    waveform = waveform_metadata(
+        root=ROOT_DIR,
+        approximant=approximant,
+        frequency_resolution=0.125,
+        turnover_frequency=100.0,
+        dlogf=0.01266,
+    )
     frequencies = np.asarray(waveform.build().frequencies)
     population = population_metadata(
         root=ROOT_DIR,
@@ -637,7 +645,7 @@ def _():
     ## Injections
 
     $M$ Poisson spectra at the fiducials: the ensemble of
-    `notebooks/mean_spectrum_snr_table.py`, read from the shared cache
+    `notebooks/ensemble_spectrum.py`, read from the shared cache
     (`spectra_ensemble`, one file per draw).
     """)
 
