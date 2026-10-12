@@ -110,7 +110,7 @@ def test_analytic_generator_evaluates_on_exact_metadata_grid(
         {
             "frequency_spacing": "loglinear",
             "turnover_frequency": 12.0,
-            "log_resolution": 0.2,
+            "dlogf": 0.2,
         },
     ],
     ids=["loglinear", "log", "loglinear-independent"],
@@ -140,7 +140,7 @@ def test_analytic_generator_evaluates_on_a_log_spaced_grid(
 
     assert frequencies[0] == 10.0
     assert frequencies[-1] == 100.0
-    if generator.metadata.log_resolution is not None:
+    if generator.metadata.dlogf is not None:
         assert frequencies.size == 14
     assert np.ptp(np.diff(np.asarray(frequencies))) > 0.0
     np.testing.assert_array_equal(actual, expected)

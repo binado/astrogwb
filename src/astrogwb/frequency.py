@@ -75,16 +75,16 @@ def _check_log_grid_arguments(minimum: float, maximum: float, df: float) -> None
 
 
 def _geometric_tail(
-    start: float, maximum: float, df: float, *, log_resolution: float | None = None
+    start: float, maximum: float, df: float, *, dlogf: float | None = None
 ) -> np.ndarray:
     """Return the geometric points above ``start``, ending exactly at ``maximum``.
 
     The step count is the smallest that keeps the first geometric gap,
     ``start * (ratio - 1)``, no larger than ``df``; the ratio is then set so the
-    last point lands on ``maximum``. With ``log_resolution``, the step count
+    last point lands on ``maximum``. With ``dlogf``, the step count
     instead bounds the natural-log step by that value.
     """
-    log_step = np.log1p(df / start) if log_resolution is None else log_resolution
+    log_step = np.log1p(df / start) if dlogf is None else dlogf
     num_steps = max(int(np.ceil(np.log(maximum / start) / log_step)), 1)
     ratio = (maximum / start) ** (1.0 / num_steps)
     tail = start * ratio ** np.arange(1, num_steps + 1, dtype=np.float64)
@@ -113,7 +113,7 @@ def loglinear_frequency_grid(
     df: float,
     turnover_frequency: float,
     *,
-    log_resolution: float | None = None,
+    dlogf: float | None = None,
 ) -> np.ndarray:
     """Return a grid linear up to the turnover and geometric above it.
 
@@ -131,7 +131,7 @@ def loglinear_frequency_grid(
         Linear spacing in Hz.
     turnover_frequency:
         Requested turnover in Hz, strictly inside the band.
-    log_resolution:
+    dlogf:
         Optional finite positive bound on the natural-log step of the tail.
         The actual step may be slightly smaller to align the endpoint. The
         linear points and effective turnover are unchanged, but spacing may
@@ -147,10 +147,8 @@ def loglinear_frequency_grid(
             "turnover_frequency must lie strictly between minimum_frequency and "
             "maximum_frequency"
         )
-    if log_resolution is not None and (
-        not np.isfinite(log_resolution) or log_resolution <= 0.0
-    ):
-        raise ValueError("log_resolution must be a finite positive scalar")
+    if dlogf is not None and (not np.isfinite(dlogf) or dlogf <= 0.0):
+        raise ValueError("dlogf must be a finite positive scalar")
     num_linear_steps = int(
         np.floor((turnover - minimum) / spacing + _TURNOVER_STEP_TOLERANCE)
     )
@@ -158,9 +156,7 @@ def loglinear_frequency_grid(
     return np.concatenate(
         [
             linear,
-            _geometric_tail(
-                linear[-1], maximum, spacing, log_resolution=log_resolution
-            ),
+            _geometric_tail(linear[-1], maximum, spacing, dlogf=dlogf),
         ]
     )
 
@@ -172,14 +168,14 @@ def frequency_grid(
     df: float,
     turnover_frequency: float | None = None,
     *,
-    log_resolution: float | None = None,
+    dlogf: float | None = None,
 ) -> np.ndarray:
     """Return the grid ``spacing`` names, validated as a frequency grid.
 
     The single entry point the waveform generators use, so a
     ``WaveformMetadata`` record maps to one grid. ``turnover_frequency`` is
     required for ``"loglinear"`` and must be ``None`` otherwise. The optional
-    ``log_resolution`` bounds the tail's natural-log step only for
+    ``dlogf`` bounds the tail's natural-log step only for
     ``"loglinear"`` and must be ``None`` otherwise. Endpoint alignment can
     reduce that step slightly; spacing may jump at the turnover.
     """
@@ -191,11 +187,11 @@ def frequency_grid(
             maximum_frequency,
             df,
             turnover_frequency,
-            log_resolution=log_resolution,
+            dlogf=dlogf,
         )
     else:
-        if log_resolution is not None:
-            raise ValueError("log_resolution is only used by the 'loglinear' spacing")
+        if dlogf is not None:
+            raise ValueError("dlogf is only used by the 'loglinear' spacing")
         if turnover_frequency is not None:
             raise ValueError(
                 f"turnover_frequency is only used by the 'loglinear' spacing, "

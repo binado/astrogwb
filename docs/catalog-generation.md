@@ -35,7 +35,7 @@ anything about a draw -- a seed, a kwarg, a fiducial -- gives a new one.
    `turnover_frequency` belongs to `"loglinear"` alone: required there and
    rejected elsewhere, so one grid has one record and one key. The turn falls on
    the last uniform point not above `turnover_frequency`. Optional
-   `log_resolution` independently bounds the natural-log step of the geometric
+   `dlogf` independently bounds the natural-log step of the geometric
    tail; endpoint alignment may make the actual step slightly smaller. Linear
    points and the effective turnover stay unchanged, but spacing may jump at
    the turn. It must be finite and positive, and is rejected for `"linear"`
@@ -320,7 +320,7 @@ simulator's later split into a population draw and a packed reduction changes
 the spectra record, hence its keys, but no catalog draw, so it did not bump.
 
 The waveform metadata records `frequency_spacing`, `frequency_resolution`,
-`turnover_frequency` and `log_resolution` -- what was *requested* of the
+`turnover_frequency` and `dlogf` -- what was *requested* of the
 generating backend -- while
 the bin widths used in every integral are derived from the `frequency` dataset
 itself (`astrogwb.frequency.bin_widths`, used directly on
@@ -329,7 +329,7 @@ the two can differ. The grid need only be strictly increasing: each bin's width
 is half the distance between its neighbours, which is the grid spacing on a
 uniform grid and grows with frequency above the turn of a `"loglinear"` one.
 
-`log_resolution` is serialized even when unset (`null`). Its addition changes
+`dlogf` is serialized even when unset (`null`). Its addition changes
 metadata hashes and may regenerate cached catalogs and spectra; no cache
 migration is provided. Configured defaults and notebook grids are unchanged.
 

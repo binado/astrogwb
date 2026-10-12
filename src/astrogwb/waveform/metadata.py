@@ -32,7 +32,7 @@ class WaveformMetadata(BaseModel):
     there and must be ``None`` otherwise, so one grid has one record and one
     catalog key.
 
-    ``log_resolution`` is an optional finite positive bound on the tail's
+    ``dlogf`` is an optional finite positive bound on the tail's
     natural-log step for ``"loglinear"`` only. Endpoint alignment may make
     the actual step slightly smaller, and spacing may jump at the turn.
     With ``None``, the first geometric gap is bounded by the linear spacing.
@@ -48,7 +48,7 @@ class WaveformMetadata(BaseModel):
     frequency_spacing: Literal["linear", "log", "loglinear"] = "linear"
     frequency_resolution: float = Field(default=1.0, gt=0.0, allow_inf_nan=False)
     turnover_frequency: float | None = Field(default=None, gt=0.0, allow_inf_nan=False)
-    log_resolution: float | None = Field(default=None, gt=0.0, allow_inf_nan=False)
+    dlogf: float | None = Field(default=None, gt=0.0, allow_inf_nan=False)
     alpha: float | None = Field(default=None, gt=0.0, allow_inf_nan=False)
     use_taper_in_tidal_corrections: bool = True
 
@@ -89,10 +89,8 @@ class WaveformMetadata(BaseModel):
             raise ValueError(
                 "turnover_frequency is only valid for frequency_spacing='loglinear'"
             )
-        if self.frequency_spacing != "loglinear" and self.log_resolution is not None:
-            raise ValueError(
-                "log_resolution is only valid for frequency_spacing='loglinear'"
-            )
+        if self.frequency_spacing != "loglinear" and self.dlogf is not None:
+            raise ValueError("dlogf is only valid for frequency_spacing='loglinear'")
         if self.frequency_spacing != "linear" and self.minimum_frequency <= 0.0:
             raise ValueError(
                 f"frequency_spacing={self.frequency_spacing!r} needs "

@@ -127,7 +127,7 @@ def test_committed_waveform_uses_the_loglinear_grid() -> None:
     assert metadata.frequency_spacing == "loglinear"
     assert metadata.frequency_resolution == 1.0
     assert metadata.turnover_frequency == 100.0
-    assert metadata.log_resolution is None
+    assert metadata.dlogf is None
 
 
 def test_committed_waveform_variants_share_the_default_band_and_differ_in_grid() -> (
@@ -271,10 +271,8 @@ def test_accessor_kwargs_do_not_poison_the_cache() -> None:
 
 
 @pytest.mark.parametrize("approximant", ["TaylorF2", "AnalyticInspiral"])
-def test_waveform_log_resolution_override_reaches_metadata(approximant: str) -> None:
-    generator = waveform_generator(
-        REPO_ROOT, approximant=approximant, log_resolution=0.2
-    )
-    assert generator.metadata.log_resolution == 0.2
+def test_waveform_dlogf_override_reaches_metadata(approximant: str) -> None:
+    generator = waveform_generator(REPO_ROOT, approximant=approximant, dlogf=0.2)
+    assert generator.metadata.dlogf == 0.2
     assert generator.metadata.frequency_spacing == "loglinear"
     assert np.asarray(generator.frequencies).size == 115

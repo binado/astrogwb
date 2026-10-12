@@ -308,7 +308,7 @@ def test_population_simulator_takes_one_key() -> None:
 
 @pytest.mark.parametrize("template", [CATALOG, SPECTRA], ids=["catalog", "spectra"])
 @pytest.mark.parametrize("resolution", [None, 0.1, 0.2])
-def test_nested_log_resolution_round_trips_through_hdf5(
+def test_nested_dlogf_round_trips_through_hdf5(
     tmp_path: Path,
     template: CatalogMetadata | BackgroundSpectralDensityMetadata,
     resolution: float | None,
@@ -318,7 +318,7 @@ def test_nested_log_resolution_round_trips_through_hdf5(
             **WAVEFORM.model_dump(),
             "frequency_spacing": "loglinear",
             "turnover_frequency": 30.0,
-            "log_resolution": resolution,
+            "dlogf": resolution,
         }
     )
     metadata = type(template).model_validate(
@@ -332,11 +332,11 @@ def test_nested_log_resolution_round_trips_through_hdf5(
     )
     _, restored, _ = load(path, type(template))
     assert restored == metadata
-    assert restored.waveform.model_dump()["log_resolution"] == resolution
+    assert restored.waveform.model_dump()["dlogf"] == resolution
 
 
 @pytest.mark.parametrize("template", [CATALOG, SPECTRA], ids=["catalog", "spectra"])
-def test_log_resolution_changes_artifact_keys(
+def test_dlogf_changes_artifact_keys(
     template: CatalogMetadata | BackgroundSpectralDensityMetadata,
 ) -> None:
     keys = []
@@ -346,7 +346,7 @@ def test_log_resolution_changes_artifact_keys(
                 **WAVEFORM.model_dump(),
                 "frequency_spacing": "loglinear",
                 "turnover_frequency": 30.0,
-                "log_resolution": resolution,
+                "dlogf": resolution,
             }
         )
         metadata = type(template).model_validate(
