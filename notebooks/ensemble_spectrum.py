@@ -744,7 +744,7 @@ def _(BASE_DIR, table_coba, table_etd, write_figures):
     if write_figures:
         BASE_DIR.mkdir(parents=True, exist_ok=True)
         for _tag, _block in _blocks.items():
-            _path = BASE_DIR / f"mean_spectrum_snr_{_tag}.tex"
+            _path = BASE_DIR / f"ensemble_spectrum_snr_{_tag}.tex"
             _path.write_text(_block, encoding="utf-8")
     mo.md("\n\n".join(f"```latex\n{block}\n```" for block in _blocks.values()))
     return
@@ -831,7 +831,7 @@ def _(
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    ## 7. Shot noise of one draw
+    ## 8. Shot noise of one draw
 
     One realization of the background scatters about the mean: a finite
     Poisson sum over mergers. Projected on the mean spectrum, the scatter is

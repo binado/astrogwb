@@ -67,7 +67,7 @@ def _():
     Einstein Telescope (ET) and Cosmic Explorer (CE), and where the SNR accrues.
 
     The paper's figure and SNR tables come from the Poisson ensemble in
-    `notebooks/mean_spectrum_snr_table.py`; a single draw has no sense of scatter.
+    `notebooks/ensemble_spectrum.py`; a single draw has no sense of scatter.
     """)
     return
 

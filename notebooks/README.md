@@ -11,7 +11,7 @@ Every notebook here drives the `astrogwb.paper` configuration layer, so they all
   $S_h$ / $\Omega_{\mathrm{GW}}$), network $S_{\mathrm{eff}}$, $\sigma$, and
   cumulative per-network SNR, with sliders for approximant, resolution and
   observation time. No catalog file, and no paper SNR table: a single draw is
-  not the quoted number (see `mean_spectrum_snr_table.py`).
+  not the quoted number (see `ensemble_spectrum.py`).
 - **`spectrum_snrs.py`** — **deprecated**: it depends on the removed
   amplitude-marginalized model and fails at import; to be resolved in a
   follow-up. Marimo notebook for the appendix's shot-noise
@@ -50,7 +50,7 @@ Every notebook here drives the `astrogwb.paper` configuration layer, so they all
   Sobol catalogs (`CatalogMetadata(sampling="sobol")`), compared at equal $N$
   (`sampling_comparison.pdf`). Errors are in units of the most
   sensitive network's per-bin noise and of each parameter's Fisher width.
-- **`mean_spectrum_snr_table.py`** — marimo notebook. The paper's spectrum
+- **`ensemble_spectrum.py`** — marimo notebook. The paper's spectrum
   figure and SNR tables, from a 200-draw Poisson ensemble (`IMRPhenomXAS`,
   seed 41): per-network SNR and low-frequency cut as the mean over draws of
   each draw's SNR with its 16-84% range (LaTeX tables, ET-COBA and ET-D PSDs),
@@ -62,7 +62,7 @@ Every notebook here drives the `astrogwb.paper` configuration layer, so they all
   with `shot_noise_coverage.py`.
 - **`shot_noise_coverage.py`** — marimo notebook. Calibration of the
   shot-noise likelihood for $H_0$: the Poisson ensemble of
-  `mean_spectrum_snr_table.py` as injections (read from the shared cache),
+  `ensemble_spectrum.py` as injections (read from the shared cache),
   plus Gaussian detector noise per network, scored on an $H_0$ grid against an
   independent `IMRPhenomXAS` reference catalog with the `detector`,
   `amplitude` and `fixed` likelihoods. Compares the model's $\rho s$ with the

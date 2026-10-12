@@ -18,7 +18,7 @@ The notebooks are marimo notebooks. Open one from the repository root:
 
 ```bash
 uv sync --extra notebook --group notebook
-uv run --extra notebook --group notebook marimo edit notebooks/mean_spectrum_snr_table.py
+uv run --extra notebook --group notebook marimo edit notebooks/ensemble_spectrum.py
 ```
 
 Every path is relative to the repository root -- library code names no absolute

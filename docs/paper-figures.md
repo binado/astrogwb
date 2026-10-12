@@ -29,7 +29,7 @@ update the notebook's configuration cell too.
 The spectrum figure (characteristic amplitudes $h_c$ and $h_n$ with percentile
 bands over a Poisson ensemble, stacked over $d\mathrm{SNR}^2/d\ln f$) and the
 SNR tables (mean over draws of each draw's SNR, with the 16-84% range) come from
-[`notebooks/mean_spectrum_snr_table.py`](../notebooks/mean_spectrum_snr_table.py).
+[`notebooks/ensemble_spectrum.py`](../notebooks/ensemble_spectrum.py).
 The single-draw explorer, with the network $S_{\mathrm{eff}}$, cumulative SNR
 and sliders, is
 [`notebooks/fiducial_spectrum.py`](../notebooks/fiducial_spectrum.py).
