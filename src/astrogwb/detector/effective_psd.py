@@ -25,7 +25,10 @@ from ._types import DetectorSpec
 from .overlap import overlap_reduction_function
 from .sensitivity import Sensitivity
 
-_NETWORK_SENSITIVITY_FACTOR = 0.16
+# Normalization of the overlap reduction function: the paper's
+# Gamma_ab = (2/5) gamma_ab, with gamma_ab the normalized ORF returned by
+# ``overlap_reduction_function`` (one for co-located aligned L-shaped detectors).
+_OVERLAP_REDUCTION_FUNCTION_NORM = 0.4
 
 
 def effective_psd(
@@ -33,13 +36,19 @@ def effective_psd(
     detectors: Sequence[DetectorSpec],
     sensitivities: Mapping[str, Sensitivity],
 ) -> NDArray[np.float64]:
-    """Network effective PSD from an inverse-variance cross-correlation sum.
+    r"""Network effective PSD from an inverse-variance cross-correlation sum.
+
+    .. math::
+
+        S_{\mathrm{eff}}^{-2} = \sum_{a<b}
+        \frac{\Gamma_{ab}^2}{S_{n,a} S_{n,b}}, \qquad
+        \Gamma_{ab} = \tfrac{2}{5}\, \gamma_{ab},
+
+    with :math:`\gamma_{ab}` the normalized overlap reduction function.
 
     ``detectors`` are matched to ``sensitivities`` by their public name
     (gwmock ``detector_names``): plain str codes match directly, while a
-    ``CustomDetector`` matches on its ``name``. The contraction and
-    ``_NETWORK_SENSITIVITY_FACTOR`` are unchanged from the pre-refactor
-    implementation.
+    ``CustomDetector`` matches on its ``name``.
     """
     frequencies = np.asarray(frequencies, dtype=float)
     det_list = list(detectors)
@@ -58,7 +67,7 @@ def effective_psd(
             inverse_variance += np.where(np.isfinite(contribution), contribution, 0.0)
 
     with np.errstate(invalid="ignore", divide="ignore"):
-        result = 1.0 / (_NETWORK_SENSITIVITY_FACTOR * np.sqrt(inverse_variance))
+        result = 1.0 / (_OVERLAP_REDUCTION_FUNCTION_NORM * np.sqrt(inverse_variance))
     return np.where(inverse_variance > 0.0, result, np.inf)
 
 
