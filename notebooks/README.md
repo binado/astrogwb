@@ -6,9 +6,12 @@ Every notebook here drives the `astrogwb.paper` configuration layer, so they all
 
 ## Notebooks
 
-- **`fiducial_spectrum.py`** — marimo notebook. One seeded forward-model draw
-  of the fiducial $S_h$ / $\Omega_{\mathrm{GW}}$, network $S_{\mathrm{eff}}$,
-  $\sigma$, and per-network SNR. No catalog file.
+- **`fiducial_spectrum.py`** — marimo notebook. Interactive explorer of one
+  seeded forward-model draw: characteristic amplitudes $h_c$ / $h_n$ (or
+  $S_h$ / $\Omega_{\mathrm{GW}}$), network $S_{\mathrm{eff}}$, $\sigma$, and
+  cumulative per-network SNR, with sliders for approximant, resolution and
+  observation time. No catalog file, and no paper SNR table: a single draw is
+  not the quoted number (see `mean_spectrum_snr_table.py`).
 - **`spectrum_snrs.py`** — **deprecated**: it depends on the removed
   amplitude-marginalized model and fails at import; to be resolved in a
   follow-up. Marimo notebook for the appendix's shot-noise
@@ -47,13 +50,16 @@ Every notebook here drives the `astrogwb.paper` configuration layer, so they all
   Sobol catalogs (`CatalogMetadata(sampling="sobol")`), compared at equal $N$
   (`sampling_comparison.pdf`). Errors are in units of the most
   sensitive network's per-bin noise and of each parameter's Fisher width.
-- **`mean_spectrum_snr_table.py`** — marimo notebook. Mean-spectrum SNR per
-  network and low-frequency cut, as LaTeX tables, from a 200-draw Poisson
-  ensemble (`IMRPhenomXAS`, seed 41), plus the shot noise of one draw about
-  the mean ($\rho\,\mathrm{sd}(\epsilon)$ and the correlation across bins).
-  The ensemble is cached one draw per file under
-  `default_cache_dir() / "ensembles"` (`spectra_ensemble`) and shared with
-  `shot_noise_coverage.py`.
+- **`mean_spectrum_snr_table.py`** — marimo notebook. The paper's spectrum
+  figure and SNR tables, from a 200-draw Poisson ensemble (`IMRPhenomXAS`,
+  seed 41): per-network SNR and low-frequency cut as the mean over draws of
+  each draw's SNR with its 16-84% range (LaTeX tables, ET-COBA and ET-D PSDs),
+  the characteristic amplitudes $h_c$ (median and band) against $h_n$ over
+  $d\mathrm{SNR}^2/d\ln f$ (`characteristic_amplitudes_and_snr_density.pdf`),
+  and the shot noise of one draw about the mean ($\rho\,\mathrm{sd}(\epsilon)$
+  and the correlation across bins). The ensemble is cached one draw per file
+  under `default_cache_dir() / "ensembles"` (`spectra_ensemble`) and shared
+  with `shot_noise_coverage.py`.
 - **`shot_noise_coverage.py`** — marimo notebook. Calibration of the
   shot-noise likelihood for $H_0$: the Poisson ensemble of
   `mean_spectrum_snr_table.py` as injections (read from the shared cache),
