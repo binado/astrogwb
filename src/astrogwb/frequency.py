@@ -74,14 +74,18 @@ def _check_log_grid_arguments(minimum: float, maximum: float, df: float) -> None
         raise ValueError("df must be a finite positive scalar")
 
 
-def _geometric_tail(start: float, maximum: float, df: float) -> np.ndarray:
+def _geometric_tail(
+    start: float, maximum: float, df: float, *, dlogf: float | None = None
+) -> np.ndarray:
     """Return the geometric points above ``start``, ending exactly at ``maximum``.
 
     The step count is the smallest that keeps the first geometric gap,
     ``start * (ratio - 1)``, no larger than ``df``; the ratio is then set so the
-    last point lands on ``maximum``.
+    last point lands on ``maximum``. With ``dlogf``, the step count
+    instead bounds the natural-log step by that value.
     """
-    num_steps = max(int(np.ceil(np.log(maximum / start) / np.log1p(df / start))), 1)
+    log_step = np.log1p(df / start) if dlogf is None else dlogf
+    num_steps = max(int(np.ceil(np.log(maximum / start) / log_step)), 1)
     ratio = (maximum / start) ** (1.0 / num_steps)
     tail = start * ratio ** np.arange(1, num_steps + 1, dtype=np.float64)
     tail[-1] = maximum
@@ -108,15 +112,30 @@ def loglinear_frequency_grid(
     maximum_frequency: float,
     df: float,
     turnover_frequency: float,
+    *,
+    dlogf: float | None = None,
 ) -> np.ndarray:
     """Return a grid linear up to the turnover and geometric above it.
 
     Below the turnover the grid is ``minimum_frequency + df * k``. The turn
     itself is the last of those points not above ``turnover_frequency`` (the
     *effective* turnover, at most one ``df`` below the request). Above it the
-    grid is geometric, with a ratio chosen so the first geometric gap is at
-    most ``df`` (continuous with the linear spacing at the turn) and the last
-    point is exactly ``maximum_frequency``.
+    grid is geometric and the last point is exactly ``maximum_frequency``.
+    By default the ratio keeps the first geometric gap at most ``df``.
+
+    Parameters
+    ----------
+    minimum_frequency, maximum_frequency:
+        Positive frequency bounds in Hz.
+    df:
+        Linear spacing in Hz.
+    turnover_frequency:
+        Requested turnover in Hz, strictly inside the band.
+    dlogf:
+        Optional finite positive bound on the natural-log step of the tail.
+        The actual step may be slightly smaller to align the endpoint. The
+        linear points and effective turnover are unchanged, but spacing may
+        jump at the turnover. ``None`` uses the first-gap bound from ``df``.
     """
     minimum = float(minimum_frequency)
     maximum = float(maximum_frequency)
@@ -128,11 +147,18 @@ def loglinear_frequency_grid(
             "turnover_frequency must lie strictly between minimum_frequency and "
             "maximum_frequency"
         )
+    if dlogf is not None and (not np.isfinite(dlogf) or dlogf <= 0.0):
+        raise ValueError("dlogf must be a finite positive scalar")
     num_linear_steps = int(
         np.floor((turnover - minimum) / spacing + _TURNOVER_STEP_TOLERANCE)
     )
     linear = minimum + spacing * np.arange(num_linear_steps + 1, dtype=np.float64)
-    return np.concatenate([linear, _geometric_tail(linear[-1], maximum, spacing)])
+    return np.concatenate(
+        [
+            linear,
+            _geometric_tail(linear[-1], maximum, spacing, dlogf=dlogf),
+        ]
+    )
 
 
 def frequency_grid(
@@ -141,20 +167,31 @@ def frequency_grid(
     maximum_frequency: float,
     df: float,
     turnover_frequency: float | None = None,
+    *,
+    dlogf: float | None = None,
 ) -> np.ndarray:
     """Return the grid ``spacing`` names, validated as a frequency grid.
 
     The single entry point the waveform generators use, so a
     ``WaveformMetadata`` record maps to one grid. ``turnover_frequency`` is
-    required for ``"loglinear"`` and must be ``None`` otherwise.
+    required for ``"loglinear"`` and must be ``None`` otherwise. The optional
+    ``dlogf`` bounds the tail's natural-log step only for
+    ``"loglinear"`` and must be ``None`` otherwise. Endpoint alignment can
+    reduce that step slightly; spacing may jump at the turnover.
     """
     if spacing == "loglinear":
         if turnover_frequency is None:
             raise ValueError("the 'loglinear' spacing needs a turnover_frequency")
         grid = loglinear_frequency_grid(
-            minimum_frequency, maximum_frequency, df, turnover_frequency
+            minimum_frequency,
+            maximum_frequency,
+            df,
+            turnover_frequency,
+            dlogf=dlogf,
         )
     else:
+        if dlogf is not None:
+            raise ValueError("dlogf is only used by the 'loglinear' spacing")
         if turnover_frequency is not None:
             raise ValueError(
                 f"turnover_frequency is only used by the 'loglinear' spacing, "

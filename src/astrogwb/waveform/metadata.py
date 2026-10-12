@@ -23,14 +23,19 @@ class WaveformMetadata(BaseModel):
 
     - ``"linear"``: uniform bins of width ``frequency_resolution``.
     - ``"loglinear"``: uniform bins of width ``frequency_resolution`` up to
-      ``turnover_frequency``, then geometric bins whose width is continuous with
-      the linear ones at the turn and grows in proportion to frequency.
+      ``turnover_frequency``, then geometric bins whose width grows in
+      proportion to frequency.
     - ``"log"``: geometric bins, ``frequency_resolution`` wide at
       ``minimum_frequency``.
 
     ``turnover_frequency`` belongs to ``"loglinear"`` alone: it is required
     there and must be ``None`` otherwise, so one grid has one record and one
     catalog key.
+
+    ``dlogf`` is an optional finite positive bound on the tail's
+    natural-log step for ``"loglinear"`` only. Endpoint alignment may make
+    the actual step slightly smaller, and spacing may jump at the turn.
+    With ``None``, the first geometric gap is bounded by the linear spacing.
     """
 
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
@@ -43,6 +48,7 @@ class WaveformMetadata(BaseModel):
     frequency_spacing: Literal["linear", "log", "loglinear"] = "linear"
     frequency_resolution: float = Field(default=1.0, gt=0.0, allow_inf_nan=False)
     turnover_frequency: float | None = Field(default=None, gt=0.0, allow_inf_nan=False)
+    dlogf: float | None = Field(default=None, gt=0.0, allow_inf_nan=False)
     alpha: float | None = Field(default=None, gt=0.0, allow_inf_nan=False)
     use_taper_in_tidal_corrections: bool = True
 
@@ -83,6 +89,8 @@ class WaveformMetadata(BaseModel):
             raise ValueError(
                 "turnover_frequency is only valid for frequency_spacing='loglinear'"
             )
+        if self.frequency_spacing != "loglinear" and self.dlogf is not None:
+            raise ValueError("dlogf is only valid for frequency_spacing='loglinear'")
         if self.frequency_spacing != "linear" and self.minimum_frequency <= 0.0:
             raise ValueError(
                 f"frequency_spacing={self.frequency_spacing!r} needs "
