@@ -41,7 +41,7 @@ with app.setup(hide_code=True):
         waveform_metadata,
     )
     from astrogwb.paper.config.detectors import DetectorRegistry
-    from astrogwb.paper.config.runs import FIGURES_DIR
+    from astrogwb.paper.config.runs import BASE_OUT_DIR
     from astrogwb.paper.plotting import (
         DETECTOR_COMPARISON_LEGEND,
         DETECTOR_NETWORKS,
@@ -161,9 +161,9 @@ def _():
     maximum_redshift = 20.0
     # Shared with shot_noise_coverage.py: same record, seed and directory.
     ensemble_dir = default_cache_dir() / "ensembles"
-    #: Where this notebook's figures and tables go, under the one output root
-    #: the workflow and `config/plotting.toml` agree on.
-    BASE_DIR = ROOT_DIR / FIGURES_DIR / "fiducial_spectrum"
+    #: Where this notebook's figures and tables go: one folder per notebook
+    #: under the output root, named after the notebook file.
+    BASE_DIR = ROOT_DIR / BASE_OUT_DIR / Path(__file__).stem
     use_paper_style(root=ROOT_DIR)
     # Percentiles of the plotted bands and of the table ranges (16-84%).
     percentiles = (16.0, 50.0, 84.0)
