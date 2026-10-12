@@ -346,10 +346,14 @@ def _():
     FIDUCIALS = fiducials(root=ROOT_DIR)
     PRIORS = priors(root=ROOT_DIR)
     registry = detector_registry(root=ROOT_DIR)
-    # Same grid as ensemble_spectrum.py, whose draws these injections read: the
-    # shared 1 Hz spacing leaves kinks in the SNR density at the 5-10 Hz peak.
+    # Same 1024-point grid as ensemble_spectrum.py, whose draws these injections
+    # read. Keep this waveform record in sync with that notebook.
     waveform = waveform_metadata(
-        root=ROOT_DIR, approximant=approximant, frequency_resolution=0.125
+        root=ROOT_DIR,
+        approximant=approximant,
+        frequency_resolution=0.125,
+        turnover_frequency=100.0,
+        dlogf=0.01266,
     )
     frequencies = np.asarray(waveform.build().frequencies)
     population = population_metadata(
