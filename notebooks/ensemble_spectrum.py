@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.25.0"
+__generated_with = "0.25.1"
 app = marimo.App()
 
 with app.setup(hide_code=True):
@@ -95,8 +95,9 @@ def _():
 
     **The spectrum.** The background is a sum over compact-binary mergers;
     its spectral density $S_h(f)$ is the incoherent sum of the sources'
-    contributions. With a Poisson count, $N \sim \mathrm{Poisson}(R\,T)$, so
-    each draw is one realization and the spread over draws is the scatter a
+    contributions. With a Poisson count,
+    $$N \sim \mathrm{Poisson}(R\,T),$$
+    so each draw is one realization and the spread over draws is the scatter a
     single observation would show.
 
     **The SNR.** For a stochastic signal and a network with effective noise
@@ -111,10 +112,12 @@ def _():
 
     **Characteristic amplitudes.** With $T$ the observation time,
     $$h_c = \sqrt{2 f S_h}, \qquad
-    h_n = \frac{\sqrt{2 f S_{\mathrm{eff}}}}{(2 T f)^{1/4}}, \qquad
-    \rho^2 = \int d\ln f\,\left(\frac{h_c}{h_n}\right)^4,$$
-    so $(h_c/h_n)^4 = d\rho^2/d\ln f$ and the gap between the curves on a log
-    plot shows where the SNR accrues.
+    h_n = \frac{\sqrt{2 f S_{\mathrm{eff}}}}{(2 T f)^{1/4}},$$
+    and
+    $$\rho^2 = \int d\ln f\,\left(\frac{h_c}{h_n}\right)^4
+    \quad\Longrightarrow\quad
+    \left(\frac{h_c}{h_n}\right)^4 = \frac{d\rho^2}{d\ln f}.$$
+    The gap between the curves on a log plot shows where the SNR accrues.
 
     **The network PSD.** A stochastic background is detected by
     cross-correlating detectors, weighting each pair by the overlap reduction
@@ -122,8 +125,9 @@ def _():
     cross-correlation, hence an infinite effective PSD and zero SNR; this is
     why the rows are *networks*, not single detectors.
 
-    **Why the cut matters.** In the inspiral $S_h \propto f^{2/3}$, but
-    third-generation detectors (ET, CE) have noise that falls steeply towards
+    **Why the cut matters.** In the inspiral
+    $$S_h \propto f^{2/3},$$
+    but third-generation detectors (ET, CE) have noise that falls steeply towards
     low frequency, so much of their SNR sits at a few Hz. Current-generation
     networks gain little below $\sim 10$ Hz.
 
@@ -212,11 +216,11 @@ def _():
         BASE_DIR,
         ROOT_DIR,
         SMOKE,
+        chunk_size,
         coba_rows,
+        ensemble_dir,
         etd_registry,
         etd_rows,
-        chunk_size,
-        ensemble_dir,
         maximum_frequency,
         metadata,
         minimum_frequencies,
@@ -772,9 +776,9 @@ def _():
 
     The paper's spectrum figure. The median $h_c$ with its 16-84% band against
     each network's $h_n$ on top; below, each network's
-    $(h_c/h_n)^4 = d\mathrm{SNR}^2/d\ln f$ computed draw by draw, with the same
-    band. The area under a median curve in $\ln f$ is approximately that
-    network's $\mathrm{SNR}^2$. The colors and line styles are those of the other
+    $$\left(\frac{h_c}{h_n}\right)^4 = \frac{d\mathrm{SNR}^2}{d\ln f}$$
+    computed draw by draw, with the same band. The area under a median curve in
+    $\ln f$ is approximately that network's $\mathrm{SNR}^2$. The colors and line styles are those of the other
     network figures.
     """)
     return
