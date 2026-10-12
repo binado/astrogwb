@@ -303,6 +303,7 @@ class AnalyticInspiralGenerator(PolarizationPowerGenerator):
             self.metadata.maximum_frequency,
             self.metadata.frequency_resolution,
             self.metadata.turnover_frequency,
+            log_resolution=self.metadata.log_resolution,
         )
 
     def _generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:

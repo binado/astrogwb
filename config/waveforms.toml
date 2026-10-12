@@ -6,9 +6,12 @@
 # The frequency grid is frequency_spacing over [minimum_frequency,
 # maximum_frequency]. "loglinear" is linear at frequency_resolution up to
 # turnover_frequency and geometric above it, with the bin width continuous at
-# the turn; "linear" is uniform at frequency_resolution and takes no
-# turnover_frequency. Most of the signal sits at low frequency, so the loglinear
-# grid spends its bins there.
+# the turn by default. Optional log_resolution bounds the natural-log step
+# of the geometric tail independently; endpoint alignment may reduce that step
+# slightly, and spacing may jump at the turn. "linear" is uniform at
+# frequency_resolution and takes neither turnover_frequency nor log_resolution.
+# Most of the signal sits at low frequency, so the loglinear grid spends its
+# bins there.
 
 # The waveform every catalog draws with unless its role names another.
 [waveforms.default]

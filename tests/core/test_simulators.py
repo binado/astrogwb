@@ -304,3 +304,53 @@ def test_reducing_a_population_equals_the_spectrum_simulator() -> None:
 def test_population_simulator_takes_one_key() -> None:
     with pytest.raises(ValueError, match="single key"):
         PopulationSimulator(SPECTRA.sources)(batch_keys(41, 2))
+
+
+@pytest.mark.parametrize("template", [CATALOG, SPECTRA], ids=["catalog", "spectra"])
+@pytest.mark.parametrize("resolution", [None, 0.1, 0.2])
+def test_nested_log_resolution_round_trips_through_hdf5(
+    tmp_path: Path,
+    template: CatalogMetadata | BackgroundSpectralDensityMetadata,
+    resolution: float | None,
+) -> None:
+    waveform = WaveformMetadata.model_validate(
+        {
+            **WAVEFORM.model_dump(),
+            "frequency_spacing": "loglinear",
+            "turnover_frequency": 30.0,
+            "log_resolution": resolution,
+        }
+    )
+    metadata = type(template).model_validate(
+        {**template.model_dump(), "waveform": waveform.model_dump()}
+    )
+    path = write(
+        tmp_path / "metadata.h5",
+        {"frequencies": np.array([20.0, 50.0])},
+        metadata,
+        seed=41,
+    )
+    _, restored, _ = load(path, type(template))
+    assert restored == metadata
+    assert restored.waveform.model_dump()["log_resolution"] == resolution
+
+
+@pytest.mark.parametrize("template", [CATALOG, SPECTRA], ids=["catalog", "spectra"])
+def test_log_resolution_changes_artifact_keys(
+    template: CatalogMetadata | BackgroundSpectralDensityMetadata,
+) -> None:
+    keys = []
+    for resolution in [None, 0.1, 0.2]:
+        waveform = WaveformMetadata.model_validate(
+            {
+                **WAVEFORM.model_dump(),
+                "frequency_spacing": "loglinear",
+                "turnover_frequency": 30.0,
+                "log_resolution": resolution,
+            }
+        )
+        metadata = type(template).model_validate(
+            {**template.model_dump(), "waveform": waveform.model_dump()}
+        )
+        keys.append(metadata.key())
+    assert len(set(keys)) == 3

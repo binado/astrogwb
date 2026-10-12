@@ -414,3 +414,73 @@ def test_validate_frequency_grid_rejects_malformed_grids(
 ) -> None:
     with pytest.raises(ValueError, match=message):
         validate_frequency_grid(frequencies)
+
+
+@pytest.mark.parametrize(
+    ("df", "turnover", "resolution", "expected", "linear_count"),
+    [
+        (2.0, 4.0, np.log(2.0), [2.0, 4.0, 8.0, 16.0], 2),
+        (2.0, 5.0, np.log(2.0), [2.0, 4.0, 8.0, 16.0], 2),
+        (2.0, 4.0, 2.0, [2.0, 4.0, 16.0], 2),
+        (8.0, 4.0, 3.0, [2.0, 16.0], 1),
+        (1.0, 4.0, np.log(2.0), [2.0, 3.0, 4.0, 8.0, 16.0], 3),
+    ],
+)
+def test_loglinear_independent_tail_has_exact_expected_grid(
+    df: float,
+    turnover: float,
+    resolution: float,
+    expected: list[float],
+    linear_count: int,
+) -> None:
+    grid = loglinear_frequency_grid(2.0, 16.0, df, turnover, log_resolution=resolution)
+    np.testing.assert_array_equal(grid, expected)
+    default = loglinear_frequency_grid(2.0, 16.0, df, turnover)
+    np.testing.assert_array_equal(grid[:linear_count], default[:linear_count])
+    np.testing.assert_array_equal(
+        frequency_grid("loglinear", 2.0, 16.0, df, turnover, log_resolution=resolution),
+        grid,
+    )
+    assert np.all(np.diff(grid) > 0.0)
+
+
+@pytest.mark.parametrize(
+    ("turnover", "start", "linear_count"), [(100.0, 98.0, 25), (101.0, 98.0, 25)]
+)
+@pytest.mark.parametrize(("resolution", "tail_steps"), [(0.1, 31), (0.3, 11), (4.0, 1)])
+def test_loglinear_tail_aligns_endpoint_with_bounded_uniform_log_steps(
+    turnover: float,
+    start: float,
+    linear_count: int,
+    resolution: float,
+    tail_steps: int,
+) -> None:
+    grid = loglinear_frequency_grid(
+        2.0, 2048.0, 4.0, turnover, log_resolution=resolution
+    )
+    assert grid.size == linear_count + tail_steps
+    assert grid[0] == 2.0
+    assert grid[-1] == 2048.0
+    np.testing.assert_array_equal(grid[:linear_count], np.arange(2.0, 99.0, 4.0))
+    steps = np.log(grid[linear_count:] / grid[linear_count - 1 : -1])
+    expected_step = np.log(2048.0 / start) / tail_steps
+    slack = 64 * np.finfo(np.float64).eps
+    assert np.all(np.abs(steps - expected_step) <= slack)
+    assert np.all(steps <= resolution + slack)
+    assert np.all(np.diff(grid) > 0.0)
+
+
+@pytest.mark.parametrize("resolution", [0.0, -0.1, np.inf, -np.inf, np.nan])
+def test_loglinear_rejects_invalid_log_resolution(resolution: float) -> None:
+    with pytest.raises(ValueError, match="log_resolution"):
+        loglinear_frequency_grid(2.0, 16.0, 2.0, 4.0, log_resolution=resolution)
+    with pytest.raises(ValueError, match="log_resolution"):
+        frequency_grid("loglinear", 2.0, 16.0, 2.0, 4.0, log_resolution=resolution)
+
+
+@pytest.mark.parametrize("spacing", ["linear", "log"])
+def test_frequency_grid_rejects_log_resolution_for_other_spacings(
+    spacing: FrequencySpacing,
+) -> None:
+    with pytest.raises(ValueError, match="log_resolution is only used"):
+        frequency_grid(spacing, 2.0, 16.0, 2.0, log_resolution=0.1)

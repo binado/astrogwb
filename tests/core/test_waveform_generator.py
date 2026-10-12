@@ -176,6 +176,7 @@ def test_waveform_metadata_defaults_to_a_uniform_grid() -> None:
     assert metadata.frequency_spacing == "linear"
     assert metadata.frequency_resolution == 1.0
     assert metadata.turnover_frequency is None
+    assert metadata.log_resolution is None
 
 
 @pytest.mark.parametrize(
@@ -188,8 +189,14 @@ def test_waveform_metadata_defaults_to_a_uniform_grid() -> None:
             "frequency_resolution": 0.5,
             "turnover_frequency": 40.0,
         },
+        {
+            "frequency_spacing": "loglinear",
+            "frequency_resolution": 0.5,
+            "turnover_frequency": 40.0,
+            "log_resolution": 0.1,
+        },
     ],
-    ids=["linear", "log", "loglinear"],
+    ids=["linear", "log", "loglinear", "loglinear-independent"],
 )
 def test_waveform_metadata_grid_settings_round_trip_through_json(
     settings: dict[str, Any],
@@ -199,6 +206,7 @@ def test_waveform_metadata_grid_settings_round_trip_through_json(
     attrs = metadata.model_dump(mode="json")
     assert attrs["frequency_spacing"] == settings["frequency_spacing"]
     assert attrs["turnover_frequency"] == settings.get("turnover_frequency")
+    assert attrs["log_resolution"] == settings.get("log_resolution")
     assert WaveformMetadata.model_validate_json(json.dumps(attrs)) == metadata
 
 
@@ -397,8 +405,13 @@ def test_ripple_generator_calls_its_kernel_with_the_full_grid_above_dc(
     [
         {"frequency_spacing": "loglinear", "turnover_frequency": 40.0},
         {"frequency_spacing": "log"},
+        {
+            "frequency_spacing": "loglinear",
+            "turnover_frequency": 40.0,
+            "log_resolution": 0.2,
+        },
     ],
-    ids=["loglinear", "log"],
+    ids=["loglinear", "log", "loglinear-independent"],
 )
 def test_ripple_generator_evaluates_a_non_uniform_grid_directly(
     grid_settings: dict[str, Any],
@@ -425,6 +438,8 @@ def test_ripple_generator_evaluates_a_non_uniform_grid_directly(
     np.testing.assert_array_equal(np.asarray(kernel.call_args.args[0]), frequencies)
     assert frequencies[0] == 20.0
     assert frequencies[-1] == 100.0
+    if generator.metadata.log_resolution is not None:
+        assert frequencies.size == 16
     assert np.ptp(np.diff(frequencies)) > 0.0
     assert power.shape == (frequencies.size, 2)
     assert generator.n_samples is None
@@ -873,7 +888,10 @@ def test_power_matches_the_gwmock_backend(approximant: str) -> None:
 
 @pytest.mark.integration
 @pytest.mark.parametrize("approximant", SUPPORTED_APPROXIMANTS)
-def test_loglinear_power_agrees_with_a_dense_uniform_grid(approximant: str) -> None:
+@pytest.mark.parametrize("log_resolution", [None, 0.2])
+def test_loglinear_power_agrees_with_a_dense_uniform_grid(
+    approximant: str, log_resolution: float | None
+) -> None:
     """Handing Ripple a lin-log grid instead of the FFT grid changes no power.
 
     Ripple reads the grid's shape in three places (the cutoff snap in
@@ -906,6 +924,7 @@ def test_loglinear_power_agrees_with_a_dense_uniform_grid(approximant: str) -> N
                 "frequency_spacing": "loglinear",
                 "frequency_resolution": 1.0,
                 "turnover_frequency": 64.0,
+                "log_resolution": log_resolution,
             }
         )
     )
@@ -1046,3 +1065,23 @@ def test_generate_is_the_length_one_batch(ripple_generator: RippleGenerator) -> 
 @pytest.mark.integration
 def test_polarization_power_is_float64(ripple_generator: RippleGenerator) -> None:
     assert ripple_generator.generate_batch(_ripple_sources()).dtype == jnp.float64
+
+
+@pytest.mark.parametrize("resolution", [0.0, -0.1, np.inf, -np.inf, np.nan])
+def test_metadata_rejects_invalid_log_resolution(resolution: float) -> None:
+    with pytest.raises(ValidationError, match="log_resolution"):
+        WaveformMetadata.model_validate(
+            _grid_settings(
+                frequency_spacing="loglinear",
+                turnover_frequency=40.0,
+                log_resolution=resolution,
+            )
+        )
+
+
+@pytest.mark.parametrize("spacing", ["linear", "log"])
+def test_metadata_rejects_log_resolution_for_other_spacings(spacing: str) -> None:
+    with pytest.raises(ValidationError, match="log_resolution is only valid"):
+        WaveformMetadata.model_validate(
+            _grid_settings(frequency_spacing=spacing, log_resolution=0.1)
+        )

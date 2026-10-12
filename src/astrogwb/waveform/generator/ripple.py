@@ -78,6 +78,7 @@ class RippleGenerator(PolarizationPowerGenerator):
                 metadata.maximum_frequency,
                 metadata.frequency_resolution,
                 metadata.turnover_frequency,
+                log_resolution=metadata.log_resolution,
             )
             band = slice(None)
 
