@@ -179,7 +179,12 @@ def _():
         num_events=64 if SMOKE else None,
         observation_time=observation_time,
         hyperparameters={**fiducials(root=ROOT_DIR)},
-        waveform=waveform_metadata(root=ROOT_DIR, approximant="IMRPhenomXAS"),
+        # Finer than the shared 1 Hz grid, which leaves kinks in the SNR density at
+        # the 5-10 Hz peak. shot_noise_coverage.py reads these draws, so it must use
+        # the same resolution.
+        waveform=waveform_metadata(
+            root=ROOT_DIR, approximant="IMRPhenomXAS", frequency_resolution=0.125
+        ),
         population=population_metadata(
             root=ROOT_DIR,
             minimum_redshift=minimum_redshift,
