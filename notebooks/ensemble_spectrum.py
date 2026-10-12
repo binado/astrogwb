@@ -548,7 +548,7 @@ def plot_characteristic_amplitudes(
     ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
     signal_legend = ax.legend(
         handles=[Line2D([], [], color=SPECTRUM["sh"])],
-        labels=[r"$h_c$ (median)"],
+        labels=[r"$h_c$"],
         loc="upper left",
         frameon=False,
         handlelength=2.5,
