@@ -54,8 +54,9 @@ Every notebook here drives the `astrogwb.paper` configuration layer, so they all
   figure and SNR tables, from a 200-draw Poisson ensemble (`IMRPhenomXAS`,
   seed 41): per-network SNR and low-frequency cut as the mean over draws of
   each draw's SNR with its 16-84% range (LaTeX tables, ET-COBA and ET-D PSDs),
-  the characteristic amplitudes $h_c$ (median and band) against $h_n$ over
-  $d\mathrm{SNR}^2/d\ln f$ (`characteristic_amplitudes_and_snr_density.pdf`),
+  the characteristic amplitudes $h_c$ (median and band) against $h_n$ and
+  the $d\mathrm{SNR}^2/d\ln f$ curves, as two figures (`characteristic_amplitudes.pdf`,
+  `snr_density.pdf`),
   and the shot noise of one draw about the mean ($\rho\,\mathrm{sd}(\epsilon)$
   and the correlation across bins). The ensemble is cached one draw per file
   under `default_cache_dir() / "ensembles"` (`spectra_ensemble`) and shared
