@@ -21,7 +21,6 @@ with app.setup(hide_code=True):
     from matplotlib.axes import Axes as MplAxes
     from matplotlib.figure import Figure
     from matplotlib.lines import Line2D
-    from matplotlib.patches import Patch
     from matplotlib.projections import register_projection
     from matplotlib.ticker import LogFormatterMathtext, ScalarFormatter
     from numpy.typing import NDArray
@@ -532,36 +531,24 @@ def plot_characteristic_amplitudes(
 
     The fourth power of the gap between the signal band and a network's
     :math:`h_n` is that network's SNR density, shown in
-    :func:`plot_snr_density`. The band and line are the percentiles over
-    draws; ``strain`` carries ``(low, middle, high)`` rows.
+    :func:`plot_snr_density`. The line is the median over draws, the middle
+    row of ``strain``; the scatter is below the line width and is shown by
+    :func:`plot_strain_scatter`.
     """
     fig, ax = plt.subplots()
     positive = strain[1] > 0.0
-    ax.fill_between(
-        frequency[positive],
-        np.maximum(strain[0][positive], np.finfo(float).tiny),
-        strain[2][positive],
-        color=SPECTRUM["sh"],
-        alpha=0.25,
-        linewidth=0,
-    )
     ax.loglog(frequency[positive], strain[1][positive], color=SPECTRUM["sh"])
     for network, color, linestyle in zip(networks, colors, linestyles, strict=True):
         curve = curves[network.name]
         ax.loglog(curve["frequency"], curve["noise"], color=color, linestyle=linestyle)
-    ax.set_ylim(0.3 * strain[0][positive].min(), 20.0 * strain[2].max())
+    ax.set_ylim(0.3 * strain[1][positive].min(), 20.0 * strain[1].max())
     ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
     ax.set_ylabel(r"$h_c(f), \, h_n(f)$")
     ax.set_axisbelow(True)
     ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
     signal_legend = ax.legend(
-        handles=[
-            (
-                Patch(facecolor=SPECTRUM["sh"], alpha=0.25, linewidth=0),
-                Line2D([], [], color=SPECTRUM["sh"]),
-            )
-        ],
-        labels=[r"$h_c$ (median, 16--84\%)"],
+        handles=[Line2D([], [], color=SPECTRUM["sh"])],
+        labels=[r"$h_c$ (median)"],
         loc="upper left",
         frameon=False,
         handlelength=2.5,
@@ -798,8 +785,8 @@ def _():
     mo.md(r"""
     ## 7. Characteristic amplitudes
 
-    The paper's spectrum figures. The first shows the median $h_c$ with its 16-84%
-    band against each network's $h_n$; the second, each network's
+    The paper's spectrum figures. The first shows the median $h_c$ against each
+    network's $h_n$; the second, each network's
     $$\left(\frac{h_c}{h_n}\right)^4 = \frac{d\mathrm{SNR}^2}{d\ln f}$$
     computed draw by draw, with the same band. The area under a median curve in
     $\ln f$ is approximately that network's $\mathrm{SNR}^2$. The colors and line styles are those of the other
