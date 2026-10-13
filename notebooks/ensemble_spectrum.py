@@ -535,7 +535,9 @@ def plot_characteristic_amplitudes(
     """
     fig, ax = plt.subplots()
     positive = strain[1] > 0.0
-    ax.loglog(frequency[positive], strain[1][positive], color=SPECTRUM["sh"])
+    ax.loglog(
+        frequency[positive], strain[1][positive], color=SPECTRUM["sh"], linestyle=":"
+    )
     for network, color, linestyle in zip(networks, colors, linestyles, strict=True):
         curve = curves[network.name]
         ax.loglog(curve["frequency"], curve["noise"], color=color, linestyle=linestyle)
@@ -545,7 +547,7 @@ def plot_characteristic_amplitudes(
     ax.set_axisbelow(True)
     ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
     signal_legend = ax.legend(
-        handles=[Line2D([], [], color=SPECTRUM["sh"])],
+        handles=[Line2D([], [], color=SPECTRUM["sh"], linestyle=":")],
         labels=[r"$h_c$"],
         loc="upper right",
         frameon=False,
