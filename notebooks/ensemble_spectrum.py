@@ -1234,7 +1234,7 @@ def plot_minimum_redshift_scan(
         rows = scan[scan["network"] == network.label].sort_values("minimum_redshift")
         edge = rows["minimum_redshift"].to_numpy()
         total = 100.0 * rows["relative_uncertainty"].to_numpy()
-        ax.plot(edge, total, color=color, linestyle=linestyle)
+        ax.semilogy(edge, total, color=color, linestyle=linestyle)
         best = int(np.argmin(total))
         ax.plot(edge[best], total[best], "o", color=color, markersize=4)
     ax.axvline(window_edge, color="k", linestyle=":", linewidth=0.8)
