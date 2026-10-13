@@ -151,7 +151,7 @@ def _():
 def _():
     ROOT_DIR = Path(__file__).resolve().parents[1]
 
-    num_draws = 200
+    num_draws = 1000
     seed = 41
     chunk_size = 1024
     observation_time = 1.0  # years
