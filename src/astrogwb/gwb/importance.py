@@ -300,7 +300,9 @@ def reference_catalog(
 
     The model is conditioned on :func:`reference_redshift` (the population's
     ``minimum_redshift`` unless ``metadata`` sets one) and
-    :data:`EFFECTIVE_INCLINATION` before the draw. The intrinsic parameters are
+    :data:`EFFECTIVE_INCLINATION` before the draw. When the reference redshift is
+    below the population's, the distance table is extended down to it, so the
+    stored luminosity distance is the one at the reference redshift. The intrinsic parameters are
     drawn i.i.d., or on a scrambled Sobol net seeded by ``key`` when
     ``metadata.sampling`` is ``"sobol"``
     (:func:`~astrogwb.populations.evaluation.sample_sources_qmc`): the only
@@ -321,10 +323,22 @@ def reference_catalog(
         metadata.population.model_name,
         metadata.num_samples,
     )
-    model = joint_model(*metadata.population.build()(metadata.fiducials))
+    reference = reference_redshift(metadata)
+    population = metadata.population
+    if reference < _redshift_window(population)[0]:
+        # The distance table clamps outside its grid: extend it down to the pin.
+        population = population.model_copy(
+            update={
+                "model_kwargs": {
+                    **population.model_kwargs,
+                    "minimum_redshift": reference,
+                }
+            }
+        )
+    model = joint_model(*population.build()(metadata.fiducials))
     draw = sample_sources_qmc if metadata.sampling == "sobol" else sample_sources
     samples = draw(
-        _pin_redshift_and_inclination(model, reference_redshift(metadata)),
+        _pin_redshift_and_inclination(model, reference),
         key,
         num_samples=metadata.num_samples,
     )

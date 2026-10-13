@@ -631,3 +631,20 @@ def test_reference_redshift_defaults_to_the_window_lower_edge(
     metadata = reference_metadata.model_copy(update={"reference_redshift": reference})
 
     assert reference_redshift(metadata) == 0.1
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("reference", [0.02, 0.05, 0.1])
+def test_reference_catalog_distance_is_at_the_reference_redshift(
+    reference_metadata: CatalogMetadata, reference: float
+) -> None:
+    """Below the population's minimum redshift the distance must not be clamped."""
+    metadata = reference_metadata.model_copy(update={"reference_redshift": reference})
+    columns = reference_catalog(metadata, batch_keys(41, 1)[0])["source_parameters"]
+    fiducials = metadata.fiducials
+
+    expected = luminosity_distance(reference, fiducials["H0"], fiducials["Omega_m"])
+    np.testing.assert_allclose(columns["redshift"], reference)
+    np.testing.assert_allclose(
+        columns["luminosity_distance"], float(expected), rtol=1e-6
+    )
