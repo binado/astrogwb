@@ -108,6 +108,24 @@ def test_catalog_key_of_random_sampling_is_the_key_without_it() -> None:
     assert explicit.key() == CATALOG.key()
 
 
+def test_catalog_key_of_default_reference_redshift_is_the_key_without_it() -> None:
+    """Existing catalogs predate the field: the default must not change keys."""
+    explicit = CatalogMetadata.model_validate(
+        {**CATALOG.model_dump(), "reference_redshift": None}
+    )
+    assert explicit.key() == CATALOG.key()
+
+
+def test_catalog_key_tells_reference_redshifts_apart() -> None:
+    keys = {
+        CatalogMetadata.model_validate(
+            {**CATALOG.model_dump(), "reference_redshift": reference}
+        ).key()
+        for reference in (None, 0.0, 0.1, 0.2)
+    }
+    assert len(keys) == 4
+
+
 def test_catalog_key_tells_sobol_from_random() -> None:
     sobol = CatalogMetadata.model_validate(
         {**CATALOG.model_dump(), "num_samples": 8, "sampling": "sobol"}

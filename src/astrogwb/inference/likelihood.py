@@ -278,13 +278,18 @@ class ImportanceGaussianLikelihood:
         network: Network | None = None,
         shot_noise: ShotNoiseMode | None = None,
         observation_time: float | None = None,
+        minimum_redshift: float | None = None,
     ) -> Self:
         """Bind a reference catalog to a target on the observed ``frequencies``.
 
         The spectrum is predicted on ``frequencies``, which need not be the
         catalog's own; redshift is integrated on ``num_redshift_nodes`` nodes
         of :func:`~astrogwb.gwb.importance.redshift_quadrature` over the
-        catalog population's window. ``density_sites`` names the intrinsic
+        catalog population's window, whose lower edge is ``minimum_redshift``
+        (the population's own by default). It must not be below the catalog's
+        :func:`~astrogwb.gwb.importance.reference_redshift`, else ``ValueError``,
+        so one catalog generated low serves every window above it.
+        ``density_sites`` names the intrinsic
         factors the weights include; leave it empty when no intrinsic
         hyperparameter varies, and every weight is one. Call outside JAX
         transformations.
@@ -314,7 +319,12 @@ class ImportanceGaussianLikelihood:
             density_sites=tuple(density_sites),
             shot_noise=shot_noise,
             **_rescaling_arrays(
-                data, metadata, frequencies, num_redshift_nodes, density_sites
+                data,
+                metadata,
+                frequencies,
+                num_redshift_nodes,
+                density_sites,
+                minimum_redshift,
             ),
         )
 

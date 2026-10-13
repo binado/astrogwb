@@ -42,6 +42,12 @@ class CatalogMetadata(BaseModel):
     parameters: ``"random"`` i.i.d., or ``"sobol"`` on a scrambled Sobol net
     (:func:`~astrogwb.populations.evaluation.sample_sources_qmc`), which needs a
     power-of-two ``num_samples``. A plain catalog is always random.
+
+    ``reference_redshift`` is the redshift a reference catalog's waveforms are
+    generated at; ``None`` means the population's ``minimum_redshift``, the
+    window's lower edge. Set it below the edge to let one catalog serve every
+    window that starts at or above it
+    (:func:`~astrogwb.gwb.importance.reference_redshift`).
     """
 
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
@@ -51,6 +57,7 @@ class CatalogMetadata(BaseModel):
     fiducials: dict[str, float]
     num_samples: Annotated[int, Field(gt=0)]
     sampling: Literal["random", "sobol"] = "random"
+    reference_redshift: Annotated[float, Field(ge=0.0)] | None = None
     version: str = __version__
 
     @model_validator(mode="after")
@@ -73,11 +80,14 @@ class CatalogMetadata(BaseModel):
         The payload nests ``waveform`` and ``population`` under ``metadata``,
         the shape this record had before it was flattened, so every catalog
         already on disk keeps its key. For the same reason the default
-        ``sampling="random"`` is left out of the payload.
+        ``sampling="random"`` and ``reference_redshift=None`` are left out of
+        the payload.
         """
         payload = self.model_dump(mode="json")
         if payload["sampling"] == "random":
             del payload["sampling"]
+        if payload["reference_redshift"] is None:
+            del payload["reference_redshift"]
         widen_model_kwargs(payload["population"])
         payload["metadata"] = {
             "waveform": payload.pop("waveform"),

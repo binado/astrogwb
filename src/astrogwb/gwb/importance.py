@@ -26,15 +26,20 @@ mode alone.
 The power is not generated at every node. For a :math:`(2, 2)`-mode,
 aligned-spin, quasi-circular waveform the strain depends on mass only through
 :math:`M_d f` and an overall :math:`M_d^2`, with :math:`M_d = M (1 + z)`, so the
-power of a draw generated at the window's lower edge :math:`z_{\min}` is, at any
-redshift,
+power of a draw generated at the reference redshift :math:`z_{\mathrm{ref}}`
+(by default the window's lower edge) is, at any redshift,
 
 .. math::
 
     P(f; \theta, z) = s^4 \left[\frac{d^{\mathrm{ref}}}{d_L(z)}\right]^2
-        P_{\mathrm{ref}}(f s; \theta), \qquad s = \frac{1 + z}{1 + z_{\min}},
+        P_{\mathrm{ref}}(f s; \theta), \qquad s = \frac{1 + z}{1 + z_{\mathrm{ref}}},
 
-with :math:`d^{\mathrm{ref}} = d_L(z_{\min})` at the fiducials.
+with :math:`d^{\mathrm{ref}} = d_L(z_{\mathrm{ref}})` at the fiducials. The window's
+lower edge is independent of :math:`z_{\mathrm{ref}}` as long as it is not below it,
+so one catalog at the smallest edge of a scan serves every larger one. The
+reference frequency grid must extend past the detector-frame merger at
+:math:`z_{\mathrm{ref}}`, since the rescaled queries :math:`f s` reach above the
+observed band.
 :func:`reference_catalog` generates one waveform per draw there, and
 :class:`~astrogwb.inference.likelihood.ImportanceGaussianLikelihood` rescales the
 weighted mean of those to the nodes in each call, interpolating it in
@@ -125,6 +130,7 @@ __all__ = [
     "redshift_quadrature",
     "reference_catalog",
     "reference_catalog_stem",
+    "reference_redshift",
 ]
 
 logger = logging.getLogger(__name__)
@@ -251,6 +257,17 @@ def _redshift_window(population: PopulationMetadata) -> tuple[float, float]:
     return minimum, maximum
 
 
+def reference_redshift(metadata: CatalogMetadata) -> float:
+    """The redshift ``metadata``'s reference catalog is generated at.
+
+    ``metadata.reference_redshift``, or the population's ``minimum_redshift``
+    when that is ``None``.
+    """
+    if metadata.reference_redshift is not None:
+        return metadata.reference_redshift
+    return _redshift_window(metadata.population)[0]
+
+
 def _pin_redshift_and_inclination(
     model: PopulationModel, redshift: ArrayLike
 ) -> PopulationModel:
@@ -279,10 +296,13 @@ def reference_catalog(
     *,
     chunk_size: int | None = None,
 ) -> PolarizationPowerData:
-    """Every draw of ``metadata`` placed at the window's lower edge: power ``(F, N)``.
+    """Every draw of ``metadata`` placed at its reference redshift: power ``(F, N)``.
 
-    The model is conditioned on the population's ``minimum_redshift`` and
-    :data:`EFFECTIVE_INCLINATION` before the draw. The intrinsic parameters are
+    The model is conditioned on :func:`reference_redshift` (the population's
+    ``minimum_redshift`` unless ``metadata`` sets one) and
+    :data:`EFFECTIVE_INCLINATION` before the draw. When the reference redshift is
+    below the population's, the distance table is extended down to it, so the
+    stored luminosity distance is the one at the reference redshift. The intrinsic parameters are
     drawn i.i.d., or on a scrambled Sobol net seeded by ``key`` when
     ``metadata.sampling`` is ``"sobol"``
     (:func:`~astrogwb.populations.evaluation.sample_sources_qmc`): the only
@@ -303,11 +323,22 @@ def reference_catalog(
         metadata.population.model_name,
         metadata.num_samples,
     )
-    model = joint_model(*metadata.population.build()(metadata.fiducials))
-    minimum_redshift, _ = _redshift_window(metadata.population)
+    reference = reference_redshift(metadata)
+    population = metadata.population
+    if reference < _redshift_window(population)[0]:
+        # The distance table clamps outside its grid: extend it down to the pin.
+        population = population.model_copy(
+            update={
+                "model_kwargs": {
+                    **population.model_kwargs,
+                    "minimum_redshift": reference,
+                }
+            }
+        )
+    model = joint_model(*population.build()(metadata.fiducials))
     draw = sample_sources_qmc if metadata.sampling == "sobol" else sample_sources
     samples = draw(
-        _pin_redshift_and_inclination(model, minimum_redshift),
+        _pin_redshift_and_inclination(model, reference),
         key,
         num_samples=metadata.num_samples,
     )
@@ -392,6 +423,7 @@ def _rescaling_arrays(
     frequencies: ArrayLike,
     num_redshift_nodes: int,
     density_sites: Sequence[str],
+    minimum_redshift: float | None = None,
 ) -> dict[str, Any]:
     """Every array a rescaled estimator binds except the catalog's power.
 
@@ -399,12 +431,32 @@ def _rescaling_arrays(
     ``(F, Z)``, the node amplitude :math:`s_j^4`, the intrinsic columns, the
     drawn intrinsic density at the catalog's fiducials, and the reference
     distance.
+
+    The window is ``(minimum_redshift, maximum_redshift)``. The upper edge is
+    the population's; the lower defaults to its ``minimum_redshift``. The scale
+    factors are relative to :func:`reference_redshift`, which the lower edge
+    must not undercut.
+
+    Raises
+    ------
+    ValueError
+        If the window's lower edge is below the reference redshift: the query
+        frequencies would fall below the reference grid, where
+        :func:`_node_power` clamps instead of following the power law.
     """
-    minimum_redshift, maximum_redshift = _redshift_window(metadata.population)
+    window_minimum, maximum_redshift = _redshift_window(metadata.population)
+    if minimum_redshift is None:
+        minimum_redshift = window_minimum
+    reference = reference_redshift(metadata)
+    if minimum_redshift < reference:
+        raise ValueError(
+            f"the window's lower edge, {minimum_redshift}, is below the reference "
+            f"redshift {reference} the catalog was generated at"
+        )
     redshift, redshift_weights = redshift_quadrature(
         minimum_redshift, maximum_redshift, num_redshift_nodes
     )
-    scale = (1.0 + redshift) / (1.0 + minimum_redshift)
+    scale = (1.0 + redshift) / (1.0 + reference)
     query_log_frequencies = (
         np.log(np.asarray(frequencies, dtype=np.float64))[:, None]
         + np.log(scale)[None, :]
