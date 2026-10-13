@@ -24,7 +24,9 @@ with app.setup(hide_code=True):
     from matplotlib.projections import register_projection
     from matplotlib.ticker import LogFormatterMathtext, ScalarFormatter
     from numpy.typing import NDArray
+    from scipy.optimize import brentq
 
+    from astrogwb.cosmology import luminosity_distance
     from astrogwb.detector import effective_psd, gaussian_bin_scale
     from astrogwb.frequency import frequency_mask
     from astrogwb.gwb import (
@@ -32,6 +34,11 @@ with app.setup(hide_code=True):
         characteristic_strain,
         spectral_snr,
         spectral_snr_squared_per_log_frequency,
+    )
+    from astrogwb.gwb.importance import reference_catalog, reference_catalog_stem
+    from astrogwb.inference import (
+        ImportanceGaussianLikelihood,
+        amplitude_shot_noise_variance,
     )
     from astrogwb.paper.cache import default_cache_dir
     from astrogwb.paper.config import (
@@ -41,7 +48,7 @@ with app.setup(hide_code=True):
         waveform_metadata,
     )
     from astrogwb.paper.config.detectors import DetectorRegistry
-    from astrogwb.paper.config.runs import FIGURES_DIR
+    from astrogwb.paper.config.runs import CATALOGS_ROOT, FIGURES_DIR
     from astrogwb.paper.plotting import (
         DETECTOR_COMPARISON_LEGEND,
         DETECTOR_NETWORKS,
@@ -50,6 +57,13 @@ with app.setup(hide_code=True):
         detector_network_styles,
         save_figures,
         use_paper_style,
+    )
+    from astrogwb.populations import build_population
+    from astrogwb.populations.metadata import PopulationMetadata
+    from astrogwb.simulators.core import batch_keys, load, write
+    from astrogwb.simulators.polarization_power import (
+        CatalogMetadata,
+        PolarizationPowerData,
     )
     from astrogwb.simulators.spectra import (
         BackgroundSpectralDensityMetadata,
@@ -923,6 +937,452 @@ def _(
         maximum_frequency,
     )
     shot_noise
+    return (shot_noise,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## 9. Minimum redshift
+
+    Foreground subtraction removes the nearby sources, which dominate the shot
+    noise: its variance goes as $1/z_{\min}$, while the signal loses only a
+    little. This section scans the window's lower edge $z_{\min}$ with the
+    rescaled importance estimator of `astrogwb.gwb.importance`. One reference
+    catalog is generated at the redshift where $d_L = 1$ Mpc, below every
+    window, and rescaled to each window's nodes, so the scan costs no
+    waveforms. Per network it computes $\rho$ and the relative shot-noise
+    scatter $s$ of the amplitude at the fiducials, and from them the relative
+    uncertainty of the amplitude, $\sigma_{\mathrm{tot}}/A = (\rho^{-2} + s^2)^{1/2}$.
+    At $z_{\min}$ of the ensemble, $\rho s$ is checked against the measured
+    $\rho\,\mathrm{sd}(\epsilon)$ of section 8.
+    """)
+    return
+
+
+@app.cell
+def _(SMOKE, ROOT_DIR, metadata, minimum_frequencies):
+    #: Where the reference waveforms sit: the redshift at which the fiducial
+    #: luminosity distance is this many Mpc. Below every window of the scan.
+    reference_distance_mpc = 1.0
+    scan_seed = 42
+    scan_num_samples = 2**14  # Sobol net, as in cosmology_grid_posteriors.py
+    scan_redshift_nodes = 32  # converged to 1e-4 down to z_min = 0.01
+    scan_redshifts = np.geomspace(0.01, 3.0, 49)
+    scan_chunk_size = 4096
+    if SMOKE:
+        scan_num_samples = 64
+        scan_redshift_nodes = 8
+        scan_redshifts = np.geomspace(0.05, 3.0, 5)
+        scan_chunk_size = 64
+
+    scan_hyperparameters = {**metadata.hyperparameters}
+    reference_redshift = redshift_at_distance(
+        reference_distance_mpc,
+        scan_hyperparameters["H0"],
+        scan_hyperparameters["Omega_m"],
+    )
+    # The reference grid runs from the lowest observed frequency to past the
+    # detector-frame merger at the reference redshift.
+    scan_catalog_metadata = CatalogMetadata(
+        waveform=waveform_metadata(
+            root=ROOT_DIR,
+            approximant="IMRPhenomXAS",
+            frequency_spacing="log",
+            minimum_frequency=minimum_frequencies[0],
+            maximum_frequency=4000.0,
+            frequency_resolution=0.02,
+            turnover_frequency=None,
+        ),
+        population=metadata.population,
+        fiducials=scan_hyperparameters,
+        num_samples=scan_num_samples,
+        sampling="sobol",
+        reference_redshift=reference_redshift,
+    )
+    mo.md(
+        f"Reference redshift {reference_redshift:.6g} "
+        f"($d_L$ = {reference_distance_mpc:g} Mpc); window edges "
+        f"{scan_redshifts[0]:.3g} to {scan_redshifts[-1]:.3g}."
+    )
+    return (
+        scan_catalog_metadata,
+        scan_chunk_size,
+        scan_hyperparameters,
+        scan_redshift_nodes,
+        scan_redshifts,
+        scan_seed,
+    )
+
+
+@app.function(hide_code=True)
+def redshift_at_distance(
+    distance: float, hubble_constant: float, omega_m: float
+) -> float:
+    """The redshift at which the luminosity distance is ``distance`` Mpc.
+
+    Parameters
+    ----------
+    distance
+        Luminosity distance in Mpc.
+    hubble_constant, omega_m
+        The flat LCDM cosmology.
+
+    Returns
+    -------
+    float
+        The redshift, found by root-finding on
+        :func:`astrogwb.cosmology.luminosity_distance`.
+    """
+    return float(
+        brentq(
+            lambda z: (
+                float(luminosity_distance(z, hubble_constant, omega_m)) - distance
+            ),
+            1e-9,
+            1.0,
+            xtol=1e-16,
+        )
+    )
+
+
+@app.function(hide_code=True)
+def ensure_reference_catalog(
+    metadata: CatalogMetadata,
+    seed: int,
+    directory: Path,
+    *,
+    chunk_size: int | None = None,
+) -> PolarizationPowerData:
+    """The reference catalog of ``metadata`` at ``seed``, drawn on a miss.
+
+    The same file ``cosmology_grid_posteriors.py`` and
+    ``shot_noise_coverage.py`` read and write,
+    ``<directory>/reference_catalog-<key>-<seed>.h5``.
+
+    Parameters
+    ----------
+    metadata
+        The catalog record.
+    seed
+        The draw's seed.
+    directory
+        Where catalogs are kept.
+    chunk_size
+        Waveforms per batch when drawing.
+
+    Returns
+    -------
+    PolarizationPowerData
+        The catalog's frequencies, power and source parameters.
+
+    Raises
+    ------
+    ValueError
+        If the cached file records another metadata or seed.
+    """
+    path = directory / f"{reference_catalog_stem(metadata, seed)}.h5"
+    if path.is_file():
+        data, recorded, attrs = load(path, CatalogMetadata)
+        if recorded.key() != metadata.key() or attrs.get("seed") != seed:
+            raise ValueError(
+                f"{path} records {recorded.key()} at seed {attrs.get('seed')}, "
+                f"not the requested {metadata.key()} at seed {seed}"
+            )
+        return data  # ty: ignore[invalid-return-type]
+    data = reference_catalog(metadata, batch_keys(seed, 1)[0], chunk_size=chunk_size)
+    write(path, data, metadata, seed=seed)
+    return data
+
+
+@app.function(hide_code=True)
+def minimum_redshift_scan(
+    data: PolarizationPowerData,
+    catalog_metadata: CatalogMetadata,
+    population: PopulationMetadata,
+    registry: DetectorRegistry,
+    rows: Sequence[tuple[str, str]],
+    frequencies: NDArray[np.float64],
+    redshifts: NDArray[np.float64],
+    hyperparameters: dict[str, float],
+    observation_time: float,
+    minimum_frequency: float,
+    maximum_frequency: float,
+    num_redshift_nodes: int,
+) -> pd.DataFrame:
+    r"""The SNR and shot-noise scatter of the amplitude against the window edge.
+
+    For each ``redshifts`` entry the catalog is bound with that lower edge and
+    evaluated at ``hyperparameters``; then, per network, :math:`\rho` is the
+    SNR of the expected spectrum and :math:`s` the SNR-weighted relative
+    standard deviation of its shot noise
+    (:func:`astrogwb.inference.amplitude_shot_noise_variance`). The relative
+    uncertainty of the amplitude is :math:`(\rho^{-2} + s^2)^{1/2}`.
+
+    Parameters
+    ----------
+    data, catalog_metadata
+        The reference catalog and its record. Its reference redshift must not
+        exceed any entry of ``redshifts``.
+    population
+        The target population's record.
+    registry, rows
+        Source of the networks and ``(network name, row label)`` pairs.
+    frequencies
+        Observed frequency grid ``(F,)``.
+    redshifts
+        Lower edges of the redshift window.
+    hyperparameters
+        The point the spectrum is evaluated at.
+    observation_time
+        Observing time in years.
+    minimum_frequency, maximum_frequency
+        Analysis band in Hz.
+    num_redshift_nodes
+        Quadrature nodes per window.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per (network label, window edge), with ``snr``, ``scatter`` and
+        ``relative_uncertainty`` columns.
+    """
+    target = build_population(population.model_name, **population.model_kwargs)
+    grid = jnp.asarray(frequencies)
+    seconds = years_to_seconds(observation_time)
+    networks = {}
+    for name, label in rows:
+        geometry, sensitivities = registry.build_network(name)
+        noise = jnp.asarray(effective_psd(grid, geometry, sensitivities))
+        keep = (
+            frequency_mask(grid, fmin=minimum_frequency, fmax=maximum_frequency)
+            & jnp.isfinite(noise)
+            & (noise > 0.0)
+        )
+        networks[label] = (
+            noise,
+            gaussian_bin_scale(noise, observation_time, grid),
+            keep,
+        )
+    records = []
+    for edge in redshifts:
+        likelihood = ImportanceGaussianLikelihood.from_catalog(
+            data,
+            catalog_metadata,
+            population=target,
+            frequencies=frequencies,
+            num_redshift_nodes=num_redshift_nodes,
+            density_sites=(),
+            shot_noise="amplitude",
+            observation_time=observation_time,
+            minimum_redshift=float(edge),
+        )
+        spectrum, variance, _ = likelihood.predict(hyperparameters)
+        for label, (noise, scale, keep) in networks.items():
+            snr = float(
+                spectral_snr(spectrum, noise, seconds, grid, frequency_mask=keep)
+            )
+            scatter = float(
+                jnp.sqrt(amplitude_shot_noise_variance(spectrum, variance, scale, keep))
+            )
+            records.append(
+                {
+                    "network": label,
+                    "minimum_redshift": float(edge),
+                    "snr": snr,
+                    "scatter": scatter,
+                    "relative_uncertainty": float(np.hypot(1.0 / snr, scatter)),
+                }
+            )
+    return pd.DataFrame.from_records(records)
+
+
+@app.function(hide_code=True)
+def plot_minimum_redshift_scan(
+    scan: pd.DataFrame,
+    networks: Sequence[Network],
+    colors: Sequence[str],
+    linestyles: Sequence[str],
+    window_edge: float,
+) -> Figure:
+    r"""Plot :math:`\sigma_{\mathrm{tot}}/A` and its shot-noise inflation.
+
+    Left: the relative uncertainty of the amplitude against the window's lower
+    edge, with a dot at each network's minimum. Right: its ratio to the
+    detector-noise-only :math:`1/\rho`, :math:`\sqrt{1 + (\rho s)^2}`. The
+    dotted vertical line is the analysis' own window edge ``window_edge``.
+
+    Parameters
+    ----------
+    scan
+        Output of :func:`minimum_redshift_scan`.
+    networks, colors, linestyles
+        Plotted networks, in order, with their styles.
+    window_edge
+        The lower edge of the paper's analysis window.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The two-panel figure.
+    """
+    width, height = plt.rcParams["figure.figsize"]
+    fig, (ax, ax_ratio) = plt.subplots(1, 2, figsize=(2.0 * width, height))
+    for network, color, linestyle in zip(networks, colors, linestyles, strict=True):
+        rows = scan[scan["network"] == network.label].sort_values("minimum_redshift")
+        edge = rows["minimum_redshift"].to_numpy()
+        total = 100.0 * rows["relative_uncertainty"].to_numpy()
+        ax.loglog(edge, total, color=color, linestyle=linestyle)
+        best = int(np.argmin(total))
+        ax.plot(edge[best], total[best], "o", color=color, markersize=4)
+        inflation = rows["relative_uncertainty"].to_numpy() * rows["snr"].to_numpy()
+        ax_ratio.semilogx(edge, inflation, color=color, linestyle=linestyle)
+    ax.set_ylabel(r"$\sigma_{\mathrm{tot}}/A\ (\%)$")
+    ax_ratio.set_ylabel(r"$\sigma_{\mathrm{tot}}\,\rho/A$")
+    for panel in (ax, ax_ratio):
+        panel.axvline(window_edge, color="k", linestyle=":", linewidth=0.8)
+        panel.set_xlabel(r"$z_{\min}$")
+        panel.set_axisbelow(True)
+        panel.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
+        format_axis_ticks(panel)
+    ax.legend(
+        handles=network_legend_handles(networks, colors, linestyles),
+        **DETECTOR_COMPARISON_LEGEND,
+    )
+    fig.tight_layout()
+    return fig
+
+
+@app.cell
+def _(
+    ROOT_DIR,
+    frequencies,
+    maximum_frequency,
+    metadata,
+    minimum_frequencies,
+    observation_time,
+    registry,
+    scan_catalog_metadata,
+    scan_chunk_size,
+    scan_hyperparameters,
+    scan_redshift_nodes,
+    scan_redshifts,
+    scan_seed,
+    coba_rows,
+):
+    scan_data = ensure_reference_catalog(
+        scan_catalog_metadata,
+        scan_seed,
+        ROOT_DIR / CATALOGS_ROOT,
+        chunk_size=scan_chunk_size,
+    )
+    scan = minimum_redshift_scan(
+        scan_data,
+        scan_catalog_metadata,
+        metadata.population,
+        registry,
+        coba_rows,
+        frequencies,
+        scan_redshifts,
+        scan_hyperparameters,
+        observation_time,
+        minimum_frequencies[0],
+        maximum_frequency,
+        scan_redshift_nodes,
+    )
+    return (scan,)
+
+
+@app.cell
+def _(
+    BASE_DIR,
+    ROOT_DIR,
+    metadata,
+    plotted_colors,
+    plotted_linestyles,
+    plotted_networks,
+    scan,
+    write_figures,
+):
+    _fig = plot_minimum_redshift_scan(
+        scan,
+        plotted_networks,
+        plotted_colors,
+        plotted_linestyles,
+        float(metadata.population.model_kwargs["minimum_redshift"]),
+    )
+    if write_figures:
+        BASE_DIR.mkdir(parents=True, exist_ok=True)
+        scan.to_csv(BASE_DIR / "minimum_redshift_scan.csv", index=False)
+        save_figures({BASE_DIR / "minimum_redshift_scan.pdf": _fig}, root=ROOT_DIR)
+    _fig
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ### Check against the ensemble
+
+    At the window edge of the ensemble, the model's $\rho s$ (a property of the
+    expected spectrum) should match the $\rho\,\mathrm{sd}(\epsilon)$ measured
+    on the draws in section 8, and the optimum shows how much the choice of
+    edge matters for each network.
+    """)
+    return
+
+
+@app.cell
+def _(
+    ROOT_DIR,
+    frequencies,
+    maximum_frequency,
+    metadata,
+    minimum_frequencies,
+    observation_time,
+    registry,
+    coba_rows,
+    scan,
+    scan_catalog_metadata,
+    scan_chunk_size,
+    scan_hyperparameters,
+    scan_redshift_nodes,
+    scan_seed,
+    shot_noise,
+):
+    _edge = float(metadata.population.model_kwargs["minimum_redshift"])
+    _at_edge = minimum_redshift_scan(
+        ensure_reference_catalog(
+            scan_catalog_metadata,
+            scan_seed,
+            ROOT_DIR / CATALOGS_ROOT,
+            chunk_size=scan_chunk_size,
+        ),
+        scan_catalog_metadata,
+        metadata.population,
+        registry,
+        coba_rows,
+        frequencies,
+        np.asarray([_edge]),
+        scan_hyperparameters,
+        observation_time,
+        minimum_frequencies[0],
+        maximum_frequency,
+        scan_redshift_nodes,
+    ).set_index("network")
+    _best = scan.loc[
+        scan.groupby("network")["relative_uncertainty"].idxmin()
+    ].set_index("network")
+    comparison = pd.DataFrame(
+        {
+            "rho sd(eps), draws": shot_noise["rho sd(eps)"],
+            "rho s, model": _at_edge["snr"] * _at_edge["scatter"],
+            "sigma_tot/A at edge (%)": 100.0 * _at_edge["relative_uncertainty"],
+            "best z_min": _best["minimum_redshift"],
+            "sigma_tot/A at best (%)": 100.0 * _best["relative_uncertainty"],
+        }
+    )
+    comparison
     return
 
 

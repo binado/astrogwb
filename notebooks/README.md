@@ -58,7 +58,12 @@ Every notebook here drives the `astrogwb.paper` configuration layer, so they all
   the $d\mathrm{SNR}^2/d\ln f$ curves, as two figures (`characteristic_amplitudes.pdf`,
   `snr_density.pdf`),
   and the shot noise of one draw about the mean ($\rho\,\mathrm{sd}(\epsilon)$
-  and the correlation across bins). The ensemble is cached one draw per file
+  and the correlation across bins). It also scans the window's lower edge
+  $z_{\min}$: the amplitude uncertainty
+  $\sigma_{\mathrm{tot}}/A = (\rho^{-2} + s^2)^{1/2}$ per network
+  (`minimum_redshift_scan.pdf`), from one reference catalog generated at the
+  redshift where $d_L = 1$ Mpc and rescaled to each window, checked against the
+  draws' $\rho\,\mathrm{sd}(\epsilon)$. The ensemble is cached one draw per file
   under `default_cache_dir() / "ensembles"` (`spectra_ensemble`) and shared
   with `shot_noise_coverage.py`.
 - **`shot_noise_coverage.py`** — marimo notebook. Calibration of the
