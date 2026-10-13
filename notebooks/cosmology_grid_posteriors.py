@@ -199,10 +199,9 @@ def _():
     xi_n_window, xi_n_size = (0.3, 3.0), 55  # prior range
 
     # Likelihood variants evaluated per problem, and the one every figure
-    # shows. "fixed" pins s^2 at the fiducial; the A/B section adopts it if it
-    # moves no posterior mean or sd by more than ab_tolerance detector sigma,
-    # which it does not (worst 0.003 sigma).
-    likelihood_variant = "fixed"
+    # shows. "amplitude" evaluates s^2 at each grid point, so sigma_eps depends
+    # on Lambda; "fixed" would pin it at the fiducial (the A/B section compares).
+    likelihood_variant = "amplitude"
     problem_variants = {
         "H0": ("detector", "amplitude", "fixed"),
         "H0_Omega_m": ("detector", "amplitude", "fixed"),
@@ -812,6 +811,15 @@ def plot_marginals(
                 label=network.label,
             )
         )
+    # Zoom to +/- 5 sd of the broadest network: the grid window is far wider.
+    moments = []
+    for density in densities.values():
+        mean = np.trapezoid(grid * density, grid)
+        moments.append(
+            (mean, np.sqrt(np.trapezoid((grid - mean) ** 2 * density, grid)))
+        )
+    mean, sd = max(moments, key=lambda moment: moment[1])
+    ax.set_xlim(max(grid[0], mean - 5 * sd), min(grid[-1], mean + 5 * sd))
     ax.axvline(fiducial, **TRUTH)  # ty: ignore[invalid-argument-type]
     ax.set(xlabel=parameter_label(parameter), ylabel="Posterior density")
     ax.legend(handles=handles, **DETECTOR_COMPARISON_LEGEND)  # ty: ignore[no-matching-overload]
