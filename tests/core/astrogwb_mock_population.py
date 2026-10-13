@@ -27,9 +27,7 @@ import numpy as np
 from jax.typing import ArrayLike
 
 from astrogwb.constants import ISCO_ALPHA
-from astrogwb.gwb.importance import (
-    reference_catalog,
-)
+from astrogwb.gwb.importance import reference_sources
 from astrogwb.inference import ImportanceGaussianLikelihood
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
@@ -42,6 +40,7 @@ from astrogwb.populations.evaluation import evaluate_sources, sample_sources
 from astrogwb.simulators.polarization_power import (
     CatalogMetadata,
     PolarizationPowerData,
+    polarization_power_data,
 )
 from astrogwb.waveform import AnalyticInspiralGenerator, WaveformMetadata
 
@@ -248,7 +247,7 @@ def build_reference_catalog(
     """A closed-form reference catalog of the mock population.
 
     Every draw sits at the window's lower edge, as
-    :func:`~astrogwb.gwb.importance.reference_catalog` places them, and its power
+    :func:`~astrogwb.gwb.importance.reference_sources` places them, and its power
     comes from :class:`~astrogwb.waveform.AnalyticInspiralGenerator`: no Ripple
     backend, no persisted file. The draw is seeded, so it is deterministic.
     """
@@ -278,7 +277,10 @@ def build_reference_catalog(
         num_samples=num_sources,
     )
     return (
-        reference_catalog(metadata, jax.random.PRNGKey(MOCK_POPULATION_SEED)),
+        polarization_power_data(
+            metadata.waveform.build(),
+            reference_sources(metadata, jax.random.PRNGKey(MOCK_POPULATION_SEED)),
+        ),
         metadata,
     )
 

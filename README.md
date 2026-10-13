@@ -123,9 +123,10 @@ closed-form quadrature, so it needs no weights at all.
 import jax
 import numpy as np
 
-from astrogwb.gwb.importance import reference_catalog
+from astrogwb.gwb.importance import reference_sources
 from astrogwb.inference import ImportanceGaussianLikelihood
 from astrogwb.metadata import CatalogMetadata
+from astrogwb.simulators.polarization_power import polarization_power_data
 
 metadata = CatalogMetadata(
     waveform=generator.metadata,
@@ -133,7 +134,9 @@ metadata = CatalogMetadata(
     fiducials=params,
     num_samples=1024,
 )
-reference = reference_catalog(metadata, jax.random.PRNGKey(42))
+reference = polarization_power_data(
+    metadata.waveform.build(), reference_sources(metadata, jax.random.PRNGKey(42))
+)
 
 target = build_population("bns_coba", **model_kwargs)
 likelihood = ImportanceGaussianLikelihood.from_catalog(

@@ -48,6 +48,7 @@ with app.setup(hide_code=True):
         use_paper_style,
     )
     from astrogwb.simulators.core import batch_keys
+    from astrogwb.simulators.population import PopulationSimulator
     from astrogwb.simulators.spectra import (
         BackgroundSpectralDensityMetadata,
         BackgroundSpectralDensitySimulator,
@@ -389,7 +390,9 @@ def _(
         observation_time=observation_time,
     )
     _spectrum = BackgroundSpectralDensitySimulator(_metadata, chunk_size=chunk_size)(
-        batch_keys(seed, 1)[0]
+        PopulationSimulator(_metadata.sources, chunk_size=chunk_size)(
+            batch_keys(seed, 1)[0]
+        )
     )
     frequencies = jnp.asarray(_spectrum["frequencies"])
     spectral_density = jnp.asarray(_spectrum["spectral_density"][0])

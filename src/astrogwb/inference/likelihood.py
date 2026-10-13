@@ -209,7 +209,7 @@ jax.tree_util.register_dataclass(
 class ImportanceGaussianLikelihood:
     r"""A Gaussian likelihood of the rescaled importance spectrum.
 
-    Binds a :func:`~astrogwb.gwb.importance.reference_catalog` to a target
+    Binds a reference catalog (:func:`~astrogwb.gwb.importance.reference_sources`) to a target
     population on the observed grid. The spectrum is the redshift quadrature of
     :mod:`astrogwb.gwb.importance`; with ``shot_noise`` set, the covariance of
     each network gains a rank-one term from the catalog's Poisson variance

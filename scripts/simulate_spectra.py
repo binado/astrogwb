@@ -43,6 +43,7 @@ from astrogwb.paper.config.runs import (
     load_merged_config,
 )
 from astrogwb.simulators.core import batch_keys, load, write
+from astrogwb.simulators.population import PopulationSimulator
 from astrogwb.simulators.spectra import (
     BackgroundSpectralDensityData,
     BackgroundSpectralDensityMetadata,
@@ -152,14 +153,18 @@ def main(argv: Sequence[str] | None = None) -> None:
             raise ValueError(f"{output} records {recorded.key()}, not {metadata.key()}")
         outputs = cast(BackgroundSpectralDensityData, cached)
     else:
+        population = PopulationSimulator(
+            metadata.sources,
+            chunk_size=args.chunk_size
+            if args.source_chunk_size is None
+            else args.source_chunk_size,
+        )
         simulator = BackgroundSpectralDensitySimulator(
-            metadata,
-            chunk_size=args.chunk_size,
-            source_chunk_size=args.source_chunk_size,
+            metadata, chunk_size=args.chunk_size
         )
         parts = []
         for draw, key in enumerate(batch_keys(seed, num_draws), start=1):
-            parts.append(simulator(key))
+            parts.append(simulator(population(key)))
             logger.info("Drew spectrum %d/%d", draw, num_draws)
         outputs = stack_spectra(parts)
         write(output, outputs, metadata, seed=seed)

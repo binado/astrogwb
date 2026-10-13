@@ -295,9 +295,9 @@ Persistence and cache locations belong to the callers. The core `write` and
 
 | | simulator | metadata | input | data |
 | --- | --- | --- | --- | --- |
-| catalogs | `draw_catalog` | `CatalogMetadata` | one JAX key | `PolarizationPowerData` |
-| reference catalogs | `reference_catalog` | `CatalogMetadata` | one JAX key | `PolarizationPowerData` |
-| spectra | `BackgroundSpectralDensitySimulator` | `BackgroundSpectralDensityMetadata` | one JAX key | `BackgroundSpectralDensityData` |
+| catalogs | `sample_sources` then `polarization_power_data` | `CatalogMetadata` | one JAX key | `PolarizationPowerData` |
+| reference catalogs | `reference_sources` then `polarization_power_data` | `CatalogMetadata` | one JAX key | `PolarizationPowerData` |
+| spectra | `PopulationSimulator` then `BackgroundSpectralDensitySimulator` | `BackgroundSpectralDensityMetadata` | one JAX key | `BackgroundSpectralDensityData` |
 
 Catalog files are `polarization_power-<key>-<seed>.h5`; spectra files are
 `spectra-<key>-<seed>-<num_draws>.h5`. A miss generates data and writes atomically;
@@ -393,18 +393,18 @@ Draw once and reduce through several waveforms -- the same events, so the
 differences are the waveform's alone:
 
 ```python
-simulator = PopulationSimulator(metadata.sources)
+population = PopulationSimulator(metadata.sources)
 simulator_a, simulator_b = BackgroundSpectralDensitySimulator(metadata_a), BackgroundSpectralDensitySimulator(metadata_b)
 parts_a, parts_b = [], []
 for key in batch_keys(seed, n):
-    draw = simulator(key)
-    parts_a.append(simulator_a.reduce(draw))
-    parts_b.append(simulator_b.reduce(draw))
+    draw = population(key)
+    parts_a.append(simulator_a(draw))
+    parts_b.append(simulator_b(draw))
 spectra_a, spectra_b = stack_spectra(parts_a), stack_spectra(parts_b)
 ```
 
 Persisting a population pays when it is reused like this; a simulation loop
-calls `BackgroundSpectralDensitySimulator(...)(key)` per draw and keeps nothing.
+calls `simulator(population(key))` per draw and keeps nothing.
 
 ## The background spectral-density simulator
 
@@ -419,12 +419,13 @@ It is produced by `astrogwb.simulators.spectra.BackgroundSpectralDensitySimulato
   `num_events`, and the `astrogwb` version. It extends the waveform-free
   `PopulationDrawMetadata` (see [the population simulator](#the-population-simulator)); its
   `.sources` is that part. No seed and no draw count.
-- **input** -- one JAX key, usually from `batch_keys(seed, num_draws)`.
+- **input** -- a `PopulationData` draw, from a `PopulationSimulator` on the
+  metadata's `.sources` and a key, usually from `batch_keys(seed, num_draws)`.
   Each key is one draw
   (hyperparameters and sources alike), so a draw depends on its own seed alone,
   not on its batchmates, and the same key gives the same spectrum in any call.
-- **settings** -- `chunk_size` chunks the waveform reduction;
-  `source_chunk_size` (default `chunk_size`) sets the size of the pieces
+- **settings** -- the simulator's `chunk_size` chunks the waveform reduction;
+  the `PopulationSimulator`'s `chunk_size` sets the size of the pieces
   Poisson-count sources are drawn in. Neither consumes randomness, so neither is in the
   path. Memory is one draw's sources.
 
@@ -438,6 +439,7 @@ from astrogwb.simulators.spectra import (
     BackgroundSpectralDensitySimulator,
     stack_spectra,
 )
+from astrogwb.simulators.population import PopulationSimulator
 
 metadata = BackgroundSpectralDensityMetadata(
     waveform=waveform_metadata(),
@@ -451,9 +453,12 @@ metadata = BackgroundSpectralDensityMetadata(
     observation_time=1.0,
     count="poisson",
 )
+population = PopulationSimulator(metadata.sources, chunk_size=1024)
 simulator = BackgroundSpectralDensitySimulator(metadata, chunk_size=1024)
 seed, num_draws = 41, 64
-data = stack_spectra([simulator(key) for key in batch_keys(seed, num_draws)])
+data = stack_spectra(
+    [simulator(population(key)) for key in batch_keys(seed, num_draws)]
+)
 path = (
     default_cache_dir() / "spectra"
     / f"spectra-{metadata.key()}-{seed}-{num_draws}.h5"
@@ -475,13 +480,13 @@ A draw's events are reduced chunk by chunk (`ChunkedPowerSum`): chunks of
 `chunk_size` sources run through the waveform and are added into one `(F,)`
 sum, with a mask on the tail of the last chunk, so one compilation serves any
 count and a prior that spreads the merger rate several-fold costs no more
-waveforms than the counts need. A simulator call or `.reduce(population)`
+waveforms than the counts need. A simulator call
 returns `BackgroundSpectralDensityData` with one row: `(1, F)` spectral density
 and `(1,)` event counts, rates and hyperparameter columns. `stack_spectra`
 concatenates a non-empty sequence along that existing draw axis. Its inputs
 must share a frequency grid and hyperparameter names; it keeps the first grid
 without re-validating the arrays. A single spectrum is `data["spectral_density"][0]`.
-`BackgroundSpectralDensitySimulator` owns the built population, generator and
+`BackgroundSpectralDensitySimulator` owns the built generator and
 jitted stages, so reusing one instance in a loop reuses its compilations.
 
 `count="poisson"` (the default) draws
@@ -542,7 +547,7 @@ uv run --extra paper python scripts/simulate_spectra.py \
 Callers
 using custom source-model compositions can still build a
 `PopulationSimulator` from a registered population and reduce its draws with
-`ChunkedPowerSum` (or `BackgroundSpectralDensitySimulator.reduce`). Sampled inclination is already part of the
+`ChunkedPowerSum` (or `BackgroundSpectralDensitySimulator`). Sampled inclination is already part of the
 registered BNS population and needs no custom composition.
 
 The root of a spectra file holds:

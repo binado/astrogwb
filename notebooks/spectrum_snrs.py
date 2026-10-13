@@ -55,6 +55,7 @@ with app.setup(hide_code=True):
     from astrogwb.paper.config.runs import FIGURES_DIR
     from astrogwb.paper.plotting import save_figures, use_paper_style
     from astrogwb.simulators.core import batch_keys, load, write
+    from astrogwb.simulators.population import PopulationSimulator
     from astrogwb.simulators.spectra import (
         BackgroundSpectralDensityData,
         BackgroundSpectralDensityMetadata,
@@ -581,10 +582,15 @@ def draw_spectra(
     elif settings.cache_only:
         raise FileNotFoundError(f"no cached spectra at {path}")
     else:
+        population = PopulationSimulator(
+            metadata.sources, chunk_size=settings.chunk_size
+        )
         simulator = BackgroundSpectralDensitySimulator(
             metadata, chunk_size=settings.chunk_size
         )
-        outputs = stack_spectra([simulator(key) for key in batch_keys(seed, num_draws)])
+        outputs = stack_spectra(
+            [simulator(population(key)) for key in batch_keys(seed, num_draws)]
+        )
         write(path, outputs, metadata, seed=seed)
     return outputs, metadata
 

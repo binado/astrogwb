@@ -4,7 +4,7 @@ Several analyses draw the same record many times -- a mean spectrum, its
 sample variance, coverage injections -- and a Poisson draw at the paper's
 rate reduces several hundred thousand waveforms. :func:`spectra_ensemble`
 draws each one once: draw ``i`` of ``seed`` is
-``simulator(batch_keys(seed, n)[i])``, and because those keys are
+``simulator(population(batch_keys(seed, n)[i]))``, and because those keys are
 prefix-stable it does not depend on ``n``. So every caller asking for the same
 record and seed shares the same files, whatever ensemble size each asks for,
 and an interrupted run resumes where it stopped.
@@ -17,6 +17,7 @@ from pathlib import Path
 import numpy as np
 
 from astrogwb.simulators.core import batch_keys, load, write
+from astrogwb.simulators.population.simulator import PopulationSimulator
 from astrogwb.simulators.spectra.metadata import BackgroundSpectralDensityMetadata
 from astrogwb.simulators.spectra.simulator import (
     BackgroundSpectralDensityData,
@@ -50,10 +51,12 @@ def spectra_ensemble(
 
     A missing draw is simulated and written with :func:`~astrogwb.simulators.core.write`,
     which records the metadata and seed beside the data; a cached one is read
-    back and checked against both. The simulator is built only if a draw is
-    missing. ``chunk_size`` and ``source_chunk_size`` are
+    back and checked against both. The simulators are built only if a draw is
+    missing. ``chunk_size`` is
     :class:`~astrogwb.simulators.spectra.BackgroundSpectralDensitySimulator`'s
-    cost settings: they change no draw.
+    and ``source_chunk_size`` (default ``chunk_size``)
+    :class:`~astrogwb.simulators.population.PopulationSimulator`'s cost
+    setting: they change no draw.
 
     Parameters
     ----------
@@ -77,7 +80,7 @@ def spectra_ensemble(
         If a cached file records another metadata or seed.
     """
     keys = batch_keys(seed, num_draws)
-    simulator: BackgroundSpectralDensitySimulator | None = None
+    built: tuple[PopulationSimulator, BackgroundSpectralDensitySimulator] | None = None
     parts: list[BackgroundSpectralDensityData] = []
     for index in range(num_draws):
         path = spectra_ensemble_path(directory, metadata, seed, index)
@@ -90,11 +93,18 @@ def spectra_ensemble(
                 )
             parts.append(data)  # ty: ignore[invalid-argument-type]
             continue
-        if simulator is None:
-            simulator = BackgroundSpectralDensitySimulator(
-                metadata, chunk_size=chunk_size, source_chunk_size=source_chunk_size
+        if built is None:
+            built = (
+                PopulationSimulator(
+                    metadata.sources,
+                    chunk_size=chunk_size
+                    if source_chunk_size is None
+                    else source_chunk_size,
+                ),
+                BackgroundSpectralDensitySimulator(metadata, chunk_size=chunk_size),
             )
-        drawn = simulator(keys[index])
+        population, simulator = built
+        drawn = simulator(population(keys[index]))
         write(path, drawn, metadata, seed=seed)
         parts.append(drawn)
     stacked = stack_spectra(parts)

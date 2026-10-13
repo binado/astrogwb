@@ -33,8 +33,8 @@ with app.setup(hide_code=True):
     from astrogwb.detector import effective_psd, gaussian_bin_scale
     from astrogwb.frequency import frequency_mask
     from astrogwb.gwb.importance import (
-        reference_catalog,
         reference_catalog_stem,
+        reference_sources,
     )
     from astrogwb.inference import (
         ImportanceGaussianLikelihood,
@@ -71,7 +71,9 @@ with app.setup(hide_code=True):
     from astrogwb.simulators.polarization_power import (
         CatalogMetadata,
         PolarizationPowerData,
+        polarization_power_data,
     )
+    from astrogwb.simulators.population import PopulationSimulator
     from astrogwb.simulators.spectra import (
         BackgroundSpectralDensityMetadata,
         BackgroundSpectralDensitySimulator,
@@ -424,7 +426,11 @@ def ensure_reference_catalog(
                 f"not the requested {metadata.key()} at seed {seed}"
             )
         return data  # ty: ignore[invalid-return-type]
-    data = reference_catalog(metadata, batch_keys(seed, 1)[0], chunk_size=chunk_size)
+    data = polarization_power_data(
+        metadata.waveform.build(),
+        reference_sources(metadata, batch_keys(seed, 1)[0]),
+        chunk_size=chunk_size,
+    )
     write(path, data, metadata, seed=seed)
     return data
 
@@ -899,7 +905,11 @@ def _(
     else:
         drawn = BackgroundSpectralDensitySimulator(
             injection_metadata, chunk_size=chunk_size
-        )(batch_keys(data_seed, 1)[0])
+        )(
+            PopulationSimulator(injection_metadata.sources, chunk_size=chunk_size)(
+                batch_keys(data_seed, 1)[0]
+            )
+        )
         # Zero noise: the Poisson spectrum itself is the data. The draw axis
         # is leading even for one draw.
         observed = np.asarray(drawn["spectral_density"][0], dtype=np.float64)

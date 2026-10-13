@@ -155,7 +155,7 @@ the posteriors of `H0`, `(H0, Omega_m)` and `(xi_0, xi_n)` on a grid for all six
 networks, with no sampler. The data are a zero-noise Poisson injection
 (`data_seed = 41`); the model spectrum is the rescaled reference-redshift
 spectrum of `astrogwb.gwb.importance` (`catalog_seed = 42`): `2^19` intrinsic
-draws, each generated once at the window's lower edge by `reference_catalog`,
+draws, each generated once at the window's lower edge from `reference_sources`,
 and `ImportanceGaussianLikelihood` rescaling their mean power to 32 Gauss-Legendre
 nodes in the scale factor `1/(1 + z)` at each grid point, with no intrinsic
 reweighting. The log densities are cached in `default_cache_dir() /
@@ -163,7 +163,7 @@ reweighting. The log densities are cached in `default_cache_dir() /
 whose name carries a hash of the seeds, grids, band, observing time, version
 and catalog keys, so a stale cache is never served. The first run generates the
 reference catalog (`outputs/catalogs/reference_catalog-<key>-42.h5`, chunked
-by `reference_catalog(..., chunk_size=...)`).
+by `polarization_power_data(..., chunk_size=...)`).
 Figures go to `outputs/figures/cosmology_grid_posteriors/` when the
 `Write figures` switch is on:
 

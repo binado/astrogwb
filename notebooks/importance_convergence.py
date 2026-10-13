@@ -26,8 +26,8 @@ with app.setup(hide_code=True):
     from astrogwb.detector import effective_psd, gaussian_bin_scale
     from astrogwb.frequency import frequency_mask
     from astrogwb.gwb.importance import (
-        reference_catalog,
         reference_catalog_stem,
+        reference_sources,
     )
     from astrogwb.inference import ImportanceGaussianLikelihood
     from astrogwb.inference.fisher import spectral_density_jacobian
@@ -45,6 +45,7 @@ with app.setup(hide_code=True):
     from astrogwb.simulators.polarization_power import (
         CatalogMetadata,
         PolarizationPowerData,
+        polarization_power_data,
     )
 
     # One compiled spectrum for every catalog: the likelihood is a pytree
@@ -271,7 +272,11 @@ def ensure_reference_catalog(
         directory / f"{reference_catalog_stem(metadata, seed)}.h5",
         metadata,
         seed,
-        lambda key: reference_catalog(metadata, key, chunk_size=chunk_size),
+        lambda key: polarization_power_data(
+            metadata.waveform.build(),
+            reference_sources(metadata, key),
+            chunk_size=chunk_size,
+        ),
     )
 
 
@@ -769,8 +774,10 @@ def catalog_ladder(
     fiducial = dict(next(iter(points.values())))
     spectra, variances = [], []
     for seed in seeds:
-        data = reference_catalog(
-            metadata, batch_keys(seed, 1)[0], chunk_size=chunk_size
+        data = polarization_power_data(
+            metadata.waveform.build(),
+            reference_sources(metadata, batch_keys(seed, 1)[0]),
+            chunk_size=chunk_size,
         )
         row_spectra, row_variances = [], []
         for size in sizes:
