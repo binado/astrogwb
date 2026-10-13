@@ -956,7 +956,7 @@ def _(eps_correlation, eps_frequencies):
         _ax,
         eps_frequencies,
         eps_correlation,
-        label=r"$\mathrm{Corr}[\epsilon(f), \epsilon(f')]$",
+        label=r"$\mathrm{Corr}[\epsilon_k, \epsilon_{k'}]$",
         # The correlation is close to 1 almost everywhere; a [-1, 1] range would
         # hide the decorrelation at high frequency.
         vmin=np.floor(20.0 * np.nanmin(eps_correlation)) / 20.0,
@@ -973,7 +973,7 @@ def _():
     **Excess of the covariance over a constant.** The shot-noise covariance is almost
     constant, so it is shown relative to the paper's rank-one model, with
     $\sigma_\epsilon$ the mean of $\sqrt{\mathrm{Var}[\epsilon(f)]}$ weighted by the
-    squared SNR $\rho_k^2$ of each bin: $\mathrm{Cov}[\epsilon(f), \epsilon(f')] /
+    squared SNR $\rho_k^2$ of each bin: $\mathrm{Cov}[\epsilon_k, \epsilon_{k'}] /
     \sigma_\epsilon^2 - 1$ on a diverging scale clipped at $\pm 0.3$, which shows
     where and with which sign the covariance departs from a constant.
     """)
@@ -998,7 +998,7 @@ def _(eps_covariance_excess, eps_frequencies):
         _ax,
         eps_frequencies,
         eps_covariance_excess,
-        label=r"$\mathrm{Cov}[\epsilon(f), \epsilon(f')] / \sigma_\epsilon^2 - 1$",
+        label=r"$\mathrm{Cov}[\epsilon_k, \epsilon_{k'}] / \sigma_\epsilon^2 - 1$",
         vmin=-0.3,
         vmax=0.3,
         cmap="RdBu_r",
@@ -1071,7 +1071,7 @@ def _(eps_covariance_excess, eps_frequencies, probe_labels, probe_samples):
         _ax_excess,
         eps_frequencies,
         eps_covariance_excess,
-        label=r"$\mathrm{Cov}[\epsilon(f), \epsilon(f')] / \sigma_\epsilon^2 - 1$",
+        label=r"$\mathrm{Cov}[\epsilon_k, \epsilon_{k'}] / \sigma_\epsilon^2 - 1$",
         vmin=-0.3,
         vmax=0.3,
         cmap="RdBu_r",
