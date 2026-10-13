@@ -1207,12 +1207,10 @@ def plot_minimum_redshift_scan(
     linestyles: Sequence[str],
     window_edge: float,
 ) -> Figure:
-    r"""Plot :math:`\sigma_{\mathrm{tot}}/A` and its shot-noise inflation.
+    r"""Plot :math:`\sigma_{\mathrm{tot}}/A` against the window's lower edge.
 
-    Left: the relative uncertainty of the amplitude against the window's lower
-    edge, with a dot at each network's minimum. Right: its ratio to the
-    detector-noise-only :math:`1/\rho`, :math:`\sqrt{1 + (\rho s)^2}`. The
-    dotted vertical line is the analysis' own window edge ``window_edge``.
+    One curve per network, with a dot at its minimum. The dotted vertical line is
+    the analysis' own window edge ``window_edge``.
 
     Parameters
     ----------
@@ -1226,10 +1224,9 @@ def plot_minimum_redshift_scan(
     Returns
     -------
     matplotlib.figure.Figure
-        The two-panel figure.
+        The figure.
     """
-    width, height = plt.rcParams["figure.figsize"]
-    fig, (ax, ax_ratio) = plt.subplots(1, 2, figsize=(2.0 * width, height))
+    fig, ax = plt.subplots()
     for network, color, linestyle in zip(networks, colors, linestyles, strict=True):
         rows = scan[scan["network"] == network.label].sort_values("minimum_redshift")
         edge = rows["minimum_redshift"].to_numpy()
@@ -1237,16 +1234,12 @@ def plot_minimum_redshift_scan(
         ax.semilogy(edge, total, color=color, linestyle=linestyle)
         best = int(np.argmin(total))
         ax.plot(edge[best], total[best], "o", color=color, markersize=4)
-        inflation = rows["relative_uncertainty"].to_numpy() * rows["snr"].to_numpy()
-        ax_ratio.plot(edge, inflation, color=color, linestyle=linestyle)
+    ax.axvline(window_edge, color="k", linestyle=":", linewidth=0.8)
+    ax.set_xlabel(r"$z_{\min}$")
     ax.set_ylabel(r"$\sigma_{\mathrm{tot}}/A\ (\%)$")
-    ax_ratio.set_ylabel(r"$\sigma_{\mathrm{tot}}\,\rho/A$")
-    for panel in (ax, ax_ratio):
-        panel.axvline(window_edge, color="k", linestyle=":", linewidth=0.8)
-        panel.set_xlabel(r"$z_{\min}$")
-        panel.set_axisbelow(True)
-        panel.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
-        format_axis_ticks(panel)
+    ax.set_axisbelow(True)
+    ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
+    format_axis_ticks(ax)
     ax.legend(
         handles=network_legend_handles(networks, colors, linestyles),
         **DETECTOR_COMPARISON_LEGEND,
