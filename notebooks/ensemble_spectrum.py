@@ -524,16 +524,28 @@ def plot_characteristic_amplitudes(
     networks: Sequence[Network],
     colors: Sequence[str],
     linestyles: Sequence[str],
+    observation_time: float,
 ) -> Figure:
-    r"""Plot the characteristic strain :math:`h_c` against each network's :math:`h_n`.
+    r"""Stack :math:`h_c` against each :math:`h_n` over :math:`d\mathrm{SNR}^2/d\ln f`.
 
-    The fourth power of the gap between the signal band and a network's
-    :math:`h_n` is that network's SNR density, shown in
-    :func:`plot_snr_density`. The line is the median over draws, the middle
-    row of ``strain``; the scatter is below the line width and is shown by
+    The top panel shows the median characteristic strain against each network's
+    :math:`h_n`. The fourth power of the ratio of the two is that network's SNR
+    density, shown in the bottom panel on the shared frequency axis, so the
+    comparison lines up with where the SNR accrues. On a log frequency axis the
+    area under a density curve is the network's :math:`\mathrm{SNR}^2`. The
+    lines are the median over draws, the middle row of ``strain`` and of each
+    ``"density"``; the shaded band of the density is its ``(low, high)`` rows.
+    The scatter of :math:`h_c` is below the line width and is shown by
     :func:`plot_strain_scatter`.
     """
-    fig, ax = plt.subplots()
+    width, height = plt.rcParams["figure.figsize"]
+    fig, (ax, ax_density) = plt.subplots(
+        2,
+        1,
+        sharex=True,
+        figsize=(width, 1.6 * height),
+        gridspec_kw={"height_ratios": (3, 2)},
+    )
     positive = strain[1] > 0.0
     ax.loglog(
         frequency[positive], strain[1][positive], color=SPECTRUM["sh"], linestyle=":"
@@ -541,11 +553,36 @@ def plot_characteristic_amplitudes(
     for network, color, linestyle in zip(networks, colors, linestyles, strict=True):
         curve = curves[network.name]
         ax.loglog(curve["frequency"], curve["noise"], color=color, linestyle=linestyle)
+        ax_density.semilogx(
+            curve["frequency"],
+            curve["density"][1],
+            color=color,
+            linestyle=linestyle,
+        )
+        ax_density.fill_between(
+            curve["frequency"],
+            curve["density"][0],
+            curve["density"][2],
+            color=color,
+            alpha=0.2,
+            linewidth=0,
+        )
     ax.set_ylim(0.3 * strain[1][positive].min(), 20.0 * strain[1].max())
-    ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
     ax.set_ylabel(r"$h_c(f), \, h_n(f)$")
-    ax.set_axisbelow(True)
-    ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
+    ax_density.set_xlabel(r"$f\ \mathrm{(Hz)}$")
+    ax_density.set_ylabel(r"$d\mathrm{SNR}^{2}/d\ln f$")
+    ax_density.text(
+        0.98,
+        0.92,
+        rf"$T = {observation_time:g}\ \mathrm{{yr}}$",
+        transform=ax_density.transAxes,
+        ha="right",
+        va="top",
+    )
+    for panel in (ax, ax_density):
+        panel.set_axisbelow(True)
+        panel.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
+        format_axis_ticks(panel)
     signal_legend = ax.legend(
         handles=[Line2D([], [], color=SPECTRUM["sh"], linestyle=":")],
         labels=[r"$h_c$"],
@@ -558,59 +595,6 @@ def plot_characteristic_amplitudes(
         handles=network_legend_handles(networks, colors, linestyles),
         **DETECTOR_COMPARISON_LEGEND,
     )
-    format_axis_ticks(ax)
-    fig.tight_layout()
-    return fig
-
-
-@app.function(hide_code=True)
-def plot_snr_density(
-    curves: dict[str, dict[str, NDArray]],
-    networks: Sequence[Network],
-    colors: Sequence[str],
-    linestyles: Sequence[str],
-    observation_time: float,
-) -> Figure:
-    r"""Plot each network's :math:`d\mathrm{SNR}^2/d\ln f` with its band over draws.
-
-    On a log frequency axis the area under a curve is the network's
-    :math:`\mathrm{SNR}^2`. Each ``"density"`` carries ``(low, middle, high)``
-    rows over draws; the line is the median.
-    """
-    fig, ax = plt.subplots()
-    for network, color, linestyle in zip(networks, colors, linestyles, strict=True):
-        curve = curves[network.name]
-        ax.semilogx(
-            curve["frequency"],
-            curve["density"][1],
-            color=color,
-            linestyle=linestyle,
-        )
-        ax.fill_between(
-            curve["frequency"],
-            curve["density"][0],
-            curve["density"][2],
-            color=color,
-            alpha=0.2,
-            linewidth=0,
-        )
-    ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
-    ax.set_ylabel(r"$d\mathrm{SNR}^{2}/d\ln f$")
-    ax.text(
-        0.98,
-        0.92,
-        rf"$T = {observation_time:g}\ \mathrm{{yr}}$",
-        transform=ax.transAxes,
-        ha="right",
-        va="top",
-    )
-    ax.set_axisbelow(True)
-    ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
-    ax.legend(
-        handles=network_legend_handles(networks, colors, linestyles),
-        **DETECTOR_COMPARISON_LEGEND,
-    )
-    format_axis_ticks(ax)
     fig.tight_layout()
     return fig
 
@@ -784,8 +768,9 @@ def _():
     mo.md(r"""
     ## 7. Characteristic amplitudes
 
-    The paper's spectrum figures. The first shows the median $h_c$ against each
-    network's $h_n$; the second, each network's
+    The paper's spectrum figure, in two stacked panels on a shared frequency
+    axis. The top panel shows the median $h_c$ against each network's $h_n$;
+    the bottom panel, each network's
     $$\left(\frac{h_c}{h_n}\right)^4 = \frac{d\mathrm{SNR}^2}{d\ln f}$$
     computed draw by draw, with the same band. The area under a median curve in
     $\ln f$ is approximately that network's $\mathrm{SNR}^2$. The colors and line styles are those of the other
@@ -840,6 +825,7 @@ def _(
     band_strain,
     plotted_colors,
     plotted_linestyles,
+    observation_time,
     plotted_networks,
     write_figures,
 ):
@@ -850,37 +836,11 @@ def _(
         plotted_networks,
         plotted_colors,
         plotted_linestyles,
-    )
-    if write_figures:
-        save_figures(
-            {BASE_DIR / "characteristic_amplitudes.pdf": _fig},
-            root=ROOT_DIR,
-        )
-    _fig
-    return
-
-
-@app.cell
-def _(
-    BASE_DIR,
-    ROOT_DIR,
-    amplitude_curves_by_network,
-    observation_time,
-    plotted_colors,
-    plotted_linestyles,
-    plotted_networks,
-    write_figures,
-):
-    _fig = plot_snr_density(
-        amplitude_curves_by_network,
-        plotted_networks,
-        plotted_colors,
-        plotted_linestyles,
         observation_time,
     )
     if write_figures:
         save_figures(
-            {BASE_DIR / "snr_density.pdf": _fig},
+            {BASE_DIR / "characteristic_amplitudes.pdf": _fig},
             root=ROOT_DIR,
         )
     _fig
