@@ -65,7 +65,7 @@ notebook = [
     "arviz-stats[xarray]>=1.2.0",
     "corner @ git+https://github.com/dfm/corner.py@d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4",
     "matplotlib>=3.11.1",
-    "pandas>=2.0",
+    "pandas[output-formatting]>=2.0",
     "scipy>=1.10",
 ]
 blackjax = [

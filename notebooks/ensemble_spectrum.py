@@ -70,7 +70,7 @@ def _():
     The paper's spectrum figure and SNR tables, from one Poisson ensemble of
     background spectra drawn with `IMRPhenomXAS`. For each paper network and
     several values of the lower band edge $f_{\min}$ it reports the SNR of every
-    draw, summarized as the mean over draws with its 16-84% range, as LaTeX
+    draw, summarized as the mean over draws, as LaTeX
     tables (one with the ET-COBA PSD for ET-$\Delta$, one with the ET-D PSD). The
     spectrum is plotted as the dimensionless characteristic amplitudes of
     Belgacem et al. (arXiv:2411.04029, Eqs. 47-49), with percentile bands from
@@ -165,7 +165,7 @@ def _():
     #: the figures root, named after the notebook file.
     BASE_DIR = ROOT_DIR / FIGURES_DIR / Path(__file__).stem
     use_paper_style(root=ROOT_DIR)
-    # Percentiles of the plotted bands and of the table ranges (16-84%).
+    # Percentiles of the plotted bands (16-84%).
     percentiles = (16.0, 50.0, 84.0)
 
     # Execution smoke tests exercise the same code with tiny draws.
@@ -395,9 +395,8 @@ def snr_per_draw(
 def snr_table(
     snrs: dict[str, NDArray[np.float64]],
     minimum_frequencies: Sequence[float],
-    percentiles: tuple[float, float, float],
 ) -> pd.DataFrame:
-    """Mean over draws of the SNR, with the outer percentiles as its range.
+    """Mean over draws of the SNR.
 
     Parameters
     ----------
@@ -405,25 +404,14 @@ def snr_table(
         Output of :func:`snr_per_draw`.
     minimum_frequencies
         Lower band edges in Hz, one column each.
-    percentiles
-        ``(low, middle, high)`` percentiles; the middle one is unused, the
-        range is ``low`` to ``high``.
 
     Returns
     -------
     pandas.DataFrame
-        ``mean (low--high)`` strings indexed by row label, one column per cut.
+        Mean SNR indexed by row label, one column per cut.
     """
-    low, _, high = percentiles
-    cells = {}
-    for label, values in snrs.items():
-        lo, hi = np.percentile(values, [low, high], axis=-1)
-        cells[label] = [
-            f"{mean:.1f} ({lo_i:.1f}--{hi_i:.1f})"
-            for mean, lo_i, hi_i in zip(values.mean(axis=-1), lo, hi, strict=True)
-        ]
     return pd.DataFrame.from_dict(
-        cells,
+        {label: values.mean(axis=-1) for label, values in snrs.items()},
         orient="index",
         columns=[rf"$f_{{\min}} = {fmin:g}$ Hz" for fmin in minimum_frequencies],
     )
@@ -436,6 +424,7 @@ def latex_table(table: pd.DataFrame, caption: str, label: str) -> str:
         column_format="l" + "r" * table.shape[1],
         caption=caption,
         label=label,
+        float_format="%.2f",
     )
 
 
@@ -650,7 +639,7 @@ def _():
     mo.md(r"""
     ## 4. SNR per network and cut
 
-    Each draw's SNR, then the mean over draws with its 16-84% range. The
+    Each draw's SNR, then the mean over draws. The
     SNR of the mean spectrum is shown below for comparison only.
     """)
     return
@@ -666,7 +655,6 @@ def _(
     maximum_frequency,
     minimum_frequencies,
     observation_time,
-    percentiles,
     registry,
 ):
     snrs_coba = snr_per_draw(
@@ -687,14 +675,14 @@ def _(
         minimum_frequencies,
         maximum_frequency,
     )
-    table_coba = snr_table(snrs_coba, minimum_frequencies, percentiles)
-    table_etd = snr_table(snrs_etd, minimum_frequencies, percentiles)
+    table_coba = snr_table(snrs_coba, minimum_frequencies)
+    table_etd = snr_table(snrs_etd, minimum_frequencies)
     mo.vstack(
         [
             mo.md("**ET-$\\Delta$ with the ET-COBA PSD**"),
-            table_coba,
+            table_coba.style.format("{:.2f}"),
             mo.md("**ET-$\\Delta$ with the ET-D PSD**"),
-            table_etd,
+            table_etd.style.format("{:.2f}"),
         ]
     )
     return snrs_coba, table_coba, table_etd
@@ -755,7 +743,7 @@ def _(BASE_DIR, table_coba, table_etd, write_figures):
     _blocks = {
         tag: latex_table(
             table,
-            "Mean over the draws of each draw's SNR, with the 16--84\\% range, "
+            "Mean over the draws of each draw's SNR "
             "for each detector network as the lower edge of the analysis band is "
             f"raised, with {psd} PSD for ET-$\\Delta$.",
             f"tab:mean-spectrum-snr-{tag}",
