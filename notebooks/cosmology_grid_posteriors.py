@@ -190,9 +190,9 @@ def _():
     # Grid knobs: each window is (low, high), each size a point count. Uniform
     # grids: the corner plot reads each density value as proportional to the
     # mass of its cell. Windows should hold the posterior comfortably; the
-    # best network's sigma is ~0.3 for H0 and ~0.004 for xi_0, the worst's ~1
+    # best network's sigma is ~0.2 for H0 and ~0.004 for xi_0, the worst's ~0.45
     # and ~0.013. xi_n is flat at xi_0 = 1, so it takes its prior range.
-    h0_window, h0_size = (60.0, 76.0), 321  # H0 alone: 0.05 step
+    h0_window, h0_size = (64.5, 71.0), 321  # H0 alone: 0.02 step
     h0_omega_window, h0_omega_size = (65.0, 70.5), 111  # H0 in the 2D problem
     omega_m_window, omega_m_size = (0.2856, 0.3336), 41  # +/- 4 prior sigma
     xi_0_window, xi_0_size = (0.94, 1.06), 121
@@ -710,14 +710,39 @@ def median_and_hdi(
     Returns
     -------
     tuple
-        ``(median, lower, upper)``; the interval is the span of the cells
-        above the density threshold that encloses ``mass``.
+        ``(median, lower, upper)``; the interval is where the density exceeds
+        the level that encloses ``mass``, with its edges interpolated linearly
+        between grid points, so it is not quantized to the grid cell.
     """
-    cell = density / density.sum()
-    median = float(np.interp(0.5, np.cumsum(cell) - cell / 2, grid))
-    order = np.argsort(cell)[::-1]
-    kept = order[: int(np.searchsorted(np.cumsum(cell[order]), mass)) + 1]
-    return median, float(grid[kept].min()), float(grid[kept].max())
+    cdf = np.concatenate(
+        [[0.0], np.cumsum(0.5 * (density[1:] + density[:-1]) * np.diff(grid))]
+    )
+    cdf /= cdf[-1]
+    median = float(np.interp(0.5, cdf, grid))
+    density = density / np.trapezoid(density, grid)
+
+    def crossing(level: float, inside: int, outside: int) -> float:
+        slope = (grid[outside] - grid[inside]) / (density[outside] - density[inside])
+        return float(grid[inside] + (level - density[inside]) * slope)
+
+    def interval(level: float) -> tuple[float, float]:
+        above = np.flatnonzero(density >= level)
+        first, last = int(above[0]), int(above[-1])
+        lower = crossing(level, first, first - 1) if first > 0 else float(grid[0])
+        upper = (
+            crossing(level, last, last + 1) if last < len(grid) - 1 else float(grid[-1])
+        )
+        return lower, upper
+
+    # Bisect the density level whose superlevel interval encloses `mass`.
+    low, high = 0.0, float(density.max())
+    for _ in range(60):
+        level = 0.5 * (low + high)
+        lower, upper = interval(level)
+        enclosed = np.interp(upper, grid, cdf) - np.interp(lower, grid, cdf)
+        low, high = (level, high) if enclosed > mass else (low, level)
+    lower, upper = interval(0.5 * (low + high))
+    return median, lower, upper
 
 
 @app.function(hide_code=True)
