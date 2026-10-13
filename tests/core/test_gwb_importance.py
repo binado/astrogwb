@@ -24,6 +24,7 @@ from astrogwb.gwb.importance import (
     phinney_kernel,
     redshift_quadrature,
     reference_catalog,
+    reference_redshift,
 )
 from astrogwb.inference import ImportanceGaussianLikelihood
 from astrogwb.populations import PopulationMetadata, build_population, joint_model
@@ -535,4 +536,115 @@ def test_spectrum_scales_as_a_power_of_h0_and_the_local_merger_rate(
 
     np.testing.assert_allclose(
         np.asarray(scaled), factor**exponent * np.asarray(baseline), rtol=1e-8
+    )
+
+
+def _at_window_edge(metadata: CatalogMetadata, edge: float) -> CatalogMetadata:
+    """``metadata`` with the population's window starting at ``edge``."""
+    kwargs = {**metadata.population.model_kwargs, "minimum_redshift": edge}
+    return metadata.model_copy(
+        update={
+            "population": metadata.population.model_copy(
+                update={"model_kwargs": kwargs}
+            )
+        }
+    )
+
+
+def _bound_predictions(
+    data: Any,
+    metadata: CatalogMetadata,
+    *,
+    minimum_redshift: float | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """The spectrum and shot-noise variance of ``data`` at the fiducials."""
+    likelihood = ImportanceGaussianLikelihood.from_catalog(
+        data,
+        metadata,
+        population=build_population(
+            metadata.population.model_name, **metadata.population.model_kwargs
+        ),
+        frequencies=OBSERVED_WAVEFORM.build().frequencies,
+        num_redshift_nodes=NUM_NODES,
+        density_sites=(),
+        shot_noise="amplitude",
+        observation_time=OBSERVATION_TIME,
+        minimum_redshift=minimum_redshift,
+    )
+    mean, variance, _ = likelihood.predict(metadata.fiducials)
+    return np.asarray(mean), np.asarray(variance)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("window_edge", [0.1, 0.5, 1.5])
+def test_low_reference_catalog_matches_one_generated_at_the_window_edge(
+    reference_metadata: CatalogMetadata, window_edge: float
+) -> None:
+    """Same key, hence same intrinsic draws: only the interpolation differs."""
+    key = batch_keys(41, 1)[0]
+    low = reference_catalog(reference_metadata, key)
+    direct_metadata = _at_window_edge(reference_metadata, window_edge)
+    direct = reference_catalog(direct_metadata, key)
+    for name in ("source_frame_mass_1", "source_frame_mass_2"):
+        np.testing.assert_array_equal(
+            low["source_parameters"][name], direct["source_parameters"][name]
+        )
+
+    rescaled = _bound_predictions(low, reference_metadata, minimum_redshift=window_edge)
+    expected = _bound_predictions(direct, direct_metadata)
+
+    # Linear interpolation of an f^(-7/3) power law on a 0.1% log grid, as in
+    # the comparisons against waveforms generated at every node.
+    np.testing.assert_allclose(rescaled[0], expected[0], rtol=1e-5)
+    np.testing.assert_allclose(rescaled[1], expected[1], rtol=1e-5)
+
+
+@pytest.mark.integration
+def test_default_window_edge_is_the_population_minimum_redshift(
+    reference_metadata: CatalogMetadata,
+) -> None:
+    low = reference_catalog(reference_metadata, batch_keys(41, 1)[0])
+
+    default = _bound_predictions(low, reference_metadata)
+    explicit = _bound_predictions(
+        low, reference_metadata, minimum_redshift=reference_redshift(reference_metadata)
+    )
+
+    np.testing.assert_array_equal(default[0], explicit[0])
+    np.testing.assert_array_equal(default[1], explicit[1])
+
+
+@pytest.mark.integration
+def test_window_edge_below_the_reference_redshift_is_rejected(
+    reference_metadata: CatalogMetadata,
+) -> None:
+    low = reference_catalog(reference_metadata, batch_keys(41, 1)[0])
+
+    with pytest.raises(ValueError, match="below the reference redshift"):
+        _bound_predictions(low, reference_metadata, minimum_redshift=0.05)
+
+
+@pytest.mark.parametrize("reference", [None, 0.1])
+def test_reference_redshift_defaults_to_the_window_lower_edge(
+    reference_metadata: CatalogMetadata, reference: float | None
+) -> None:
+    metadata = reference_metadata.model_copy(update={"reference_redshift": reference})
+
+    assert reference_redshift(metadata) == 0.1
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("reference", [0.02, 0.05, 0.1])
+def test_reference_catalog_distance_is_at_the_reference_redshift(
+    reference_metadata: CatalogMetadata, reference: float
+) -> None:
+    """Below the population's minimum redshift the distance must not be clamped."""
+    metadata = reference_metadata.model_copy(update={"reference_redshift": reference})
+    columns = reference_catalog(metadata, batch_keys(41, 1)[0])["source_parameters"]
+    fiducials = metadata.fiducials
+
+    expected = luminosity_distance(reference, fiducials["H0"], fiducials["Omega_m"])
+    np.testing.assert_allclose(columns["redshift"], reference)
+    np.testing.assert_allclose(
+        columns["luminosity_distance"], float(expected), rtol=1e-6
     )
