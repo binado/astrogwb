@@ -12,6 +12,7 @@ with app.setup(hide_code=True):
     # Backend configuration precedes waveform construction and array creation.
     configure_runtime(num_chains=1)
 
+    import arviz as az
     import jax
     import jax.numpy as jnp
     import marimo as mo
@@ -21,6 +22,7 @@ with app.setup(hide_code=True):
     from matplotlib.axes import Axes
     from matplotlib.projections import register_projection
     from numpy.typing import NDArray
+    from scipy import stats
 
     from astrogwb.detector import effective_psd, gaussian_bin_scale
     from astrogwb.frequency import frequency_mask
@@ -307,7 +309,7 @@ def _():
 
     # The injections are the Poisson ensemble of ensemble_spectrum.py:
     # the same record, seed and cache, so the draws are made once for both.
-    num_injections = 200
+    num_injections = 1000
     ensemble_seed = 41
     noise_seed = 2000  # detector noise, one stream per network
     # Detector-noise draws per injection: noise is free next to an injection,
@@ -554,6 +556,132 @@ def coverage_row(
     return row
 
 
+@app.function(hide_code=True)
+def plot_eps_density(ax: Axes, samples: NDArray[np.float64], labels: list[str]) -> None:
+    """Plot a Gaussian KDE of each column of ``samples`` on ``ax``.
+
+    Every KDE is evaluated on one window, four standard deviations either side
+    of the column means, so the tails are not cut at the data range and the
+    widths and offsets of the columns are comparable. A dashed normal density,
+    with the average mean and kernel-smoothed standard deviation of the columns,
+    is overlaid.
+
+    Parameters
+    ----------
+    ax
+        Axes to draw on.
+    samples
+        Draws of shape ``(M, K)``, one column per label.
+    labels
+        The ``K`` legend labels.
+    """
+    sd = samples.std(axis=0, ddof=1)
+    mean = samples.mean(axis=0)
+    window = ((mean - 4.0 * sd).min(), (mean + 4.0 * sd).max())
+    grid, density, bandwidth = az.kde(
+        samples, axis=0, custom_lims=window, bound_correction=False
+    )
+    for label, x, y in zip(labels, grid, density, strict=True):
+        ax.plot(x, y, label=label)
+    # The columns share nearly one width, so a single reference normal with
+    # their mean location and scale stands for all of them. A Gaussian KDE of
+    # normal draws is a normal of variance sd^2 + bandwidth^2, so the reference
+    # is widened by the kernel to be comparable with the curves.
+    x = np.linspace(*window, 512)
+    ax.plot(
+        x,
+        stats.norm.pdf(x, loc=mean.mean(), scale=np.hypot(sd, bandwidth).mean()),
+        color="black",
+        linestyle="--",
+        linewidth=1.0,
+        label="Normal",
+    )
+    ax.set(xlabel=r"$\epsilon$", ylabel="Density", xlim=window)
+    ax.legend(fontsize="small")
+
+
+@app.function(hide_code=True)
+def plot_eps_matrix(
+    ax: Axes,
+    frequencies: NDArray[np.float64],
+    matrix: NDArray[np.float64],
+    *,
+    label: str,
+    vmin: float,
+    vmax: float,
+    cmap: str = "viridis",
+    extend: str = "neither",
+) -> None:
+    """Draw a matrix over frequency on ``ax``, with a colorbar.
+
+    Parameters
+    ----------
+    ax
+        Axes to draw on.
+    frequencies
+        Bin centers in Hz, shape ``(F,)``.
+    matrix
+        Matrix of shape ``(F, F)``, for example a covariance or correlation.
+    label
+        Colorbar label.
+    vmin, vmax
+        Color limits.
+    cmap
+        Matplotlib colormap name.
+    extend
+        Which ends of the colorbar get an arrow for clipped values.
+    """
+    mesh = ax.pcolormesh(
+        frequencies,
+        frequencies,
+        matrix,
+        cmap=cmap,
+        vmin=vmin,
+        vmax=vmax,
+        shading="auto",
+        rasterized=True,
+    )
+    ax.set(
+        xscale="log",
+        yscale="log",
+        xlabel=r"$f$ [Hz]",
+        ylabel=r"$f'$ [Hz]",
+        aspect="equal",
+    )
+    # In axes coordinates, so the colorbar is as tall as the drawn (square) axes,
+    # which `colorbar(ax=ax)` is not once the aspect is equal.
+    cax = ax.inset_axes((1.04, 0.0, 0.05, 1.0))
+    ax.figure.colorbar(mesh, cax=cax, label=label, extend=extend)
+
+
+@app.function(hide_code=True)
+def plot_eps_eigenvalues(
+    ax: Axes, eigenvalues: NDArray[np.float64], num_modes: int = 20
+) -> None:
+    """Plot the leading eigenvalues of the whitened shot-noise covariance.
+
+    The shot noise is whitened by the detector scale, so a detector-noise
+    variance is 1 and the dashed line marks it. An eigenvalue far above the
+    line is a mode that detector noise cannot hide, and one far below it is
+    irrelevant to the likelihood.
+
+    Parameters
+    ----------
+    ax
+        Axes to draw on.
+    eigenvalues
+        Eigenvalues in descending order.
+    num_modes
+        Number of leading modes to show.
+    """
+    modes = np.arange(1, num_modes + 1)
+    ax.semilogy(modes, eigenvalues[:num_modes], "o")
+    ax.axhline(1.0, color="0.5", ls="--", lw=1, label="detector noise")
+    ax.set(xlabel="Mode", ylabel=r"Eigenvalue $\lambda_j$")
+    ax.set_xticks([1, *range(5, num_modes + 1, 5)])
+    ax.legend(fontsize="small")
+
+
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
@@ -753,6 +881,250 @@ def _(fiducial_prediction, fiducial_variance, injections, per_network):
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
+    ## Shot-noise covariance of the injections
+
+    The relative shot-noise fluctuation per bin, with no detector noise, is
+
+    $$
+    \epsilon(f_k) = \frac{S^{\rm cat}_h(f_k) - S_h^t(f_k)}{S_h^t(f_k)},
+    $$
+
+    and its sample covariance $\hat C_{kl}$ over the $M$ injections, with
+    correlation $\hat R_{kl} = \hat C_{kl} / \sqrt{\hat C_{kk}\hat C_{ll}}$.
+
+    **Figure (variance).** The diagonal $\hat C_{kk}$ against frequency, over the
+    bins the fiducial network can use, with the model's per-bin
+    $V_k / S_h^t(f_k)^2$ from the reference catalog for comparison.
+
+    **Figure (correlation).** The heatmap of $\hat R_{kl}$. A block of
+    correlation close to 1 is the band where shot noise acts as a single
+    amplitude mode, which is the assumption behind the rank-one model.
+    """)
+
+
+@app.cell
+def _(
+    fiducial_network,
+    fiducial_prediction,
+    fiducial_variance,
+    frequencies,
+    injections,
+    per_network,
+):
+    _template = np.asarray(fiducial_prediction)
+    _mask = per_network[fiducial_network][1] & (_template > 0.0)
+    eps_frequencies = frequencies[_mask]
+    # Squared SNR of the template in each usable bin: the weight of a bin in the
+    # likelihood, and the whitening of the shot noise by the detector noise.
+    eps_snr_squared = (_template[_mask] / per_network[fiducial_network][0][_mask]) ** 2
+    eps_samples = (injections[:, _mask] - _template[_mask]) / _template[_mask]
+    eps_covariance = np.cov(eps_samples, rowvar=False)
+    eps_variance = np.diag(eps_covariance)
+    model_variance = np.asarray(fiducial_variance)[_mask] / _template[_mask] ** 2
+    eps_correlation = eps_covariance / np.sqrt(np.outer(eps_variance, eps_variance))
+
+    variance_figure, (_ax, _ax_ratio) = plt.subplots(
+        2,
+        1,
+        figsize=(5.0, 4.6),
+        sharex=True,
+        height_ratios=(3, 1),
+    )
+    _ax.loglog(eps_frequencies, eps_variance, label="injections")
+    _ax.loglog(eps_frequencies, model_variance, "--", label="model")
+    _ax.set(ylabel=r"$\mathrm{Var}[\epsilon(f)]$", ylim=(1e-6, 1e-5))
+    _ax.legend(fontsize="small")
+    _ax_ratio.semilogx(eps_frequencies, model_variance / eps_variance)
+    _ax_ratio.axhline(1.0, color="0.5", lw=1)
+    _ax_ratio.set(xlabel=r"$f$ [Hz]", ylabel="model / injections")
+    variance_figure.tight_layout()
+    variance_figure
+    return (
+        eps_correlation,
+        eps_covariance,
+        eps_frequencies,
+        eps_samples,
+        eps_snr_squared,
+        variance_figure,
+    )
+
+
+@app.cell
+def _(eps_correlation, eps_frequencies):
+    correlation_figure, _ax = plt.subplots(figsize=(5.0, 4.2))
+    plot_eps_matrix(
+        _ax,
+        eps_frequencies,
+        eps_correlation,
+        label=r"$\mathrm{Corr}[\epsilon(f), \epsilon(f')]$",
+        # The correlation is close to 1 almost everywhere; a [-1, 1] range would
+        # hide the decorrelation at high frequency.
+        vmin=np.floor(20.0 * np.nanmin(eps_correlation)) / 20.0,
+        vmax=1.0,
+    )
+    correlation_figure.tight_layout()
+    correlation_figure
+    return (correlation_figure,)
+
+
+@app.cell(hide_code=True)
+def _(eps_covariance, eps_frequencies):
+    covariance_figure, _ax = plt.subplots(figsize=(5.0, 4.2))
+    plot_eps_matrix(
+        _ax,
+        eps_frequencies,
+        eps_covariance,
+        label=r"$\mathrm{Cov}[\epsilon(f), \epsilon(f')]$",
+        # From zero, so that the size of the decorrelation is not exaggerated.
+        vmin=0.0,
+        vmax=float(np.nanmax(eps_covariance)),
+    )
+    covariance_figure.tight_layout()
+    covariance_figure
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    **Figure variants of the covariance.** The shot-noise covariance is almost
+    constant, so the choice of color scale decides what the eye sees. With the
+    plateau $V_0$ the mean of the diagonal $\mathrm{Var}[\epsilon(f)]$ weighted by
+    the squared SNR $\rho_k^2$ of each bin:
+
+    - *Normalized:* $\mathrm{Cov}[\epsilon(f), \epsilon(f')]/V_0$ on a scale from
+      0 to its maximum. The same picture as above, without the $10^{-6}$ offset.
+    - *Deviation:* $100\,(\mathrm{Cov}/V_0 - 1)$ in percent on a diverging scale
+      clipped at $\pm 30\%$, which shows where and with which sign the
+      covariance departs from a constant.
+    """)
+
+
+@app.cell(hide_code=True)
+def _(eps_covariance, eps_frequencies, eps_snr_squared):
+    # SNR^2-weighted mean of the diagonal: the plateau as the likelihood weights it.
+    covariance_plateau = float(
+        np.average(np.diag(eps_covariance), weights=eps_snr_squared)
+    )
+    covariance_normalized_figure, _ax = plt.subplots(figsize=(5.0, 4.2))
+    plot_eps_matrix(
+        _ax,
+        eps_frequencies,
+        eps_covariance / covariance_plateau,
+        label=r"$\mathrm{Cov}[\epsilon(f), \epsilon(f')] / V_0$",
+        vmin=0.0,
+        vmax=float(np.nanmax(eps_covariance)) / covariance_plateau,
+    )
+    covariance_normalized_figure.tight_layout()
+    covariance_normalized_figure
+    return (covariance_plateau,)
+
+
+@app.cell(hide_code=True)
+def _(covariance_plateau, eps_covariance, eps_frequencies):
+    covariance_deviation_figure, _ax = plt.subplots(figsize=(5.0, 4.2))
+    plot_eps_matrix(
+        _ax,
+        eps_frequencies,
+        100.0 * (eps_covariance / covariance_plateau - 1.0),
+        label=r"Deviation of $\mathrm{Cov}$ from $V_0$ [\%]",
+        vmin=-30.0,
+        vmax=30.0,
+        cmap="RdBu_r",
+    )
+    covariance_deviation_figure.tight_layout()
+    covariance_deviation_figure
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    **Figure (distribution).** Correlation close to 1 shows a single mode, not that
+    the mode is Gaussian, which the shot-noise likelihood assumes. At a few
+    frequencies in the inspiral band it plots the standardized
+    $\epsilon / \mathrm{sd}(\epsilon)$ across the $M$ injections: *left*, a
+    histogram against $\mathcal{N}(0, 1)$; *right*, a Q-Q plot against the normal
+    quantiles, where a Gaussian lies on the diagonal. With $M$ draws only the
+    bulk is tested: the tails are not resolved beyond about $\pm\sqrt{2\ln M}$.
+    """)
+
+
+@app.cell
+def _(eps_frequencies, eps_samples):
+    _probe = (5.0, 10.0, 20.0, 50.0, 100.0)
+    _index = [int(np.argmin(np.abs(eps_frequencies - f))) for f in _probe]
+    probe_labels = [f"{eps_frequencies[_i]:.0f} Hz" for _i in _index]
+    probe_samples = eps_samples[:, _index]
+    probe_standardized = (
+        probe_samples - probe_samples.mean(axis=0)
+    ) / probe_samples.std(axis=0, ddof=1)
+
+    distribution_figure, _ax = plt.subplots(figsize=(4.5, 3.6))
+    plot_eps_density(_ax, probe_samples, probe_labels)
+    distribution_figure.tight_layout()
+
+    eps_normality = pd.DataFrame(
+        {
+            "f [Hz]": eps_frequencies[_index],
+            "sd(eps)": probe_samples.std(axis=0, ddof=1),
+            "skew": stats.skew(probe_samples, axis=0),
+            "excess kurtosis": stats.kurtosis(probe_samples, axis=0),
+            "Shapiro p": [stats.shapiro(_column).pvalue for _column in probe_samples.T],
+        }
+    )
+    mo.vstack([distribution_figure, eps_normality])
+    return distribution_figure, probe_labels, probe_samples, probe_standardized
+
+
+@app.cell(hide_code=True)
+def _(probe_labels, probe_standardized):
+    _count = probe_standardized.shape[0]
+    _theory = stats.norm.ppf((np.arange(1, _count + 1) - 0.5) / _count)
+    qq_figure, _ax = plt.subplots(figsize=(4.0, 3.6))
+    for _label, _column in zip(probe_labels, probe_standardized.T, strict=True):
+        _ax.plot(_theory, np.sort(_column), ".", ms=3, label=_label)
+    _ax.plot([-3, 3], [-3, 3], color="0.5", lw=1)
+    _ax.set(xlabel="Normal quantile", ylabel=r"$\epsilon / \mathrm{sd}(\epsilon)$")
+    _ax.legend(fontsize="small")
+    qq_figure.tight_layout()
+    qq_figure
+    return (qq_figure,)
+
+
+@app.cell(hide_code=True)
+def _(eps_correlation, eps_frequencies, probe_labels, probe_samples):
+    combined_figure, (_ax_density, _ax_correlation) = plt.subplots(
+        1, 2, figsize=(9.0, 3.8)
+    )
+    plot_eps_density(_ax_density, probe_samples, probe_labels)
+    plot_eps_matrix(
+        _ax_correlation,
+        eps_frequencies,
+        eps_correlation,
+        label=r"$\mathrm{Corr}[\epsilon(f), \epsilon(f')]$",
+        vmin=np.floor(20.0 * np.nanmin(eps_correlation)) / 20.0,
+        vmax=1.0,
+    )
+    combined_figure.tight_layout()
+    combined_figure
+    return (combined_figure,)
+
+
+@app.cell(hide_code=True)
+def _(eps_samples, eps_snr_squared):
+    # Shot noise in units of the detector noise: detector variance is 1.
+    _whitened = eps_samples * np.sqrt(eps_snr_squared)
+    whitened_eigenvalues = np.linalg.eigvalsh(np.cov(_whitened, rowvar=False))[::-1]
+    eigenvalue_figure, _ax = plt.subplots(figsize=(4.0, 3.6))
+    plot_eps_eigenvalues(
+        _ax, whitened_eigenvalues, num_modes=min(20, eps_samples.shape[0] - 1)
+    )
+    eigenvalue_figure.tight_layout()
+    eigenvalue_figure
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
     ## Coverage
 
     **Table.** For each network and likelihood variant, it summarizes the
@@ -915,13 +1287,27 @@ def _(
 @app.cell
 def _(
     FIGURES,
+    combined_figure,
+    correlation_figure,
     coverage,
     coverage_figure,
+    distribution_figure,
     model_against_injections,
+    qq_figure,
+    variance_figure,
     write_figures,
 ):
     if write_figures.value:
-        save_figures({FIGURES / "coverage_H0.pdf": coverage_figure})
+        save_figures(
+            {
+                FIGURES / "coverage_H0.pdf": coverage_figure,
+                FIGURES / "shot_noise_variance.pdf": variance_figure,
+                FIGURES / "shot_noise_correlation.pdf": correlation_figure,
+                FIGURES / "shot_noise_distribution.pdf": distribution_figure,
+                FIGURES / "shot_noise_qq.pdf": qq_figure,
+                FIGURES / "shot_noise_density_correlation.pdf": combined_figure,
+            }
+        )
         FIGURES.mkdir(parents=True, exist_ok=True)
         coverage.to_csv(FIGURES / "coverage_H0.csv", index=False)
         model_against_injections.to_csv(
