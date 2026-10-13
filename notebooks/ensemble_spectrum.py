@@ -970,7 +970,7 @@ def _(SMOKE, ROOT_DIR, approximant, metadata, minimum_frequencies):
     scan_seed = 42
     scan_num_samples = 2**14  # Sobol net, as in cosmology_grid_posteriors.py
     scan_redshift_nodes = 32  # converged to 1e-4 down to z_min = 0.01
-    scan_redshifts = np.geomspace(0.01, 3.0, 49)
+    scan_redshifts = np.geomspace(0.01, 1.5, 49)
     scan_chunk_size = 4096
     if SMOKE:
         scan_num_samples = 64
@@ -1234,11 +1234,11 @@ def plot_minimum_redshift_scan(
         rows = scan[scan["network"] == network.label].sort_values("minimum_redshift")
         edge = rows["minimum_redshift"].to_numpy()
         total = 100.0 * rows["relative_uncertainty"].to_numpy()
-        ax.loglog(edge, total, color=color, linestyle=linestyle)
+        ax.semilogy(edge, total, color=color, linestyle=linestyle)
         best = int(np.argmin(total))
         ax.plot(edge[best], total[best], "o", color=color, markersize=4)
         inflation = rows["relative_uncertainty"].to_numpy() * rows["snr"].to_numpy()
-        ax_ratio.semilogx(edge, inflation, color=color, linestyle=linestyle)
+        ax_ratio.plot(edge, inflation, color=color, linestyle=linestyle)
     ax.set_ylabel(r"$\sigma_{\mathrm{tot}}/A\ (\%)$")
     ax_ratio.set_ylabel(r"$\sigma_{\mathrm{tot}}\,\rho/A$")
     for panel in (ax, ax_ratio):
