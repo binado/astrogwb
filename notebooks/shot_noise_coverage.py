@@ -315,8 +315,8 @@ def _():
     # Detector-noise draws per injection: noise is free next to an injection,
     # and one draw each leaves var(z) dominated by its own sampling error.
     noise_draws = 20
-    # IMRPhenomXAS, like the injections; tides are negligible in band.
-    approximant = "IMRPhenomXAS"
+    # The approximant of the ensemble draws, which this notebook reads.
+    approximant = "IMRPhenomXAS_NRTidalv3"
     minimum_redshift, maximum_redshift = 0.35, 20.0
     catalog_seed = 42  # independent of the injections' seed
     num_samples = 2**14  # on a scrambled Sobol net; see importance_convergence.py

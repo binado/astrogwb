@@ -82,7 +82,7 @@ def _():
     # Ensemble spectra, SNR table and characteristic amplitudes
 
     The paper's spectrum figure and SNR tables, from one Poisson ensemble of
-    background spectra drawn with `IMRPhenomXAS`. For each paper network and
+    background spectra drawn with `IMRPhenomXAS_NRTidalv3`. For each paper network and
     several values of the lower band edge $f_{\min}$ it reports the SNR of every
     draw, summarized as the mean over draws, as LaTeX
     tables (one with the ET-COBA PSD for ET-$\Delta$, one with the ET-D PSD). The
@@ -173,6 +173,7 @@ def _():
     minimum_frequencies = [2.0, 5.0, 10.0, 20.0]
     minimum_redshift = 0.35
     maximum_redshift = 20.0
+    approximant = "IMRPhenomXAS_NRTidalv3"
     # Shared with shot_noise_coverage.py: same record, seed and directory.
     ensemble_dir = default_cache_dir() / "ensembles"
     #: Where this notebook's figures and tables go: one folder per notebook under
@@ -198,7 +199,7 @@ def _():
         # which reads the same cached draws.
         waveform=waveform_metadata(
             root=ROOT_DIR,
-            approximant="IMRPhenomXAS",
+            approximant=approximant,
             frequency_resolution=0.125,
             turnover_frequency=100.0,
             dlogf=0.01266,
@@ -238,6 +239,7 @@ def _():
         BASE_DIR,
         ROOT_DIR,
         SMOKE,
+        approximant,
         chunk_size,
         coba_rows,
         ensemble_dir,
@@ -961,7 +963,7 @@ def _():
 
 
 @app.cell
-def _(SMOKE, ROOT_DIR, metadata, minimum_frequencies):
+def _(SMOKE, ROOT_DIR, approximant, metadata, minimum_frequencies):
     #: Where the reference waveforms sit: the redshift at which the fiducial
     #: luminosity distance is this many Mpc. Below every window of the scan.
     reference_distance_mpc = 1.0
@@ -987,7 +989,7 @@ def _(SMOKE, ROOT_DIR, metadata, minimum_frequencies):
     scan_catalog_metadata = CatalogMetadata(
         waveform=waveform_metadata(
             root=ROOT_DIR,
-            approximant="IMRPhenomXAS",
+            approximant=approximant,
             frequency_spacing="log",
             minimum_frequency=minimum_frequencies[0],
             maximum_frequency=4000.0,
