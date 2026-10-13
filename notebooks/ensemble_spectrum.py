@@ -534,9 +534,8 @@ def plot_characteristic_amplitudes(
     comparison lines up with where the SNR accrues. On a log frequency axis the
     area under a density curve is the network's :math:`\mathrm{SNR}^2`. The
     lines are the median over draws, the middle row of ``strain`` and of each
-    ``"density"``; the shaded band of the density is its ``(low, high)`` rows.
-    The scatter of :math:`h_c` is below the line width and is shown by
-    :func:`plot_strain_scatter`.
+    ``"density"``. The scatter over draws of both is below the line width; that
+    of :math:`h_c` is shown by :func:`plot_strain_scatter`.
     """
     width, height = plt.rcParams["figure.figsize"]
     fig, (ax, ax_density) = plt.subplots(
@@ -558,14 +557,6 @@ def plot_characteristic_amplitudes(
             curve["density"][1],
             color=color,
             linestyle=linestyle,
-        )
-        ax_density.fill_between(
-            curve["frequency"],
-            curve["density"][0],
-            curve["density"][2],
-            color=color,
-            alpha=0.2,
-            linewidth=0,
         )
     ax.set_ylim(0.3 * strain[1][positive].min(), 20.0 * strain[1].max())
     ax.set_ylabel(r"$h_c(f), \, h_n(f)$")
