@@ -27,8 +27,8 @@ with app.setup(hide_code=True):
     from astrogwb.detector import effective_psd, gaussian_bin_scale
     from astrogwb.frequency import frequency_mask
     from astrogwb.gwb.importance import (
-        reference_catalog,
         reference_catalog_stem,
+        reference_sources,
     )
     from astrogwb.inference import (
         ImportanceGaussianLikelihood,
@@ -57,6 +57,7 @@ with app.setup(hide_code=True):
     from astrogwb.simulators.polarization_power import (
         CatalogMetadata,
         PolarizationPowerData,
+        polarization_power_data,
     )
     from astrogwb.simulators.spectra import (
         BackgroundSpectralDensityMetadata,
@@ -457,7 +458,11 @@ def ensure_reference_catalog(
                 f"not the requested {metadata.key()} at seed {seed}"
             )
         return data  # ty: ignore[invalid-return-type]
-    data = reference_catalog(metadata, batch_keys(seed, 1)[0], chunk_size=chunk_size)
+    data = polarization_power_data(
+        metadata.waveform.build(),
+        reference_sources(metadata, batch_keys(seed, 1)[0]),
+        chunk_size=chunk_size,
+    )
     write(path, data, metadata, seed=seed)
     return data
 

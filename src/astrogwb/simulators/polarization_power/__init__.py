@@ -1,4 +1,4 @@
-"""Per-source polarization-power catalogs: packaging generated power, and the plain draw."""
+"""Per-source polarization-power catalogs: packaging generated power."""
 
 from astrogwb.simulators.polarization_power.metadata import (
     CatalogMetadata,
@@ -11,7 +11,6 @@ from astrogwb.simulators.polarization_power.restrict import (
 )
 from astrogwb.simulators.polarization_power.simulator import (
     PolarizationPowerData,
-    draw_catalog,
     polarization_power_data,
 )
 
@@ -21,7 +20,6 @@ __all__ = [
     "CatalogMetadata",
     "PolarizationPowerData",
     "catalog_stem",
-    "draw_catalog",
     "polarization_power_data",
     "restrict_redshift",
 ]

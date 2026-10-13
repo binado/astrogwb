@@ -20,7 +20,8 @@ Source sampling does not use ``numpyro.plate`` at a rate-derived size, so the
 population draw is independent of the merger rate.
 
 :class:`PopulationSimulator` is the waveform-free half of the spectra forward
-model; :class:`PopulationData` names one draw. Persisting a draw pays when it is
+model, composed with
+:class:`~astrogwb.simulators.spectra.BackgroundSpectralDensitySimulator`; :class:`PopulationData` names one draw. Persisting a draw pays when it is
 reused, such as two waveform approximants on the same sources.
 """
 

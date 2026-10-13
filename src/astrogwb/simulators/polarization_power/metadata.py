@@ -19,9 +19,11 @@ class CatalogMetadata(BaseModel):
     """Everything that determines a polarization-power catalog's contents.
 
     It is both the request and the provenance, as
-    :class:`~astrogwb.simulators.spectra.BackgroundSpectralDensityMetadata` is for spectra: the
-    :func:`~astrogwb.simulators.polarization_power.draw_catalog`
-    turns it and a key into a catalog, the draw is stored beside it
+    :class:`~astrogwb.simulators.spectra.BackgroundSpectralDensityMetadata` is for spectra: it
+    records the (sources, waveform) pair of a catalog -- sources drawn from
+    its population and fiducials at one key, then run through its waveform by
+    :func:`~astrogwb.simulators.polarization_power.polarization_power_data` --
+    the draw is stored beside it
     (:func:`~astrogwb.simulators.core.write`),
     and :meth:`key` is the middle part of the file name by convention
     (:func:`catalog_stem`). The seed is not part of it: it picks one realization of the
@@ -38,7 +40,7 @@ class CatalogMetadata(BaseModel):
     hash to drift.
 
     ``sampling`` is how a reference catalog
-    (:func:`~astrogwb.gwb.importance.reference_catalog`) draws its intrinsic
+    (:func:`~astrogwb.gwb.importance.reference_sources`) draws its intrinsic
     parameters: ``"random"`` i.i.d., or ``"sobol"`` on a scrambled Sobol net
     (:func:`~astrogwb.populations.evaluation.sample_sources_qmc`), which needs a
     power-of-two ``num_samples``. A plain catalog is always random.

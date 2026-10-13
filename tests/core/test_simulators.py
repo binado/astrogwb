@@ -10,18 +10,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import jax
 import numpy as np
 import pytest
 
 from astrogwb.distributions.config import DistributionConfig
-from astrogwb.populations import PopulationMetadata
+from astrogwb.populations import PopulationMetadata, joint_model
+from astrogwb.populations.evaluation import sample_sources
 from astrogwb.simulators.core import Arrays, batch_keys, load, write
 from astrogwb.simulators.polarization_power import (
     CatalogMetadata,
-    draw_catalog,
+    PolarizationPowerData,
+    polarization_power_data,
 )
 from astrogwb.simulators.population import PopulationSimulator
 from astrogwb.simulators.spectra import (
+    BackgroundSpectralDensityData,
     BackgroundSpectralDensityMetadata,
     BackgroundSpectralDensitySimulator,
     spectra_ensemble,
@@ -75,6 +79,30 @@ SPECTRA = BackgroundSpectralDensityMetadata(
 )
 
 
+def _draw_catalog(
+    key: jax.Array, *, chunk_size: int | None = None
+) -> PolarizationPowerData:
+    """The plain catalog: sources at the fiducials, through the waveform."""
+    model = joint_model(*CATALOG.population.build()(CATALOG.fiducials))
+    sources = sample_sources(model, key, num_samples=CATALOG.num_samples)
+    return polarization_power_data(
+        CATALOG.waveform.build(), sources, chunk_size=chunk_size
+    )
+
+
+def _draw_spectrum(
+    simulator: BackgroundSpectralDensitySimulator,
+    key: jax.Array,
+    *,
+    source_chunk_size: int = 4,
+) -> BackgroundSpectralDensityData:
+    """One population draw at ``key``, reduced through ``simulator``."""
+    population = PopulationSimulator(
+        simulator.metadata.sources, chunk_size=source_chunk_size
+    )
+    return simulator(population(key))
+
+
 def _same(first: Arrays, second: Arrays) -> None:
     assert first.keys() == second.keys()
     for name, value in first.items():
@@ -90,7 +118,7 @@ def _same(first: Arrays, second: Arrays) -> None:
 
 @pytest.mark.integration
 def test_polarization_power_round_trips_through_a_file(tmp_path: Path) -> None:
-    fresh = draw_catalog(CATALOG, batch_keys(41, 1)[0])
+    fresh = _draw_catalog(batch_keys(41, 1)[0])
     path = write(tmp_path / "catalog.h5", fresh, CATALOG, seed=41)
 
     data, metadata, attrs = load(path, CatalogMetadata)
@@ -123,9 +151,9 @@ def test_sobol_catalog_needs_a_power_of_two_size() -> None:
 
 @pytest.mark.integration
 def test_polarization_power_key_picks_the_realization() -> None:
-    one = draw_catalog(CATALOG, batch_keys(41, 1)[0])
-    again = draw_catalog(CATALOG, batch_keys(41, 1)[0])
-    other = draw_catalog(CATALOG, batch_keys(42, 1)[0])
+    one = _draw_catalog(batch_keys(41, 1)[0])
+    again = _draw_catalog(batch_keys(41, 1)[0])
+    other = _draw_catalog(batch_keys(42, 1)[0])
 
     np.testing.assert_array_equal(
         one["polarization_power"], again["polarization_power"]
@@ -137,8 +165,8 @@ def test_polarization_power_key_picks_the_realization() -> None:
 @pytest.mark.parametrize("chunk_size", [1, 4, 6, 100])
 def test_polarization_power_is_independent_of_chunk_size(chunk_size: int) -> None:
     key = batch_keys(41, 1)[0]
-    whole = draw_catalog(CATALOG, key, chunk_size=None)
-    chunked = draw_catalog(CATALOG, key, chunk_size=chunk_size)
+    whole = _draw_catalog(key, chunk_size=None)
+    chunked = _draw_catalog(key, chunk_size=chunk_size)
 
     # Sources are drawn before chunking, so they are exact. The power is the
     # same elementwise computation, but XLA may fuse a differently shaped chunk
@@ -153,7 +181,7 @@ def test_polarization_power_is_independent_of_chunk_size(chunk_size: int) -> Non
 @pytest.mark.parametrize("num_draws", [1, 3])
 def test_spectra_round_trip_through_a_file(tmp_path: Path, num_draws: int) -> None:
     simulator = BackgroundSpectralDensitySimulator(SPECTRA, chunk_size=4)
-    parts = [simulator(key) for key in batch_keys(41, num_draws)]
+    parts = [_draw_spectrum(simulator, key) for key in batch_keys(41, num_draws)]
     fresh = parts[0] if num_draws == 1 else stack_spectra(parts)
     path = write(tmp_path / "spectra.h5", fresh, SPECTRA, seed=41)
 
@@ -169,7 +197,9 @@ def test_spectra_round_trip_through_a_file(tmp_path: Path, num_draws: int) -> No
 @pytest.mark.integration
 def test_spectra_ensemble_is_the_stack_of_single_draws(tmp_path: Path) -> None:
     simulator = BackgroundSpectralDensitySimulator(SPECTRA, chunk_size=4)
-    direct = stack_spectra([simulator(key) for key in batch_keys(41, 3)])
+    direct = stack_spectra(
+        [_draw_spectrum(simulator, key) for key in batch_keys(41, 3)]
+    )
 
     ensemble = spectra_ensemble(SPECTRA, 41, 3, tmp_path, chunk_size=4)
 
@@ -198,7 +228,7 @@ def test_spectra_ensemble_rejects_a_file_of_another_seed(tmp_path: Path) -> None
     simulator = BackgroundSpectralDensitySimulator(SPECTRA, chunk_size=4)
     write(
         spectra_ensemble_path(tmp_path, SPECTRA, 41, 0),
-        simulator(batch_keys(42, 1)[0]),
+        _draw_spectrum(simulator, batch_keys(42, 1)[0]),
         SPECTRA,
         seed=42,
     )
@@ -212,9 +242,9 @@ def test_a_key_picks_the_spectrum() -> None:
     simulator = BackgroundSpectralDensitySimulator(SPECTRA, chunk_size=4)
     keys = batch_keys(41, 3)
 
-    one = simulator(keys[1])
-    again = simulator(keys[1])
-    other = simulator(keys[2])
+    one = _draw_spectrum(simulator, keys[1])
+    again = _draw_spectrum(simulator, keys[1])
+    other = _draw_spectrum(simulator, keys[2])
 
     np.testing.assert_array_equal(one["spectral_density"], again["spectral_density"])
     assert one["spectral_density"].shape == (1, one["frequencies"].size)
@@ -230,7 +260,7 @@ def test_a_key_picks_the_spectrum() -> None:
 @pytest.mark.integration
 def test_stacking_a_loop_equals_the_single_calls() -> None:
     simulator = BackgroundSpectralDensitySimulator(SPECTRA, chunk_size=4)
-    singles = [simulator(key) for key in batch_keys(41, 3)]
+    singles = [_draw_spectrum(simulator, key) for key in batch_keys(41, 3)]
 
     stacked = stack_spectra(singles)
 
@@ -254,7 +284,9 @@ def test_spectra_chunk_size_changes_cost_not_the_draws() -> None:
 
     for key in batch_keys(41, 2):
         np.testing.assert_allclose(
-            small(key)["spectral_density"], large(key)["spectral_density"], rtol=1e-12
+            _draw_spectrum(small, key)["spectral_density"],
+            _draw_spectrum(large, key)["spectral_density"],
+            rtol=1e-12,
         )
 
 
@@ -290,15 +322,14 @@ def test_poisson_population_draw_does_not_depend_on_chunk_size() -> None:
 
 
 @pytest.mark.integration
-def test_reducing_a_population_equals_the_spectrum_simulator() -> None:
+def test_spectrum_does_not_depend_on_source_chunk_size() -> None:
     key = batch_keys(41, 1)[0]
     simulator = BackgroundSpectralDensitySimulator(SPECTRA, chunk_size=4)
-    population = PopulationSimulator(SPECTRA.sources, chunk_size=4)(key)
 
-    reduced = simulator.reduce(population)
-    direct = simulator(key)
+    small = _draw_spectrum(simulator, key, source_chunk_size=1)
+    large = _draw_spectrum(simulator, key, source_chunk_size=64)
 
-    _same(dict(reduced), dict(direct))  # ty: ignore[invalid-argument-type]
+    _same(dict(small), dict(large))  # ty: ignore[invalid-argument-type]
 
 
 def test_population_simulator_takes_one_key() -> None:
