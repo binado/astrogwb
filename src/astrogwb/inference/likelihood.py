@@ -36,6 +36,7 @@ from astrogwb.gwb.importance import (
     _node_power,
     _rescaling_arrays,
     _shared_terms,
+    _SharedTerms,
 )
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.populations._types import Population
@@ -43,8 +44,8 @@ from astrogwb.simulators.polarization_power.metadata import CatalogMetadata
 from astrogwb.simulators.polarization_power.simulator import PolarizationPowerData
 
 from .shot_noise import (
+    _keep,
     amplitude_direction,
-    amplitude_shot_noise_variance,
     per_frequency_direction,
     rank_one_gaussian_log_likelihood,
 )
@@ -58,9 +59,10 @@ __all__ = [
     "shot_noise_log_likelihood",
 ]
 
-#: The shot-noise term of a likelihood: an amplitude mode with :math:`s^2` per
-#: point, the per-frequency mode, or an amplitude mode with a fixed :math:`s^2`
-#: (``Network.relative_variance``). ``None`` is the diagonal Gaussian.
+#: The shot-noise term of a likelihood: an amplitude mode with the projected
+#: :math:`s^2` per point and network, the per-frequency mode, or an amplitude
+#: mode with a fixed :math:`s^2` (``Network.relative_variance``). ``None`` is
+#: the diagonal Gaussian.
 type ShotNoiseMode = Literal["amplitude", "per_frequency", "fixed"]
 
 #: ``(mean, variance | None, extras)``, what ``predict`` returns.
@@ -118,28 +120,19 @@ def shot_noise_log_likelihood(
 
     The covariance is :math:`D + \mathbf{u}\mathbf{u}^T` along the direction
     ``mode`` selects (see :mod:`astrogwb.inference.shot_noise`): ``"amplitude"``
-    takes :math:`s^2` from the ``variance`` at this point and network,
-    ``"fixed"`` takes ``network.relative_variance``, ``"per_frequency"`` takes
-    :math:`u_f = \sqrt{V_f}`. ``None`` is the diagonal Gaussian and ignores
-    ``variance``. ``mode`` is static; ``variance`` is required by the first and
-    third modes and is not checked.
+    and ``"fixed"`` take :math:`s^2` from ``network.relative_variance`` (the
+    projected variance at this point for the first, a constant for the second),
+    ``"per_frequency"`` takes :math:`u_f = \sqrt{V_f}` from ``variance``.
+    ``None`` is the diagonal Gaussian and ignores ``variance``. ``mode`` is
+    static; the inputs each mode reads are required and not checked.
     """
     if mode is None:
         return gaussian_log_likelihood(mean, observed, network.scale, network.mask)
-    if mode == "fixed":
+    if mode in ("amplitude", "fixed"):
         assert network.relative_variance is not None
         direction = amplitude_direction(mean, network.relative_variance)
-        return rank_one_gaussian_log_likelihood(
-            observed, mean, network.scale, direction, network.mask
-        )
-    # Every other mode predicted a variance next to the spectrum.
-    assert variance is not None
-    if mode == "amplitude":
-        direction = amplitude_direction(
-            mean,
-            amplitude_shot_noise_variance(mean, variance, network.scale, network.mask),
-        )
     else:
+        assert variance is not None
         direction = per_frequency_direction(variance)
     return rank_one_gaussian_log_likelihood(
         observed, mean, network.scale, direction, network.mask
@@ -344,6 +337,18 @@ class ImportanceGaussianLikelihood:
         """Per-draw intrinsic log importance weights at ``params``, ``(N,)``."""
         return self._shared(params).log_weights
 
+    def _variance_kernel(self, shared: _SharedTerms) -> jax.Array:
+        r"""The spectrum's kernel times :math:`(d^{\mathrm{ref}}/d_{GW})^2`, ``(Z,)``.
+
+        A second moment of the power carries the distance rescaling twice. The
+        extra factor uses the pointwise
+        :func:`~astrogwb.cosmology.luminosity_distance`, as the kernel does.
+        """
+        gw_distance = shared.distance_ratio * luminosity_distance(
+            self.redshift, shared.hubble_constant, shared.omega_m
+        )
+        return shared.kernel * (self.reference_distance / gw_distance) ** 2
+
     def predict(self, params: Mapping[str, ArrayLike]) -> Prediction:
         r"""``(mean, variance | None, extras)`` at ``params``.
 
@@ -351,15 +356,15 @@ class ImportanceGaussianLikelihood:
         variance of a Poisson catalog realization about it, ``(F,)``, for the
         ``"amplitude"`` and ``"per_frequency"`` modes: the weighted mean of
         ``squared_power`` is rescaled with ``amplitude**2`` (:math:`s_j^8`),
-        integrated with the spectrum's kernel times
-        :math:`(d^{\mathrm{ref}}/d_{GW})^2` and multiplied by
+        integrated with :meth:`_variance_kernel` and multiplied by
         :data:`~astrogwb.gwb.importance.INCLINATION_SECOND_MOMENT` over
-        ``observation_seconds``. The extra distance factor uses the pointwise
-        :func:`~astrogwb.cosmology.luminosity_distance`, as the kernel does.
-        ``extras`` holds ``total_merger_rate`` (observer frame, mergers per
-        second) and ``importance_relative_ess``, both ``()``.
+        ``observation_seconds``. ``extras`` holds ``total_merger_rate``
+        (observer frame, mergers per second) and ``importance_relative_ess``,
+        both ``()``.
         """
-        shared = self._shared(params)
+        return self._predict(self._shared(params))
+
+    def _predict(self, shared: _SharedTerms) -> Prediction:
         node_power = _node_power(
             self.power,
             shared.log_weights,
@@ -382,16 +387,76 @@ class ImportanceGaussianLikelihood:
                 self.query_log_frequencies,
                 self.amplitude**2,
             )
-            gw_distance = shared.distance_ratio * luminosity_distance(
-                self.redshift, shared.hubble_constant, shared.omega_m
-            )
-            kernel = shared.kernel * (self.reference_distance / gw_distance) ** 2
             variance = (
                 INCLINATION_SECOND_MOMENT
-                * (squared_node_power @ kernel)
+                * (squared_node_power @ self._variance_kernel(shared))
                 / self.observation_seconds
             )
         return node_power @ shared.kernel, variance, extras
+
+    def _projected_relative_variance(
+        self, shared: _SharedTerms, mean: jax.Array, network: Network
+    ) -> jax.Array:
+        r"""The variance of the catalog's fractional amplitude along ``mean``.
+
+        Each source is projected on the noise-weighted mean,
+        :math:`a = \sum_f c_f P_f` with :math:`c_f = S_f / \sigma_f^2` over the
+        counted bins, before squaring, so
+
+        .. math::
+
+            s^2 = \frac{\langle a^2 \rangle}{\mathcal{R} T \langle a \rangle^2}
+                = \frac{\mathbf{c}^T \mathrm{Cov}[\mathbf{S}^{\mathrm{cat}}]\,
+                  \mathbf{c}}{(\mathbf{c}^T \mathbf{S})^2},
+
+        the second cumulant of the compound-Poisson amplitude. At node
+        :math:`j` the projection is the transposed interpolation of
+        :math:`\mathbf{c}` contracted with the catalog, ``(Z, F_ref) @ (F_ref, N)``,
+        once per network.
+        """
+        assert self.observation_seconds is not None
+        keep = _keep(network.mask, mean) & (mean > 0.0)
+        safe_scale = jnp.where(keep, network.scale, 1.0)
+        projector = jnp.where(keep, mean / safe_scale**2, 0.0)
+
+        def node_projector(query: jax.Array) -> jax.Array:
+            """:math:`\\mathbf{c}` pulled back through one node's interpolation."""
+            _, pullback = jax.vjp(
+                lambda reference: jnp.interp(
+                    query, self.log_reference_frequencies, reference, right=0.0
+                ),
+                jnp.zeros_like(self.log_reference_frequencies),
+            )
+            return pullback(projector)[0]
+
+        projectors = jax.vmap(node_projector, in_axes=1)(self.query_log_frequencies)
+        projected = self.amplitude[:, None] * (projectors @ self.power)
+        second_moment = (projected**2 @ jnp.exp(shared.log_weights)) / (
+            shared.log_weights.shape[0]
+        )
+        variance = (
+            INCLINATION_SECOND_MOMENT
+            * (second_moment @ self._variance_kernel(shared))
+            / self.observation_seconds
+        )
+        return variance / (projector @ mean) ** 2
+
+    def relative_variance(
+        self, params: Mapping[str, ArrayLike], network: Network | None = None
+    ) -> jax.Array:
+        r"""The ``"amplitude"`` mode's :math:`s^2` at ``params`` under ``network``.
+
+        The exact variance of the fractional amplitude estimator, ``()``. It is
+        bounded above by the SNR-weighted
+        :func:`~astrogwb.inference.shot_noise.amplitude_shot_noise_variance` of
+        the predicted per-bin variance, and equals it when the shot noise is
+        perfectly correlated across bins. Requires ``observation_seconds``.
+        """
+        shared = self._shared(params)
+        mean = self._predict(shared)[0]
+        network = self.network if network is None else network
+        assert network is not None
+        return self._projected_relative_variance(shared, mean, network)
 
     def spectrum(self, params: Mapping[str, ArrayLike]) -> jax.Array:
         """The spectrum at ``params``, ``(F,)``: a :data:`~astrogwb.inference.protocol.SpectrumFn`."""
@@ -400,7 +465,11 @@ class ImportanceGaussianLikelihood:
     def log_likelihood_from_prediction(
         self, prediction: Prediction, network: Network
     ) -> jax.Array:
-        """The log-likelihood of ``prediction`` under ``network``, shape ``()``."""
+        """The log-likelihood of ``prediction`` under ``network``, shape ``()``.
+
+        In the ``"amplitude"`` mode :math:`s^2` is ``network.relative_variance``,
+        which :meth:`log_likelihood` sets from :meth:`relative_variance`.
+        """
         mean, variance, _ = prediction
         assert self.observed is not None
         return shot_noise_log_likelihood(
@@ -411,9 +480,16 @@ class ImportanceGaussianLikelihood:
         self, params: Mapping[str, ArrayLike], network: Network | None = None
     ) -> tuple[jax.Array, Mapping[str, jax.Array]]:
         """``(log L, extras)`` at ``params`` under ``network`` (the instance's by default)."""
-        prediction = self.predict(params)
+        shared = self._shared(params)
+        prediction = self._predict(shared)
         network = self.network if network is None else network
         assert network is not None
+        if self.shot_noise == "amplitude":
+            network = network._replace(
+                relative_variance=self._projected_relative_variance(
+                    shared, prediction[0], network
+                )
+            )
         return self.log_likelihood_from_prediction(prediction, network), prediction[2]
 
     def __call__(
