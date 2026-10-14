@@ -24,8 +24,6 @@ with app.setup(hide_code=True):
     import numpyro.distributions as dist
     import pandas as pd
     from matplotlib.axes import Axes
-    from matplotlib.figure import Figure
-    from matplotlib.lines import Line2D
     from matplotlib.projections import register_projection
     from numpy.typing import NDArray
 
@@ -38,7 +36,6 @@ with app.setup(hide_code=True):
     )
     from astrogwb.inference import (
         ImportanceGaussianLikelihood,
-        amplitude_shot_noise_variance,
         grid_log_posterior,
     )
     from astrogwb.inference import Network as LikelihoodNetwork
@@ -54,15 +51,12 @@ with app.setup(hide_code=True):
     from astrogwb.paper.config.detectors import DetectorRegistry
     from astrogwb.paper.config.runs import CATALOGS_ROOT, FIGURES_DIR
     from astrogwb.paper.plotting import (
-        CORNER_LEVELS,
-        DETECTOR_COMPARISON_LEGEND,
         DETECTOR_NETWORKS,
         TRUTH,
-        Network,
-        detector_network_styles,
-        get_corner_kwargs,
+        convert_grids_to_samples,
         parameter_label,
-        plot_corner_for_posterior_grid,
+        plot_corner,
+        plot_network_marginals,
         save_figures,
         use_paper_style,
     )
@@ -176,6 +170,8 @@ def _():
     # template error is ~5e-5 sigma (importance_convergence.py), where i.i.d.
     # draws would need ~3e5 for 0.1 sigma.
     num_samples = 2**14
+    marginal_seed = 43  # cell and jitter draws behind the plots
+    num_marginal_samples = 2**18  # grid draws per plot, for the marginals and corners
     redshift_nodes = 32  # Gauss-Legendre nodes in 1/(1 + z); costs no waveforms
     catalog_chunk_size = 4096  # reference waveforms per lax.map batch
     chunk_size = 16_384  # injection waveforms per reduced chunk
@@ -190,19 +186,18 @@ def _():
     # Grid knobs: each window is (low, high), each size a point count. Uniform
     # grids: the corner plot reads each density value as proportional to the
     # mass of its cell. Windows should hold the posterior comfortably; the
-    # best network's sigma is ~0.3 for H0 and ~0.004 for xi_0, the worst's ~1
+    # best network's sigma is ~0.2 for H0 and ~0.004 for xi_0, the worst's ~0.45
     # and ~0.013. xi_n is flat at xi_0 = 1, so it takes its prior range.
-    h0_window, h0_size = (60.0, 76.0), 321  # H0 alone: 0.05 step
+    h0_window, h0_size = (64.5, 71.0), 321  # H0 alone: 0.02 step
     h0_omega_window, h0_omega_size = (65.0, 70.5), 111  # H0 in the 2D problem
     omega_m_window, omega_m_size = (0.2856, 0.3336), 41  # +/- 4 prior sigma
     xi_0_window, xi_0_size = (0.94, 1.06), 121
     xi_n_window, xi_n_size = (0.3, 3.0), 55  # prior range
 
     # Likelihood variants evaluated per problem, and the one every figure
-    # shows. "fixed" pins s^2 at the fiducial; the A/B section adopts it if it
-    # moves no posterior mean or sd by more than ab_tolerance detector sigma,
-    # which it does not (worst 0.003 sigma).
-    likelihood_variant = "fixed"
+    # shows. "amplitude" evaluates s^2 at each grid point, so sigma_eps depends
+    # on Lambda; "fixed" would pin it at the fiducial (the A/B section compares).
+    likelihood_variant = "amplitude"
     problem_variants = {
         "H0": ("detector", "amplitude", "fixed"),
         "H0_Omega_m": ("detector", "amplitude", "fixed"),
@@ -219,6 +214,7 @@ def _():
         catalog_chunk_size = 512
         chunk_size = 512
         grid_chunk_size = 4
+        num_marginal_samples = 2000
         write_figures_default = False
         cache_name_prefix = "smoke_"
         h0_window, h0_size = (40.0, 100.0), 7
@@ -298,9 +294,11 @@ def _():
         grid_specs,
         injection_metadata,
         likelihood_variant,
+        marginal_seed,
         maximum_frequency,
         minimum_frequency,
         network_names,
+        num_marginal_samples,
         observation_time,
         population,
         problem_variants,
@@ -711,14 +709,39 @@ def median_and_hdi(
     Returns
     -------
     tuple
-        ``(median, lower, upper)``; the interval is the span of the cells
-        above the density threshold that encloses ``mass``.
+        ``(median, lower, upper)``; the interval is where the density exceeds
+        the level that encloses ``mass``, with its edges interpolated linearly
+        between grid points, so it is not quantized to the grid cell.
     """
-    cell = density / density.sum()
-    median = float(np.interp(0.5, np.cumsum(cell) - cell / 2, grid))
-    order = np.argsort(cell)[::-1]
-    kept = order[: int(np.searchsorted(np.cumsum(cell[order]), mass)) + 1]
-    return median, float(grid[kept].min()), float(grid[kept].max())
+    cdf = np.concatenate(
+        [[0.0], np.cumsum(0.5 * (density[1:] + density[:-1]) * np.diff(grid))]
+    )
+    cdf /= cdf[-1]
+    median = float(np.interp(0.5, cdf, grid))
+    density = density / np.trapezoid(density, grid)
+
+    def crossing(level: float, inside: int, outside: int) -> float:
+        slope = (grid[outside] - grid[inside]) / (density[outside] - density[inside])
+        return float(grid[inside] + (level - density[inside]) * slope)
+
+    def interval(level: float) -> tuple[float, float]:
+        above = np.flatnonzero(density >= level)
+        first, last = int(above[0]), int(above[-1])
+        lower = crossing(level, first, first - 1) if first > 0 else float(grid[0])
+        upper = (
+            crossing(level, last, last + 1) if last < len(grid) - 1 else float(grid[-1])
+        )
+        return lower, upper
+
+    # Bisect the density level whose superlevel interval encloses `mass`.
+    low, high = 0.0, float(density.max())
+    for _ in range(60):
+        level = 0.5 * (low + high)
+        lower, upper = interval(level)
+        enclosed = np.interp(upper, grid, cdf) - np.interp(lower, grid, cdf)
+        low, high = (level, high) if enclosed > mass else (low, level)
+    lower, upper = interval(0.5 * (low + high))
+    return median, lower, upper
 
 
 @app.function(hide_code=True)
@@ -768,55 +791,42 @@ def summary_rows(
 
 
 @app.function(hide_code=True)
-def plot_marginals(
-    parameter: str,
+def marginal_window(
     grid: NDArray[np.float64],
-    densities: Mapping[str, NDArray[np.float64]],
-    networks: Sequence[tuple[str, str]],
-    fiducial: float,
-) -> Figure:
-    """Overlay one parameter's marginal posterior for every network.
+    log_densities: Mapping[str, NDArray[np.float64]],
+    axis: int,
+    num_sd: float = 5.0,
+) -> tuple[float, float]:
+    """Plot window of ``num_sd`` standard deviations around the broadest marginal.
 
-    Colors and line styles follow the detector-comparison convention of
-    ``scripts/mcmc_cosmological_parameters.py``.
+    The grid window is far wider than any posterior, so the marginal plots zoom
+    to the network with the largest sd, clipped to the grid.
 
     Parameters
     ----------
-    parameter
-        Parameter name, for the axis label.
     grid
-        Parameter grid.
-    densities
-        Marginal density by network name.
-    networks
-        ``(name, LaTeX label)`` in legend order.
-    fiducial
-        Truth marker position.
+        Coordinate of ``axis``.
+    log_densities
+        Unnormalized log density by network name.
+    axis
+        Axis of ``grid`` in each log density.
+    num_sd
+        Half-width of the window in standard deviations.
 
     Returns
     -------
-    matplotlib.figure.Figure
+    tuple of float
+        ``(low, high)`` limits of the window.
     """
-    styled = [Network(name, label, ()) for name, label in networks]
-    colors, linestyles = detector_network_styles(styled)
-    fig, ax = plt.subplots()
-    handles = []
-    for network, color, linestyle in zip(styled, colors, linestyles, strict=True):
-        ax.plot(grid, densities[network.name], color=color, linestyle=linestyle)
-        handles.append(
-            Line2D(
-                [],
-                [],
-                color=color,
-                linestyle=linestyle,  # ty: ignore[invalid-argument-type]
-                label=network.label,
-            )
+    moments = []
+    for log_density in log_densities.values():
+        density = marginal_density(grid, log_density, axis=axis)
+        mean = np.trapezoid(grid * density, grid)
+        moments.append(
+            (mean, np.sqrt(np.trapezoid((grid - mean) ** 2 * density, grid)))
         )
-    ax.axvline(fiducial, **TRUTH)  # ty: ignore[invalid-argument-type]
-    ax.set(xlabel=parameter_label(parameter), ylabel="Posterior density")
-    ax.legend(handles=handles, **DETECTOR_COMPARISON_LEGEND)  # ty: ignore[no-matching-overload]
-    fig.tight_layout()
-    return fig
+    mean, sd = max(moments, key=lambda moment: moment[1])
+    return max(grid[0], mean - num_sd * sd), min(grid[-1], mean + num_sd * sd)
 
 
 @app.cell(hide_code=True)
@@ -953,6 +963,8 @@ def _(
         "injection": injection_metadata.key(),
         "reference_catalog": catalog_metadata.key(),
         "redshift_nodes": redshift_nodes,
+        # The amplitude mode's s^2: the catalog projected on each template.
+        "relative_variance": "projected",
     }
     labelled_networks = [(n, l) for n, l in DETECTOR_NETWORKS if n in network_names]
     return cache_settings, labelled_networks, per_network
@@ -974,15 +986,16 @@ def _():
 
 @app.cell
 def _(FIDUCIALS, likelihood, per_network):
-    _spectrum, _variance, _ = likelihood.predict(FIDUCIALS)
+    _spectrum, _, _ = likelihood.predict(FIDUCIALS)
     _label = dict(DETECTOR_NETWORKS)
     _rows = []
     for _name, _data in per_network.items():
         _keep = np.asarray(_data["frequency_mask"])
         _sigma = np.asarray(_data["scale"])
         _s2 = float(
-            amplitude_shot_noise_variance(
-                _spectrum, _variance, _data["scale"], _data["frequency_mask"]
+            likelihood.relative_variance(
+                FIDUCIALS,
+                LikelihoodNetwork(_data["scale"], _data["frequency_mask"]),
             )
         )
         _snr = float(
@@ -1062,17 +1075,18 @@ def _(
 
 
 @app.cell
-def _(FIDUCIALS, h0_posterior, labelled_networks):
+def _(FIDUCIALS, h0_posterior, labelled_networks, marginal_seed, num_marginal_samples):
     _grids, _log_densities = h0_posterior
-    h0_marginal = plot_marginals(
+    _rng = np.random.default_rng(marginal_seed)
+    h0_marginal = plot_network_marginals(
         "H0",
-        _grids["H0"],
         {
-            name: marginal_density(_grids["H0"], ld, axis=0)
+            name: convert_grids_to_samples(_grids, ld, num_marginal_samples, rng=_rng)
             for name, ld in _log_densities.items()
         },
         labelled_networks,
         FIDUCIALS["H0"],
+        xlim=marginal_window(_grids["H0"], _log_densities, axis=0),
     )
     mo.as_html(h0_marginal)
     return (h0_marginal,)
@@ -1132,17 +1146,24 @@ def _(
 
 
 @app.cell
-def _(FIDUCIALS, h0_omega_m_posterior, labelled_networks):
+def _(
+    FIDUCIALS,
+    h0_omega_m_posterior,
+    labelled_networks,
+    marginal_seed,
+    num_marginal_samples,
+):
     _grids, _log_densities = h0_omega_m_posterior
-    h0_omega_m_marginal = plot_marginals(
+    _rng = np.random.default_rng(marginal_seed)
+    h0_omega_m_marginal = plot_network_marginals(
         "H0",
-        _grids["H0"],
         {
-            name: marginal_density(_grids["H0"], ld, axis=0)
+            name: convert_grids_to_samples(_grids, ld, num_marginal_samples, rng=_rng)
             for name, ld in _log_densities.items()
         },
         labelled_networks,
         FIDUCIALS["H0"],
+        xlim=marginal_window(_grids["H0"], _log_densities, axis=0),
     )
     mo.as_html(h0_omega_m_marginal)
     return (h0_omega_m_marginal,)
@@ -1157,15 +1178,23 @@ def _():
 
 
 @app.cell
-def _(FIDUCIALS, fiducial_network, grid_specs, h0_omega_m_posterior):
+def _(
+    FIDUCIALS,
+    fiducial_network,
+    grid_specs,
+    h0_omega_m_posterior,
+    marginal_seed,
+    num_marginal_samples,
+):
     _grids, _log_densities = h0_omega_m_posterior
-    _names = list(grid_specs["H0_Omega_m"])
-    h0_omega_m_corner = plot_corner_for_posterior_grid(
-        [_grids[name] for name in _names],
-        _log_densities[fiducial_network],
-        labels=[parameter_label(name) for name in _names],
-        truths=[FIDUCIALS[name] for name in _names],
-        **get_corner_kwargs(levels=CORNER_LEVELS),  # ty: ignore[invalid-argument-type]
+    h0_omega_m_corner = plot_corner(
+        convert_grids_to_samples(
+            _grids,
+            _log_densities[fiducial_network],
+            num_marginal_samples,
+            rng=np.random.default_rng(marginal_seed),
+        ),
+        {name: FIDUCIALS[name] for name in grid_specs["H0_Omega_m"]},
     )
     mo.as_html(h0_omega_m_corner)
     return (h0_omega_m_corner,)
@@ -1227,17 +1256,18 @@ def _(
 
 
 @app.cell
-def _(FIDUCIALS, labelled_networks, xi_posterior):
+def _(FIDUCIALS, labelled_networks, marginal_seed, num_marginal_samples, xi_posterior):
     _grids, _log_densities = xi_posterior
-    xi_marginal = plot_marginals(
+    _rng = np.random.default_rng(marginal_seed)
+    xi_marginal = plot_network_marginals(
         "xi_0",
-        _grids["xi_0"],
         {
-            name: marginal_density(_grids["xi_0"], ld, axis=0)
+            name: convert_grids_to_samples(_grids, ld, num_marginal_samples, rng=_rng)
             for name, ld in _log_densities.items()
         },
         labelled_networks,
         FIDUCIALS["xi_0"],
+        xlim=marginal_window(_grids["xi_0"], _log_densities, axis=0),
     )
     mo.as_html(xi_marginal)
     return (xi_marginal,)
@@ -1253,15 +1283,23 @@ def _():
 
 
 @app.cell
-def _(FIDUCIALS, fiducial_network, grid_specs, xi_posterior):
+def _(
+    FIDUCIALS,
+    fiducial_network,
+    grid_specs,
+    marginal_seed,
+    num_marginal_samples,
+    xi_posterior,
+):
     _grids, _log_densities = xi_posterior
-    _names = list(grid_specs["xi_0_xi_n"])
-    xi_corner = plot_corner_for_posterior_grid(
-        [_grids[name] for name in _names],
-        _log_densities[fiducial_network],
-        labels=[parameter_label(name) for name in _names],
-        truths=[FIDUCIALS[name] for name in _names],
-        **get_corner_kwargs(levels=CORNER_LEVELS),  # ty: ignore[invalid-argument-type]
+    xi_corner = plot_corner(
+        convert_grids_to_samples(
+            _grids,
+            _log_densities[fiducial_network],
+            num_marginal_samples,
+            rng=np.random.default_rng(marginal_seed),
+        ),
+        {name: FIDUCIALS[name] for name in grid_specs["xi_0_xi_n"]},
     )
     mo.as_html(xi_corner)
     return (xi_corner,)

@@ -51,21 +51,26 @@ Every notebook here drives the `astrogwb.paper` configuration layer, so they all
   (`sampling_comparison.pdf`). Errors are in units of the most
   sensitive network's per-bin noise and of each parameter's Fisher width.
 - **`ensemble_spectrum.py`** — marimo notebook. The paper's spectrum
-  figure and SNR tables, from a 200-draw Poisson ensemble (`IMRPhenomXAS`,
+  figure and SNR tables, from a 1000-draw Poisson ensemble (`IMRPhenomXAS_NRTidalv3`,
   seed 41): per-network SNR and low-frequency cut as the mean over draws of
   each draw's SNR with its 16-84% range (LaTeX tables, ET-COBA and ET-D PSDs),
   the characteristic amplitudes $h_c$ (median) against $h_n$ and
   the $d\mathrm{SNR}^2/d\ln f$ curves, as two figures (`characteristic_amplitudes.pdf`,
   `snr_density.pdf`),
   and the shot noise of one draw about the mean ($\rho\,\mathrm{sd}(\epsilon)$
-  and the correlation across bins). The ensemble is cached one draw per file
+  and the correlation across bins). It also scans the window's lower edge
+  $z_{\min}$: the amplitude uncertainty
+  $\sigma_{\mathrm{tot}}/A = (\rho^{-2} + s^2)^{1/2}$ per network
+  (`minimum_redshift_scan.pdf`), from one reference catalog generated at the
+  redshift where $d_L = 1$ Mpc and rescaled to each window, checked against the
+  draws' $\rho\,\mathrm{sd}(\epsilon)$. The ensemble is cached one draw per file
   under `default_cache_dir() / "ensembles"` (`spectra_ensemble`) and shared
   with `shot_noise_coverage.py`.
 - **`shot_noise_coverage.py`** — marimo notebook. Calibration of the
   shot-noise likelihood for $H_0$: the Poisson ensemble of
   `ensemble_spectrum.py` as injections (read from the shared cache),
   plus Gaussian detector noise per network, scored on an $H_0$ grid against an
-  independent `IMRPhenomXAS` reference catalog with the `detector`,
+  independent `IMRPhenomXAS_NRTidalv3` reference catalog with the `detector`,
   `amplitude` and `fixed` likelihoods. Compares the model's $\rho s$ with the
   injections' realized scatter, and reports 68%/95% coverage and the mean and
   variance of $z = (\bar H_0 - H_0^{\mathrm{true}})/\mathrm{sd}$ with
