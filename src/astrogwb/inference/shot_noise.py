@@ -20,7 +20,12 @@ Two directions are offered:
   a multiplicative nuisance :math:`1 + \epsilon` with an informative prior
   :math:`\epsilon \sim \mathcal{N}(0, s^2)`, marginalized. Along the template
   this is a Gaussian in the amplitude estimator with variance
-  :math:`\rho^{-2} + A^2 s^2`; the shape residual is unchanged.
+  :math:`\rho^{-2} + A^2 s^2`; the shape residual is unchanged. The likelihood
+  takes :math:`s^2` as the exact variance of the catalog projected on the
+  template
+  (:meth:`~astrogwb.inference.likelihood.ImportanceGaussianLikelihood.relative_variance`);
+  :func:`amplitude_shot_noise_variance` is its upper bound from the per-bin
+  variances alone.
 - *Per frequency* (:func:`per_frequency_direction`):
   :math:`u_f = \sqrt{V_f}`, the right variance in every bin and still perfectly
   correlated across bins. It equals the amplitude direction wherever
@@ -71,7 +76,9 @@ def amplitude_shot_noise_variance(
     the SNR-weighted mean relative standard deviation over the counted bins
     with signal. It is exact when the shot noise is perfectly correlated
     across bins, and otherwise an upper bound on the variance of the
-    amplitude estimator (Cauchy-Schwarz).
+    amplitude estimator (Cauchy-Schwarz), which
+    :meth:`~astrogwb.inference.likelihood.ImportanceGaussianLikelihood.relative_variance`
+    computes exactly from the catalog.
 
     Parameters
     ----------

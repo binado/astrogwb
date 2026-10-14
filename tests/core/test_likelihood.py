@@ -33,6 +33,7 @@ from astrogwb.inference import (
     LogDensityFn,
     Network,
     ShotNoiseMode,
+    amplitude_shot_noise_variance,
     gaussian_log_likelihood,
     grid_log_posterior,
     gwb_likelihood_model,
@@ -165,18 +166,15 @@ def test_per_frequency_shot_noise_matches_the_dense_covariance(
     )
 
 
-def test_amplitude_shot_noise_with_flat_relative_scatter_is_the_fixed_mode(
+def test_amplitude_shot_noise_takes_its_variance_from_the_network_as_fixed_does(
     mean: jax.Array, observed: jax.Array, scale: jax.Array
 ) -> None:
-    """A flat :math:`\\sqrt{V}/S` makes the amplitude mode exact: :math:`s = 0.1`."""
-    variance = (0.1 * mean) ** 2
+    network = Network(scale, None, jnp.asarray(0.01))
     amplitude = shot_noise_log_likelihood(
-        mean, variance, observed, Network(scale), "amplitude"
+        mean, (0.3 * mean) ** 2, observed, network, "amplitude"
     )
-    fixed = shot_noise_log_likelihood(
-        mean, None, observed, Network(scale, None, jnp.asarray(0.01)), "fixed"
-    )
-    np.testing.assert_allclose(amplitude, fixed, rtol=1e-10)
+    fixed = shot_noise_log_likelihood(mean, None, observed, network, "fixed")
+    np.testing.assert_allclose(amplitude, fixed, rtol=1e-14)
 
 
 # --------------------------------------------------------------------------- #
@@ -317,6 +315,88 @@ def test_predict_returns_a_variance_only_for_the_modes_that_use_one(
         assert set(extras) == {"total_merger_rate", "importance_relative_ess"}
 
 
+@pytest.fixture(scope="module")
+def amplitude_likelihood(catalog: Any) -> ImportanceGaussianLikelihood:
+    return _likelihood(catalog, "amplitude")
+
+
+@pytest.mark.parametrize("index", range(NUM_NETWORKS))
+def test_relative_variance_is_bounded_by_the_snr_weighted_scatter(
+    amplitude_likelihood: ImportanceGaussianLikelihood, networks: Network, index: int
+) -> None:
+    """Cauchy-Schwarz: the projected variance never exceeds the per-bin bound."""
+    network = _single(networks, index)
+    mean, variance, _ = amplitude_likelihood.predict(FIDUCIALS)
+    assert variance is not None
+    bound = amplitude_shot_noise_variance(mean, variance, network.scale, network.mask)
+
+    assert float(amplitude_likelihood.relative_variance(FIDUCIALS, network)) <= float(
+        bound
+    )
+
+
+@pytest.mark.parametrize("bin_index", [3, 6, 11])
+def test_relative_variance_of_one_counted_bin_is_its_fractional_variance(
+    amplitude_likelihood: ImportanceGaussianLikelihood, bin_index: int
+) -> None:
+    """One bin projects on itself; only the interpolation order of the square differs."""
+    mean, variance, _ = amplitude_likelihood.predict(FIDUCIALS)
+    assert variance is not None
+    mask = jnp.zeros(mean.shape, dtype=bool).at[bin_index].set(True)
+    network = Network(jnp.ones_like(mean), mask)
+
+    assert float(
+        amplitude_likelihood.relative_variance(FIDUCIALS, network)
+    ) == pytest.approx(float(variance[bin_index] / mean[bin_index] ** 2), rel=1e-2)
+
+
+def test_relative_variance_does_not_depend_on_the_overall_noise_level(
+    amplitude_likelihood: ImportanceGaussianLikelihood, networks: Network
+) -> None:
+    network = _single(networks, 1)
+    louder = network._replace(scale=7.0 * network.scale)
+
+    assert float(
+        amplitude_likelihood.relative_variance(FIDUCIALS, louder)
+    ) == pytest.approx(
+        float(amplitude_likelihood.relative_variance(FIDUCIALS, network)), rel=1e-12
+    )
+
+
+def test_relative_variance_falls_as_the_inverse_observation_time(
+    amplitude_likelihood: ImportanceGaussianLikelihood, networks: Network
+) -> None:
+    network = _single(networks, 0)
+    assert amplitude_likelihood.observation_seconds is not None
+    longer = dataclasses.replace(
+        amplitude_likelihood,
+        observation_seconds=4.0 * amplitude_likelihood.observation_seconds,
+    )
+
+    assert float(
+        amplitude_likelihood.relative_variance(FIDUCIALS, network)
+    ) == pytest.approx(
+        4.0 * float(longer.relative_variance(FIDUCIALS, network)), rel=1e-12
+    )
+
+
+def test_amplitude_log_likelihood_is_the_fixed_mode_at_the_relative_variance(
+    catalog: Any, networks: Network
+) -> None:
+    network = _single(networks, 2)
+    params = {**FIDUCIALS, "H0": 70.0}
+    amplitude = _likelihood(catalog, "amplitude")
+    pinned = network._replace(
+        relative_variance=amplitude.relative_variance(params, network)
+    )
+
+    np.testing.assert_allclose(
+        amplitude.log_likelihood(params, network)[0],
+        _likelihood(catalog, "fixed").log_likelihood(params, pinned)[0],
+        rtol=1e-12,
+    )
+
+
 def test_the_importance_weights_are_one_at_the_fiducials(catalog: Any) -> None:
     likelihood = _likelihood(catalog, None)
 
@@ -373,10 +453,14 @@ def test_the_catalog_contraction_is_shared_across_networks(
         if equation.primitive.name == "dot_general"
         and any(tuple(operand.aval.shape) == power_shape for operand in equation.invars)
     ]
-    num_power_operands = 2 if mode == "amplitude" else 1
-    assert len(contractions) == num_power_operands
-    for shapes in contractions:
-        assert sorted(shapes) == sorted([power_shape, (power_shape[1],)])
+    weighted = [power_shape, (power_shape[1],)]
+    # The weighted means (power, and its square in the amplitude mode) are shared;
+    # the amplitude mode's projection on each network's template is not.
+    expected = [weighted] * (2 if mode == "amplitude" else 1)
+    if mode == "amplitude":
+        num_nodes = likelihood.redshift.shape[0]
+        expected.append([(NUM_NETWORKS, num_nodes, power_shape[0]), power_shape])
+    assert sorted(map(sorted, contractions)) == sorted(map(sorted, expected))
 
 
 def test_a_catalog_is_a_traced_input_that_compiles_once_per_shape(
