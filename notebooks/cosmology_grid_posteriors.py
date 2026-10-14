@@ -5,8 +5,6 @@ app = marimo.App()
 
 with app.setup(hide_code=True):
     import dataclasses
-    import hashlib
-    import json
     import os
     from collections.abc import Callable, Mapping, Sequence
     from functools import partial
@@ -28,12 +26,6 @@ with app.setup(hide_code=True):
     from numpy.typing import NDArray
 
     from astrogwb import __version__
-    from astrogwb.detector import effective_psd, gaussian_bin_scale
-    from astrogwb.frequency import frequency_mask
-    from astrogwb.gwb.importance import (
-        reference_catalog,
-        reference_catalog_stem,
-    )
     from astrogwb.inference import (
         ImportanceGaussianLikelihood,
         grid_log_posterior,
@@ -48,7 +40,6 @@ with app.setup(hide_code=True):
         priors,
         waveform_metadata,
     )
-    from astrogwb.paper.config.detectors import DetectorRegistry
     from astrogwb.paper.config.runs import CATALOGS_ROOT, FIGURES_DIR
     from astrogwb.paper.plotting import (
         DETECTOR_NETWORKS,
@@ -60,15 +51,19 @@ with app.setup(hide_code=True):
         save_figures,
         use_paper_style,
     )
+    from astrogwb.paper.posteriors import (
+        ensure_reference_catalog,
+        injection_spectrum,
+        network_data,
+        settings_digest,
+        shot_noise_variant,
+    )
     from astrogwb.populations import build_population
-    from astrogwb.simulators.core import batch_keys, load, write
     from astrogwb.simulators.polarization_power import (
         CatalogMetadata,
-        PolarizationPowerData,
     )
     from astrogwb.simulators.spectra import (
         BackgroundSpectralDensityMetadata,
-        BackgroundSpectralDensitySimulator,
     )
 
 
@@ -317,24 +312,6 @@ def _():
 
 
 @app.function(hide_code=True)
-def settings_digest(**settings: object) -> str:
-    """Short hash of everything a cached log density depends on.
-
-    Parameters
-    ----------
-    **settings
-        JSON-serializable (or ``str``-able) values; key order is irrelevant.
-
-    Returns
-    -------
-    str
-        Twelve hex characters, for use in a cache file name.
-    """
-    text = json.dumps(settings, sort_keys=True, default=str)
-    return hashlib.sha256(text.encode()).hexdigest()[:12]
-
-
-@app.function(hide_code=True)
 def cached_log_densities(
     compute: Callable[[], tuple[dict[str, NDArray], dict[str, NDArray]]],
     outfile: Path,
@@ -377,88 +354,6 @@ def cached_log_densities(
             if k.startswith("log_density__")
         }
     return grids, log_densities
-
-
-@app.function(hide_code=True)
-def ensure_reference_catalog(
-    metadata: CatalogMetadata,
-    seed: int,
-    directory: Path,
-    *,
-    chunk_size: int | None = None,
-) -> PolarizationPowerData:
-    """The reference catalog of ``metadata`` at ``seed``, drawn on a miss.
-
-    The file is ``<directory>/reference_catalog-<key>-<seed>.h5``. A hit is
-    checked against the request it records; a miss is drawn at ``batch_keys(seed, 1)[0]`` and written.
-
-    Parameters
-    ----------
-    metadata
-        The catalog's record.
-    seed
-        The draw's seed.
-    directory
-        Cache directory.
-    chunk_size
-        Waveforms per ``lax.map`` batch on a miss; cost only.
-
-    Returns
-    -------
-    PolarizationPowerData
-        Power ``(F_ref, N)``, every draw at the window's lower edge.
-
-    Raises
-    ------
-    ValueError
-        If the cached file records another metadata or seed.
-    """
-    path = directory / f"{reference_catalog_stem(metadata, seed)}.h5"
-    if path.is_file():
-        data, recorded, attrs = load(path, CatalogMetadata)
-        if recorded.key() != metadata.key() or attrs.get("seed") != seed:
-            raise ValueError(
-                f"{path} records {recorded.key()} at seed {attrs.get('seed')}, "
-                f"not the requested {metadata.key()} at seed {seed}"
-            )
-        return data  # ty: ignore[invalid-return-type]
-    data = reference_catalog(metadata, batch_keys(seed, 1)[0], chunk_size=chunk_size)
-    write(path, data, metadata, seed=seed)
-    return data
-
-
-@app.function(hide_code=True)
-def network_data(
-    registry: DetectorRegistry,
-    name: str,
-    frequencies: NDArray[np.float64],
-    *,
-    observation_time: float,
-    minimum_frequency: float,
-    maximum_frequency: float,
-) -> dict[str, object]:
-    """The per-bin Gaussian scale and usable-bin mask of one network.
-
-    Bins no detector pair measures have infinite effective PSD; they are
-    dropped from the mask and given a finite scale of one, as
-    ``InferenceInputs.model_kwargs`` does.
-
-    Returns
-    -------
-    dict
-        ``scale`` and ``frequency_mask``, shape ``(F,)``, as model keyword
-        arguments.
-    """
-    grid = jnp.asarray(frequencies)
-    geometry, sensitivities = registry.build_network(name)
-    psd = jnp.asarray(effective_psd(grid, geometry, sensitivities))
-    mask = (
-        frequency_mask(grid, fmin=minimum_frequency, fmax=maximum_frequency)
-        & jnp.isfinite(psd)
-        & (psd > 0.0)
-    )
-    scale = gaussian_bin_scale(psd, observation_time, grid)
-    return {"scale": jnp.where(mask, scale, 1.0), "frequency_mask": mask}
 
 
 @app.function(hide_code=True)
@@ -592,49 +487,6 @@ def grid_posterior(
             relative_variance,
         ),
         cache_dir / f"{prefix}{run}_{digest}.npz",
-    )
-
-
-@app.function(hide_code=True)
-def shot_noise_variant(
-    variant: str,
-    likelihood: ImportanceGaussianLikelihood,
-    fiducial_relative_variance: NDArray[np.float64],
-) -> tuple[ImportanceGaussianLikelihood, NDArray[np.float64] | None, dict[str, object]]:
-    """The likelihood, per-network :math:`s^2` and cache settings of one variant.
-
-    Parameters
-    ----------
-    variant
-        ``"detector"``, ``"amplitude"``, ``"fixed"`` or ``"per_frequency"``.
-    likelihood
-        Built with ``shot_noise="amplitude"``, so the squared power is held
-        for every variant.
-    fiducial_relative_variance
-        :math:`s^2` at the fiducials per network, in ``per_network`` order;
-        used by ``"fixed"`` only.
-
-    Returns
-    -------
-    tuple
-        The likelihood with the variant's mode, the ``"fixed"`` variant's
-        per-network :math:`s^2` (else ``None``), and the settings that set the
-        variant apart in a cache digest. The detector variant adds none, so
-        its caches predate shot noise and stay valid.
-    """
-    if variant == "detector":
-        return dataclasses.replace(likelihood, shot_noise=None), None, {}
-    if variant == "fixed":
-        values = [float(value) for value in fiducial_relative_variance]
-        return (
-            dataclasses.replace(likelihood, shot_noise="fixed"),
-            np.asarray(values),
-            {"shot_noise": variant, "relative_variance": values},
-        )
-    return (
-        dataclasses.replace(likelihood, shot_noise=variant),
-        None,
-        {"shot_noise": variant},
     )
 
 
@@ -897,31 +749,13 @@ def _(
     frequencies,
     injection_metadata,
 ):
-    injection_file = (
+    observed, injection_frequencies, num_injected = injection_spectrum(
+        injection_metadata,
+        data_seed,
         cache_dir
-        / f"{cache_name_prefix}injection_{injection_metadata.key()}_{data_seed}.npz"
+        / f"{cache_name_prefix}injection_{injection_metadata.key()}_{data_seed}.npz",
+        chunk_size=chunk_size,
     )
-    if injection_file.is_file():
-        with np.load(injection_file) as cached:
-            observed = cached["spectral_density"]
-            injection_frequencies = cached["frequencies"]
-            num_injected = int(cached["n_events"])
-    else:
-        drawn = BackgroundSpectralDensitySimulator(
-            injection_metadata, chunk_size=chunk_size
-        )(batch_keys(data_seed, 1)[0])
-        # Zero noise: the Poisson spectrum itself is the data. The draw axis
-        # is leading even for one draw.
-        observed = np.asarray(drawn["spectral_density"][0], dtype=np.float64)
-        injection_frequencies = np.asarray(drawn["frequencies"], dtype=np.float64)
-        num_injected = int(drawn["n_events"][0])
-        injection_file.parent.mkdir(parents=True, exist_ok=True)
-        np.savez(
-            injection_file,
-            spectral_density=observed,
-            frequencies=injection_frequencies,
-            n_events=num_injected,
-        )
     validate_matching_frequency_grids(injection_frequencies, frequencies)
     print(f"injection: {num_injected:,} Poisson events")
     return (observed,)
