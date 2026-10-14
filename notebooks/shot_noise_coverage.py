@@ -33,9 +33,9 @@ with app.setup(hide_code=True):
     from astrogwb.inference import (
         ImportanceGaussianLikelihood,
         amplitude_direction,
-        amplitude_shot_noise_variance,
         rank_one_gaussian_log_likelihood,
     )
+    from astrogwb.inference import Network as LikelihoodNetwork
     from astrogwb.paper.cache import default_cache_dir
     from astrogwb.paper.config import (
         detector_registry,
@@ -704,6 +704,7 @@ def _(
     h0_size,
     h0_window,
     observation_time,
+    per_network,
     population,
     redshift_nodes,
 ):
@@ -726,20 +727,47 @@ def _(
     @jax.jit
     def _predict(likelihood, h0):
         def point(value):
-            mean, variance, _ = likelihood.predict({**FIDUCIALS, "H0": value})
-            return mean, variance
+            return likelihood.predict({**FIDUCIALS, "H0": value})[0]
 
         return jax.lax.map(point, h0, batch_size=grid_chunk_size)
 
-    grid_prediction, grid_variance = _predict(likelihood, jnp.asarray(h0_grid))
+    grid_prediction = _predict(likelihood, jnp.asarray(h0_grid))
     _fiducial = int(np.argmin(np.abs(h0_grid - FIDUCIALS["H0"])))
     print(f"grid: {h0_size} H0 points; fiducial node H0 = {h0_grid[_fiducial]:.3f}")
     fiducial_prediction, fiducial_variance, _ = likelihood.predict(FIDUCIALS)
+
+    # s^2 of each network: the catalog projected on its noise-weighted template.
+    @jax.jit
+    def _relative_variance(likelihood, h0, scale, mask):
+        network = LikelihoodNetwork(scale, mask)
+        return jax.lax.map(
+            lambda value: likelihood.relative_variance(
+                {**FIDUCIALS, "H0": value}, network
+            ),
+            h0,
+            batch_size=grid_chunk_size,
+        )
+
+    grid_relative_variance = {
+        _name: _relative_variance(
+            likelihood, jnp.asarray(h0_grid), jnp.asarray(_scale), jnp.asarray(_mask)
+        )
+        for _name, (_scale, _mask) in per_network.items()
+    }
+    fiducial_relative_variance = {
+        _name: float(
+            likelihood.relative_variance(
+                FIDUCIALS, LikelihoodNetwork(jnp.asarray(_scale), jnp.asarray(_mask))
+            )
+        )
+        for _name, (_scale, _mask) in per_network.items()
+    }
     return (
         fiducial_prediction,
+        fiducial_relative_variance,
         fiducial_variance,
         grid_prediction,
-        grid_variance,
+        grid_relative_variance,
         h0_grid,
     )
 
@@ -846,7 +874,7 @@ def _():
 
 
 @app.cell
-def _(fiducial_prediction, fiducial_variance, injections, per_network):
+def _(fiducial_prediction, fiducial_relative_variance, injections, per_network):
     _label = dict(DETECTOR_NETWORKS)
     _template = np.asarray(fiducial_prediction)
     _rows = []
@@ -854,13 +882,7 @@ def _(fiducial_prediction, fiducial_variance, injections, per_network):
         _weight = np.where(_mask, 1.0 / _scale**2, 0.0)
         _norm = np.sum(_template**2 * _weight)
         _rho = np.sqrt(_norm)
-        _model = _rho * np.sqrt(
-            float(
-                amplitude_shot_noise_variance(
-                    fiducial_prediction, fiducial_variance, _scale, _mask
-                )
-            )
-        )
+        _model = _rho * np.sqrt(fiducial_relative_variance[_name])
         _eps = (injections - _template) @ (_template * _weight) / _norm
         _empirical = _rho * np.std(_eps, ddof=1)
         _rows.append(
@@ -972,8 +994,9 @@ def _():
     mo.md(r"""
     **Excess of the covariance over a constant.** The shot-noise covariance is almost
     constant, so it is shown relative to the paper's rank-one model, with
-    $\sigma_\epsilon$ the mean of $\sqrt{\mathrm{Var}[\epsilon(f)]}$ weighted by the
-    squared SNR $\rho_k^2$ of each bin: $\mathrm{Cov}[\epsilon_k, \epsilon_{k'}] /
+    $\sigma_\epsilon^2 = \sum_{kk'} w_k w_{k'} \mathrm{Cov}[\epsilon_k, \epsilon_{k'}]$
+    the variance of the fractional amplitude, with weights $w_k = \rho_k^2 /
+    \sum_j \rho_j^2$ from the squared SNR of each bin: $\mathrm{Cov}[\epsilon_k, \epsilon_{k'}] /
     \sigma_\epsilon^2 - 1$ on a diverging scale clipped at $\pm 0.3$, which shows
     where and with which sign the covariance departs from a constant.
     """)
@@ -981,11 +1004,10 @@ def _():
 
 @app.cell(hide_code=True)
 def _(eps_covariance, eps_snr_squared):
-    # Effective shot-noise amplitude: the standard deviation of epsilon averaged over
-    # the bins with weights rho_k^2, as in the paper's scalar approximation.
-    sigma_eps = float(
-        np.average(np.sqrt(np.diag(eps_covariance)), weights=eps_snr_squared)
-    )
+    # Effective shot-noise amplitude: the variance of epsilon projected on the
+    # template, with bin weights rho_k^2, as in the paper's scalar approximation.
+    _weights = eps_snr_squared / np.sum(eps_snr_squared)
+    sigma_eps = float(np.sqrt(_weights @ eps_covariance @ _weights))
     # Fractional excess of the covariance over the rank-one model sigma_eps^2.
     eps_covariance_excess = eps_covariance / sigma_eps**2 - 1.0
     return (eps_covariance_excess,)
@@ -1131,10 +1153,9 @@ def _():
 def _(
     FIDUCIALS,
     PRIORS,
-    fiducial_prediction,
-    fiducial_variance,
+    fiducial_relative_variance,
     grid_prediction,
-    grid_variance,
+    grid_relative_variance,
     h0_grid,
     injections,
     noise_draws,
@@ -1157,12 +1178,8 @@ def _(
         _data = jnp.asarray(
             (injections[:, None, :] + _noise * _scale).reshape(-1, _bins)
         )
-        _s2_fixed = amplitude_shot_noise_variance(
-            fiducial_prediction, fiducial_variance, _scale, _mask
-        )
-        _s2_grid = amplitude_shot_noise_variance(
-            grid_prediction, grid_variance, _scale, _mask
-        )
+        _s2_fixed = jnp.asarray(fiducial_relative_variance[_name])
+        _s2_grid = grid_relative_variance[_name]
         _directions = {
             "detector": jnp.zeros_like(grid_prediction),
             "amplitude": amplitude_direction(grid_prediction, _s2_grid),

@@ -36,10 +36,8 @@ with app.setup(hide_code=True):
         spectral_snr_squared_per_log_frequency,
     )
     from astrogwb.gwb.importance import reference_catalog, reference_catalog_stem
-    from astrogwb.inference import (
-        ImportanceGaussianLikelihood,
-        amplitude_shot_noise_variance,
-    )
+    from astrogwb.inference import ImportanceGaussianLikelihood
+    from astrogwb.inference import Network as LikelihoodNetwork
     from astrogwb.paper.cache import default_cache_dir
     from astrogwb.paper.config import (
         detector_registry,
@@ -1119,9 +1117,9 @@ def minimum_redshift_scan(
 
     For each ``redshifts`` entry the catalog is bound with that lower edge and
     evaluated at ``hyperparameters``; then, per network, :math:`\rho` is the
-    SNR of the expected spectrum and :math:`s` the SNR-weighted relative
-    standard deviation of its shot noise
-    (:func:`astrogwb.inference.amplitude_shot_noise_variance`). The relative
+    SNR of the expected spectrum and :math:`s` the relative standard deviation
+    of its shot noise projected on the network's noise-weighted template
+    (:meth:`astrogwb.inference.ImportanceGaussianLikelihood.relative_variance`). The relative
     uncertainty of the amplitude is :math:`(\rho^{-2} + s^2)^{1/2}`.
 
     Parameters
@@ -1182,13 +1180,17 @@ def minimum_redshift_scan(
             observation_time=observation_time,
             minimum_redshift=float(edge),
         )
-        spectrum, variance, _ = likelihood.predict(hyperparameters)
+        spectrum, _, _ = likelihood.predict(hyperparameters)
         for label, (noise, scale, keep) in networks.items():
             snr = float(
                 spectral_snr(spectrum, noise, seconds, grid, frequency_mask=keep)
             )
             scatter = float(
-                jnp.sqrt(amplitude_shot_noise_variance(spectrum, variance, scale, keep))
+                jnp.sqrt(
+                    likelihood.relative_variance(
+                        hyperparameters, LikelihoodNetwork(scale, keep)
+                    )
+                )
             )
             records.append(
                 {

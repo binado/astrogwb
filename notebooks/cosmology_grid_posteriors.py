@@ -38,7 +38,6 @@ with app.setup(hide_code=True):
     )
     from astrogwb.inference import (
         ImportanceGaussianLikelihood,
-        amplitude_shot_noise_variance,
         grid_log_posterior,
     )
     from astrogwb.inference import Network as LikelihoodNetwork
@@ -986,6 +985,8 @@ def _(
         "injection": injection_metadata.key(),
         "reference_catalog": catalog_metadata.key(),
         "redshift_nodes": redshift_nodes,
+        # The amplitude mode's s^2: the catalog projected on each template.
+        "relative_variance": "projected",
     }
     labelled_networks = [(n, l) for n, l in DETECTOR_NETWORKS if n in network_names]
     return cache_settings, labelled_networks, per_network
@@ -1007,15 +1008,16 @@ def _():
 
 @app.cell
 def _(FIDUCIALS, likelihood, per_network):
-    _spectrum, _variance, _ = likelihood.predict(FIDUCIALS)
+    _spectrum, _, _ = likelihood.predict(FIDUCIALS)
     _label = dict(DETECTOR_NETWORKS)
     _rows = []
     for _name, _data in per_network.items():
         _keep = np.asarray(_data["frequency_mask"])
         _sigma = np.asarray(_data["scale"])
         _s2 = float(
-            amplitude_shot_noise_variance(
-                _spectrum, _variance, _data["scale"], _data["frequency_mask"]
+            likelihood.relative_variance(
+                FIDUCIALS,
+                LikelihoodNetwork(_data["scale"], _data["frequency_mask"]),
             )
         )
         _snr = float(
