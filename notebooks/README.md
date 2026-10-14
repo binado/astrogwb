@@ -41,6 +41,20 @@ Every notebook here drives the `astrogwb.paper` configuration layer, so they all
   widening, the fixed vs per-point $s^2$ verdict, and the per-frequency
   leakage check. Writes per-problem marginals and corner plots, and an $H_0$
   overlay of the variants.
+- **`madau_dickinson_mcmc.py`** — marimo notebook. NUTS posteriors on the
+  Madau-Dickinson shape $(z_{\mathrm{peak}}, \gamma, \kappa)$ for the six
+  detector networks (the paper's astrophysical-parameter section), from the
+  same zero-noise Poisson injection and rescaled reference catalog as
+  `cosmology_grid_posteriors.py`. Every prior site is sampled and the
+  non-sampled ones are pinned with `numpyro.handlers.condition`; four chains
+  run on four host devices, started at the fiducial plus jitter. One knob,
+  `likelihood_variant` (`detector`, `amplitude`, `fixed`; `fixed` is the
+  fallback if the nested AD of `amplitude` is too slow). Includes a gradient
+  check with timing, an $\hat R$/ESS/divergence table against the targets
+  ($\hat R < 1.01$, no divergences), traces cached as NetCDF under
+  `default_cache_dir() / "posteriors"`, and writes per-parameter marginals, a
+  corner plot and `summary.csv` / `summary.tex`. The setup helpers are shared
+  with the grid notebook through `astrogwb.paper.posteriors`.
 - **`importance_convergence.py`** — marimo notebook. Chooses the grid
   posteriors' $(N, Z)$: redshift-quadrature convergence on a $Z = 2^i$
   ladder over one fixed set of draws (for the spectrum and, separately, for
