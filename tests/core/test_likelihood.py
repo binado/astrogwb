@@ -380,6 +380,45 @@ def test_relative_variance_falls_as_the_inverse_observation_time(
     )
 
 
+@pytest.mark.parametrize("index", range(NUM_NETWORKS))
+def test_catalog_covariance_along_the_projector_is_the_relative_variance(
+    amplitude_likelihood: ImportanceGaussianLikelihood, networks: Network, index: int
+) -> None:
+    """The dense covariance and the projected amplitude are one second cumulant."""
+    network = _single(networks, index)
+    assert network.mask is not None
+    mean = amplitude_likelihood.spectrum(FIDUCIALS)
+    projector = jnp.where(network.mask, mean / network.scale**2, 0.0)
+    covariance = amplitude_likelihood.catalog_covariance(FIDUCIALS)
+
+    assert float(
+        projector @ covariance @ projector / (projector @ mean) ** 2
+    ) == pytest.approx(
+        float(amplitude_likelihood.relative_variance(FIDUCIALS, network)), rel=1e-10
+    )
+
+
+def test_catalog_covariance_diagonal_is_bounded_by_the_per_bin_variance(
+    amplitude_likelihood: ImportanceGaussianLikelihood,
+) -> None:
+    """Squaring after interpolation never exceeds interpolating the square."""
+    _, variance, _ = amplitude_likelihood.predict(FIDUCIALS)
+    assert variance is not None
+    diagonal = jnp.diag(amplitude_likelihood.catalog_covariance(FIDUCIALS))
+
+    assert bool(jnp.all(diagonal <= variance * (1.0 + 1e-12)))
+
+
+def test_catalog_covariance_is_symmetric_positive_semidefinite(
+    amplitude_likelihood: ImportanceGaussianLikelihood,
+) -> None:
+    covariance = np.asarray(amplitude_likelihood.catalog_covariance(FIDUCIALS))
+    eigenvalues = np.linalg.eigvalsh(covariance)
+
+    np.testing.assert_array_equal(covariance, covariance.T)
+    assert eigenvalues.min() >= -1e-10 * eigenvalues.max()
+
+
 def test_amplitude_log_likelihood_is_the_fixed_mode_at_the_relative_variance(
     catalog: Any, networks: Network
 ) -> None:

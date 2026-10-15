@@ -682,6 +682,94 @@ def plot_eps_eigenvalues(
     ax.legend(fontsize="small")
 
 
+@app.function(hide_code=True)
+def common_shape_metrics(
+    covariance: NDArray[np.float64],
+    template: NDArray[np.float64],
+    scale: NDArray[np.float64],
+    shape_derivatives: dict[str, NDArray[np.float64]],
+) -> tuple[dict[str, float], NDArray[np.float64]]:
+    r"""How much of a catalog covariance the common-shape model drops.
+
+    Everything is whitened by the detector noise,
+    :math:`C = N^{-1/2} \mathrm{Cov} N^{-1/2}`, with the unit template
+    direction :math:`\mathbf{e} = N^{-1/2}\mathbf{S} / \rho`. The common-shape
+    (rank-one) model keeps :math:`\kappa^2 \mathbf{e}\mathbf{e}^T`, with
+    :math:`\kappa^2 = \mathbf{e}^T C \mathbf{e} = \rho^2 \sigma_\epsilon^2`, and
+    drops :math:`\Delta = C - \kappa^2 \mathbf{e}\mathbf{e}^T`: the
+    perpendicular block :math:`P C P`, :math:`P = I - \mathbf{e}\mathbf{e}^T`,
+    and its coupling :math:`P C \mathbf{e}` to the amplitude.
+
+    The Kullback-Leibler divergence of the common-shape Gaussian
+    :math:`\Sigma_{\rm cs} = I + \kappa^2 \mathbf{e}\mathbf{e}^T` from the
+    true one :math:`\Sigma = I + C`, with Sherman-Morrison for
+    :math:`\Sigma_{\rm cs}^{-1}`, is
+
+    .. math::
+
+        \mathrm{KL} = \tfrac12 \left[ \mathrm{tr}\, C - \kappa^2
+            - \ln\det(I + C) + \ln(1 + \kappa^2) \right],
+
+    and its leading term is
+    :math:`\tfrac14 \| \Sigma_{\rm cs}^{-1/2} \Delta \Sigma_{\rm cs}^{-1/2} \|_F^2`.
+
+    Parameters
+    ----------
+    covariance
+        Catalog covariance over the counted bins, ``(F, F)``.
+    template
+        Expected spectrum over the counted bins, ``(F,)``.
+    scale
+        Detector standard deviation per counted bin, ``(F,)``.
+    shape_derivatives
+        Derivatives of the spectrum over the counted bins, ``(F,)`` each,
+        keyed by parameter; each is whitened and projected off
+        :math:`\mathbf{e}` for its posterior-variance inflation
+        :math:`\mathbf{g}^T P C P \mathbf{g} / \|\mathbf{g}\|^2`.
+
+    Returns
+    -------
+    metrics
+        ``rho``, ``kappa^2``, the extreme eigenvalues of :math:`\Delta`, the
+        largest of :math:`P C P`, :math:`\|P C \mathbf{e}\|`, the KL divergence
+        and its leading term in nats, and one ``inflation - 1`` per derivative.
+    delta_eigenvalues
+        Eigenvalues of :math:`\Delta`, descending, ``(F,)``.
+    """
+    signal = template / scale
+    rho = float(np.sqrt(signal @ signal))
+    e = signal / rho
+    whitened = covariance / np.outer(scale, scale)
+    kappa2 = float(e @ whitened @ e)
+    delta = whitened - kappa2 * np.outer(e, e)
+    projector = np.eye(e.size) - np.outer(e, e)
+    perpendicular = projector @ whitened @ projector
+    delta_eigenvalues = np.linalg.eigvalsh(delta)[::-1]
+    covariance_eigenvalues = np.linalg.eigvalsh(whitened)
+    kl = 0.5 * (
+        np.trace(whitened)
+        - kappa2
+        - np.sum(np.log1p(covariance_eigenvalues))
+        + np.log1p(kappa2)
+    )
+    # Sigma_cs^{-1/2} = I - (1 - 1/sqrt(1 + kappa^2)) e e^T.
+    root = np.eye(e.size) - (1.0 - 1.0 / np.sqrt(1.0 + kappa2)) * np.outer(e, e)
+    metrics = {
+        "rho": rho,
+        "kappa^2": kappa2,
+        "lambda_max(Delta)": float(delta_eigenvalues[0]),
+        "lambda_min(Delta)": float(delta_eigenvalues[-1]),
+        "lambda_max(PCP)": float(np.linalg.eigvalsh(perpendicular)[-1]),
+        "|PCe|": float(np.linalg.norm(projector @ whitened @ e)),
+        "KL [nats]": float(kl),
+        "KL leading [nats]": float(0.25 * np.sum((root @ delta @ root) ** 2)),
+    }
+    for name, derivative in shape_derivatives.items():
+        g = projector @ (derivative / scale)
+        metrics[f"inflation - 1 ({name})"] = float(g @ perpendicular @ g / (g @ g))
+    return metrics, delta_eigenvalues
+
+
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
@@ -769,6 +857,7 @@ def _(
         grid_prediction,
         grid_relative_variance,
         h0_grid,
+        likelihood,
     )
 
 
@@ -1114,6 +1203,189 @@ def _(eps_samples, eps_snr_squared):
     )
     eigenvalue_figure.tight_layout()
     eigenvalue_figure
+    return (whitened_eigenvalues,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## Accuracy of the common-shape approximation
+
+    The excess above is a fraction of $\sigma_\epsilon^2$ per bin and ignores
+    the detector noise, so it overstates the problem in bins the detector
+    noise dominates. The likelihood sees the shot noise only in units of the
+    detector noise. Whiten by $N = \mathrm{diag}(\Delta S_h^2)$:
+
+    $$
+    C = N^{-1/2}\, \mathrm{Cov}[S_h^{\rm cat}]\, N^{-1/2},
+    \qquad
+    \mathbf{e} = \frac{N^{-1/2} S_h^t}{\rho},
+    \qquad
+    \kappa^2 = \mathbf{e}^T C\, \mathbf{e} = \rho^2 \sigma_\epsilon^2.
+    $$
+
+    The common-shape model keeps $\kappa^2 \mathbf{e}\mathbf{e}^T$ and drops
+    $\Delta = C - \kappa^2 \mathbf{e}\mathbf{e}^T$. With
+    $P = I - \mathbf{e}\mathbf{e}^T$, $\Delta$ is the perpendicular shot noise
+    $P C P$ plus its coupling $P C \mathbf{e}$ to the amplitude. Its eigenvalues
+    are variances relative to one detector-noise variance, so
+    $\lambda_{\max}(\Delta)$ is the worst mode the model misses, next to the
+    $\kappa^2$ it keeps. A coupling-dominated $\Delta$ has a spectrum symmetric
+    about zero, $\pm\|P C \mathbf{e}\|$.
+
+    The covariance is analytic, from Campbell's theorem on the reference
+    catalog (`ImportanceGaussianLikelihood.catalog_covariance`), with no Poisson
+    realizations:
+    $\mathrm{Cov}[S_k, S_{k'}] = (\mathcal{R}/T)\,\langle P_k P_{k'} \rangle$,
+    on the redshift nodes, importance weights and inclination factor of the
+    per-bin variance $V_k$. Its diagonal is $V_k$ up to the interpolation order
+    of the square.
+
+    **Table.** Per network, $\kappa^2$, the extreme eigenvalues of $\Delta$,
+    $\lambda_{\max}(P C P)$, $\|P C \mathbf{e}\|$ and the Kullback-Leibler
+    divergence, in nats, of the common-shape Gaussian
+    $\mathcal{N}(0, I + \kappa^2 \mathbf{e}\mathbf{e}^T)$ from the true
+    $\mathcal{N}(0, I + C)$,
+
+    $$
+    \mathrm{KL} = \tfrac12\left[\mathrm{tr}\, C - \kappa^2 - \ln\det(I + C)
+    + \ln(1 + \kappa^2)\right]
+    \simeq \tfrac14 \big\| \Sigma_{\rm cs}^{-1/2} \Delta\, \Sigma_{\rm cs}^{-1/2} \big\|_F^2,
+    $$
+
+    on the scale of the $< 0.02$ nats the two-cumulant (Gaussian) approximation
+    costs. The `inflation - 1` columns are the fractional posterior-variance
+    increase along the shape derivative $\mathbf{g} = P\, N^{-1/2}\,
+    \partial S_h / \partial \Lambda$ that the model misses,
+    $\mathbf{g}^T P C P\, \mathbf{g} / \|\mathbf{g}\|^2$. $H_0$ is left out: its
+    derivative is almost along $\mathbf{e}$, and the small remainder is
+    dominated by round-off.
+
+    **Figure.** *Left*, at the fiducial network: the eigenvalues of the
+    analytic $C$, the positive and negative eigenvalues of $\Delta$ (in
+    magnitude), and those of the injections' sample covariance, against the
+    detector noise at 1. The injections are independent of the reference
+    catalog, so their agreement checks the analytic covariance. An isotropic
+    spectrum sampled by $M$ draws would have a noise floor of about
+    $\mathrm{tr}\, C / M$. This one falls by orders of magnitude per mode, so
+    the error on each sample eigenvalue scales with the eigenvalue instead,
+    about $\sqrt{2/M}$, and the injections resolve the leading modes far below
+    $\mathrm{tr}\, C / M$. $\Delta$ has one negative eigenvalue: the rest are
+    round-off and fall below the axis. *Right*, per network: $\kappa^2$,
+    $\lambda_{\max}(\Delta)$ and the KL divergence, with the detector noise
+    (dashed) and the 0.02 nats of the two-cumulant approximation (dotted).
+    """)
+
+
+@app.cell
+def _(FIDUCIALS, fiducial_prediction, fiducial_variance, likelihood, per_network):
+    _template = np.asarray(fiducial_prediction)
+    catalog_covariance = np.asarray(likelihood.catalog_covariance(FIDUCIALS))
+    # Campbell's diagonal squares the interpolated source spectrum; V_k
+    # interpolates the squared one, which can only be larger (Jensen).
+    _positive = _template > 0.0
+    _diagonal_ratio = (
+        np.diag(catalog_covariance)[_positive]
+        / np.asarray(fiducial_variance)[_positive]
+    )
+    print(f"diag Cov / V_k: {_diagonal_ratio.min():.5f} to {_diagonal_ratio.max():.5f}")
+    assert np.all(_diagonal_ratio <= 1.0 + 1e-10)
+
+    _shape_parameters = ("z_peak", "gamma", "kappa")
+    _derivatives = {
+        _name: np.asarray(
+            jax.jvp(
+                lambda value, name=_name: likelihood.spectrum(
+                    {**FIDUCIALS, name: value}
+                ),
+                (jnp.asarray(FIDUCIALS[_name]),),
+                (jnp.asarray(1.0),),
+            )[1]
+        )
+        for _name in _shape_parameters
+    }
+    _label = dict(DETECTOR_NETWORKS)
+    _rows = []
+    delta_eigenvalues = {}
+    covariance_eigenvalues = {}
+    for _name, (_scale, _mask) in per_network.items():
+        _keep = _mask & _positive
+        _covariance = catalog_covariance[np.ix_(_keep, _keep)]
+        _metrics, delta_eigenvalues[_name] = common_shape_metrics(
+            _covariance,
+            _template[_keep],
+            _scale[_keep],
+            {_key: _value[_keep] for _key, _value in _derivatives.items()},
+        )
+        _whitened = _covariance / np.outer(_scale[_keep], _scale[_keep])
+        covariance_eigenvalues[_name] = np.linalg.eigvalsh(_whitened)[::-1]
+        _relative = float(
+            likelihood.relative_variance(
+                FIDUCIALS, LikelihoodNetwork(jnp.asarray(_scale), jnp.asarray(_mask))
+            )
+        )
+        np.testing.assert_allclose(
+            _metrics["kappa^2"], _metrics["rho"] ** 2 * _relative, rtol=1e-8
+        )
+        _rows.append({"network": _label[_name], "bins": int(_keep.sum()), **_metrics})
+    common_shape = pd.DataFrame(_rows)
+    common_shape
+    return common_shape, covariance_eigenvalues, delta_eigenvalues
+
+
+@app.cell(hide_code=True)
+def _(
+    common_shape,
+    covariance_eigenvalues,
+    delta_eigenvalues,
+    eps_samples,
+    fiducial_network,
+    whitened_eigenvalues,
+):
+    _modes = 20
+    _index = np.arange(1, _modes + 1)
+    _delta = delta_eigenvalues[fiducial_network]
+    _covariance = covariance_eigenvalues[fiducial_network]
+    common_shape_figure, (_ax_spectrum, _ax_networks) = plt.subplots(
+        1, 2, figsize=(9.0, 3.8)
+    )
+    _ax_spectrum.semilogy(_index, _covariance[:_modes], "o", label=r"$C$")
+    _ax_spectrum.semilogy(_index, _delta[:_modes], "^", label=r"$\Delta > 0$")
+    _ax_spectrum.semilogy(_index, -_delta[::-1][:_modes], "v", label=r"$-\Delta > 0$")
+    _sampled = min(_modes, eps_samples.shape[0] - 1)
+    _ax_spectrum.semilogy(
+        _index[:_sampled],
+        whitened_eigenvalues[:_sampled],
+        "+",
+        color="black",
+        label="injections",
+    )
+    _ax_spectrum.axhline(1.0, color="0.5", ls="--", lw=1, label="detector noise")
+    # Below this, eigenvalues of Delta are round-off of a matrix of order kappa^2.
+    _floor = 1e-12 * _covariance[0]
+    _ax_spectrum.set(
+        xlabel="Mode", ylabel=r"$|\lambda_j|$", ylim=(_floor, 10.0 * _covariance[0])
+    )
+    _ax_spectrum.set_xticks([1, *range(5, _modes + 1, 5)])
+    _ax_spectrum.legend(fontsize="small", ncols=2, loc="upper right")
+
+    _position = np.arange(len(common_shape))
+    for _column, _marker, _label in (
+        ("kappa^2", "o", r"$\kappa^2$"),
+        ("lambda_max(Delta)", "^", r"$\lambda_{\max}(\Delta)$"),
+        ("KL [nats]", "s", "KL [nats]"),
+    ):
+        _ax_networks.semilogy(_position, common_shape[_column], _marker, label=_label)
+    _ax_networks.axhline(1.0, color="0.5", ls="--", lw=1)
+    _ax_networks.axhline(0.02, color="0.5", ls=":", lw=1)
+    _ax_networks.set_xticks(_position, common_shape["network"], rotation=30, ha="right")
+    _ax_networks.set_xlim(-0.5, len(common_shape) - 0.5)
+    _ax_networks.legend(
+        fontsize="small", ncols=3, loc="lower center", bbox_to_anchor=(0.5, 1.0)
+    )
+    common_shape_figure.tight_layout()
+    common_shape_figure
+    return (common_shape_figure,)
 
 
 @app.cell(hide_code=True)
@@ -1277,6 +1549,8 @@ def _(
 def _(
     FIGURES,
     combined_figure,
+    common_shape,
+    common_shape_figure,
     correlation_figure,
     covariance_deviation_figure,
     coverage,
@@ -1297,6 +1571,7 @@ def _(
                 FIGURES / "shot_noise_qq.pdf": qq_figure,
                 FIGURES / "shot_noise_deviation.pdf": covariance_deviation_figure,
                 FIGURES / "shot_noise_density_excess.pdf": combined_figure,
+                FIGURES / "shot_noise_common_shape.pdf": common_shape_figure,
             }
         )
         FIGURES.mkdir(parents=True, exist_ok=True)
@@ -1304,6 +1579,7 @@ def _(
         model_against_injections.to_csv(
             FIGURES / "shot_noise_model_vs_injections.csv", index=False
         )
+        common_shape.to_csv(FIGURES / "shot_noise_common_shape.csv", index=False)
 
 
 if __name__ == "__main__":
