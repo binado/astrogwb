@@ -43,6 +43,12 @@ from astrogwb.populations._types import Population
 from astrogwb.simulators.polarization_power.metadata import CatalogMetadata
 from astrogwb.simulators.polarization_power.simulator import PolarizationPowerData
 
+from .compound_poisson import (
+    AmplitudeDensityMethod,
+    PointSet,
+    amplitude_log_density,
+    inclination_quadrature,
+)
 from .shot_noise import (
     _keep,
     amplitude_direction,
@@ -52,6 +58,7 @@ from .shot_noise import (
 
 __all__ = [
     "GaussianLikelihood",
+    "ImportanceCompoundPoissonLikelihood",
     "ImportanceGaussianLikelihood",
     "Network",
     "ShotNoiseMode",
@@ -67,6 +74,8 @@ type ShotNoiseMode = Literal["amplitude", "per_frequency", "fixed"]
 
 #: ``(mean, variance | None, extras)``, what ``predict`` returns.
 type Prediction = tuple[jax.Array, jax.Array | None, Mapping[str, jax.Array]]
+
+_HALF_LOG_TWO_PI = 0.5 * float(np.log(2.0 * np.pi))
 
 
 class Network(NamedTuple):
@@ -199,7 +208,119 @@ jax.tree_util.register_dataclass(
 
 
 @dataclass(frozen=True)
-class ImportanceGaussianLikelihood:
+class _ImportanceCatalog:
+    r"""What every likelihood of a rescaled reference catalog shares.
+
+    The fields of :func:`~astrogwb.gwb.importance._rescaling_arrays` plus the
+    data, and the stages that do not depend on how the shot noise is modelled:
+    the importance terms of ``population(params)``, the predicted spectrum, and
+    the projection of every catalog source on a network's noise-weighted
+    template. Subclasses register themselves as pytrees with their own fields.
+    """
+
+    power: jax.Array
+    intrinsic: Mapping[str, jax.Array]
+    proposal_log_prob: jax.Array
+    log_reference_frequencies: jax.Array
+    query_log_frequencies: jax.Array
+    amplitude: jax.Array
+    redshift: jax.Array
+    redshift_weights: jax.Array
+    reference_distance: jax.Array
+    observation_seconds: jax.Array | None
+    observed: jax.Array | None
+    network: Network | None
+    population: Population
+    density_sites: tuple[str, ...]
+
+    def _shared(self, params: Mapping[str, ArrayLike]) -> _SharedTerms:
+        return _shared_terms(
+            params,
+            population=self.population,
+            intrinsic=self.intrinsic,
+            proposal_log_prob=self.proposal_log_prob,
+            density_sites=self.density_sites,
+            redshift=self.redshift,
+            redshift_weights=self.redshift_weights,
+            reference_distance=self.reference_distance,
+        )
+
+    def log_weights(self, params: Mapping[str, ArrayLike]) -> jax.Array:
+        """Per-draw intrinsic log importance weights at ``params``, ``(N,)``."""
+        return self._shared(params).log_weights
+
+    def _squared_distance_ratio(self, shared: _SharedTerms) -> jax.Array:
+        r""":math:`(d^{\mathrm{ref}}/d_{GW})^2` at each redshift node, ``(Z,)``.
+
+        A second moment of the power carries the distance rescaling twice. The
+        extra factor uses the pointwise
+        :func:`~astrogwb.cosmology.luminosity_distance`, as the kernel does.
+        """
+        gw_distance = shared.distance_ratio * luminosity_distance(
+            self.redshift, shared.hubble_constant, shared.omega_m
+        )
+        return (self.reference_distance / gw_distance) ** 2
+
+    def _variance_kernel(self, shared: _SharedTerms) -> jax.Array:
+        r"""The spectrum's kernel times :meth:`_squared_distance_ratio`, ``(Z,)``."""
+        return shared.kernel * self._squared_distance_ratio(shared)
+
+    def _mean(self, shared: _SharedTerms) -> tuple[jax.Array, dict[str, jax.Array]]:
+        """The spectrum, ``(F,)``, and the extras every prediction carries."""
+        node_power = _node_power(
+            self.power,
+            shared.log_weights,
+            self.log_reference_frequencies,
+            self.query_log_frequencies,
+            self.amplitude,
+        )
+        extras = {
+            "total_merger_rate": shared.total_rate,
+            "importance_relative_ess": relative_ess(shared.log_weights),
+        }
+        return node_power @ shared.kernel, extras
+
+    def spectrum(self, params: Mapping[str, ArrayLike]) -> jax.Array:
+        """The spectrum at ``params``, ``(F,)``: a :data:`~astrogwb.inference.protocol.SpectrumFn`."""
+        return self._mean(self._shared(params))[0]
+
+    def _project(self, projector: jax.Array) -> jax.Array:
+        r"""Every catalog source projected on ``projector``, per node, ``(Z, N)``.
+
+        Entry :math:`(m, j)` is :math:`\sum_f c_f P_{f j}(z_m)`, source ``j``'s
+        power interpolated to node ``m``'s observed frequencies, rescaled by
+        ``amplitude`` and contracted with :math:`\mathbf{c}` = ``projector``,
+        ``(F,)``. The contraction is the transposed interpolation of
+        :math:`\mathbf{c}` against the catalog, ``(Z, F_ref) @ (F_ref, N)``.
+        """
+
+        def node_projector(query: jax.Array) -> jax.Array:
+            """:math:`\\mathbf{c}` pulled back through one node's interpolation."""
+            _, pullback = jax.vjp(
+                lambda reference: jnp.interp(
+                    query, self.log_reference_frequencies, reference, right=0.0
+                ),
+                jnp.zeros_like(self.log_reference_frequencies),
+            )
+            return pullback(projector)[0]
+
+        projectors = jax.vmap(node_projector, in_axes=1)(self.query_log_frequencies)
+        return self.amplitude[:, None] * (projectors @ self.power)
+
+
+def _template_projector(mean: jax.Array, network: Network) -> jax.Array:
+    r""":math:`c_f = S_f / \sigma_f^2` over the counted bins with signal, else 0, ``(F,)``.
+
+    :math:`\mathbf{c}^T \mathbf{S} = \rho^2`, the template's squared SNR, and
+    :math:`\mathbf{c}^T \mathbf{d} / \rho^2` the amplitude estimator.
+    """
+    keep = _keep(network.mask, mean) & (mean > 0.0)
+    safe_scale = jnp.where(keep, network.scale, 1.0)
+    return jnp.where(keep, mean / safe_scale**2, 0.0)
+
+
+@dataclass(frozen=True)
+class ImportanceGaussianLikelihood(_ImportanceCatalog):
     r"""A Gaussian likelihood of the rescaled importance spectrum.
 
     Binds a :func:`~astrogwb.gwb.importance.reference_catalog` to a target
@@ -240,21 +361,7 @@ class ImportanceGaussianLikelihood:
         The shot-noise mode, or ``None`` for the diagonal Gaussian.
     """
 
-    power: jax.Array
     squared_power: jax.Array | None
-    intrinsic: Mapping[str, jax.Array]
-    proposal_log_prob: jax.Array
-    log_reference_frequencies: jax.Array
-    query_log_frequencies: jax.Array
-    amplitude: jax.Array
-    redshift: jax.Array
-    redshift_weights: jax.Array
-    reference_distance: jax.Array
-    observation_seconds: jax.Array | None
-    observed: jax.Array | None
-    network: Network | None
-    population: Population
-    density_sites: tuple[str, ...]
     shot_noise: ShotNoiseMode | None
 
     @classmethod
@@ -321,34 +428,6 @@ class ImportanceGaussianLikelihood:
             ),
         )
 
-    def _shared(self, params: Mapping[str, ArrayLike]):
-        return _shared_terms(
-            params,
-            population=self.population,
-            intrinsic=self.intrinsic,
-            proposal_log_prob=self.proposal_log_prob,
-            density_sites=self.density_sites,
-            redshift=self.redshift,
-            redshift_weights=self.redshift_weights,
-            reference_distance=self.reference_distance,
-        )
-
-    def log_weights(self, params: Mapping[str, ArrayLike]) -> jax.Array:
-        """Per-draw intrinsic log importance weights at ``params``, ``(N,)``."""
-        return self._shared(params).log_weights
-
-    def _variance_kernel(self, shared: _SharedTerms) -> jax.Array:
-        r"""The spectrum's kernel times :math:`(d^{\mathrm{ref}}/d_{GW})^2`, ``(Z,)``.
-
-        A second moment of the power carries the distance rescaling twice. The
-        extra factor uses the pointwise
-        :func:`~astrogwb.cosmology.luminosity_distance`, as the kernel does.
-        """
-        gw_distance = shared.distance_ratio * luminosity_distance(
-            self.redshift, shared.hubble_constant, shared.omega_m
-        )
-        return shared.kernel * (self.reference_distance / gw_distance) ** 2
-
     def predict(self, params: Mapping[str, ArrayLike]) -> Prediction:
         r"""``(mean, variance | None, extras)`` at ``params``.
 
@@ -365,17 +444,7 @@ class ImportanceGaussianLikelihood:
         return self._predict(self._shared(params))
 
     def _predict(self, shared: _SharedTerms) -> Prediction:
-        node_power = _node_power(
-            self.power,
-            shared.log_weights,
-            self.log_reference_frequencies,
-            self.query_log_frequencies,
-            self.amplitude,
-        )
-        extras = {
-            "total_merger_rate": shared.total_rate,
-            "importance_relative_ess": relative_ess(shared.log_weights),
-        }
+        mean, extras = self._mean(shared)
         variance = None
         if self.shot_noise in ("amplitude", "per_frequency"):
             assert self.squared_power is not None
@@ -392,7 +461,7 @@ class ImportanceGaussianLikelihood:
                 * (squared_node_power @ self._variance_kernel(shared))
                 / self.observation_seconds
             )
-        return node_power @ shared.kernel, variance, extras
+        return mean, variance, extras
 
     def _projected_relative_variance(
         self, shared: _SharedTerms, mean: jax.Array, network: Network
@@ -415,22 +484,8 @@ class ImportanceGaussianLikelihood:
         once per network.
         """
         assert self.observation_seconds is not None
-        keep = _keep(network.mask, mean) & (mean > 0.0)
-        safe_scale = jnp.where(keep, network.scale, 1.0)
-        projector = jnp.where(keep, mean / safe_scale**2, 0.0)
-
-        def node_projector(query: jax.Array) -> jax.Array:
-            """:math:`\\mathbf{c}` pulled back through one node's interpolation."""
-            _, pullback = jax.vjp(
-                lambda reference: jnp.interp(
-                    query, self.log_reference_frequencies, reference, right=0.0
-                ),
-                jnp.zeros_like(self.log_reference_frequencies),
-            )
-            return pullback(projector)[0]
-
-        projectors = jax.vmap(node_projector, in_axes=1)(self.query_log_frequencies)
-        projected = self.amplitude[:, None] * (projectors @ self.power)
+        projector = _template_projector(mean, network)
+        projected = self._project(projector)
         second_moment = (projected**2 @ jnp.exp(shared.log_weights)) / (
             shared.log_weights.shape[0]
         )
@@ -457,10 +512,6 @@ class ImportanceGaussianLikelihood:
         network = self.network if network is None else network
         assert network is not None
         return self._projected_relative_variance(shared, mean, network)
-
-    def spectrum(self, params: Mapping[str, ArrayLike]) -> jax.Array:
-        """The spectrum at ``params``, ``(F,)``: a :data:`~astrogwb.inference.protocol.SpectrumFn`."""
-        return self.predict(params)[0]
 
     def log_likelihood_from_prediction(
         self, prediction: Prediction, network: Network
@@ -516,4 +567,223 @@ jax.tree_util.register_dataclass(
         "network",
     ],
     meta_fields=["population", "density_sites", "shot_noise"],
+)
+
+
+@dataclass(frozen=True)
+class ImportanceCompoundPoissonLikelihood(_ImportanceCatalog):
+    r"""The shot-noise likelihood with the exact compound-Poisson amplitude.
+
+    The ``"amplitude"`` mode of :class:`ImportanceGaussianLikelihood` factors
+    into a shape part and a Gaussian in the amplitude estimator
+    :math:`\hat B = \mathbf{c}^T \mathbf{d} / \rho^2` (with
+    :math:`c_f = S_f / \sigma_f^2` and :math:`\rho^2 = \mathbf{c}^T \mathbf{S}`).
+    This class keeps the shape part and replaces that Gaussian with the exact
+    density of :math:`\hat B`, a compound-Poisson sum of the catalog's sources
+    in Gaussian detector noise (:mod:`astrogwb.inference.compound_poisson`):
+
+    .. math::
+
+        \log L = -\tfrac12 \chi_\perp^2 - \sum_f \log\sigma_f
+                 - \tfrac{F - 1}{2} \log 2\pi - \log\rho + \log p(\hat B),
+
+    where :math:`\chi_\perp^2` is the whitened residual orthogonal to the
+    template and :math:`F` counts the kept bins. With ``method="gaussian"``,
+    :math:`p = \mathcal{N}(1, \rho^{-2} + s^2)` and this is the Gaussian
+    class's ``"amplitude"`` mode.
+
+    The point set (:meth:`point_set`) holds one point per redshift node
+    :math:`m`, catalog draw :math:`j` and inclination node :math:`l`:
+
+    .. math::
+
+        \beta_{mjl} = \frac{q_m\, P_{mj}\, \tilde F(c_l)}{T \rho^2}, \qquad
+        a_{mjl} = \frac{T K_m}{q_m}\, \frac{w_j}{N}\, u_l,
+
+    with :math:`P_{mj} = \mathbf{c}^T \mathbf{P}_j(z_m)` source :math:`j` at
+    node :math:`m` projected on the template, :math:`K_m` the spectrum's kernel,
+    :math:`q_m = (d^{\mathrm{ref}}/d_{GW})^2`, :math:`w_j` the importance
+    weights and :math:`(c_l, u_l)` the
+    :func:`~astrogwb.inference.compound_poisson.inclination_quadrature`. Its
+    first two moments are one and the Gaussian class's
+    :meth:`~ImportanceGaussianLikelihood.relative_variance`.
+
+    The instance is a pytree as :class:`ImportanceGaussianLikelihood` is, and
+    vmaps over stacked networks the same way. ``method`` and the node counts
+    are static. Its cost is a few passes over the
+    :math:`Z \times N \times L` point set per network and evaluation.
+
+    Attributes
+    ----------
+    power, intrinsic, proposal_log_prob, log_reference_frequencies,
+    query_log_frequencies, amplitude, redshift, redshift_weights,
+    reference_distance, observed, network, population, density_sites:
+        As for :class:`ImportanceGaussianLikelihood`.
+    observation_seconds:
+        Observation time :math:`T` in seconds, ``()``; required.
+    method:
+        How :math:`p(\hat B)` is evaluated: ``"saddlepoint"`` (normalized),
+        ``"hermite"`` (Gauss-Hermite on the contour through the saddle) or
+        ``"gaussian"``.
+    num_inclination_nodes:
+        Gauss-Legendre nodes :math:`L` in :math:`\cos\iota`. Eight are plenty
+        when :math:`\mathcal{R} T` is large; the skewness at small
+        :math:`\mathcal{R} T` needs more (24).
+    num_hermite_nodes:
+        Contour nodes of ``"hermite"``.
+    num_normalization_nodes:
+        Nodes of the ``"saddlepoint"`` normalization.
+    """
+
+    method: AmplitudeDensityMethod = "saddlepoint"
+    num_inclination_nodes: int = 8
+    num_hermite_nodes: int = 8
+    num_normalization_nodes: int = 4
+
+    @classmethod
+    def from_catalog(
+        cls,
+        data: PolarizationPowerData,
+        metadata: CatalogMetadata,
+        *,
+        population: Population,
+        frequencies: ArrayLike,
+        num_redshift_nodes: int,
+        density_sites: Sequence[str],
+        observation_time: float,
+        observed: ArrayLike | None = None,
+        network: Network | None = None,
+        minimum_redshift: float | None = None,
+        method: AmplitudeDensityMethod = "saddlepoint",
+        num_inclination_nodes: int = 8,
+        num_hermite_nodes: int = 8,
+        num_normalization_nodes: int = 4,
+    ) -> Self:
+        """Bind a reference catalog to a target on the observed ``frequencies``.
+
+        As :meth:`ImportanceGaussianLikelihood.from_catalog`, with
+        ``observation_time`` in years required and the density options of the
+        class. Call outside JAX transformations.
+        """
+        return cls(
+            power=jnp.asarray(np.asarray(data["polarization_power"], dtype=np.float64)),
+            observation_seconds=jnp.asarray(observation_time * SECONDS_PER_YEAR),
+            observed=None if observed is None else jnp.asarray(observed),
+            network=network,
+            population=population,
+            density_sites=tuple(density_sites),
+            method=method,
+            num_inclination_nodes=num_inclination_nodes,
+            num_hermite_nodes=num_hermite_nodes,
+            num_normalization_nodes=num_normalization_nodes,
+            **_rescaling_arrays(
+                data,
+                metadata,
+                frequencies,
+                num_redshift_nodes,
+                density_sites,
+                minimum_redshift,
+            ),
+        )
+
+    def predict(self, params: Mapping[str, ArrayLike]) -> Prediction:
+        """``(mean, None, extras)`` at ``params``, as the Gaussian class's."""
+        mean, extras = self._mean(self._shared(params))
+        return mean, None, extras
+
+    def _point_set(
+        self, shared: _SharedTerms, mean: jax.Array, projector: jax.Array
+    ) -> PointSet:
+        assert self.observation_seconds is not None
+        seconds = self.observation_seconds
+        projected = self._project(projector)
+        squared_snr = projector @ mean
+        ratio = self._squared_distance_ratio(shared)
+        draw_weights = jnp.exp(shared.log_weights) / shared.log_weights.shape[0]
+        pattern, node_weights = inclination_quadrature(self.num_inclination_nodes)
+        amplitudes = (ratio[:, None] * projected / (seconds * squared_snr))[
+            ..., None
+        ] * jnp.asarray(pattern)
+        weights = ((seconds * shared.kernel / ratio)[:, None] * draw_weights)[
+            ..., None
+        ] * jnp.asarray(node_weights)
+        return PointSet(weights, amplitudes, squared_snr)
+
+    def point_set(
+        self, params: Mapping[str, ArrayLike], network: Network | None = None
+    ) -> PointSet:
+        """The compound-Poisson point set of :math:`\\hat B` at ``params``, ``(Z, N, L)``.
+
+        Under ``network``, the instance's by default.
+        """
+        shared = self._shared(params)
+        mean = self._mean(shared)[0]
+        network = self.network if network is None else network
+        assert network is not None
+        return self._point_set(shared, mean, _template_projector(mean, network))
+
+    def log_likelihood(
+        self, params: Mapping[str, ArrayLike], network: Network | None = None
+    ) -> tuple[jax.Array, Mapping[str, jax.Array]]:
+        """``(log L, extras)`` at ``params`` under ``network`` (the instance's by default)."""
+        assert self.observed is not None
+        shared = self._shared(params)
+        mean, extras = self._mean(shared)
+        network = self.network if network is None else network
+        assert network is not None
+        projector = _template_projector(mean, network)
+        points = self._point_set(shared, mean, projector)
+        squared_snr = points.noise_precision
+
+        keep = _keep(network.mask, mean)
+        safe_scale = jnp.where(keep, network.scale, 1.0)
+        residual = self.observed - mean
+        whitened = jnp.where(keep, residual / safe_scale, 0.0)
+        along = projector @ residual
+        chi_squared_perp = jnp.sum(whitened * whitened) - along**2 / squared_snr
+        log_normalization = (
+            jnp.sum(jnp.where(keep, jnp.log(safe_scale) + _HALF_LOG_TWO_PI, 0.0))
+            - _HALF_LOG_TWO_PI
+            + 0.5 * jnp.log(squared_snr)
+        )
+        log_amplitude = amplitude_log_density(
+            1.0 + along / squared_snr,
+            points,
+            self.method,
+            num_hermite_nodes=self.num_hermite_nodes,
+            num_normalization_nodes=self.num_normalization_nodes,
+        )
+        value = -0.5 * chi_squared_perp - log_normalization + log_amplitude
+        return value, extras
+
+    def __call__(
+        self, params: Mapping[str, ArrayLike]
+    ) -> tuple[jax.Array, Mapping[str, jax.Array]]:
+        return self.log_likelihood(params)
+
+
+jax.tree_util.register_dataclass(
+    ImportanceCompoundPoissonLikelihood,
+    data_fields=[
+        "power",
+        "intrinsic",
+        "proposal_log_prob",
+        "log_reference_frequencies",
+        "query_log_frequencies",
+        "amplitude",
+        "redshift",
+        "redshift_weights",
+        "reference_distance",
+        "observation_seconds",
+        "observed",
+        "network",
+    ],
+    meta_fields=[
+        "population",
+        "density_sites",
+        "method",
+        "num_inclination_nodes",
+        "num_hermite_nodes",
+        "num_normalization_nodes",
+    ],
 )
