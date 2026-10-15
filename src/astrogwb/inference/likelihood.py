@@ -458,6 +458,62 @@ class ImportanceGaussianLikelihood:
         assert network is not None
         return self._projected_relative_variance(shared, mean, network)
 
+    def catalog_covariance(self, params: Mapping[str, ArrayLike]) -> jax.Array:
+        r"""The shot-noise covariance of a Poisson catalog at ``params``, ``(F, F)``.
+
+        Campbell's theorem for the compound-Poisson sum of per-source spectra,
+
+        .. math::
+
+            \mathrm{Cov}[S^{\mathrm{cat}}_k, S^{\mathrm{cat}}_{k'}]
+                = \frac{\mathcal{R}}{T} \langle P_k P_{k'} \rangle,
+
+        with the average over the redshift nodes and the weighted catalog, as
+        in :meth:`predict`. A source sits at one redshift, so the nodes add
+        without cross terms. At node :math:`j` the source spectrum is the
+        linear interpolation :math:`W_j` of the reference power, so the
+        contribution is :math:`W_j G W_j^T` with the weighted Gram matrix
+        :math:`G = \sum_i w_i P_i P_i^T / N` of the catalog, ``(F_ref, F_ref)``,
+        formed once.
+
+        The quadratic form along :math:`\mathbf{c}` reproduces
+        :meth:`relative_variance`, and the diagonal is the per-bin variance of
+        :meth:`predict` up to the interpolation order of the square, which it
+        never exceeds. Requires ``observation_seconds``; ``squared_power`` is
+        not used.
+        """
+        assert self.observation_seconds is not None
+        shared = self._shared(params)
+        weights = jnp.exp(shared.log_weights) / shared.log_weights.shape[0]
+        gram = (self.power * weights) @ self.power.T
+        identity = jnp.eye(self.log_reference_frequencies.shape[0])
+
+        def node_covariance(carry: jax.Array, node: tuple) -> tuple[jax.Array, None]:
+            query, amplitude, kernel = node
+            interpolation = jax.vmap(
+                lambda reference: jnp.interp(
+                    query, self.log_reference_frequencies, reference, right=0.0
+                ),
+                out_axes=1,
+            )(identity)
+            return carry + (kernel * amplitude**2) * (
+                interpolation @ gram @ interpolation.T
+            ), None
+
+        num_bins = self.query_log_frequencies.shape[0]
+        covariance, _ = jax.lax.scan(
+            node_covariance,
+            jnp.zeros((num_bins, num_bins)),
+            (
+                self.query_log_frequencies.T,
+                self.amplitude,
+                self._variance_kernel(shared),
+            ),
+        )
+        # Symmetric to round-off only; made exact for eigh and Cholesky.
+        covariance = 0.5 * (covariance + covariance.T)
+        return INCLINATION_SECOND_MOMENT * covariance / self.observation_seconds
+
     def spectrum(self, params: Mapping[str, ArrayLike]) -> jax.Array:
         """The spectrum at ``params``, ``(F,)``: a :data:`~astrogwb.inference.protocol.SpectrumFn`."""
         return self.predict(params)[0]
