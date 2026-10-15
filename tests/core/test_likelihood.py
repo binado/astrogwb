@@ -463,6 +463,57 @@ def test_the_catalog_contraction_is_shared_across_networks(
     assert sorted(map(sorted, contractions)) == sorted(map(sorted, expected))
 
 
+def test_the_mean_power_is_held_only_without_density_sites(catalog: Any) -> None:
+    held = {
+        sites: (lik.mean_power is not None, lik.mean_squared_power is not None)
+        for sites, lik in {
+            "none": _likelihood(catalog, "per_frequency", density_sites=()),
+            "some": _likelihood(catalog, "per_frequency"),
+        }.items()
+    }
+
+    assert held == {"none": (True, True), "some": (False, False)}
+    assert _likelihood(catalog, None, density_sites=()).mean_squared_power is None
+
+
+@pytest.mark.parametrize("mode", MODES, ids=str)
+def test_the_held_mean_power_matches_the_weighted_mean(
+    catalog: Any, networks: Network, mode: str | None
+) -> None:
+    held = _likelihood(catalog, mode, density_sites=())
+    weighted = dataclasses.replace(held, mean_power=None, mean_squared_power=None)
+    params = {**FIDUCIALS, "H0": 70.0}
+    network = _single(networks, 1)
+
+    for got, want in zip(held.predict(params)[:2], weighted.predict(params)[:2]):
+        if want is None:
+            assert got is None
+        else:
+            np.testing.assert_allclose(got, want, rtol=1e-10)
+    np.testing.assert_allclose(
+        held.log_likelihood(params, network)[0],
+        weighted.log_likelihood(params, network)[0],
+        rtol=1e-10,
+    )
+
+
+@pytest.mark.parametrize("mode", [None, "fixed", "per_frequency"], ids=str)
+def test_the_catalog_is_not_contracted_per_evaluation_without_density_sites(
+    catalog: Any, networks: Network, mode: str | None
+) -> None:
+    likelihood = _likelihood(catalog, mode, density_sites=())
+    power_shape = likelihood.power.shape
+
+    jaxpr = jax.make_jaxpr(likelihood.log_likelihood)(FIDUCIALS, _single(networks, 1))
+
+    assert not [
+        equation
+        for equation in _walk(jaxpr.jaxpr)
+        if equation.primitive.name == "dot_general"
+        and any(tuple(operand.aval.shape) == power_shape for operand in equation.invars)
+    ]
+
+
 def test_a_catalog_is_a_traced_input_that_compiles_once_per_shape(
     catalog: Any,
 ) -> None:

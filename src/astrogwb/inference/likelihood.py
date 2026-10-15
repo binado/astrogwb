@@ -37,6 +37,7 @@ from astrogwb.gwb.importance import (
     _rescaling_arrays,
     _shared_terms,
     _SharedTerms,
+    _weighted_mean_power,
 )
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.populations._types import Population
@@ -222,6 +223,15 @@ class ImportanceGaussianLikelihood:
     squared_power:
         ``power`` squared, held once so it is not formed on every evaluation;
         ``None`` unless ``shot_noise`` is ``"amplitude"`` or ``"per_frequency"``.
+    mean_power, mean_squared_power:
+        The mean over draws of ``power`` and of ``squared_power``, ``(F_ref,)``.
+        Held only when ``density_sites`` is empty: every importance weight is
+        then one, the mean does not depend on the parameters, and it is formed
+        once here and not on every evaluation. ``mean_squared_power`` is also
+        ``None`` unless a variance is predicted. ``None`` otherwise, and the
+        weighted mean is taken at every evaluation. They are a cache of
+        ``power``: :func:`dataclasses.replace` of ``power`` must replace them
+        too.
     intrinsic, proposal_log_prob, log_reference_frequencies, query_log_frequencies,
     amplitude, redshift, redshift_weights, reference_distance:
         The arrays of :func:`~astrogwb.gwb.importance._rescaling_arrays`.
@@ -242,6 +252,8 @@ class ImportanceGaussianLikelihood:
 
     power: jax.Array
     squared_power: jax.Array | None
+    mean_power: jax.Array | None
+    mean_squared_power: jax.Array | None
     intrinsic: Mapping[str, jax.Array]
     proposal_log_prob: jax.Array
     log_reference_frequencies: jax.Array
@@ -298,9 +310,17 @@ class ImportanceGaussianLikelihood:
         """
         power = np.asarray(data["polarization_power"], dtype=np.float64)
         needs_variance = shot_noise in ("amplitude", "per_frequency")
+        # No density site: every weight is one, so the means are constants.
+        constant = not density_sites
         return cls(
             power=jnp.asarray(power),
             squared_power=jnp.asarray(power * power) if needs_variance else None,
+            mean_power=jnp.asarray(power.mean(axis=1)) if constant else None,
+            mean_squared_power=(
+                jnp.asarray((power * power).mean(axis=1))
+                if constant and needs_variance
+                else None
+            ),
             observation_seconds=(
                 None
                 if observation_time is None
@@ -365,9 +385,11 @@ class ImportanceGaussianLikelihood:
         return self._predict(self._shared(params))
 
     def _predict(self, shared: _SharedTerms) -> Prediction:
+        mean_power = self.mean_power
+        if mean_power is None:
+            mean_power = _weighted_mean_power(self.power, shared.log_weights)
         node_power = _node_power(
-            self.power,
-            shared.log_weights,
+            mean_power,
             self.log_reference_frequencies,
             self.query_log_frequencies,
             self.amplitude,
@@ -380,9 +402,13 @@ class ImportanceGaussianLikelihood:
         if self.shot_noise in ("amplitude", "per_frequency"):
             assert self.squared_power is not None
             assert self.observation_seconds is not None
+            mean_squared_power = self.mean_squared_power
+            if mean_squared_power is None:
+                mean_squared_power = _weighted_mean_power(
+                    self.squared_power, shared.log_weights
+                )
             squared_node_power = _node_power(
-                self.squared_power,
-                shared.log_weights,
+                mean_squared_power,
                 self.log_reference_frequencies,
                 self.query_log_frequencies,
                 self.amplitude**2,
@@ -503,6 +529,8 @@ jax.tree_util.register_dataclass(
     data_fields=[
         "power",
         "squared_power",
+        "mean_power",
+        "mean_squared_power",
         "intrinsic",
         "proposal_log_prob",
         "log_reference_frequencies",
