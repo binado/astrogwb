@@ -162,15 +162,18 @@ def _():
     minimum_frequency = 2.0
     maximum_frequency = 2048.0
     fiducial_network = "ET-2L-aligned-CE-Hanford"
-    network_names = [name for name, _ in DETECTOR_NETWORKS]
+    network_names = [
+        fiducial_network
+    ]  # all six: [name for name, _ in DETECTOR_NETWORKS]
 
     # "detector" | "amplitude" | "fixed": the likelihood every run uses.
-    likelihood_variant = "amplitude"
+    likelihood_variant = "fixed"
     sampled = ("z_peak", "gamma", "kappa")
     # The chain count is fixed at the top of the notebook, before the backend
     # starts.
     num_chains, num_warmup, num_samples_mcmc = NUM_CHAINS, 2000, 2000
-    target_accept_prob = 0.8
+    target_accept_prob = 0.95
+    dense_mass = True  # full mass matrix: the shape parameters are correlated
     mcmc_seed = 44
     init_jitter = 0.05  # sd of the per-chain init jitter, in unconstrained space
 
@@ -188,7 +191,10 @@ def _():
 
     cache_dir = default_cache_dir() / "posteriors"
     FIDUCIALS = fiducials(root=ROOT_DIR)
-    PRIORS = priors(root=ROOT_DIR)
+    # The shared U(-10, 10) priors on gamma and kappa are restricted to positive
+    # values for this notebook; every other prior is the shared one.
+    positive = {"dist": "Uniform", "kwargs": {"low": 0.0, "high": 10.0}}
+    PRIORS = priors(root=ROOT_DIR, gamma=positive, kappa=positive)
     registry = detector_registry(root=ROOT_DIR)
 
     # The injection and the reference catalog share the approximant and the
@@ -255,6 +261,7 @@ def _():
         registry,
         sampled,
         target_accept_prob,
+        dense_mass,
         write_figures,
     )
 
@@ -318,6 +325,7 @@ def run_nuts(
     num_samples: int,
     num_chains: int,
     target_accept_prob: float,
+    dense_mass: bool,
     chain_method: str,
     progress_bar: bool,
 ) -> DataTree:
@@ -337,7 +345,7 @@ def run_nuts(
         PRNG key of the run.
     init_params
         Unconstrained starting values by site, each of shape ``(num_chains,)``.
-    num_warmup, num_samples, num_chains, target_accept_prob
+    num_warmup, num_samples, num_chains, target_accept_prob, dense_mass
         NUTS settings.
     chain_method
         NumPyro's ``chain_method``.
@@ -350,7 +358,7 @@ def run_nuts(
         With ``posterior`` and ``sample_stats`` groups.
     """
     mcmc = MCMC(
-        NUTS(model, target_accept_prob=target_accept_prob),
+        NUTS(model, target_accept_prob=target_accept_prob, dense_mass=dense_mass),
         num_warmup=num_warmup,
         num_samples=num_samples,
         num_chains=num_chains,
@@ -704,6 +712,7 @@ def _(
     num_warmup,
     sampled,
     target_accept_prob,
+    dense_mass,
     variant_settings,
 ):
     _key = jax.random.key(mcmc_seed)
@@ -720,6 +729,7 @@ def _(
         "num_samples": num_samples_mcmc,
         "num_chains": num_chains,
         "target_accept_prob": target_accept_prob,
+        "dense_mass": dense_mass,
     }
     traces = {}
     for _index, (_name, _lk) in enumerate(network_likelihoods.items()):
@@ -727,6 +737,7 @@ def _(
             run="madau_dickinson",
             network=_name,
             sampled=sampled,
+            priors={n: (float(PRIORS[n].low), float(PRIORS[n].high)) for n in sampled},
             sampler=_sampler,
             inits=(init_jitter, mcmc_seed),
             seed=mcmc_seed,
