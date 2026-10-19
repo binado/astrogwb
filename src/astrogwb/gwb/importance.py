@@ -347,19 +347,22 @@ def reference_catalog(
     )
 
 
+def _weighted_mean_power(power: jax.Array, log_weights: jax.Array) -> jax.Array:
+    """The importance-weighted mean of ``power`` ``(F_ref, N)`` over draws: ``(F_ref,)``."""
+    return power @ jnp.exp(log_weights) / log_weights.shape[0]
+
+
 def _node_power(
-    power: jax.Array,
-    log_weights: jax.Array,
+    mean_power: jax.Array,
     log_reference_frequencies: jax.Array,
     query_log_frequencies: jax.Array,
     amplitude: jax.Array,
 ) -> jax.Array:
-    """The weighted mean of ``power`` ``(F_ref, N)`` placed at every node: ``(F, Z)``.
+    """The mean power ``(F_ref,)`` placed at every node: ``(F, Z)``.
 
     Interpolated in :math:`\\ln f` at every ``f s_j`` and scaled by
     ``amplitude``, ``(Z,)``.
     """
-    mean_power = power @ jnp.exp(log_weights) / log_weights.shape[0]
     return amplitude * jnp.interp(
         query_log_frequencies, log_reference_frequencies, mean_power, right=0.0
     )

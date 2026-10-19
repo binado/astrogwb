@@ -37,6 +37,7 @@ from astrogwb.gwb.importance import (
     _rescaling_arrays,
     _shared_terms,
     _SharedTerms,
+    _weighted_mean_power,
 )
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.populations._types import Population
@@ -265,11 +266,14 @@ class _ImportanceCatalog:
         r"""The spectrum's kernel times :meth:`_squared_distance_ratio`, ``(Z,)``."""
         return shared.kernel * self._squared_distance_ratio(shared)
 
+    def _mean_power(self, shared: _SharedTerms) -> jax.Array:
+        """The importance-weighted mean of ``power`` over draws, ``(F_ref,)``."""
+        return _weighted_mean_power(self.power, shared.log_weights)
+
     def _mean(self, shared: _SharedTerms) -> tuple[jax.Array, dict[str, jax.Array]]:
         """The spectrum, ``(F,)``, and the extras every prediction carries."""
         node_power = _node_power(
-            self.power,
-            shared.log_weights,
+            self._mean_power(shared),
             self.log_reference_frequencies,
             self.query_log_frequencies,
             self.amplitude,
@@ -284,14 +288,13 @@ class _ImportanceCatalog:
         """The spectrum at ``params``, ``(F,)``: a :data:`~astrogwb.inference.protocol.SpectrumFn`."""
         return self._mean(self._shared(params))[0]
 
-    def _project(self, projector: jax.Array) -> jax.Array:
-        r"""Every catalog source projected on ``projector``, per node, ``(Z, N)``.
+    def _node_projectors(self, projector: jax.Array) -> jax.Array:
+        r""":math:`\mathbf{c}` pulled back through every node's interpolation, ``(Z, F_ref)``.
 
-        Entry :math:`(m, j)` is :math:`\sum_f c_f P_{f j}(z_m)`, source ``j``'s
-        power interpolated to node ``m``'s observed frequencies, rescaled by
-        ``amplitude`` and contracted with :math:`\mathbf{c}` = ``projector``,
-        ``(F,)``. The contraction is the transposed interpolation of
-        :math:`\mathbf{c}` against the catalog, ``(Z, F_ref) @ (F_ref, N)``.
+        The transposed interpolation of ``projector``, :math:`\mathbf{c}` with
+        shape ``(F,)``, from node :math:`m`'s observed frequencies to the
+        reference grid. It is linear in :math:`\mathbf{c}` and does not touch
+        the catalog.
         """
 
         def node_projector(query: jax.Array) -> jax.Array:
@@ -304,8 +307,18 @@ class _ImportanceCatalog:
             )
             return pullback(projector)[0]
 
-        projectors = jax.vmap(node_projector, in_axes=1)(self.query_log_frequencies)
-        return self.amplitude[:, None] * (projectors @ self.power)
+        return jax.vmap(node_projector, in_axes=1)(self.query_log_frequencies)
+
+    def _project(self, projector: jax.Array) -> jax.Array:
+        r"""Every catalog source projected on ``projector``, per node, ``(Z, N)``.
+
+        Entry :math:`(m, j)` is :math:`\sum_f c_f P_{f j}(z_m)`, source ``j``'s
+        power interpolated to node ``m``'s observed frequencies, rescaled by
+        ``amplitude`` and contracted with :math:`\mathbf{c}` = ``projector``,
+        ``(F,)``. The contraction is :meth:`_node_projectors` against the
+        catalog, ``(Z, F_ref) @ (F_ref, N)``.
+        """
+        return self.amplitude[:, None] * (self._node_projectors(projector) @ self.power)
 
 
 def _template_projector(mean: jax.Array, network: Network) -> jax.Array:
@@ -343,6 +356,22 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
     squared_power:
         ``power`` squared, held once so it is not formed on every evaluation;
         ``None`` unless ``shot_noise`` is ``"amplitude"`` or ``"per_frequency"``.
+    mean_power, mean_squared_power:
+        The mean over draws of ``power`` and of ``squared_power``, ``(F_ref,)``.
+        Held only when ``density_sites`` is empty: every importance weight is
+        then one, the mean does not depend on the parameters, and it is formed
+        once here and not on every evaluation. ``mean_squared_power`` is also
+        ``None`` unless a variance is predicted. ``None`` otherwise, and the
+        weighted mean is taken at every evaluation. They are a cache of
+        ``power``: :func:`dataclasses.replace` of ``power`` must replace them
+        too.
+    gram:
+        The Gram matrix of the catalog, :math:`\sum_i P_i P_i^T / N`,
+        ``(F_ref, F_ref)``. Held only when ``density_sites`` is empty and
+        ``shot_noise`` is ``"amplitude"``: the second moment of the projected
+        power is then a quadratic form in it, whose cost does not grow with the
+        catalog, and it is formed once here. ``None`` otherwise, and every
+        source is projected at every evaluation. A cache of ``power`` as well.
     intrinsic, proposal_log_prob, log_reference_frequencies, query_log_frequencies,
     amplitude, redshift, redshift_weights, reference_distance:
         The arrays of :func:`~astrogwb.gwb.importance._rescaling_arrays`.
@@ -362,6 +391,9 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
     """
 
     squared_power: jax.Array | None
+    mean_power: jax.Array | None
+    mean_squared_power: jax.Array | None
+    gram: jax.Array | None
     shot_noise: ShotNoiseMode | None
 
     @classmethod
@@ -405,9 +437,22 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         """
         power = np.asarray(data["polarization_power"], dtype=np.float64)
         needs_variance = shot_noise in ("amplitude", "per_frequency")
+        # No density site: every weight is one, so the means are constants.
+        constant = not density_sites
         return cls(
             power=jnp.asarray(power),
             squared_power=jnp.asarray(power * power) if needs_variance else None,
+            mean_power=jnp.asarray(power.mean(axis=1)) if constant else None,
+            mean_squared_power=(
+                jnp.asarray((power * power).mean(axis=1))
+                if constant and needs_variance
+                else None
+            ),
+            gram=(
+                jnp.asarray(power @ power.T / power.shape[1])
+                if constant and shot_noise == "amplitude"
+                else None
+            ),
             observation_seconds=(
                 None
                 if observation_time is None
@@ -443,15 +488,24 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         """
         return self._predict(self._shared(params))
 
+    def _mean_power(self, shared: _SharedTerms) -> jax.Array:
+        if self.mean_power is None:
+            return super()._mean_power(shared)
+        return self.mean_power
+
     def _predict(self, shared: _SharedTerms) -> Prediction:
         mean, extras = self._mean(shared)
         variance = None
         if self.shot_noise in ("amplitude", "per_frequency"):
             assert self.squared_power is not None
             assert self.observation_seconds is not None
+            mean_squared_power = self.mean_squared_power
+            if mean_squared_power is None:
+                mean_squared_power = _weighted_mean_power(
+                    self.squared_power, shared.log_weights
+                )
             squared_node_power = _node_power(
-                self.squared_power,
-                shared.log_weights,
+                mean_squared_power,
                 self.log_reference_frequencies,
                 self.query_log_frequencies,
                 self.amplitude**2,
@@ -462,6 +516,25 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
                 / self.observation_seconds
             )
         return mean, variance, extras
+
+    def _projected_second_moment(
+        self, shared: _SharedTerms, projector: jax.Array
+    ) -> jax.Array:
+        r"""The weighted mean over draws of the squared projection, per node, ``(Z,)``.
+
+        :math:`\langle a_m^2 \rangle` with :math:`a_{m j}` the entry of
+        :meth:`_project`. With the :attr:`gram` held it is
+        :math:`s_m^{2} \mathbf{p}_m^T G \mathbf{p}_m` for the node projector
+        :math:`\mathbf{p}_m` and the rescaling :math:`s_m`; otherwise the
+        projection of every source is formed.
+        """
+        if self.gram is None:
+            projected = self._project(projector)
+            return (projected**2 @ jnp.exp(shared.log_weights)) / (
+                shared.log_weights.shape[0]
+            )
+        nodes = self._node_projectors(projector)
+        return self.amplitude**2 * jnp.sum((nodes @ self.gram) * nodes, axis=1)
 
     def _projected_relative_variance(
         self, shared: _SharedTerms, mean: jax.Array, network: Network
@@ -485,10 +558,7 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         """
         assert self.observation_seconds is not None
         projector = _template_projector(mean, network)
-        projected = self._project(projector)
-        second_moment = (projected**2 @ jnp.exp(shared.log_weights)) / (
-            shared.log_weights.shape[0]
-        )
+        second_moment = self._projected_second_moment(shared, projector)
         variance = (
             INCLINATION_SECOND_MOMENT
             * (second_moment @ self._variance_kernel(shared))
@@ -610,6 +680,9 @@ jax.tree_util.register_dataclass(
     data_fields=[
         "power",
         "squared_power",
+        "mean_power",
+        "mean_squared_power",
+        "gram",
         "intrinsic",
         "proposal_log_prob",
         "log_reference_frequencies",
