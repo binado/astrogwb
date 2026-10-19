@@ -9,9 +9,12 @@ from gwmock_signal.detector import CustomDetector
 from gwmock_signal.network import Network
 
 from astrogwb.detector import (
+    OrientationReference,
+    align_detector,
     load_detector,
     overlap_reduction_function,
     pairwise_overlap_reduction_function,
+    relative_orientation,
     resolve_detector,
 )
 from astrogwb.detector.overlap import C_LIGHT, R_EARTH
@@ -301,3 +304,46 @@ def test_native_geometry_response_matches_lal(name: str) -> None:
     tensor = 0.5 * (np.outer(x, x) - np.outer(y, y))
     # LAL stores the response in float32 and arm angles in FrDetector as floats.
     np.testing.assert_allclose(det.to_lal().response, tensor, rtol=0.0, atol=2e-7)
+
+
+@pytest.mark.parametrize(
+    ("pair", "north_deg", "great_circle_deg"),
+    [(("S1", "R1"), 0.0, -2.51), (("S2", "R2"), 45.0, 42.49)],
+)
+def test_et_2l_orientations_match_branchesi(
+    pair: tuple[str, str], north_deg: float, great_circle_deg: float
+) -> None:
+    # Branchesi et al. (2023), Sec. 2: alpha = 0 and 45 deg from local North,
+    # with alpha ~= beta + 2.51 deg for the great-circle angle beta.
+    north = math.degrees(relative_orientation(*pair, reference="north"))
+    great_circle = math.degrees(relative_orientation(*pair))
+
+    assert north == pytest.approx(north_deg, abs=1e-9)
+    assert great_circle == pytest.approx(great_circle_deg, abs=0.01)
+
+
+@pytest.mark.parametrize("reference", ["great_circle", "north"])
+@pytest.mark.parametrize("angle_deg", [-60.0, 0.0, 30.0, 45.0, 89.0])
+def test_align_detector_reaches_target_orientation(
+    reference: OrientationReference, angle_deg: float
+) -> None:
+    rotated = align_detector("S1", "R2", math.radians(angle_deg), reference)
+    site = load_detector("R2")
+
+    assert math.degrees(
+        relative_orientation("S1", rotated, reference)
+    ) == pytest.approx(angle_deg, abs=1e-9)
+    assert (rotated.latitude_rad, rotated.longitude_rad, rotated.elevation_m) == (
+        site.latitude_rad,
+        site.longitude_rad,
+        site.elevation_m,
+    )
+
+
+def test_orf_long_wavelength_scales_as_cos_two_orientation() -> None:
+    def gamma(angle_deg: float) -> float:
+        rotated = align_detector("S1", "R1", math.radians(angle_deg))
+        return float(overlap_reduction_function([1.0], "S1", rotated)[0])
+
+    assert gamma(30.0) / gamma(0.0) == pytest.approx(0.5, abs=1e-3)
+    assert abs(gamma(45.0)) < 1e-3 * abs(gamma(0.0))

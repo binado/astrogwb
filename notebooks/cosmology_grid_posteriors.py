@@ -55,6 +55,7 @@ with app.setup(hide_code=True):
         ensure_reference_catalog,
         injection_spectrum,
         network_data,
+        noise_digest,
         settings_digest,
         shot_noise_variant,
     )
@@ -181,12 +182,13 @@ def _():
     # Grid knobs: each window is (low, high), each size a point count. Uniform
     # grids: the corner plot reads each density value as proportional to the
     # mass of its cell. Windows should hold the posterior comfortably; the
-    # best network's sigma is ~0.2 for H0 and ~0.004 for xi_0, the worst's ~0.45
-    # and ~0.013. xi_n is flat at xi_0 = 1, so it takes its prior range.
-    h0_window, h0_size = (64.5, 71.0), 321  # H0 alone: 0.02 step
-    h0_omega_window, h0_omega_size = (65.0, 70.5), 111  # H0 in the 2D problem
+    # best network's sigma is ~0.2 for H0 and ~0.003 for xi_0, the worst's
+    # (ET-2L, at 45 deg from local North) ~1.5 and ~0.02. xi_n is flat at
+    # xi_0 = 1, so it takes its prior range.
+    h0_window, h0_size = (58.5, 77.0), 926  # H0 alone: 0.02 step
+    h0_omega_window, h0_omega_size = (59.0, 76.5), 351  # H0 in the 2D problem
     omega_m_window, omega_m_size = (0.2856, 0.3336), 41  # +/- 4 prior sigma
-    xi_0_window, xi_0_size = (0.94, 1.06), 121
+    xi_0_window, xi_0_size = (0.86, 1.14), 281
     xi_n_window, xi_n_size = (0.3, 3.0), 55  # prior range
 
     # Likelihood variants evaluated per problem, and the one every figure
@@ -790,6 +792,7 @@ def _(
     cache_settings = {
         "version": __version__,
         "networks": network_names,
+        "noise": noise_digest(per_network),
         "seeds": (data_seed, catalog_seed),
         "band": (minimum_frequency, maximum_frequency),
         "observation_time": observation_time,

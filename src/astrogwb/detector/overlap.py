@@ -8,10 +8,13 @@ contribution: gwmock ships only the long-wavelength, co-located limit
 
 from __future__ import annotations
 
+import dataclasses
 import math
 from collections.abc import Callable, Sequence
+from typing import Literal
 
 import numpy as np
+from gwmock_signal.detector import CustomDetector
 from numpy.typing import ArrayLike, NDArray
 
 from astrogwb.constants import EARTH_MEAN_RADIUS_IN_METERS, SPEED_OF_LIGHT
@@ -114,6 +117,47 @@ def _opening_angle(az1: float, az2: float) -> float:
 def _azimuth_bisector(az1: float, az2: float) -> float:
     """Circular-mean bisector of two azimuths (radians in, radians out)."""
     return math.atan2(math.sin(az1) + math.sin(az2), math.cos(az1) + math.cos(az2))
+
+
+def _bisector_from_east(det: CustomDetector) -> float:
+    """Arm bisector of a detector, counter-clockwise from local East (radians).
+
+    The analytic ORF expansion uses counter-clockwise-from-East bisectors,
+    while runtime detectors carry gwmock's clockwise-from-North arm azimuths.
+    """
+    return _azimuth_bisector(
+        math.pi / 2.0 - det.xarm_azimuth_rad,
+        math.pi / 2.0 - det.yarm_azimuth_rad,
+    )
+
+
+def _great_circle_offsets(
+    det1: CustomDetector, det2: CustomDetector
+) -> tuple[float, float]:
+    """Great-circle bearings at both sites, shifted by a quarter turn (radians).
+
+    Adding them to the counter-clockwise-from-East bisectors measures each
+    detector's orientation with respect to the great circle joining the sites.
+    """
+    ang_1 = (
+        _initial_course(
+            det1.latitude_rad,
+            det2.latitude_rad,
+            det1.longitude_rad,
+            det2.longitude_rad,
+        )
+        - 0.5 * math.pi
+    )
+    ang_2 = (
+        _final_course(
+            det1.latitude_rad,
+            det2.latitude_rad,
+            det1.longitude_rad,
+            det2.longitude_rad,
+        )
+        - 0.5 * math.pi
+    )
+    return ang_1, ang_2
 
 
 def _series_or_closed_form(
@@ -234,35 +278,9 @@ def overlap_reduction_function(
     )
     alpha = 2.0 * math.pi * frequencies * d / C_LIGHT
 
-    # The analytic expansion uses counter-clockwise-from-East bisectors.
-    # Runtime detectors use gwmock's clockwise-from-North arm azimuths.
-    xax_1 = _azimuth_bisector(
-        math.pi / 2.0 - det1.xarm_azimuth_rad,
-        math.pi / 2.0 - det1.yarm_azimuth_rad,
-    )
-    xax_2 = _azimuth_bisector(
-        math.pi / 2.0 - det2.xarm_azimuth_rad,
-        math.pi / 2.0 - det2.yarm_azimuth_rad,
-    )
-
-    ang_1 = (
-        _initial_course(
-            det1.latitude_rad,
-            det2.latitude_rad,
-            det1.longitude_rad,
-            det2.longitude_rad,
-        )
-        - 0.5 * math.pi
-    )
-    ang_2 = (
-        _final_course(
-            det1.latitude_rad,
-            det2.latitude_rad,
-            det1.longitude_rad,
-            det2.longitude_rad,
-        )
-        - 0.5 * math.pi
-    )
+    xax_1 = _bisector_from_east(det1)
+    xax_2 = _bisector_from_east(det2)
+    ang_1, ang_2 = _great_circle_offsets(det1, det2)
 
     delta = 0.5 * ((xax_1 + ang_1) - (xax_2 + ang_2))
     big_delta = 0.5 * ((xax_1 + ang_1) + (xax_2 + ang_2))
@@ -293,3 +311,96 @@ def pairwise_overlap_reduction_function(
             out[i, j, :] = orf
             out[j, i, :] = orf
     return out
+
+
+#: Reference direction for the relative orientation of two detectors:
+#: ``"great_circle"`` measures each arm bisector from the great circle joining
+#: the sites, ``"north"`` from local North at each site.
+OrientationReference = Literal["great_circle", "north"]
+
+
+def _wrap_half_turn(angle: float) -> float:
+    """Wrap an angle to ``(-pi/2, pi/2]``; a half turn leaves an L unchanged."""
+    wrapped = math.remainder(angle, math.pi)
+    return math.pi / 2.0 if wrapped == -math.pi / 2.0 else wrapped
+
+
+def relative_orientation(
+    detector_1: DetectorSpec,
+    detector_2: DetectorSpec,
+    reference: OrientationReference = "great_circle",
+) -> float:
+    r"""Rotation of the second detector's arm bisector relative to the first.
+
+    With bisectors :math:`\sigma_i` measured counter-clockwise from the chosen
+    reference direction at each site, this returns
+    :math:`\sigma_2 - \sigma_1`, wrapped to :math:`(-\pi/2, \pi/2]`. In the
+    long-wavelength limit the overlap reduction function of two L-shaped
+    detectors is proportional to :math:`\cos 2(\sigma_2 - \sigma_1)` for the
+    great-circle reference, so :math:`\pm\pi/4` nearly cancels it. The
+    ``"north"`` reference is the angle :math:`\alpha` of Branchesi et al.
+    (2023), which differs from the great-circle angle by the convergence of
+    the meridians along the baseline.
+
+    Parameters
+    ----------
+    detector_1, detector_2
+        Site codes resolved through ``geometry.toml``, or ``CustomDetector``
+        instances.
+    reference
+        ``"great_circle"`` or ``"north"``.
+
+    Returns
+    -------
+    float
+        Relative orientation in radians, in :math:`(-\pi/2, \pi/2]`.
+    """
+    det1 = resolve_detector(detector_1)
+    det2 = resolve_detector(detector_2)
+    angle = _bisector_from_east(det2) - _bisector_from_east(det1)
+    if reference == "great_circle":
+        ang_1, ang_2 = _great_circle_offsets(det1, det2)
+        angle += ang_2 - ang_1
+    elif reference != "north":
+        raise ValueError(f"Unknown orientation reference {reference!r}.")
+    return _wrap_half_turn(angle)
+
+
+def align_detector(
+    reference_detector: DetectorSpec,
+    detector: DetectorSpec,
+    angle: float,
+    reference: OrientationReference = "great_circle",
+) -> CustomDetector:
+    """Rotate a detector about its vertex to a target relative orientation.
+
+    Only the arm azimuths change: the site, elevation, tilts and opening
+    angle are kept, so the great-circle bearings are unaffected and the
+    result satisfies ``relative_orientation(reference_detector, result,
+    reference) == angle`` up to the half-turn wrap.
+
+    Parameters
+    ----------
+    reference_detector
+        Detector whose orientation is held fixed.
+    detector
+        Detector to rotate.
+    angle
+        Target relative orientation in radians.
+    reference
+        ``"great_circle"`` or ``"north"``; see :func:`relative_orientation`.
+
+    Returns
+    -------
+    CustomDetector
+        Copy of ``detector`` with rotated arm azimuths.
+    """
+    det = resolve_detector(detector)
+    current = relative_orientation(reference_detector, det, reference)
+    # A counter-clockwise rotation lowers gwmock's clockwise-from-North azimuths.
+    rotation = _wrap_half_turn(angle - current)
+    return dataclasses.replace(
+        det,
+        xarm_azimuth_rad=(det.xarm_azimuth_rad - rotation) % (2.0 * math.pi),
+        yarm_azimuth_rad=(det.yarm_azimuth_rad - rotation) % (2.0 * math.pi),
+    )
