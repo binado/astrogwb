@@ -55,6 +55,19 @@ Every notebook here drives the `astrogwb.paper` configuration layer, so they all
   `default_cache_dir() / "posteriors"`, and writes per-parameter marginals, a
   corner plot and `summary.csv` / `summary.tex`. The setup helpers are shared
   with the grid notebook through `astrogwb.paper.posteriors`.
+- **`madau_dickinson_grid.py`** — marimo notebook. The independent check of
+  `madau_dickinson_mcmc.py`: the same $(z_{\mathrm{peak}}, \gamma, \kappa)$
+  posterior on a **ridge-aligned grid** for the six networks. The data pin the
+  spectrum amplitude to about $10^{-4}$ to $10^{-3}$ of the prior range, so the
+  posterior is a thin curved sheet that a uniform grid steps over. The grid runs
+  over $(\gamma, \kappa)$ and solves $z_{\mathrm{peak}}$ at every point: a
+  coarse scan and Newton iterations locate the spike, and the trapezoid rule
+  integrates a window around it. Same `likelihood_variant` knob and data as the
+  NUTS notebook. A 200x120 grid takes a few seconds per network. Reports, per
+  network, the posterior mass in columns where Newton did not converge or the
+  ridge sits on the support edge, and the quantile shift under a 2x refinement;
+  writes marginals, a corner plot, `summary.csv` / `summary.tex` and
+  `checks.csv`.
 - **`importance_convergence.py`** — marimo notebook. Chooses the grid
   posteriors' $(N, Z)$: redshift-quadrature convergence on a $Z = 2^i$
   ladder over one fixed set of draws (for the spectrum and, separately, for
