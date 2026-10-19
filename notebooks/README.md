@@ -41,29 +41,18 @@ Every notebook here drives the `astrogwb.paper` configuration layer, so they all
   widening, the fixed vs per-point $s^2$ verdict, and the per-frequency
   leakage check. Writes per-problem marginals and corner plots, and an $H_0$
   overlay of the variants.
-- **`madau_dickinson_mcmc.py`** — marimo notebook. NUTS posteriors on the
+- **`madau_dickinson_grid.py`** — marimo notebook. Posteriors on the
   Madau-Dickinson shape $(z_{\mathrm{peak}}, \gamma, \kappa)$ for the six
   detector networks (the paper's astrophysical-parameter section), from the
   same zero-noise Poisson injection and rescaled reference catalog as
-  `cosmology_grid_posteriors.py`. Every prior site is sampled and the
-  non-sampled ones are pinned with `numpyro.handlers.condition`; four chains
-  run on four host devices, started at the fiducial plus jitter. One knob,
-  `likelihood_variant` (`detector`, `amplitude`, `fixed`; `fixed` is the
-  fallback if the nested AD of `amplitude` is too slow). Includes a gradient
-  check with timing, an $\hat R$/ESS/divergence table against the targets
-  ($\hat R < 1.01$, no divergences), traces cached as NetCDF under
-  `default_cache_dir() / "posteriors"`, and writes per-parameter marginals, a
-  corner plot and `summary.csv` / `summary.tex`. The setup helpers are shared
-  with the grid notebook through `astrogwb.paper.posteriors`.
-- **`madau_dickinson_grid.py`** — marimo notebook. The independent check of
-  `madau_dickinson_mcmc.py`: the same $(z_{\mathrm{peak}}, \gamma, \kappa)$
-  posterior on a **ridge-aligned grid** for the six networks. The data pin the
+  `cosmology_grid_posteriors.py`, on a **ridge-aligned grid**. NUTS is not
+  used: the posterior is too thin and curved for it to sample reliably. The data pin the
   spectrum amplitude to about $10^{-4}$ to $10^{-3}$ of the prior range, so the
   posterior is a thin curved sheet that a uniform grid steps over. The grid runs
   over $(\gamma, \kappa)$ and solves $z_{\mathrm{peak}}$ at every point: a
   coarse scan and Newton iterations locate the spike, and the trapezoid rule
-  integrates a window around it. Same `likelihood_variant` knob and data as the
-  NUTS notebook. A 200x120 grid takes a few seconds per network. Reports, per
+  integrates a window around it. One knob, `likelihood_variant` (`detector`,
+  `amplitude`, `fixed`). A 200x120 grid takes a few seconds per network. Reports, per
   network, the posterior mass in columns where Newton did not converge or the
   ridge sits on the support edge, and the quantile shift under a 2x refinement;
   writes marginals, a corner plot, `summary.csv` / `summary.tex` and
