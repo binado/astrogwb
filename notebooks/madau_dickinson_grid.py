@@ -141,13 +141,12 @@ def _():
 
     Posteriors on the shape of the merger-rate history,
     $(z_{\mathrm{peak}}, \gamma, \kappa)$, from a **ridge-aligned grid** and not
-    from sampling. `madau_dickinson_mcmc.py` samples the same posterior with
-    NUTS; this notebook is its independent check, and the answer when the
-    sampler has trouble.
+    from sampling: the posterior is too thin and curved for NUTS to sample
+    reliably, which showed as divergences and chains that froze.
 
-    The data and the model spectrum are those of the NUTS notebook: the
-    zero-noise Poisson injection, and the rescaled reference-redshift catalog
-    drawn at a different seed. Setting `ASTROGWB_NOTEBOOK_SMOKE=1` swaps in a
+    The data and the model spectrum are those of `cosmology_grid_posteriors.py`:
+    the zero-noise Poisson injection, and the rescaled reference-redshift
+    catalog drawn at a different seed. Setting `ASTROGWB_NOTEBOOK_SMOKE=1` swaps in a
     tiny catalog and a coarse grid so the whole notebook runs quickly.
     """)
 
@@ -176,7 +175,7 @@ def _():
     chosen cell.
 
     **Likelihood.** `likelihood_variant`: `"detector"`, `"amplitude"` or
-    `"fixed"`, as in the NUTS notebook.
+    `"fixed"`. `"fixed"` holds the shot-noise variance at its fiducial value.
 
     **Checks.** Per network: the posterior mass in columns where Newton did not
     converge or the ridge sits on the support edge, and how far the quantiles
@@ -199,7 +198,7 @@ def _():
     # Different seeds: the injection must not be a subset of the catalog.
     data_seed = 41
     catalog_seed = 42
-    # The same reference catalog and injection as the NUTS notebook.
+    # The same reference catalog and injection as the cosmology grid notebook.
     num_samples = 2**14
     redshift_nodes = 32  # Gauss-Legendre nodes in 1/(1 + z); costs no waveforms
     catalog_chunk_size = 4096  # reference waveforms per lax.map batch
@@ -235,7 +234,7 @@ def _():
     cache_dir = default_cache_dir() / "posteriors"
     FIDUCIALS = fiducials(root=ROOT_DIR)
     # The shared U(-10, 10) priors on gamma and kappa are restricted to positive
-    # values, as in the NUTS notebook; every other prior is the shared one.
+    # values; every other prior is the shared one.
     positive = {"dist": "Uniform", "kwargs": {"low": 0.0, "high": 10.0}}
     PRIORS = priors(root=ROOT_DIR, gamma=positive, kappa=positive)
     registry = detector_registry(root=ROOT_DIR)
@@ -368,7 +367,7 @@ def ridge_grid(
     seconds = time.perf_counter() - start
     shape = (num_gamma, num_kappa)
     log_density, z_star, sigma, gradient_scale = (
-        np.asarray(array).reshape(shape) for array in solved
+        np.asarray(array, dtype=np.float64).reshape(shape) for array in solved
     )
     return {
         "gamma": gamma,
@@ -377,7 +376,7 @@ def ridge_grid(
         "z_star": z_star,
         "sigma": sigma,
         "gradient_scale": gradient_scale,
-        "seconds": np.float64(seconds),
+        "seconds": np.asarray(seconds),
     }
 
 
@@ -524,7 +523,7 @@ def _():
     mo.md(r"""
     ## Reference catalog and injection
 
-    As in the NUTS notebook: the reference catalog is built once with
+    The reference catalog is built once with
     `density_sites=()` and the amplitude mode, which holds the squared power
     and the Gram matrix of the catalog so that every variant can be switched
     to afterwards and no evaluation contracts the catalog. The injection is one
@@ -632,8 +631,8 @@ def _(
             variant_likelihood,
             observed=jnp.asarray(observed),
             network=LikelihoodNetwork(
-                data["scale"],
-                data["frequency_mask"],
+                jnp.asarray(data["scale"]),
+                jnp.asarray(data["frequency_mask"]),
                 None if _s2 is None else jnp.asarray(_s2[index]),
             ),
         )
@@ -678,8 +677,7 @@ def _():
     Per network: the posterior mass in columns where Newton did not converge
     (`unconverged_mass`) or the ridge sits at the edge of the support
     (`edge_mass`), and the largest change of any quantile under refinement, as
-    a fraction of the prior width (`max_shift`). All three should be small;
-    the NUTS notebook's targets do not apply.
+    a fraction of the prior width (`max_shift`). All three should be small.
     """)
 
 
