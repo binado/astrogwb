@@ -656,30 +656,40 @@ def plot_eps_matrix(
 
 @app.function(hide_code=True)
 def plot_eps_eigenvalues(
-    ax: Axes, eigenvalues: NDArray[np.float64], num_modes: int = 20
+    ax: Axes,
+    analytic: NDArray[np.float64],
+    sampled: NDArray[np.float64],
+    num_modes: int = 10,
 ) -> None:
-    """Plot the leading eigenvalues of the whitened shot-noise covariance.
+    r"""Plot the leading eigenvalues of the whitened shot-noise covariance.
 
-    The shot noise is whitened by the detector scale, so a detector-noise
-    variance is 1 and the dashed line marks it. An eigenvalue far above the
-    line is a mode that detector noise cannot hide, and one far below it is
-    irrelevant to the likelihood.
+    The shot noise is whitened by the detector scale,
+    :math:`\rho_k \epsilon_k = (S_h^{\rm cat} - S_h) / \Delta S_h`, so a
+    detector-noise variance is 1. The leading eigenvalue is the common
+    amplitude, :math:`\kappa^2`; the rest are the shape fluctuations the
+    common-shape model drops.
 
     Parameters
     ----------
     ax
         Axes to draw on.
-    eigenvalues
-        Eigenvalues in descending order.
+    analytic
+        Eigenvalues of the analytic (Campbell) covariance, descending.
+    sampled
+        Eigenvalues of the sample covariance of the injections, descending.
     num_modes
         Number of leading modes to show.
     """
     modes = np.arange(1, num_modes + 1)
-    ax.semilogy(modes, eigenvalues[:num_modes], "o")
-    ax.axhline(1.0, color="0.5", ls="--", lw=1, label="detector noise")
-    ax.set(xlabel="Mode", ylabel=r"Eigenvalue $\lambda_j$")
-    ax.set_xticks([1, *range(5, num_modes + 1, 5)])
-    ax.legend(fontsize="small")
+    ax.semilogy(modes, analytic[:num_modes], "o", mfc="none", label="analytic")
+    ax.semilogy(modes, sampled[:num_modes], "+", color="k", ms=6, label="simulations")
+    ax.set(
+        xlabel=r"Mode $j$",
+        ylabel=r"$\lambda_j\big(\mathrm{Cov}[\rho_k\epsilon_k]\big)$",
+        xlim=(0.4, num_modes + 0.6),
+    )
+    ax.set_xticks(modes)
+    ax.legend(loc="upper right", numpoints=1)
 
 
 @app.function(hide_code=True)
@@ -1175,35 +1185,37 @@ def _(probe_labels, probe_standardized):
 
 
 @app.cell(hide_code=True)
-def _(eps_covariance_excess, eps_frequencies, probe_labels, probe_samples):
-    combined_figure, (_ax_density, _ax_excess) = plt.subplots(1, 2, figsize=(9.0, 3.8))
-    plot_eps_density(_ax_density, probe_samples, probe_labels)
-    plot_eps_matrix(
-        _ax_excess,
-        eps_frequencies,
-        eps_covariance_excess,
-        label=r"$\mathrm{Cov}[\epsilon_k, \epsilon_{k'}] / \sigma_\epsilon^2 - 1$",
-        vmin=-0.3,
-        vmax=0.3,
-        cmap="RdBu_r",
-    )
-    combined_figure.tight_layout()
-    combined_figure
-    return (combined_figure,)
-
-
-@app.cell(hide_code=True)
 def _(eps_samples, eps_snr_squared):
     # Shot noise in units of the detector noise: detector variance is 1.
     _whitened = eps_samples * np.sqrt(eps_snr_squared)
     whitened_eigenvalues = np.linalg.eigvalsh(np.cov(_whitened, rowvar=False))[::-1]
-    eigenvalue_figure, _ax = plt.subplots(figsize=(4.0, 3.6))
-    plot_eps_eigenvalues(
-        _ax, whitened_eigenvalues, num_modes=min(20, eps_samples.shape[0] - 1)
-    )
-    eigenvalue_figure.tight_layout()
-    eigenvalue_figure
     return (whitened_eigenvalues,)
+
+
+@app.cell(hide_code=True)
+def _(
+    covariance_eigenvalues,
+    eps_samples,
+    fiducial_network,
+    probe_labels,
+    probe_samples,
+    whitened_eigenvalues,
+):
+    # The paper figure: the bulk of epsilon_k (left), and the whitened spectrum
+    # that shows which of its fluctuations the likelihood can see (right).
+    density_spectrum_figure, (_ax_density, _ax_spectrum) = plt.subplots(
+        1, 2, figsize=(9.0, 3.8)
+    )
+    plot_eps_density(_ax_density, probe_samples, probe_labels)
+    plot_eps_eigenvalues(
+        _ax_spectrum,
+        covariance_eigenvalues[fiducial_network],
+        whitened_eigenvalues,
+        num_modes=min(10, eps_samples.shape[0] - 1),
+    )
+    density_spectrum_figure.tight_layout()
+    density_spectrum_figure
+    return (density_spectrum_figure,)
 
 
 @app.cell(hide_code=True)
@@ -1548,7 +1560,7 @@ def _(
 @app.cell
 def _(
     FIGURES,
-    combined_figure,
+    density_spectrum_figure,
     common_shape,
     common_shape_figure,
     correlation_figure,
@@ -1570,7 +1582,7 @@ def _(
                 FIGURES / "shot_noise_distribution.pdf": distribution_figure,
                 FIGURES / "shot_noise_qq.pdf": qq_figure,
                 FIGURES / "shot_noise_deviation.pdf": covariance_deviation_figure,
-                FIGURES / "shot_noise_density_excess.pdf": combined_figure,
+                FIGURES / "shot_noise_density_spectrum.pdf": density_spectrum_figure,
                 FIGURES / "shot_noise_common_shape.pdf": common_shape_figure,
             }
         )
