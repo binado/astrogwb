@@ -36,6 +36,7 @@ __all__ = [
     "ensure_reference_catalog",
     "injection_spectrum",
     "network_data",
+    "noise_digest",
     "settings_digest",
     "shot_noise_variant",
 ]
@@ -190,6 +191,32 @@ def network_data(
     )
     scale = gaussian_bin_scale(psd, observation_time, grid)
     return {"scale": jnp.where(mask, scale, 1.0), "frequency_mask": mask}
+
+
+def noise_digest(per_network: dict[str, dict[str, object]]) -> dict[str, str]:
+    """Short hash of each network's per-bin noise, for the cache digest.
+
+    Network names alone do not identify the noise: editing a detector's
+    geometry or PSD changes the scale under the same name. Hashing the
+    :func:`network_data` arrays keys cached results to the noise itself.
+
+    Parameters
+    ----------
+    per_network
+        :func:`network_data` by network name.
+
+    Returns
+    -------
+    dict
+        Twelve hex characters per network name.
+    """
+    digests = {}
+    for name, data in per_network.items():
+        hasher = hashlib.sha256()
+        for key in ("scale", "frequency_mask"):
+            hasher.update(np.asarray(data[key]).tobytes())
+        digests[name] = hasher.hexdigest()[:12]
+    return digests
 
 
 def shot_noise_variant(

@@ -16,6 +16,7 @@ from astrogwb.paper.config import detector_registry
 from astrogwb.paper.posteriors import (
     ensure_reference_catalog,
     network_data,
+    noise_digest,
     settings_digest,
     shot_noise_variant,
 )
@@ -43,6 +44,26 @@ def registry():
 )
 def test_settings_digest(left: dict, right: dict, equal: bool) -> None:
     assert (settings_digest(**left) == settings_digest(**right)) is equal
+
+
+def test_noise_digest_separates_networks_by_geometry(registry) -> None:
+    # The two 2L networks share PSDs and differ only in geometry.
+    frequencies = np.geomspace(5.0, 1000.0, 64)
+    data = {
+        name: network_data(
+            registry,
+            name,
+            frequencies,
+            observation_time=1.0,
+            minimum_frequency=5.0,
+            maximum_frequency=1000.0,
+        )
+        for name in ("ET-2L-aligned", "ET-2L-misaligned")
+    }
+    digests = noise_digest(data)
+
+    assert digests["ET-2L-aligned"] != digests["ET-2L-misaligned"]
+    assert noise_digest(data) == digests
 
 
 @pytest.mark.parametrize(("recorded_key", "recorded_seed"), [("other", 7), ("this", 8)])

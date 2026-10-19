@@ -55,6 +55,7 @@ with app.setup(hide_code=True):
         ensure_reference_catalog,
         injection_spectrum,
         network_data,
+        noise_digest,
         settings_digest,
         shot_noise_variant,
     )
@@ -790,6 +791,7 @@ def _(
     cache_settings = {
         "version": __version__,
         "networks": network_names,
+        "noise": noise_digest(per_network),
         "seeds": (data_seed, catalog_seed),
         "band": (minimum_frequency, maximum_frequency),
         "observation_time": observation_time,
