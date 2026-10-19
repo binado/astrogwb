@@ -6,8 +6,11 @@ from .effective_psd import (
 )
 from .geometry import load_detector, resolve_detector
 from .overlap import (
+    OrientationReference,
+    align_detector,
     overlap_reduction_function,
     pairwise_overlap_reduction_function,
+    relative_orientation,
 )
 from .psd import resolve_psd_path
 from .sensitivity import (
@@ -19,7 +22,9 @@ from .sensitivity import (
 
 __all__ = [
     "DetectorSpec",
+    "OrientationReference",
     "Sensitivity",
+    "align_detector",
     "effective_psd",
     "gaussian_bin_scale",
     "load_detector",
@@ -29,6 +34,7 @@ __all__ = [
     "log_frequency_noise_scale",
     "overlap_reduction_function",
     "pairwise_overlap_reduction_function",
+    "relative_orientation",
     "resolve_detector",
     "resolve_psd_path",
 ]
