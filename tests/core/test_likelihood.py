@@ -515,12 +515,31 @@ def test_the_mean_power_is_held_only_without_density_sites(catalog: Any) -> None
     assert _likelihood(catalog, None, density_sites=()).mean_squared_power is None
 
 
+def test_the_gram_matrix_is_held_only_for_the_amplitude_mode_without_density_sites(
+    catalog: Any,
+) -> None:
+    held = {
+        mode: _likelihood(catalog, mode, density_sites=()).gram is not None
+        for mode in MODES
+    }
+
+    assert held == {
+        None: False,
+        "amplitude": True,
+        "per_frequency": False,
+        "fixed": False,
+    }
+    assert _likelihood(catalog, "amplitude").gram is None
+
+
 @pytest.mark.parametrize("mode", MODES, ids=str)
 def test_the_held_mean_power_matches_the_weighted_mean(
     catalog: Any, networks: Network, mode: str | None
 ) -> None:
     held = _likelihood(catalog, mode, density_sites=())
-    weighted = dataclasses.replace(held, mean_power=None, mean_squared_power=None)
+    weighted = dataclasses.replace(
+        held, mean_power=None, mean_squared_power=None, gram=None
+    )
     params = {**FIDUCIALS, "H0": 70.0}
     network = _single(networks, 1)
 
@@ -536,7 +555,7 @@ def test_the_held_mean_power_matches_the_weighted_mean(
     )
 
 
-@pytest.mark.parametrize("mode", [None, "fixed", "per_frequency"], ids=str)
+@pytest.mark.parametrize("mode", [None, "fixed", "per_frequency", "amplitude"], ids=str)
 def test_the_catalog_is_not_contracted_per_evaluation_without_density_sites(
     catalog: Any, networks: Network, mode: str | None
 ) -> None:
