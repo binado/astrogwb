@@ -1,9 +1,11 @@
-"""Frequency-dependent overlap reduction and effective PSD utilities.
+"""Frequency-dependent overlap reduction functions.
 
 The frequency-dependent overlap reduction function (ORF) is astrogwb's own
 contribution: gwmock ships only the long-wavelength, co-located limit
-(``gamma = 2 D_i:D_j``). This module keeps the validated analytic ORF
-(angle-based ``g1/g2/g3`` expansion) for resolved detector geometry.
+(``gamma = 2 D_i:D_j``). This module keeps the validated analytic isotropic
+ORF (angle-based ``g1/g2/g3`` expansion) for resolved detector geometry,
+:func:`isotropic_overlap_reduction_function`, and the response of a pair to
+one source, :func:`overlap_reduction_function`, whose isotropic average it is.
 """
 
 from __future__ import annotations
@@ -11,7 +13,10 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Sequence
 
+import jax
+import jax.numpy as jnp
 import numpy as np
+from jax.typing import ArrayLike as JaxArrayLike
 from numpy.typing import ArrayLike, NDArray
 
 from astrogwb.constants import EARTH_MEAN_RADIUS_IN_METERS, SPEED_OF_LIGHT
@@ -212,14 +217,14 @@ def _get_orf(
     )
 
 
-def overlap_reduction_function(
+def isotropic_overlap_reduction_function(
     frequencies: ArrayLike,
     detector_1: DetectorSpec,
     detector_2: DetectorSpec,
 ) -> NDArray[np.float64]:
-    """Frequency-dependent ORF between two detectors.
+    """Frequency-dependent ORF between two detectors for an isotropic background.
 
-    Each detector is a ``str`` site code (resolved via ``geometry.toml``)
+    The isotropic average of :func:`overlap_reduction_function`. Each detector is a ``str`` site code (resolved via ``geometry.toml``)
     or a gwmock ``CustomDetector``.
     """
     frequencies = np.asarray(frequencies, dtype=float)
@@ -280,7 +285,7 @@ def pairwise_overlap_reduction_function(
     frequencies: ArrayLike,
     detectors: Sequence[DetectorSpec],
 ) -> NDArray[np.float64]:
-    """Symmetric ``(n, n, nfreq)`` ORF matrix with unit diagonal."""
+    """Symmetric ``(n, n, nfreq)`` isotropic ORF matrix with unit diagonal."""
     frequencies = np.asarray(frequencies, dtype=float)
     det_list = list(detectors)
     n = len(det_list)
@@ -289,7 +294,133 @@ def pairwise_overlap_reduction_function(
     for i, det1 in enumerate(det_list):
         out[i, i, :] = 1.0
         for j in range(i + 1, n):
-            orf = overlap_reduction_function(frequencies, det1, det_list[j])
+            orf = isotropic_overlap_reduction_function(frequencies, det1, det_list[j])
             out[i, j, :] = orf
             out[j, i, :] = orf
     return out
+
+
+# The isotropic mean of Re[H_a^* H_b] for a unit source: <g> = 4/5 from the
+# inclination times 1/5 from sky and polarization, for co-located aligned
+# L-shaped detectors, whose isotropic ORF is one.
+_ISOTROPIC_PAIR_RESPONSE = 4.0 / 25.0
+
+
+def _detector_frame(detector: DetectorSpec) -> tuple[np.ndarray, np.ndarray]:
+    r"""Detector tensor and Earth-fixed position in km of one detector.
+
+    :math:`D = (\hat u \hat u^T - \hat v \hat v^T)/2` with the arm unit vectors
+    in the local tangent plane (azimuths clockwise from North, tilts ignored),
+    at the site on the sphere of radius ``R_EARTH``, where
+    :func:`isotropic_overlap_reduction_function` places it.
+    """
+    det = resolve_detector(detector)
+    lat, lon = det.latitude_rad, det.longitude_rad
+    east = np.array([-math.sin(lon), math.cos(lon), 0.0])
+    north = np.array(
+        [-math.sin(lat) * math.cos(lon), -math.sin(lat) * math.sin(lon), math.cos(lat)]
+    )
+
+    def arm(azimuth: float) -> np.ndarray:
+        return math.cos(azimuth) * north + math.sin(azimuth) * east
+
+    x_arm, y_arm = arm(det.xarm_azimuth_rad), arm(det.yarm_azimuth_rad)
+    tensor = 0.5 * (np.outer(x_arm, x_arm) - np.outer(y_arm, y_arm))
+    position = R_EARTH * np.array(
+        [math.cos(lat) * math.cos(lon), math.cos(lat) * math.sin(lon), math.sin(lat)]
+    )
+    return tensor, position
+
+
+def _polarization_tensors(
+    polar_cosine: jax.Array, azimuth: jax.Array, polarization: jax.Array
+) -> tuple[jax.Array, jax.Array, jax.Array]:
+    """Source direction ``(..., 3)`` and plus and cross tensors ``(..., 3, 3)``."""
+    polar_sine = jnp.sqrt(jnp.clip(1.0 - polar_cosine**2, 0.0))
+    cos_azimuth, sin_azimuth = jnp.cos(azimuth), jnp.sin(azimuth)
+    direction = jnp.stack(
+        [polar_sine * cos_azimuth, polar_sine * sin_azimuth, polar_cosine], axis=-1
+    )
+    e_theta = jnp.stack(
+        [polar_cosine * cos_azimuth, polar_cosine * sin_azimuth, -polar_sine], axis=-1
+    )
+    e_phi = jnp.stack([-sin_azimuth, cos_azimuth, jnp.zeros_like(azimuth)], axis=-1)
+    cos_psi = jnp.cos(polarization)[..., None]
+    sin_psi = jnp.sin(polarization)[..., None]
+    m = cos_psi * e_theta + sin_psi * e_phi
+    n = -sin_psi * e_theta + cos_psi * e_phi
+    plus = m[..., :, None] * m[..., None, :] - n[..., :, None] * n[..., None, :]
+    cross = m[..., :, None] * n[..., None, :] + n[..., :, None] * m[..., None, :]
+    return direction, plus, cross
+
+
+def overlap_reduction_function(
+    frequencies: JaxArrayLike,
+    detector_1: DetectorSpec,
+    detector_2: DetectorSpec,
+    polar_cosine: JaxArrayLike,
+    azimuth: JaxArrayLike,
+    polarization: JaxArrayLike,
+    cos_inclination: JaxArrayLike,
+) -> jax.Array:
+    r"""The ORF of a pair for one source: its realised cross-correlation response.
+
+    .. math::
+
+        \gamma_{ab}(\hat n, \psi, \iota; f) = \frac{25}{4}\,
+            \mathrm{Re}\left[H_a^* H_b\,
+            e^{2\pi i f \hat n \cdot (\vec x_b - \vec x_a)/c}\right],
+        \qquad H_a = h_+ F^+_a + h_\times F^\times_a,
+
+    with :math:`h_+ = (1 + \cos^2\iota)/2` and :math:`h_\times = i\cos\iota` the
+    polarization amplitudes and :math:`F^{+,\times}_a = D_a : e^{+,\times}` the
+    antenna patterns of a source at :math:`\hat n` (Earth-fixed) with
+    polarization angle :math:`\psi`. The factor :math:`25/4` inverts the
+    isotropic mean of the bracket for co-located aligned L-shaped detectors, so
+    averaging over an isotropic sky, uniform :math:`\psi` and uniform
+    :math:`\cos\iota` gives :func:`isotropic_overlap_reduction_function`. A
+    detector paired with itself gives :math:`(25/4)|H_a|^2`.
+
+    Detectors are resolved with
+    :func:`~astrogwb.detector.geometry.resolve_detector`; arm tilts and
+    elevation are ignored, as in the isotropic ORF.
+
+    Parameters
+    ----------
+    frequencies:
+        Frequencies in Hz, ``(F,)``.
+    detector_1, detector_2:
+        ``str`` site codes or gwmock ``CustomDetector`` instances.
+    polar_cosine, azimuth:
+        Cosine of the polar angle and the azimuth of the direction to the
+        source, Earth-fixed (z towards the North pole, x towards Greenwich).
+    polarization:
+        Polarization angle :math:`\psi` in radians.
+    cos_inclination:
+        :math:`\cos\iota`. The four angles broadcast to a shape ``(...)``.
+
+    Returns
+    -------
+    jax.Array
+        Shape ``(..., F)``.
+    """
+    tensor_1, position_1 = _detector_frame(detector_1)
+    tensor_2, position_2 = _detector_frame(detector_2)
+    polar_cosine, azimuth, polarization, cos_inclination = jnp.broadcast_arrays(
+        polar_cosine, azimuth, polarization, cos_inclination
+    )
+    direction, plus, cross = _polarization_tensors(polar_cosine, azimuth, polarization)
+    h_plus = 0.5 * (1.0 + cos_inclination**2)
+    h_cross = 1j * cos_inclination
+
+    def response(tensor: np.ndarray) -> jax.Array:
+        f_plus = jnp.einsum("...ij,ij->...", plus, tensor)
+        f_cross = jnp.einsum("...ij,ij->...", cross, tensor)
+        return h_plus * f_plus + h_cross * f_cross
+
+    product = jnp.conj(response(tensor_1)) * response(tensor_2)
+    delay = direction @ jnp.asarray(position_2 - position_1) / C_LIGHT
+    phase = jnp.exp(
+        2j * jnp.pi * delay[..., None] * jnp.asarray(frequencies, dtype=float)
+    )
+    return jnp.real(product[..., None] * phase) / _ISOTROPIC_PAIR_RESPONSE

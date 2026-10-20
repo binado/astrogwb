@@ -31,6 +31,7 @@ from jax.typing import ArrayLike
 
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import luminosity_distance
+from astrogwb.detector.response import response_second_moment
 from astrogwb.gwb.importance import (
     INCLINATION_SECOND_MOMENT,
     _node_power,
@@ -82,8 +83,8 @@ class Network(NamedTuple):
     """The detector-network half of a likelihood.
 
     Stacking K networks means stacking each leaf along a new leading axis, and
-    every network in a stack must share one structure: all of ``mask`` and
-    ``relative_variance`` ``None``, or all arrays.
+    every network in a stack must share one structure: all of ``mask``,
+    ``relative_variance`` and ``response`` ``None``, or all arrays of one shape.
 
     Attributes
     ----------
@@ -94,11 +95,32 @@ class Network(NamedTuple):
         contribute exactly zero, whatever their ``scale``.
     relative_variance:
         A fixed :math:`s^2`, shape ``()``, for the ``"fixed"`` shot-noise mode.
+    response:
+        Equally weighted draws or nodes of the network's response projected on
+        the template, ``(L,)``, with mean one
+        (:func:`~astrogwb.detector.response.projected_network_response`,
+        :func:`~astrogwb.detector.response.response_nodes`). They carry the
+        sky, polarization and inclination scatter of a source's contribution
+        and replace the sky-averaged inclination factor in the projected shot
+        noise: :math:`\\langle R^2 \rangle` in place of
+        :data:`~astrogwb.gwb.importance.INCLINATION_SECOND_MOMENT`, and the
+        nodes in place of the inclination quadrature of the compound-Poisson
+        point set. ``None`` keeps the sky-averaged power. The per-bin variance of
+        ``predict`` and ``catalog_covariance`` do not see the network and keep
+        the sky average.
     """
 
     scale: jax.Array
     mask: jax.Array | None = None
     relative_variance: jax.Array | None = None
+    response: jax.Array | None = None
+
+
+def _power_second_moment(network: Network) -> jax.Array | float:
+    """The orientation factor of a projected second moment of the power under ``network``."""
+    if network.response is None:
+        return INCLINATION_SECOND_MOMENT
+    return response_second_moment(network.response)
 
 
 def gaussian_log_likelihood(
@@ -481,7 +503,9 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         the second cumulant of the compound-Poisson amplitude. At node
         :math:`j` the projection is the transposed interpolation of
         :math:`\mathbf{c}` contracted with the catalog, ``(Z, F_ref) @ (F_ref, N)``,
-        once per network.
+        once per network. The orientation factor is ``network.response``'s
+        second moment when it is set, else
+        :data:`~astrogwb.gwb.importance.INCLINATION_SECOND_MOMENT`.
         """
         assert self.observation_seconds is not None
         projector = _template_projector(mean, network)
@@ -490,7 +514,7 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
             shared.log_weights.shape[0]
         )
         variance = (
-            INCLINATION_SECOND_MOMENT
+            _power_second_moment(network)
             * (second_moment @ self._variance_kernel(shared))
             / self.observation_seconds
         )
@@ -660,8 +684,9 @@ class ImportanceCompoundPoissonLikelihood(_ImportanceCatalog):
     node :math:`m` projected on the template, :math:`K_m` the spectrum's kernel,
     :math:`q_m = (d^{\mathrm{ref}}/d_{GW})^2`, :math:`w_j` the importance
     weights and :math:`(c_l, u_l)` the
-    :func:`~astrogwb.inference.compound_poisson.inclination_quadrature`. Its
-    first two moments are one and the Gaussian class's
+    :func:`~astrogwb.inference.compound_poisson.inclination_quadrature`, or,
+    when ``network.response`` is set, its nodes with equal weights. Its first
+    two moments are one and the Gaussian class's
     :meth:`~ImportanceGaussianLikelihood.relative_variance`.
 
     The instance is a pytree as :class:`ImportanceGaussianLikelihood` is, and
@@ -684,7 +709,8 @@ class ImportanceCompoundPoissonLikelihood(_ImportanceCatalog):
     num_inclination_nodes:
         Gauss-Legendre nodes :math:`L` in :math:`\cos\iota`. Eight are plenty
         when :math:`\mathcal{R} T` is large; the skewness at small
-        :math:`\mathcal{R} T` needs more (24).
+        :math:`\mathcal{R} T` needs more (24). Unused under a network that
+        carries a ``response``.
     num_hermite_nodes:
         Contour nodes of ``"hermite"``.
     num_normalization_nodes:
@@ -748,7 +774,11 @@ class ImportanceCompoundPoissonLikelihood(_ImportanceCatalog):
         return mean, None, extras
 
     def _point_set(
-        self, shared: _SharedTerms, mean: jax.Array, projector: jax.Array
+        self,
+        shared: _SharedTerms,
+        mean: jax.Array,
+        projector: jax.Array,
+        network: Network,
     ) -> PointSet:
         assert self.observation_seconds is not None
         seconds = self.observation_seconds
@@ -756,7 +786,11 @@ class ImportanceCompoundPoissonLikelihood(_ImportanceCatalog):
         squared_snr = projector @ mean
         ratio = self._squared_distance_ratio(shared)
         draw_weights = jnp.exp(shared.log_weights) / shared.log_weights.shape[0]
-        pattern, node_weights = inclination_quadrature(self.num_inclination_nodes)
+        if network.response is None:
+            pattern, node_weights = inclination_quadrature(self.num_inclination_nodes)
+        else:
+            pattern = network.response
+            node_weights = jnp.full(pattern.shape, 1.0 / pattern.shape[0])
         amplitudes = (ratio[:, None] * projected / (seconds * squared_snr))[
             ..., None
         ] * jnp.asarray(pattern)
@@ -776,7 +810,9 @@ class ImportanceCompoundPoissonLikelihood(_ImportanceCatalog):
         mean = self._mean(shared)[0]
         network = self.network if network is None else network
         assert network is not None
-        return self._point_set(shared, mean, _template_projector(mean, network))
+        return self._point_set(
+            shared, mean, _template_projector(mean, network), network
+        )
 
     def log_likelihood(
         self, params: Mapping[str, ArrayLike], network: Network | None = None
@@ -788,7 +824,7 @@ class ImportanceCompoundPoissonLikelihood(_ImportanceCatalog):
         network = self.network if network is None else network
         assert network is not None
         projector = _template_projector(mean, network)
-        points = self._point_set(shared, mean, projector)
+        points = self._point_set(shared, mean, projector, network)
         squared_snr = points.noise_precision
 
         keep = _keep(network.mask, mean)

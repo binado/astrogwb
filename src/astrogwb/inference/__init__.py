@@ -17,6 +17,7 @@ from .protocol import LogLikelihood, SpectrumFn
 from .shot_noise import (
     amplitude_direction,
     amplitude_shot_noise_variance,
+    network_shot_noise_inflation,
     per_frequency_direction,
     rank_one_gaussian_log_likelihood,
 )
@@ -39,6 +40,7 @@ __all__ = [
     "gaussian_log_likelihood",
     "grid_log_posterior",
     "gwb_likelihood_model",
+    "network_shot_noise_inflation",
     "per_frequency_direction",
     "rank_one_gaussian_log_likelihood",
     "shot_noise_log_likelihood",

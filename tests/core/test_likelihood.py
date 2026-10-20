@@ -27,6 +27,7 @@ from numpyro import handlers
 from numpyro.infer.util import log_density
 
 from astrogwb.distributions.redshift.base import RedshiftDistribution
+from astrogwb.gwb.importance import INCLINATION_SECOND_MOMENT
 from astrogwb.inference import (
     GaussianLikelihood,
     ImportanceGaussianLikelihood,
@@ -590,3 +591,24 @@ def test_grid_log_posterior_outside_the_prior_support_is_negative_infinite(
 
     assert bool(jnp.all(jnp.isfinite(result[:, 0])))
     assert bool(jnp.all(result[:, 1] == -jnp.inf))
+
+
+#: Projected-response nodes with mean one and second moment 1.635.
+RESPONSE_NODES = jnp.array([0.2, 0.7, 1.1, 2.0])
+
+
+@pytest.mark.parametrize("index", range(NUM_NETWORKS))
+def test_relative_variance_takes_the_response_second_moment_of_the_network(
+    amplitude_likelihood: ImportanceGaussianLikelihood, networks: Network, index: int
+) -> None:
+    """The response replaces the inclination factor, as one multiplicative factor."""
+    network = _single(networks, index)
+    responsive = network._replace(response=RESPONSE_NODES)
+
+    ratio = amplitude_likelihood.relative_variance(
+        FIDUCIALS, responsive
+    ) / amplitude_likelihood.relative_variance(FIDUCIALS, network)
+
+    assert float(ratio) == pytest.approx(
+        float(jnp.mean(RESPONSE_NODES**2)) / INCLINATION_SECOND_MOMENT, rel=1e-12
+    )

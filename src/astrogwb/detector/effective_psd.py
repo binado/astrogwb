@@ -22,12 +22,12 @@ from astrogwb.frequency import bin_widths
 from astrogwb.utils import years_to_seconds
 
 from ._types import DetectorSpec
-from .overlap import overlap_reduction_function
+from .overlap import isotropic_overlap_reduction_function
 from .sensitivity import Sensitivity
 
 # Normalization of the overlap reduction function: the paper's
 # Gamma_ab = (2/5) gamma_ab, with gamma_ab the normalized ORF returned by
-# ``overlap_reduction_function`` (one for co-located aligned L-shaped detectors).
+# ``isotropic_overlap_reduction_function`` (one for co-located aligned L-shaped detectors).
 _OVERLAP_REDUCTION_FUNCTION_NORM = 0.4
 
 
@@ -61,7 +61,7 @@ def effective_psd(
     inverse_variance = np.zeros(frequencies.shape, dtype=float)
     for i, det1 in enumerate(det_list):
         for j in range(i + 1, len(det_list)):
-            gamma = overlap_reduction_function(frequencies, det1, det_list[j])
+            gamma = isotropic_overlap_reduction_function(frequencies, det1, det_list[j])
             with np.errstate(invalid="ignore", divide="ignore"):
                 contribution = gamma**2 / (psds[i] * psds[j])
             inverse_variance += np.where(np.isfinite(contribution), contribution, 0.0)

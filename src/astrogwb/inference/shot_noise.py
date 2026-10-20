@@ -45,9 +45,13 @@ import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 
+from astrogwb.detector.response import response_second_moment
+from astrogwb.gwb.importance import INCLINATION_SECOND_MOMENT
+
 __all__ = [
     "amplitude_direction",
     "amplitude_shot_noise_variance",
+    "network_shot_noise_inflation",
     "per_frequency_direction",
     "rank_one_gaussian_log_likelihood",
 ]
@@ -103,6 +107,40 @@ def amplitude_shot_noise_variance(
     ratio = jnp.sqrt(jnp.where(usable, variance, 0.0)) / safe_spectrum
     scatter = jnp.sum(weight * ratio, axis=-1) / jnp.sum(weight, axis=-1)
     return scatter**2
+
+
+def network_shot_noise_inflation(projected_response: ArrayLike) -> jax.Array:
+    r"""The factor the network response multiplies the projected shot noise :math:`s` by.
+
+    .. math::
+
+        \frac{s_{\mathrm{network}}}{s_{\mathrm{sky\,average}}}
+            = \sqrt{\frac{\langle R^2 \rangle}{c_\iota}},
+
+    with :math:`R` the draws of
+    :func:`~astrogwb.detector.response.projected_network_response` and
+    :math:`c_\iota` = :data:`~astrogwb.gwb.importance.INCLINATION_SECOND_MOMENT`,
+    the factor a sky-averaged power carries in its place. Sky position and
+    orientation are independent of distance and masses, so the factor is the
+    same for every population. It is at least one: averaged over sky and
+    polarization at fixed inclination, :math:`R` is :math:`g(\iota)/\langle g
+    \rangle` plus a term odd in :math:`\cos\iota` (the circular polarization),
+    so :math:`\langle R^2 \rangle \geq \langle g^2 \rangle / \langle g \rangle^2`
+    by the law of total variance.
+
+    Parameters
+    ----------
+    projected_response:
+        Equally weighted draws of the projected response, ``(L,)``.
+
+    Returns
+    -------
+    jax.Array
+        Shape ``()``.
+    """
+    return jnp.sqrt(
+        response_second_moment(projected_response) / INCLINATION_SECOND_MOMENT
+    )
 
 
 def amplitude_direction(spectrum: ArrayLike, relative_variance: ArrayLike) -> jax.Array:
