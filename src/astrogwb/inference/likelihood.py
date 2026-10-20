@@ -54,8 +54,10 @@ from .shot_noise import (
     _keep,
     amplitude_direction,
     low_rank_gaussian_log_likelihood,
+    pad_modes,
     per_frequency_direction,
     rank_one_gaussian_log_likelihood,
+    shot_noise_modes,
 )
 
 __all__ = [
@@ -825,6 +827,42 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         network = self.network if network is None else network
         assert network is not None
         return self._mode_blocks(self._shared(params), network)
+
+    def with_shot_noise_modes(
+        self,
+        params: Mapping[str, ArrayLike],
+        network: Network,
+        *,
+        tolerance: float = 1e-6,
+        max_modes: int = 32,
+        num_modes: int | None = None,
+        hold_blocks: bool | None = None,
+    ) -> Network:
+        """``network`` with the shot-noise basis of the ``"modes"`` mode.
+
+        The basis is :func:`~astrogwb.inference.shot_noise.shot_noise_modes` of
+        :meth:`catalog_covariance` at ``params`` under ``network`` (with its
+        ``response``), padded with zero columns to ``num_modes`` when given, so
+        that networks stack. ``hold_blocks`` also holds :meth:`mode_blocks` at
+        ``params``; by default it does when no importance weight varies (no
+        ``density_sites``), where they are exact at every point. Call outside
+        JAX transformations.
+        """
+        modes = shot_noise_modes(
+            self.catalog_covariance(params, network),
+            network.scale,
+            network.mask,
+            tolerance=tolerance,
+            max_modes=max_modes,
+        )
+        if num_modes is not None:
+            modes = pad_modes(modes, num_modes)
+        network = network._replace(modes=modes)
+        if hold_blocks is None:
+            hold_blocks = not self.density_sites
+        if hold_blocks:
+            network = network._replace(mode_blocks=self.mode_blocks(params, network))
+        return network
 
     def _mode_covariance(self, shared: _SharedTerms, network: Network) -> jax.Array:
         r""":math:`B = \sum_z \kappa_z M_z / T`, ``(k, k)``."""

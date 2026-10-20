@@ -875,3 +875,27 @@ def test_the_modes_likelihood_ignores_infinite_scales_in_masked_bins(
     assert float(value) == pytest.approx(
         float(modes_likelihood.log_likelihood(FIDUCIALS, network)[0]), rel=1e-12
     )
+
+
+def test_with_shot_noise_modes_pads_the_basis_and_holds_the_blocks_on_request(
+    modes_likelihood: ImportanceGaussianLikelihood, networks: Network
+) -> None:
+    network = modes_likelihood.with_shot_noise_modes(
+        FIDUCIALS, _single(networks, 0), max_modes=3, num_modes=5, hold_blocks=True
+    )
+    assert network.modes is not None and network.mode_blocks is not None
+
+    assert network.modes.shape == (12, 5)
+    assert network.mode_blocks.shape[1:] == (5, 5)
+    np.testing.assert_array_equal(np.asarray(network.modes[:, 3:]), 0.0)
+
+
+def test_with_shot_noise_modes_holds_no_blocks_while_the_weights_vary(
+    modes_likelihood: ImportanceGaussianLikelihood, networks: Network
+) -> None:
+    """The mock catalog has intrinsic density sites, so the blocks would go stale."""
+    assert modes_likelihood.density_sites
+
+    network = modes_likelihood.with_shot_noise_modes(FIDUCIALS, _single(networks, 0))
+
+    assert network.mode_blocks is None
