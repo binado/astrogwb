@@ -531,12 +531,16 @@ def problem_posteriors(
         variant_likelihood, relative_variance, variant_settings = shot_noise_variant(
             variant, likelihood, fiducial_relative_variance
         )
+        # The basis settings key only the "modes" caches, so the others stay valid.
+        shared = {
+            k: v for k, v in settings.items() if k != "modes" or variant == "modes"
+        }
         posteriors[variant] = grid_posterior(
             run,
             axes,
             variant_likelihood,
             relative_variance,
-            settings={**settings, **variant_settings},
+            settings={**shared, **variant_settings},
             **kwargs,  # ty: ignore[invalid-argument-type]
         )
     return posteriors
