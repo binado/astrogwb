@@ -38,7 +38,9 @@ from astrogwb.inference import (
     gaussian_log_likelihood,
     grid_log_posterior,
     gwb_likelihood_model,
+    pad_modes,
     shot_noise_log_likelihood,
+    shot_noise_modes,
 )
 from astrogwb.populations._types import SourceModel
 
@@ -741,4 +743,135 @@ def test_an_inclination_like_flat_response_leaves_the_per_frequency_mode_unchang
 
     assert float(likelihood.log_likelihood(FIDUCIALS, responsive)[0]) == pytest.approx(
         float(likelihood.log_likelihood(FIDUCIALS, network)[0]), rel=1e-12
+    )
+
+
+# --------------------------------------------------------------------------- #
+# The k-mode shot noise
+# --------------------------------------------------------------------------- #
+@pytest.fixture(scope="module")
+def modes_likelihood(catalog: Any) -> ImportanceGaussianLikelihood:
+    return _likelihood(catalog, "modes")
+
+
+def _with_modes(
+    likelihood: ImportanceGaussianLikelihood, network: Network, **options: Any
+) -> Network:
+    """``network`` with the leading eigenmodes of its catalog covariance."""
+    covariance = likelihood.catalog_covariance(FIDUCIALS, network)
+    return network._replace(
+        modes=shot_noise_modes(covariance, network.scale, network.mask, **options)
+    )
+
+
+def _dense_log_likelihood(
+    likelihood: ImportanceGaussianLikelihood, network: Network
+) -> float:
+    """The Gaussian with the detector noise plus the full catalog covariance."""
+    assert network.mask is not None and likelihood.observed is not None
+    keep = np.asarray(network.mask)
+    mean = np.asarray(likelihood.spectrum(FIDUCIALS))[keep]
+    covariance = np.asarray(likelihood.catalog_covariance(FIDUCIALS, network))[
+        np.ix_(keep, keep)
+    ] + np.diag(np.asarray(network.scale)[keep] ** 2)
+    return float(
+        dist.MultivariateNormal(jnp.asarray(mean), jnp.asarray(covariance)).log_prob(
+            likelihood.observed[keep]
+        )
+    )
+
+
+@pytest.mark.parametrize("with_response", [False, True])
+@pytest.mark.parametrize("index", range(NUM_NETWORKS))
+def test_every_mode_gives_the_dense_gaussian_with_the_catalog_covariance(
+    modes_likelihood: ImportanceGaussianLikelihood,
+    networks: Network,
+    varying_response: jax.Array,
+    index: int,
+    with_response: bool,
+) -> None:
+    network = _single(networks, index)
+    if with_response:
+        network = network._replace(response=varying_response)
+    network = _with_modes(modes_likelihood, network, tolerance=0.0, max_modes=12)
+
+    value = modes_likelihood.log_likelihood(FIDUCIALS, network)[0]
+
+    assert float(value) == pytest.approx(
+        _dense_log_likelihood(modes_likelihood, network), rel=1e-9
+    )
+
+
+@pytest.mark.parametrize("index", range(NUM_NETWORKS))
+def test_the_template_mode_alone_is_the_amplitude_likelihood(
+    catalog: Any,
+    modes_likelihood: ImportanceGaussianLikelihood,
+    networks: Network,
+    index: int,
+) -> None:
+    """``U = e``, the whitened template direction: ``B`` is ``rho^2 s^2``."""
+    network = _single(networks, index)
+    assert network.mask is not None
+    whitened = jnp.where(
+        network.mask, modes_likelihood.spectrum(FIDUCIALS) / network.scale, 0.0
+    )
+    template_mode = (whitened / jnp.linalg.norm(whitened))[:, None]
+
+    value = modes_likelihood.log_likelihood(
+        FIDUCIALS, network._replace(modes=template_mode)
+    )[0]
+
+    assert float(value) == pytest.approx(
+        float(_likelihood(catalog, "amplitude").log_likelihood(FIDUCIALS, network)[0]),
+        rel=1e-10,
+    )
+
+
+def test_zero_padded_modes_leave_the_modes_likelihood_unchanged(
+    modes_likelihood: ImportanceGaussianLikelihood, networks: Network
+) -> None:
+    network = _with_modes(modes_likelihood, _single(networks, 1), max_modes=3)
+    assert network.modes is not None
+    padded = network._replace(modes=pad_modes(network.modes, 7))
+
+    assert float(
+        modes_likelihood.log_likelihood(FIDUCIALS, padded)[0]
+    ) == pytest.approx(
+        float(modes_likelihood.log_likelihood(FIDUCIALS, network)[0]), rel=1e-12
+    )
+
+
+@pytest.mark.parametrize("with_response", [False, True])
+def test_held_mode_blocks_give_the_same_likelihood(
+    modes_likelihood: ImportanceGaussianLikelihood,
+    networks: Network,
+    varying_response: jax.Array,
+    with_response: bool,
+) -> None:
+    network = _single(networks, 2)
+    if with_response:
+        network = network._replace(response=varying_response)
+    network = _with_modes(modes_likelihood, network, max_modes=4)
+    held = network._replace(
+        mode_blocks=modes_likelihood.mode_blocks(FIDUCIALS, network)
+    )
+    shifted = {**FIDUCIALS, "H0": 1.05 * FIDUCIALS["H0"]}
+
+    assert float(modes_likelihood.log_likelihood(shifted, held)[0]) == pytest.approx(
+        float(modes_likelihood.log_likelihood(shifted, network)[0]), rel=1e-12
+    )
+
+
+def test_the_modes_likelihood_ignores_infinite_scales_in_masked_bins(
+    modes_likelihood: ImportanceGaussianLikelihood, networks: Network
+) -> None:
+    network = _with_modes(modes_likelihood, _single(networks, 2), max_modes=4)
+    assert network.mask is not None
+    infinite = network._replace(scale=jnp.where(network.mask, network.scale, jnp.inf))
+
+    value = modes_likelihood.log_likelihood(FIDUCIALS, infinite)[0]
+
+    assert np.isfinite(float(value))
+    assert float(value) == pytest.approx(
+        float(modes_likelihood.log_likelihood(FIDUCIALS, network)[0]), rel=1e-12
     )
