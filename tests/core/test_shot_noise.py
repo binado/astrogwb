@@ -268,27 +268,45 @@ def test_low_rank_log_likelihood_drops_masked_bins_with_infinite_scale(
 
 @pytest.fixture
 def spectrum_covariance() -> np.ndarray:
-    """A covariance whose whitened eigenvalues are 1, 1e-3 and 1e-9 times smaller."""
+    """A covariance with whitened eigenvalues 1, 1e-3, 1e-9 and 1e-12."""
     rng = np.random.default_rng(3)
     basis = np.linalg.qr(rng.normal(size=(4, 4)))[0]
     return basis @ np.diag([1.0, 1e-3, 1e-9, 1e-12]) @ basis.T
 
 
 @pytest.mark.parametrize(
-    ("tolerance", "max_modes", "expected"),
-    [(1e-6, 32, 2), (1e-10, 32, 3), (1e-6, 1, 1)],
+    ("tolerance", "expected"),
+    [(2e-3, 1), (1e-3, 2), (1e-10, 3), (0.0, 4)],
 )
-def test_shot_noise_modes_keep_the_trace_fraction_up_to_the_cap(
-    spectrum_covariance: np.ndarray, tolerance: float, max_modes: int, expected: int
+def test_shot_noise_modes_keep_the_fewest_modes_within_the_dropped_budget(
+    spectrum_covariance: np.ndarray, tolerance: float, expected: int
 ) -> None:
-    modes = shot_noise_modes(
-        spectrum_covariance, np.ones(4), tolerance=tolerance, max_modes=max_modes
-    )
+    """The dropped eigenvalues sum below ``tolerance``, in noise units."""
+    modes = shot_noise_modes(spectrum_covariance, np.ones(4), tolerance=tolerance)
 
     assert modes.shape == (4, expected)
     np.testing.assert_allclose(
         np.asarray(modes.T @ modes), np.eye(expected), atol=1e-12
     )
+
+
+def test_shot_noise_modes_warn_when_the_cap_stops_them_short(
+    spectrum_covariance: np.ndarray,
+) -> None:
+    with pytest.warns(UserWarning, match="the budget needs k = 3"):
+        modes = shot_noise_modes(
+            spectrum_covariance, np.ones(4), tolerance=1e-10, max_modes=2
+        )
+
+    assert modes.shape == (4, 2)
+
+
+def test_shot_noise_modes_do_not_warn_within_the_cap(
+    spectrum_covariance: np.ndarray, recwarn: pytest.WarningsRecorder
+) -> None:
+    shot_noise_modes(spectrum_covariance, np.ones(4), tolerance=1e-3, max_modes=2)
+
+    assert not [w for w in recwarn if issubclass(w.category, UserWarning)]
 
 
 def test_shot_noise_modes_are_zero_in_masked_bins(

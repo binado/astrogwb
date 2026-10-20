@@ -218,7 +218,7 @@ def _():
     # The "modes" variant: isotropic response draws and the basis of the
     # catalog covariance at the fiducials.
     response_draws, response_seed = 8192, 0
-    modes_tolerance, max_modes = 1e-6, 32
+    modes_tolerance, max_modes = 1e-3, 32  # dropped eigenvalue sum, noise units
     sampled = ("z_peak", "gamma", "kappa")
     num_gamma, num_kappa = 200, 120  # grid cells over (gamma, kappa)
     num_draws = 20_000  # draws of the posterior, for the plots and summaries

@@ -56,6 +56,8 @@ frequency axis.
 
 from __future__ import annotations
 
+import warnings
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -192,17 +194,30 @@ def shot_noise_modes(
     scale: ArrayLike,
     frequency_mask: ArrayLike | None = None,
     *,
-    tolerance: float = 1e-6,
+    tolerance: float = 1e-3,
     max_modes: int = 32,
 ) -> jax.Array:
     r"""The leading eigenvectors of a whitened catalog covariance, ``(F, k)``.
 
     The whitened covariance :math:`K = \sigma^{-1} \mathrm{Cov}\, \sigma^{-1}`
-    over the counted bins is decomposed and the fewest eigenvectors whose
-    eigenvalues hold a fraction ``1 - tolerance`` of :math:`\mathrm{tr}\, K`
-    are kept, at most ``max_modes``. The columns are orthonormal over the
-    counted bins and zero elsewhere, ordered by decreasing eigenvalue. Call
-    outside JAX transformations; :math:`k` is a host integer.
+    over the counted bins has eigenvalues :math:`\lambda_1 \geq \lambda_2
+    \geq \dots` in units of the detector-noise variance. The fewest leading
+    eigenvectors are kept such that the dropped ones satisfy
+
+    .. math::
+
+        \sum_{i > k} \max(\lambda_i, 0) < \epsilon,
+
+    with :math:`\epsilon` = ``tolerance``. Dropping a mode of eigenvalue
+    :math:`\lambda` changes the log-likelihood by about :math:`\lambda / 2` (its
+    log-determinant and its expected :math:`\chi^2`), so the expected
+    :math:`|\Delta \ln \mathcal{L}|` from the truncation is about
+    :math:`\epsilon / 2`, whatever :math:`\lambda_1`. At least one mode is kept,
+    and at most ``max_modes``; if the cap stops the selection before the
+    budget is met, a :class:`UserWarning` reports the dropped sum and the
+    :math:`k` the budget needs. The columns are orthonormal over the counted
+    bins and zero elsewhere, ordered by decreasing eigenvalue. Call outside JAX
+    transformations; :math:`k` is a host integer.
 
     Parameters
     ----------
@@ -215,7 +230,8 @@ def shot_noise_modes(
     frequency_mask:
         Boolean ``(F,)`` of the bins counted; ``None`` counts all.
     tolerance:
-        The fraction of the trace the discarded modes may hold.
+        The budget :math:`\epsilon` on the dropped eigenvalues, in units of the
+        detector-noise variance.
     max_modes:
         The cap on :math:`k`.
 
@@ -233,9 +249,19 @@ def shot_noise_modes(
     whitened = covariance[np.ix_(keep, keep)] / np.outer(kept_scale, kept_scale)
     eigenvalues, eigenvectors = np.linalg.eigh(0.5 * (whitened + whitened.T))
     eigenvalues, eigenvectors = eigenvalues[::-1], eigenvectors[:, ::-1]
-    captured = np.cumsum(np.clip(eigenvalues, 0.0, None))
-    num_modes = int(np.searchsorted(captured, (1.0 - tolerance) * captured[-1])) + 1
-    num_modes = min(num_modes, max_modes, keep.sum())
+    # dropped[k]: the sum of the positive eigenvalues past the first k.
+    positive = np.clip(eigenvalues, 0.0, None)
+    dropped = np.concatenate([np.cumsum(positive[::-1])[::-1], [0.0]])
+    within = np.flatnonzero(dropped < tolerance)
+    needed = max(int(within[0]) if within.size else positive.size, 1)
+    num_modes = min(needed, max_modes)
+    if needed > max_modes:
+        warnings.warn(
+            f"max_modes = {max_modes} drops a whitened eigenvalue sum of "
+            f"{dropped[num_modes]:.3e} >= tolerance = {tolerance:.3e}; "
+            f"the budget needs k = {needed}",
+            stacklevel=2,
+        )
     basis = np.zeros((scale.size, num_modes))
     basis[keep] = eigenvectors[:, :num_modes]
     return jnp.asarray(basis)

@@ -200,6 +200,11 @@ def main() -> None:
     parser.add_argument("--drift-tolerance", type=float, default=1e-3)
     parser.add_argument("--skip-madau", action="store_true")
     parser.add_argument("--skip-cosmology", action="store_true")
+    parser.add_argument(
+        "--variants", nargs="+", default=["amplitude", "fixed+response", "modes"]
+    )
+    parser.add_argument("--problems", nargs="+", default=["H0", "H0_Omega_m"])
+    parser.add_argument("--tolerance", type=float, default=1e-3)
     args = parser.parse_args()
 
     likelihood, observed, frequencies, params = _setup()
@@ -227,13 +232,22 @@ def main() -> None:
             )
         )
         network = likelihood.with_shot_noise_modes(
-            params, responsive, max_modes=args.max_modes, num_modes=args.max_modes
+            params,
+            responsive,
+            tolerance=args.tolerance,
+            max_modes=args.max_modes,
+            num_modes=args.max_modes,
         )
         k = int(np.sum(np.any(np.asarray(network.modes) != 0.0, axis=0)))
+        whitened = _whitened(likelihood, params, network)
+        basis = np.asarray(network.modes)[np.asarray(network.mask)]
+        dropped = np.trace(whitened) - np.trace(basis.T @ whitened @ basis)
         sky_s2.append(float(likelihood.relative_variance(params, plain)))
         response_s2.append(float(likelihood.relative_variance(params, responsive)))
         print(
-            f"{name}: k = {k}, s_sky = {np.sqrt(sky_s2[-1]):.3e}, "
+            f"{name}: k = {k}, dropped = {dropped:.2e}, "
+            f"lambda_1 = {np.linalg.eigvalsh(whitened)[-1]:.3e}, "
+            f"s_sky = {np.sqrt(sky_s2[-1]):.3e}, "
             f"s_response = {np.sqrt(response_s2[-1]):.3e}",
             flush=True,
         )
@@ -257,7 +271,7 @@ def main() -> None:
         residual, captured = _drift(likelihood, corners, networks[name])
         print(f"| {name} | {residual:.2e} | {captured:.8f} |", flush=True)
 
-    variants = {
+    all_variants = {
         "amplitude": (likelihood, None),
         "fixed+response": (
             dataclasses.replace(likelihood, shot_noise="fixed"),
@@ -265,11 +279,19 @@ def main() -> None:
         ),
         "modes": (dataclasses.replace(likelihood, shot_noise="modes"), None),
     }
+    variants = {name: all_variants[name] for name in args.variants}
     cosmology_priors = priors()
     problems = (
         ()
         if args.skip_cosmology
-        else (("H0", H0_AXIS), ("(H0, Omega_m)", H0_OMEGA_AXES))
+        else tuple(
+            (title, axes)
+            for key, title, axes in (
+                ("H0", "H0", H0_AXIS),
+                ("H0_Omega_m", "(H0, Omega_m)", H0_OMEGA_AXES),
+            )
+            if key in args.problems
+        )
     )
     for title, axes in problems:
         fixed = {k: v for k, v in params.items() if k not in axes}
@@ -315,8 +337,8 @@ def main() -> None:
             dataclasses.replace(likelihood, shot_noise="fixed"),
             np.asarray(sky_s2),
         ),
-        "fixed+response": variants["fixed+response"],
-        "modes": variants["modes"],
+        "fixed+response": all_variants["fixed+response"],
+        "modes": all_variants["modes"],
     }
 
     def ridge(variant: str, name: str, network: Network) -> dict:

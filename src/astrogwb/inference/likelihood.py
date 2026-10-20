@@ -833,7 +833,7 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         params: Mapping[str, ArrayLike],
         network: Network,
         *,
-        tolerance: float = 1e-6,
+        tolerance: float = 1e-3,
         max_modes: int = 32,
         num_modes: int | None = None,
         hold_blocks: bool | None = None,

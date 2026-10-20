@@ -205,7 +205,7 @@ def _():
         "xi_0_xi_n": ("detector", "amplitude", "fixed", "per_frequency", "modes"),
     }
     response_draws, response_seed = 8192, 0
-    modes_tolerance, max_modes = 1e-6, 32
+    modes_tolerance, max_modes = 1e-3, 32  # dropped eigenvalue sum, noise units
     ab_tolerance = 0.05
 
     SMOKE = os.environ.get("ASTROGWB_NOTEBOOK_SMOKE") == "1"
