@@ -1,8 +1,10 @@
 from ._types import DetectorSpec
 from .effective_psd import (
+    PairTerms,
     effective_psd,
     gaussian_bin_scale,
     log_frequency_noise_scale,
+    pair_terms,
 )
 from .geometry import load_detector, resolve_detector
 from .overlap import (
@@ -14,13 +16,7 @@ from .overlap import (
     relative_orientation,
 )
 from .psd import resolve_psd_path
-from .response import (
-    network_response,
-    projected_network_response,
-    response_nodes,
-    response_second_moment,
-    sample_network_response,
-)
+from .response import network_response, sample_network_response
 from .sensitivity import (
     Sensitivity,
     load_sensitivities_for_network,
@@ -31,6 +27,7 @@ from .sensitivity import (
 __all__ = [
     "DetectorSpec",
     "OrientationReference",
+    "PairTerms",
     "Sensitivity",
     "align_detector",
     "effective_psd",
@@ -43,12 +40,10 @@ __all__ = [
     "log_frequency_noise_scale",
     "network_response",
     "overlap_reduction_function",
+    "pair_terms",
     "pairwise_overlap_reduction_function",
-    "projected_network_response",
     "relative_orientation",
     "resolve_detector",
     "resolve_psd_path",
-    "response_nodes",
-    "response_second_moment",
     "sample_network_response",
 ]

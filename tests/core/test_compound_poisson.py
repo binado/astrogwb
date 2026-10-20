@@ -455,16 +455,16 @@ def test_grid_log_posterior_matches_the_numpyro_log_density_per_network(
 def test_point_set_under_a_network_response_has_the_gaussian_moments(
     build: Any, build_gaussian: Any, networks: Network, index: int
 ) -> None:
-    """The response nodes replace the inclination nodes in both likelihoods alike."""
+    """Each response draw reweights the source across the band in both likelihoods."""
+    draws = jax.random.gamma(jax.random.key(index), 3.0, (8, 12)) / 3.0
     network = _single(networks, index)._replace(
-        response=jnp.array([0.2, 0.7, 1.1, 2.0])
+        response=draws / jnp.mean(draws, axis=0)
     )
     weights, amplitudes, _ = build().point_set(FIDUCIALS, network)
 
     expected = build_gaussian(OBSERVATION_TIME).relative_variance(FIDUCIALS, network)
 
-    assert weights.shape[-1] == 4
-    assert float(jnp.sum(weights * amplitudes)) == pytest.approx(1.0, rel=1e-12)
+    assert weights.shape[-1] == 8
     assert float(jnp.sum(weights * amplitudes**2)) == pytest.approx(
-        float(expected), rel=1e-12
+        float(expected), rel=1e-10
     )

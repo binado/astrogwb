@@ -31,7 +31,6 @@ from jax.typing import ArrayLike
 
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import luminosity_distance
-from astrogwb.detector.response import response_second_moment
 from astrogwb.gwb.importance import (
     INCLINATION_SECOND_MOMENT,
     _node_power,
@@ -81,7 +80,7 @@ _HALF_LOG_TWO_PI = 0.5 * float(np.log(2.0 * np.pi))
 
 
 class Network(NamedTuple):
-    """The detector-network half of a likelihood.
+    r"""The detector-network half of a likelihood.
 
     Stacking K networks means stacking each leaf along a new leading axis, and
     every network in a stack must share one structure: all of ``mask``,
@@ -97,18 +96,24 @@ class Network(NamedTuple):
     relative_variance:
         A fixed :math:`s^2`, shape ``()``, for the ``"fixed"`` shot-noise mode.
     response:
-        Equally weighted draws or nodes of the network's response projected on
-        the template, ``(L,)``, with mean one
-        (:func:`~astrogwb.detector.response.projected_network_response`,
-        :func:`~astrogwb.detector.response.response_nodes`). They carry the
-        sky, polarization and inclination scatter of a source's contribution
-        and replace the sky-averaged inclination factor in the projected shot
-        noise: :math:`\\langle R^2 \rangle` in place of
-        :data:`~astrogwb.gwb.importance.INCLINATION_SECOND_MOMENT`, and the
-        nodes in place of the inclination quadrature of the compound-Poisson
-        point set. ``None`` keeps the sky-averaged power. The per-bin variance of
-        ``predict`` and ``catalog_covariance`` do not see the network and keep
-        the sky average.
+        Equally weighted isotropic draws of the network response
+        :math:`r_l(f)` on the likelihood's frequency grid, ``(L, F)``
+        (:func:`~astrogwb.detector.response.sample_network_response`). Sky
+        position and orientation are independent of the catalog, so the
+        catalog covariance becomes the Hadamard product
+
+        .. math::
+
+            \mathrm{Cov}[S^{\mathrm{cat}}]_{f f'} = \frac{\mathcal{R}}{T}
+                \langle P_f P_{f'} \rangle\,
+                \frac{1}{L} \sum_l r_l(f)\, r_l(f'),
+
+        with :math:`P` the catalog power at the effective inclination. The
+        response carries the inclination, so it replaces
+        :data:`~astrogwb.gwb.importance.INCLINATION_SECOND_MOMENT` everywhere
+        rather than multiplying it: in the projected variance, the per-bin
+        variance of the ``"per_frequency"`` mode and the inclination nodes of
+        the compound-Poisson point set. ``None`` keeps the sky-averaged power.
     """
 
     scale: jax.Array
@@ -117,11 +122,23 @@ class Network(NamedTuple):
     response: jax.Array | None = None
 
 
-def _power_second_moment(network: Network) -> jax.Array | float:
-    """The orientation factor of a projected second moment of the power under ``network``."""
+def _orientation_covariance(network: Network | None) -> jax.Array | float:
+    r"""The orientation factor of a second moment of the power, ``()`` or ``(F, F)``.
+
+    :data:`~astrogwb.gwb.importance.INCLINATION_SECOND_MOMENT` for the
+    sky-averaged power, else :math:`\langle r_f r_{f'} \rangle` of the
+    network's response draws, which multiplies elementwise.
+    """
+    if network is None or network.response is None:
+        return INCLINATION_SECOND_MOMENT
+    return network.response.T @ network.response / network.response.shape[0]
+
+
+def _orientation_variance(network: Network) -> jax.Array | float:
+    r"""The diagonal of :func:`_orientation_covariance`, ``()`` or ``(F,)``."""
     if network.response is None:
         return INCLINATION_SECOND_MOMENT
-    return response_second_moment(network.response)
+    return jnp.mean(network.response**2, axis=0)
 
 
 def gaussian_log_likelihood(
@@ -504,7 +521,9 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         ``squared_power`` is rescaled with ``amplitude**2`` (:math:`s_j^8`),
         integrated with :meth:`_variance_kernel` and multiplied by
         :data:`~astrogwb.gwb.importance.INCLINATION_SECOND_MOMENT` over
-        ``observation_seconds``. ``extras`` holds ``total_merger_rate``
+        ``observation_seconds``; it does not see the network, and
+        :meth:`log_likelihood_from_prediction` swaps that factor for the
+        network's response when one is set. ``extras`` holds ``total_merger_rate``
         (observer frame, mergers per second) and ``importance_relative_ess``,
         both ``()``.
         """
@@ -576,19 +595,31 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         the second cumulant of the compound-Poisson amplitude. At node
         :math:`j` the projection is the transposed interpolation of
         :math:`\mathbf{c}` contracted with the catalog, ``(Z, F_ref) @ (F_ref, N)``,
-        once per network. The orientation factor is ``network.response``'s
-        second moment when it is set, else
-        :data:`~astrogwb.gwb.importance.INCLINATION_SECOND_MOMENT`.
+        once per network. Under a ``network.response`` each draw :math:`l`
+        projects :math:`P_f\, r_l(f)` instead, on the projector
+        :math:`c_f\, r_l(f)`, and the squares are averaged over draws; this is
+        :math:`\mathbf{c}^T \mathrm{Cov}\, \mathbf{c}` of the Hadamard
+        covariance. Otherwise the inclination factor
+        :data:`~astrogwb.gwb.importance.INCLINATION_SECOND_MOMENT` multiplies.
         """
         assert self.observation_seconds is not None
         projector = _template_projector(mean, network)
-        second_moment = self._projected_second_moment(shared, projector)
-        variance = (
-            _power_second_moment(network)
-            * (second_moment @ self._variance_kernel(shared))
-            / self.observation_seconds
-        )
-        return variance / (projector @ mean) ** 2
+        if network.response is None:
+            second_moment = INCLINATION_SECOND_MOMENT * self._projected_second_moment(
+                shared, projector
+            )
+        else:
+            second_moment = jnp.mean(
+                jax.lax.map(
+                    lambda draw: self._projected_second_moment(
+                        shared, projector * draw
+                    ),
+                    network.response,
+                ),
+                axis=0,
+            )
+        variance = second_moment @ self._variance_kernel(shared)
+        return variance / self.observation_seconds / (projector @ mean) ** 2
 
     def relative_variance(
         self, params: Mapping[str, ArrayLike], network: Network | None = None
@@ -607,7 +638,9 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         assert network is not None
         return self._projected_relative_variance(shared, mean, network)
 
-    def catalog_covariance(self, params: Mapping[str, ArrayLike]) -> jax.Array:
+    def catalog_covariance(
+        self, params: Mapping[str, ArrayLike], network: Network | None = None
+    ) -> jax.Array:
         r"""The shot-noise covariance of a Poisson catalog at ``params``, ``(F, F)``.
 
         Campbell's theorem for the compound-Poisson sum of per-source spectra,
@@ -628,8 +661,10 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         The quadratic form along :math:`\mathbf{c}` reproduces
         :meth:`relative_variance`, and the diagonal is the per-bin variance of
         :meth:`predict` up to the interpolation order of the square, which it
-        never exceeds. Requires ``observation_seconds``; ``squared_power`` is
-        not used.
+        never exceeds. Under ``network`` (the instance's by default) with a
+        ``response``, the inclination factor is replaced by the Hadamard product
+        with :math:`\langle r_f r_{f'} \rangle` (see :class:`Network`).
+        Requires ``observation_seconds``; ``squared_power`` is not used.
         """
         assert self.observation_seconds is not None
         shared = self._shared(params)
@@ -661,18 +696,25 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         )
         # Symmetric to round-off only; made exact for eigh and Cholesky.
         covariance = 0.5 * (covariance + covariance.T)
-        return INCLINATION_SECOND_MOMENT * covariance / self.observation_seconds
+        network = self.network if network is None else network
+        return _orientation_covariance(network) * covariance / self.observation_seconds
 
     def log_likelihood_from_prediction(
         self, prediction: Prediction, network: Network
     ) -> jax.Array:
-        """The log-likelihood of ``prediction`` under ``network``, shape ``()``.
+        r"""The log-likelihood of ``prediction`` under ``network``, shape ``()``.
 
         In the ``"amplitude"`` mode :math:`s^2` is ``network.relative_variance``,
-        which :meth:`log_likelihood` sets from :meth:`relative_variance`.
+        which :meth:`log_likelihood` sets from :meth:`relative_variance`. A
+        ``network.response`` rescales the per-bin variance of ``prediction``
+        from the inclination factor to :math:`\langle r_f^2 \rangle`.
         """
         mean, variance, _ = prediction
         assert self.observed is not None
+        if variance is not None and network.response is not None:
+            variance = (
+                variance * _orientation_variance(network) / INCLINATION_SECOND_MOMENT
+            )
         return shot_noise_log_likelihood(
             mean, variance, self.observed, network, self.shot_noise
         )
@@ -757,8 +799,10 @@ class ImportanceCompoundPoissonLikelihood(_ImportanceCatalog):
     node :math:`m` projected on the template, :math:`K_m` the spectrum's kernel,
     :math:`q_m = (d^{\mathrm{ref}}/d_{GW})^2`, :math:`w_j` the importance
     weights and :math:`(c_l, u_l)` the
-    :func:`~astrogwb.inference.compound_poisson.inclination_quadrature`, or,
-    when ``network.response`` is set, its nodes with equal weights. Its first
+    :func:`~astrogwb.inference.compound_poisson.inclination_quadrature`. Under
+    a ``network.response`` the nodes :math:`l` are its draws with equal weights,
+    and :math:`P_{mj}\,\tilde F(c_l)` becomes the projection of source
+    :math:`j`'s power times :math:`r_l(f)`. Its first
     two moments are one and the Gaussian class's
     :meth:`~ImportanceGaussianLikelihood.relative_variance`.
 
@@ -855,18 +899,26 @@ class ImportanceCompoundPoissonLikelihood(_ImportanceCatalog):
     ) -> PointSet:
         assert self.observation_seconds is not None
         seconds = self.observation_seconds
-        projected = self._project(projector)
         squared_snr = projector @ mean
         ratio = self._squared_distance_ratio(shared)
         draw_weights = jnp.exp(shared.log_weights) / shared.log_weights.shape[0]
         if network.response is None:
             pattern, node_weights = inclination_quadrature(self.num_inclination_nodes)
+            # (Z, N, L): the inclination scales every source as a whole.
+            projected = self._project(projector)[..., None] * jnp.asarray(pattern)
         else:
-            pattern = network.response
-            node_weights = jnp.full(pattern.shape, 1.0 / pattern.shape[0])
-        amplitudes = (ratio[:, None] * projected / (seconds * squared_snr))[
-            ..., None
-        ] * jnp.asarray(pattern)
+            # (Z, N, L): each response draw reweights the source across the band.
+            projected = jnp.moveaxis(
+                jax.vmap(lambda draw: self._project(projector * draw))(
+                    network.response
+                ),
+                0,
+                -1,
+            )
+            node_weights = jnp.full(
+                network.response.shape[0], 1.0 / network.response.shape[0]
+            )
+        amplitudes = (ratio[:, None, None] * projected) / (seconds * squared_snr)
         weights = ((seconds * shared.kernel / ratio)[:, None] * draw_weights)[
             ..., None
         ] * jnp.asarray(node_weights)

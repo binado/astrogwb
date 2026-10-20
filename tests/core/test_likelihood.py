@@ -663,22 +663,82 @@ def test_grid_log_posterior_outside_the_prior_support_is_negative_infinite(
     assert bool(jnp.all(result[:, 1] == -jnp.inf))
 
 
-#: Projected-response nodes with mean one and second moment 1.635.
-RESPONSE_NODES = jnp.array([0.2, 0.7, 1.1, 2.0])
+def _flat_response(values: jax.Array, num_bins: int = 12) -> jax.Array:
+    """Response draws constant across the band, ``(L, F)``."""
+    return jnp.broadcast_to(values[:, None], (values.shape[0], num_bins))
+
+
+@pytest.fixture(scope="module")
+def varying_response() -> jax.Array:
+    """Seeded response draws that vary across the band, with unit mean, ``(64, 12)``."""
+    draws = jax.random.gamma(jax.random.key(0), 3.0, (64, 12)) / 3.0
+    return draws / jnp.mean(draws, axis=0)
+
+
+#: Flat draws with :math:`\langle r^2 \rangle` equal to the inclination factor.
+INCLINATION_LIKE = 1.0 + jnp.array([-1.0, 1.0]) * np.sqrt(
+    INCLINATION_SECOND_MOMENT - 1.0
+)
+
+
+def test_catalog_covariance_under_a_unit_response_drops_the_inclination_factor(
+    amplitude_likelihood: ImportanceGaussianLikelihood, networks: Network
+) -> None:
+    """``r = 1`` has no orientation scatter: the Hadamard factor is all ones."""
+    network = _single(networks, 0)._replace(response=jnp.ones((3, 12)))
+
+    np.testing.assert_allclose(
+        np.asarray(amplitude_likelihood.catalog_covariance(FIDUCIALS, network)),
+        np.asarray(amplitude_likelihood.catalog_covariance(FIDUCIALS))
+        / INCLINATION_SECOND_MOMENT,
+    )
 
 
 @pytest.mark.parametrize("index", range(NUM_NETWORKS))
-def test_relative_variance_takes_the_response_second_moment_of_the_network(
+def test_a_flat_response_scales_the_relative_variance_by_its_second_moment(
     amplitude_likelihood: ImportanceGaussianLikelihood, networks: Network, index: int
 ) -> None:
-    """The response replaces the inclination factor, as one multiplicative factor."""
+    """Flat in frequency, the response is the old scalar inflation."""
+    values = jnp.array([0.2, 0.7, 1.1, 2.0])
     network = _single(networks, index)
-    responsive = network._replace(response=RESPONSE_NODES)
 
     ratio = amplitude_likelihood.relative_variance(
-        FIDUCIALS, responsive
+        FIDUCIALS, network._replace(response=_flat_response(values))
     ) / amplitude_likelihood.relative_variance(FIDUCIALS, network)
 
     assert float(ratio) == pytest.approx(
-        float(jnp.mean(RESPONSE_NODES**2)) / INCLINATION_SECOND_MOMENT, rel=1e-12
+        float(jnp.mean(values**2)) / INCLINATION_SECOND_MOMENT, rel=1e-12
+    )
+
+
+@pytest.mark.parametrize("index", range(NUM_NETWORKS))
+def test_the_relative_variance_is_the_hadamard_covariance_along_the_projector(
+    amplitude_likelihood: ImportanceGaussianLikelihood,
+    networks: Network,
+    varying_response: jax.Array,
+    index: int,
+) -> None:
+    """The projected path and the dense Hadamard covariance agree draw by draw."""
+    network = _single(networks, index)._replace(response=varying_response)
+    assert network.mask is not None
+    mean = amplitude_likelihood.spectrum(FIDUCIALS)
+    projector = jnp.where(network.mask, mean / network.scale**2, 0.0)
+    covariance = amplitude_likelihood.catalog_covariance(FIDUCIALS, network)
+
+    assert float(
+        projector @ covariance @ projector / (projector @ mean) ** 2
+    ) == pytest.approx(
+        float(amplitude_likelihood.relative_variance(FIDUCIALS, network)), rel=1e-10
+    )
+
+
+def test_an_inclination_like_flat_response_leaves_the_per_frequency_mode_unchanged(
+    catalog: Any, networks: Network
+) -> None:
+    likelihood = _likelihood(catalog, "per_frequency")
+    network = _single(networks, 1)
+    responsive = network._replace(response=_flat_response(INCLINATION_LIKE))
+
+    assert float(likelihood.log_likelihood(FIDUCIALS, responsive)[0]) == pytest.approx(
+        float(likelihood.log_likelihood(FIDUCIALS, network)[0]), rel=1e-12
     )

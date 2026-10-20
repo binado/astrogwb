@@ -1,4 +1,4 @@
-"""The per-source ORF, the network response, and its shot-noise inflation.
+"""The per-source ORF and the network response.
 
 The Monte Carlo checks compare against the analytic isotropic ORF in units of
 the draws' own standard error, so they hold for any seed rather than at a tuned
@@ -6,8 +6,6 @@ tolerance.
 """
 
 from __future__ import annotations
-
-from collections.abc import Sequence
 
 import jax
 import jax.numpy as jnp
@@ -19,18 +17,14 @@ from astrogwb.detector import (
     load_sensitivity_map,
     network_response,
     overlap_reduction_function,
-    projected_network_response,
-    response_nodes,
     sample_network_response,
 )
-from astrogwb.inference import network_shot_noise_inflation
 
 NUM_DRAWS = 40_000
 #: Standard errors a Monte Carlo mean may sit from its expectation.
 MAX_STANDARD_ERRORS = 5.0
 
 FREQUENCIES = np.array([5.0, 30.0, 100.0, 300.0])
-SEARCH_FREQUENCIES = np.geomspace(5.0, 1000.0, 120)
 
 
 def _isotropic_angles(key: jax.Array, num_draws: int) -> tuple[jax.Array, ...]:
@@ -119,52 +113,17 @@ def test_a_single_pair_response_does_not_depend_on_the_noise() -> None:
     )
 
 
-def _inflation(detectors: Sequence[str], seed: int) -> float:
-    projected = projected_network_response(
-        jax.random.key(seed),
-        NUM_DRAWS,
-        SEARCH_FREQUENCIES,
-        detectors,
-        load_sensitivity_map(detectors),
-    )
-    return float(network_shot_noise_inflation(projected))
+def test_a_misaligned_pair_scatters_more_than_an_aligned_one() -> None:
+    """A nearly cancelled isotropic ORF leaves sources of either sign: more scatter."""
 
+    def variance(detectors: list[str]) -> np.ndarray:
+        draws = sample_network_response(
+            jax.random.key(8),
+            NUM_DRAWS,
+            FREQUENCIES,
+            detectors,
+            load_sensitivity_map(detectors),
+        )
+        return np.asarray(jnp.var(draws, axis=0))
 
-@pytest.mark.parametrize(
-    ("detectors", "lower", "upper"),
-    [
-        (["S1", "R1"], 1.15, 1.30),
-        (["S2", "R2"], 2.50, 5.00),
-        (["E1", "E2", "E3"], 1.10, 1.30),
-    ],
-)
-def test_the_inflation_reproduces_the_monte_carlo_of_the_paper_networks(
-    detectors: list[str], lower: float, upper: float
-) -> None:
-    assert lower < _inflation(detectors, seed=4) < upper
-
-
-def test_a_misaligned_pair_inflates_more_than_an_aligned_one() -> None:
-    assert 1.0 < _inflation(["S1", "R1"], seed=5) < _inflation(["S2", "R2"], seed=5)
-
-
-def test_the_projected_response_has_unit_sample_mean() -> None:
-    projected = projected_network_response(
-        jax.random.key(6),
-        1_000,
-        SEARCH_FREQUENCIES,
-        ["S1", "R1"],
-        load_sensitivity_map(["S1", "R1"]),
-    )
-
-    assert float(jnp.mean(projected)) == pytest.approx(1.0, rel=1e-12)
-
-
-def test_response_nodes_keep_the_mean_and_shrink_the_second_moment() -> None:
-    draws = jax.random.gamma(jax.random.key(7), 2.0, (4_096,))
-
-    nodes = response_nodes(draws, 16)
-
-    assert nodes.shape == (16,)
-    assert float(jnp.mean(nodes)) == pytest.approx(float(jnp.mean(draws)), rel=1e-12)
-    assert float(jnp.mean(nodes**2)) <= float(jnp.mean(draws**2))
+    assert np.all(variance(["S1", "R1"]) < variance(["S2", "R2"]))
