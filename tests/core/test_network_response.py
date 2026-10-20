@@ -134,7 +134,7 @@ def _inflation(detectors: Sequence[str], seed: int) -> float:
     ("detectors", "lower", "upper"),
     [
         (["S1", "R1"], 1.15, 1.30),
-        (["S2", "R2"], 1.40, 1.60),
+        (["S2", "R2"], 2.50, 5.00),
         (["E1", "E2", "E3"], 1.10, 1.30),
     ],
 )
