@@ -1734,7 +1734,7 @@ def _(
             _covered = central_coverage(
                 statistics[_network.name, _variant]["pit"], _levels
             )
-            _style = {"color": _color, "linestyle": _linestyle, "lw": 1.2}
+            _style = {"color": _color, "linestyle": _linestyle}
             _ax.plot(_levels, _covered, label=_network.label, **_style)
             _ax_residual.plot(_levels, _covered - _levels, **_style)
         _ax.set(title=_title, xlim=(0.0, 1.0), ylim=(0.0, 1.0))
