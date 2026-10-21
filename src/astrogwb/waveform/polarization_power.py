@@ -23,7 +23,12 @@ import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 
-__all__ = ["polarization_power", "polarization_stokes", "quadrupolar_stokes"]
+__all__ = [
+    "polarization_power",
+    "polarization_stokes",
+    "quadrupolar_stokes",
+    "quadrupolar_stokes_factors",
+]
 
 
 def polarization_power(plus: ArrayLike, cross: ArrayLike) -> jax.Array:
@@ -98,15 +103,26 @@ def quadrupolar_stokes(amplitude: ArrayLike, inclination: ArrayLike) -> jax.Arra
     jax.Array
         ``(4, F, n)`` float64.
     """
-    amplitude_squared = jnp.asarray(amplitude) ** 2
-    cosine = jnp.cos(jnp.asarray(inclination))[:, None]
+    factors = quadrupolar_stokes_factors(jnp.cos(jnp.asarray(inclination)))
+    stokes = jnp.asarray(amplitude)[None] ** 2 * factors[:, :, None]
+    return jnp.swapaxes(stokes, 1, 2).astype(jnp.float64)
+
+
+def quadrupolar_stokes_factors(cos_inclination: ArrayLike) -> jax.Array:
+    r"""The :math:`(2, 2)` Stokes parameters per unit :math:`A^2`, ``(4, ...)``.
+
+    :math:`(g, (1 - c^2)^2/4, 0, -c(1 + c^2))` with :math:`c = \cos\iota`, the
+    inclination dependence of :func:`quadrupolar_stokes`, for any shape of
+    ``cos_inclination``. :math:`g` is formed as the quadrupolar power's
+    inclination factor is.
+    """
+    cosine = jnp.asarray(cos_inclination)
     cos_squared = cosine**2
-    stokes = jnp.stack(
+    return jnp.stack(
         [
-            amplitude_squared * (((1.0 + cos_squared) / 2.0) ** 2 + cos_squared),
-            amplitude_squared * (1.0 - cos_squared) ** 2 / 4.0,
-            jnp.zeros_like(amplitude_squared),
-            -amplitude_squared * cosine * (1.0 + cos_squared),
+            ((1.0 + cos_squared) / 2.0) ** 2 + cos_squared,
+            (1.0 - cos_squared) ** 2 / 4.0,
+            jnp.zeros_like(cosine),
+            -cosine * (1.0 + cos_squared),
         ]
     )
-    return jnp.swapaxes(stokes, 1, 2).astype(jnp.float64)

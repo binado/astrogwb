@@ -18,7 +18,9 @@ from astrogwb.detector import (
     network_response,
     overlap_reduction_function,
     sample_network_response,
+    stokes_cross_power,
 )
+from astrogwb.waveform import polarization_stokes
 
 NUM_DRAWS = 40_000
 #: Standard errors a Monte Carlo mean may sit from its expectation.
@@ -127,3 +129,97 @@ def test_a_misaligned_pair_scatters_more_than_an_aligned_one() -> None:
         return np.asarray(jnp.var(draws, axis=0))
 
     assert np.all(variance(["S1", "R1"]) < variance(["S2", "R2"]))
+
+
+def _random_stokes(key: jax.Array, num_draws: int) -> jax.Array:
+    """Stokes parameters ``(4, num_draws, F)`` of random fully polarized sources."""
+    keys = jax.random.split(key, 4)
+    shape = (num_draws, FREQUENCIES.size)
+    plus = jax.random.normal(keys[0], shape) + 1j * jax.random.normal(keys[1], shape)
+    cross = jax.random.normal(keys[2], shape) + 1j * jax.random.normal(keys[3], shape)
+    return jnp.swapaxes(polarization_stokes(plus, cross), 1, 2)
+
+
+@pytest.mark.parametrize(
+    ("detector_1", "detector_2"), [("H1", "L1"), ("E1", "E2"), ("C1", "S1")]
+)
+def test_stokes_cross_power_of_unpolarized_sources_averages_to_the_isotropic_orf(
+    detector_1: str, detector_2: str
+) -> None:
+    polar_cosine, azimuth, polarization, _ = _isotropic_angles(
+        jax.random.key(4), NUM_DRAWS
+    )
+    unpolarized = jnp.array([1.0, 0.0, 0.0, 0.0])[:, None, None]
+
+    draws = 5.0 * stokes_cross_power(
+        FREQUENCIES,
+        detector_1,
+        detector_2,
+        polar_cosine,
+        azimuth,
+        polarization,
+        unpolarized,
+    )
+    expected = isotropic_overlap_reduction_function(FREQUENCIES, detector_1, detector_2)
+
+    assert np.all(_standard_errors(draws, expected) < MAX_STANDARD_ERRORS)
+
+
+def test_stokes_cross_power_of_a_detector_with_itself_is_blind_to_v() -> None:
+    polar_cosine, azimuth, polarization, _ = _isotropic_angles(jax.random.key(5), 100)
+    circular = jnp.array([0.0, 0.0, 0.0, 1.0])[:, None, None]
+
+    power = stokes_cross_power(
+        FREQUENCIES, "H1", "H1", polar_cosine, azimuth, polarization, circular
+    )
+
+    np.testing.assert_array_equal(np.asarray(power), 0.0)
+
+
+def test_stokes_cross_power_of_a_detector_with_itself_is_non_negative() -> None:
+    polar_cosine, azimuth, polarization, _ = _isotropic_angles(jax.random.key(6), 200)
+
+    power = stokes_cross_power(
+        FREQUENCIES,
+        "H1",
+        "H1",
+        polar_cosine,
+        azimuth,
+        polarization,
+        _random_stokes(jax.random.key(7), 200),
+    )
+
+    assert np.all(np.asarray(power) >= -1e-12 * np.abs(np.asarray(power)).max())
+
+
+@pytest.mark.parametrize(("detector_1", "detector_2"), [("H1", "L1"), ("S2", "R2")])
+def test_stokes_cross_power_rotates_linear_polarization_by_four_psi(
+    detector_1: str, detector_2: str
+) -> None:
+    """Turning the basis by pi/4 is the same as flipping the signs of Q and U."""
+    polar_cosine, azimuth, polarization, _ = _isotropic_angles(jax.random.key(9), 50)
+    stokes = _random_stokes(jax.random.key(10), 50)
+    flipped = stokes * jnp.array([1.0, -1.0, -1.0, 1.0])[:, None, None]
+
+    rotated = stokes_cross_power(
+        FREQUENCIES,
+        detector_1,
+        detector_2,
+        polar_cosine,
+        azimuth,
+        polarization + jnp.pi / 4,
+        stokes,
+    )
+    reflected = stokes_cross_power(
+        FREQUENCIES,
+        detector_1,
+        detector_2,
+        polar_cosine,
+        azimuth,
+        polarization,
+        flipped,
+    )
+
+    np.testing.assert_allclose(
+        np.asarray(rotated), np.asarray(reflected), atol=1e-12, rtol=1e-10
+    )
