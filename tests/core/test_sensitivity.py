@@ -9,9 +9,9 @@ from gwmock_signal.network import Network
 from astrogwb.detector import (
     Sensitivity,
     effective_psd,
+    isotropic_overlap_reduction_function,
     load_sensitivities_for_network,
     load_sensitivity_map,
-    overlap_reduction_function,
 )
 
 
@@ -74,7 +74,7 @@ def test_network_overlap_and_effective_psd(frequencies: np.ndarray) -> None:
     network = Network.from_name("H1L1V1")
     sensitivities = load_sensitivities_for_network(network)
 
-    orf = overlap_reduction_function(frequencies, "H1", "L1")
+    orf = isotropic_overlap_reduction_function(frequencies, "H1", "L1")
     assert orf.shape == frequencies.shape
     assert np.all(np.isfinite(orf))
 

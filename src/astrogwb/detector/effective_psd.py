@@ -11,6 +11,7 @@ geometry stays in ``overlap``; GWB signal spectra stay in ``astrogwb.gwb``.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
@@ -22,13 +23,62 @@ from astrogwb.frequency import bin_widths
 from astrogwb.utils import years_to_seconds
 
 from ._types import DetectorSpec
-from .overlap import overlap_reduction_function
+from .overlap import isotropic_overlap_reduction_function
 from .sensitivity import Sensitivity
 
 # Normalization of the overlap reduction function: the paper's
 # Gamma_ab = (2/5) gamma_ab, with gamma_ab the normalized ORF returned by
-# ``overlap_reduction_function`` (one for co-located aligned L-shaped detectors).
+# ``isotropic_overlap_reduction_function`` (one for co-located aligned L-shaped detectors).
 _OVERLAP_REDUCTION_FUNCTION_NORM = 0.4
+
+
+class PairTerms(NamedTuple):
+    r"""One detector pair of an optimally weighted cross-correlation network.
+
+    Attributes
+    ----------
+    first, second:
+        Indices of the two detectors in the network, ``first < second``.
+    weight:
+        :math:`w_{ab} = \gamma_{ab} / (S_{n,a} S_{n,b})`, zero where it is not
+        finite (out of band), ``(F,)``.
+    overlap:
+        The isotropic ORF :math:`\gamma_{ab}`, ``(F,)``.
+    """
+
+    first: int
+    second: int
+    weight: NDArray[np.float64]
+    overlap: NDArray[np.float64]
+
+
+def pair_terms(
+    frequencies: ArrayLike,
+    detectors: Sequence[DetectorSpec],
+    sensitivities: Mapping[str, Sensitivity],
+) -> list[PairTerms]:
+    r"""The optimal weight and isotropic ORF of every pair :math:`a < b`.
+
+    The weights of the optimal cross-correlation estimator, shared by
+    :func:`effective_psd` (:math:`S_{\mathrm{eff}}^{-2} \propto \sum w_{ab}
+    \gamma_{ab}`) and :func:`~astrogwb.detector.response.network_response`.
+    ``detectors`` are matched to ``sensitivities`` by their public name (gwmock
+    ``detector_names``): plain str codes match directly, while a
+    ``CustomDetector`` matches on its ``name``.
+    """
+    frequencies = np.asarray(frequencies, dtype=float)
+    det_list = list(detectors)
+    psds = [sensitivities[name](frequencies) for name in detector_names(det_list)]
+    pairs = []
+    for i, det1 in enumerate(det_list):
+        for j in range(i + 1, len(det_list)):
+            gamma = isotropic_overlap_reduction_function(frequencies, det1, det_list[j])
+            with np.errstate(invalid="ignore", divide="ignore"):
+                weight = gamma / (psds[i] * psds[j])
+            pairs.append(
+                PairTerms(i, j, np.where(np.isfinite(weight), weight, 0.0), gamma)
+            )
+    return pairs
 
 
 def effective_psd(
@@ -44,27 +94,16 @@ def effective_psd(
         \frac{\Gamma_{ab}^2}{S_{n,a} S_{n,b}}, \qquad
         \Gamma_{ab} = \tfrac{2}{5}\, \gamma_{ab},
 
-    with :math:`\gamma_{ab}` the normalized overlap reduction function.
-
-    ``detectors`` are matched to ``sensitivities`` by their public name
-    (gwmock ``detector_names``): plain str codes match directly, while a
-    ``CustomDetector`` matches on its ``name``.
+    with :math:`\gamma_{ab}` the normalized overlap reduction function, summed
+    over :func:`pair_terms` as :math:`\sum_{a<b} w_{ab} \gamma_{ab}`.
     """
     frequencies = np.asarray(frequencies, dtype=float)
-    det_list = list(detectors)
-    if len(det_list) < 2:
+    if len(list(detectors)) < 2:
         return np.full(frequencies.shape, np.inf, dtype=float)
 
-    names = detector_names(det_list)
-    psds = [sensitivities[name](frequencies) for name in names]
-
     inverse_variance = np.zeros(frequencies.shape, dtype=float)
-    for i, det1 in enumerate(det_list):
-        for j in range(i + 1, len(det_list)):
-            gamma = overlap_reduction_function(frequencies, det1, det_list[j])
-            with np.errstate(invalid="ignore", divide="ignore"):
-                contribution = gamma**2 / (psds[i] * psds[j])
-            inverse_variance += np.where(np.isfinite(contribution), contribution, 0.0)
+    for pair in pair_terms(frequencies, detectors, sensitivities):
+        inverse_variance += pair.weight * pair.overlap
 
     with np.errstate(invalid="ignore", divide="ignore"):
         result = 1.0 / (_OVERLAP_REDUCTION_FUNCTION_NORM * np.sqrt(inverse_variance))

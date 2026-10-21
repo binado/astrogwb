@@ -11,8 +11,8 @@ from gwmock_signal.network import Network
 from astrogwb.detector import (
     OrientationReference,
     align_detector,
+    isotropic_overlap_reduction_function,
     load_detector,
-    overlap_reduction_function,
     pairwise_overlap_reduction_function,
     relative_orientation,
     resolve_detector,
@@ -65,7 +65,7 @@ def test_resolve_detector_unknown_name_raises() -> None:
 
 
 def test_orf_colocated_is_normalized(frequencies: np.ndarray) -> None:
-    actual = overlap_reduction_function(frequencies, "H1", "H1")
+    actual = isotropic_overlap_reduction_function(frequencies, "H1", "H1")
 
     np.testing.assert_allclose(actual, np.ones_like(frequencies))
 
@@ -161,7 +161,7 @@ def test_orf_matches_direct_sky_quadrature(
 ) -> None:
     freqs = np.concatenate([[0.0], np.geomspace(0.01, max_frequency, 400)])
 
-    actual = overlap_reduction_function(freqs, detector_1, detector_2)
+    actual = isotropic_overlap_reduction_function(freqs, detector_1, detector_2)
 
     expected = _sky_quadrature_orf(freqs, detector_1, detector_2)
     np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1e-12)
@@ -170,8 +170,8 @@ def test_orf_matches_direct_sky_quadrature(
 def test_orf_accepts_mixed_str_and_custom_detector(frequencies: np.ndarray) -> None:
     custom_h1 = resolve_detector("H1")
 
-    from_str = overlap_reduction_function(frequencies, "H1", "L1")
-    mixed = overlap_reduction_function(frequencies, custom_h1, "L1")
+    from_str = isotropic_overlap_reduction_function(frequencies, "H1", "L1")
+    mixed = isotropic_overlap_reduction_function(frequencies, custom_h1, "L1")
 
     np.testing.assert_allclose(mixed, from_str)
 
@@ -195,7 +195,7 @@ def test_matches_gwfast_reference(
         if key == "frequencies":
             continue
         det1_name, det2_name = key.split("_", maxsplit=1)
-        ours = overlap_reduction_function(freqs, det1_name, det2_name)
+        ours = isotropic_overlap_reduction_function(freqs, det1_name, det2_name)
         np.testing.assert_allclose(ours, reference, atol=1e-4)
 
 
@@ -343,7 +343,7 @@ def test_align_detector_reaches_target_orientation(
 def test_orf_long_wavelength_scales_as_cos_two_orientation() -> None:
     def gamma(angle_deg: float) -> float:
         rotated = align_detector("S1", "R1", math.radians(angle_deg))
-        return float(overlap_reduction_function([1.0], "S1", rotated)[0])
+        return float(isotropic_overlap_reduction_function([1.0], "S1", rotated)[0])
 
     assert gamma(30.0) / gamma(0.0) == pytest.approx(0.5, abs=1e-3)
     assert abs(gamma(45.0)) < 1e-3 * abs(gamma(0.0))

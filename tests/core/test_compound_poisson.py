@@ -449,3 +449,22 @@ def test_grid_log_posterior_matches_the_numpyro_log_density_per_network(
         ]
     )
     np.testing.assert_allclose(result, expected, rtol=1e-10)
+
+
+@pytest.mark.parametrize("index", range(NUM_NETWORKS))
+def test_point_set_under_a_network_response_has_the_gaussian_moments(
+    build: Any, build_gaussian: Any, networks: Network, index: int
+) -> None:
+    """Each response draw reweights the source across the band in both likelihoods."""
+    draws = jax.random.gamma(jax.random.key(index), 3.0, (8, 12)) / 3.0
+    network = _single(networks, index)._replace(
+        response=draws / jnp.mean(draws, axis=0)
+    )
+    weights, amplitudes, _ = build().point_set(FIDUCIALS, network)
+
+    expected = build_gaussian(OBSERVATION_TIME).relative_variance(FIDUCIALS, network)
+
+    assert weights.shape[-1] == 8
+    assert float(jnp.sum(weights * amplitudes**2)) == pytest.approx(
+        float(expected), rel=1e-10
+    )

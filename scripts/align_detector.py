@@ -25,7 +25,7 @@ from gwmock_signal.detector import CustomDetector
 from astrogwb.detector import (
     OrientationReference,
     align_detector,
-    overlap_reduction_function,
+    isotropic_overlap_reduction_function,
     relative_orientation,
 )
 
@@ -95,7 +95,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     print(geometry_block(rotated, args.name or args.detector))
 
-    gamma = overlap_reduction_function(
+    gamma = isotropic_overlap_reduction_function(
         [SUMMARY_FREQUENCY_HZ], args.reference_detector, rotated
     )[0]
     for reference in get_args(OrientationReference):
