@@ -133,8 +133,12 @@ def _():
     Gaussian in the amplitude with variance $\rho^{-2} + A^2 s^2$. The
     variance comes from the model at each grid point, never from the data.
     Variants: `detector` (no shot noise), `amplitude` ($s^2$ at each point),
-    `fixed` ($s^2$ at the fiducial), and `per_frequency` ($u_f =
-    \sqrt{V_f}$, a cross-check where $\Xi_0$ and $n$ tilt the template).
+    `fixed` ($s^2$ at the fiducial), `per_frequency` ($u_f =
+    \sqrt{V_f}$, a cross-check where $\Xi_0$ and $n$ tilt the template), and
+    `modes`, which keeps the $k$ leading eigenvectors of the whitened fiducial
+    catalog covariance (dropped eigenvalues summing to at most
+    `modes_tolerance`) with their $k \times k$ block $B$ at each point. The
+    figures and tables show `modes`.
 
     **Prediction.** Every draw $\theta_k$ is generated once, at the window's
     lower edge $z_{\min}$. A $(2,2)$-mode aligned-spin waveform scales
@@ -205,12 +209,13 @@ def _():
     xi_n_window, xi_n_size = (0.3, 3.0), 55  # prior range
 
     # Likelihood variants evaluated per problem, and the one every figure
-    # shows. "amplitude" evaluates s^2 at each grid point, so sigma_eps depends
-    # on Lambda; "fixed" would pin it at the fiducial (the A/B section compares).
-    # Every variant's shot noise carries the per-source network response, from
-    # `response_draws` isotropic draws, as the network injections do; "modes"
-    # keeps the leading eigenmodes of that catalog covariance.
-    likelihood_variant = "amplitude"
+    # shows. "modes" keeps the leading eigenmodes of the catalog covariance,
+    # with their block evaluated at each grid point; "amplitude" is its
+    # rank-one limit with s^2 at each point, and "fixed" pins s^2 at the
+    # fiducial (the A/B section compares). Every variant's shot noise carries
+    # the per-source network response, from `response_draws` isotropic draws,
+    # as the network injections do.
+    likelihood_variant = "modes"
     problem_variants = {
         "H0": ("detector", "amplitude", "fixed", "modes"),
         "H0_Omega_m": ("detector", "amplitude", "fixed", "modes"),
@@ -1254,13 +1259,15 @@ def _():
 
     - **Effect of shot noise**: the shift of the mean and the ratio of the
       standard deviations of each variant against `detector`.
+    - **Modes vs amplitude**: the reported `modes` likelihood against its
+      rank-one limit, in detector $\sigma$.
     - **A/B, fixed vs per-point $s^2$**: a covariance that depends on the
       parameters adds its $\ln\det$ to the likelihood, which can carry
-      spurious information. If pinning $s^2$ at the fiducial moves no mean or
-      standard deviation by more than `ab_tolerance` detector $\sigma$, the
-      fixed value is the safer choice.
+      spurious information. Within the rank-one form, if pinning $s^2$ at the
+      fiducial moves no mean or standard deviation by more than
+      `ab_tolerance` detector $\sigma$, the parameter dependence carries none.
     - **Leakage**: for $(\Xi_0, n)$, which tilt the template, the
-      per-frequency direction against the amplitude one.
+      per-frequency direction against the reported `modes`.
     """)
     return
 
@@ -1361,11 +1368,18 @@ def _(shot_noise_moments):
             compare_moments(shot_noise_moments, _variant, "detector").assign(
                 likelihood=_variant
             )
-            for _variant in ("amplitude", "fixed", "per_frequency")
+            for _variant in ("modes", "amplitude", "fixed", "per_frequency")
             if (shot_noise_moments["likelihood"] == _variant).any()
         ]
     )
     shot_noise_effect
+    return
+
+
+@app.cell
+def _(shot_noise_moments):
+    modes_comparison = compare_moments(shot_noise_moments, "modes", "amplitude")
+    modes_comparison
     return
 
 
@@ -1380,12 +1394,13 @@ def _(ab_tolerance, shot_noise_moments):
     elif _worst < ab_tolerance:
         _verdict = (
             f"fixed s^2 is within {ab_tolerance} sigma of per-point s^2 "
-            f"everywhere (worst {_worst:.3f}): adopt likelihood_variant = 'fixed'"
+            f"everywhere (worst {_worst:.3f}): the per-point ln det carries "
+            "no spurious information"
         )
     else:
         _verdict = (
             f"fixed s^2 moves a moment by {_worst:.3f} sigma > {ab_tolerance}: "
-            "keep the per-point 'amplitude' variant"
+            "the covariance must be evaluated at each point"
         )
     print(_verdict)
     ab_comparison
@@ -1394,7 +1409,7 @@ def _(ab_tolerance, shot_noise_moments):
 
 @app.cell
 def _(shot_noise_moments):
-    leakage = compare_moments(shot_noise_moments, "per_frequency", "amplitude")
+    leakage = compare_moments(shot_noise_moments, "per_frequency", "modes")
     leakage
     return
 
@@ -1402,8 +1417,9 @@ def _(shot_noise_moments):
 @app.cell
 def _(FIDUCIALS, fiducial_network, h0_posteriors):
     shot_noise_variants_figure, _ax = plt.subplots()
-    # Dashed on top: "fixed" lies on "amplitude" to well below a line width.
-    _styles = {"detector": "-", "amplitude": "-", "fixed": "--"}
+    # Broken lines on top: "amplitude" and "fixed" lie on the reported "modes"
+    # to well below a line width.
+    _styles = {"detector": "-", "modes": "-", "amplitude": "--", "fixed": ":"}
     for _variant, (_grids, _log_densities) in h0_posteriors.items():
         _ax.plot(
             _grids["H0"],
