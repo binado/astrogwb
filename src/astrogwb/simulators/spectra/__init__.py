@@ -1,6 +1,7 @@
 """Background spectral-density data, metadata and simulator."""
 
 from astrogwb.simulators.spectra.ensemble import (
+    network_spectra_ensemble,
     spectra_ensemble,
     spectra_ensemble_path,
 )
@@ -16,6 +17,7 @@ from astrogwb.simulators.spectra.metadata import (
     Hyperparameter,
 )
 from astrogwb.simulators.spectra.network import (
+    JointNetworkSpectralDensitySimulator,
     NetworkSpectralDensityMetadata,
     NetworkSpectralDensitySimulator,
     draw_extrinsic_angles,
@@ -35,9 +37,11 @@ __all__ = [
     "ChunkedNetworkSum",
     "ChunkedPowerSum",
     "Hyperparameter",
+    "JointNetworkSpectralDensitySimulator",
     "NetworkSpectralDensityMetadata",
     "NetworkSpectralDensitySimulator",
     "draw_extrinsic_angles",
+    "network_spectra_ensemble",
     "normalize_spectra",
     "poisson_counts_forward_model",
     "spectra_ensemble",

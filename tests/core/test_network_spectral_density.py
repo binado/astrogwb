@@ -21,9 +21,12 @@ from astrogwb.simulators.core import batch_keys, load, write
 from astrogwb.simulators.spectra import (
     BackgroundSpectralDensityMetadata,
     BackgroundSpectralDensitySimulator,
+    JointNetworkSpectralDensitySimulator,
     NetworkSpectralDensityMetadata,
     NetworkSpectralDensitySimulator,
     draw_extrinsic_angles,
+    network_spectra_ensemble,
+    spectra_ensemble_path,
 )
 from astrogwb.waveform import WaveformMetadata, quadrupolar_stokes_factors
 
@@ -190,6 +193,59 @@ def test_network_metadata_key_depends_on_the_noise_curves(
     )
 
     assert other.key() != network_metadata.key()
+
+
+@pytest.fixture
+def joint_metadata(
+    background_metadata: BackgroundSpectralDensityMetadata,
+) -> list[NetworkSpectralDensityMetadata]:
+    """Two networks sharing detectors, one pair in the opposite order."""
+    return [
+        NetworkSpectralDensityMetadata(
+            **background_metadata.model_dump(),
+            detectors=detectors,
+            psd_references={name: PSD_REFERENCES[name] for name in detectors},
+        )
+        for detectors in (DETECTORS, ["C1", "R1"])
+    ]
+
+
+@pytest.mark.parametrize("index", [0, 1])
+def test_joint_simulator_draws_what_each_network_simulator_draws(
+    joint_metadata: list[NetworkSpectralDensityMetadata], index: int
+) -> None:
+    key = batch_keys(41, 1)[0]
+    joint = JointNetworkSpectralDensitySimulator(joint_metadata, chunk_size=4)(key)
+
+    single = NetworkSpectralDensitySimulator(joint_metadata[index], chunk_size=4)(key)
+
+    np.testing.assert_allclose(
+        joint[index]["spectral_density"], single["spectral_density"], rtol=1e-12
+    )
+
+
+def test_network_spectra_ensemble_reads_back_the_draws_it_wrote(
+    tmp_path: Path, joint_metadata: list[NetworkSpectralDensityMetadata]
+) -> None:
+    drawn = network_spectra_ensemble(joint_metadata, 41, 2, tmp_path, chunk_size=4)
+
+    cached = network_spectra_ensemble(joint_metadata, 41, 2, tmp_path, chunk_size=4)
+
+    for fresh, read in zip(drawn, cached, strict=True):
+        np.testing.assert_array_equal(
+            read["spectral_density"], fresh["spectral_density"]
+        )
+
+
+def test_network_spectra_ensemble_caches_each_network_under_its_own_key(
+    tmp_path: Path, joint_metadata: list[NetworkSpectralDensityMetadata]
+) -> None:
+    network_spectra_ensemble(joint_metadata, 41, 1, tmp_path, chunk_size=4)
+
+    assert all(
+        spectra_ensemble_path(tmp_path, record, 41, 0).is_file()
+        for record in joint_metadata
+    )
 
 
 def test_extrinsic_angles_are_isotropic_columns() -> None:

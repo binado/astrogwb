@@ -25,7 +25,9 @@ Every notebook here drives the `astrogwb.paper` configuration layer, so they all
   figures.
 - **`cosmology_grid_posteriors.py`** — marimo notebook. Grid posteriors for
   $H_0$, $(H_0, \Omega_m)$ and $(\Xi_0, n)$ across the six detector networks,
-  from a zero-noise Poisson injection, modeled with the rescaled
+  from a zero-noise Poisson injection as each network records it
+  (`network_spectra_ensemble`: one catalog, six spectra through the per-source
+  antenna patterns), modeled with the rescaled
   reference-redshift spectrum (`astrogwb.gwb.importance`: $2^{14}$ intrinsic
   draws on a scrambled Sobol net, one waveform each at the window's lower edge, rescaled to 32 redshift
   nodes; a different seed). The log densities are cached under
@@ -34,7 +36,8 @@ Every notebook here drives the `astrogwb.paper` configuration layer, so they all
   and shared by all six networks (`grid_log_posterior`); the numbers
   equal the per-network evaluation, so existing cache files stay valid. The
   injection is one catalog realization, so its physical shot noise is modeled
-  as a rank-one covariance term from the same reference catalog
+  as a rank-one covariance term from the same reference catalog, with each
+  network's response (`Network.response`, its moments held per network)
   (`ImportanceGaussianLikelihood`'s `shot_noise` mode); each problem is evaluated with every
   likelihood variant (`detector`, `amplitude`, `fixed`, `per_frequency`), the
   figures show `likelihood_variant`, and a comparison section reports the
@@ -44,8 +47,9 @@ Every notebook here drives the `astrogwb.paper` configuration layer, so they all
 - **`madau_dickinson_grid.py`** — marimo notebook. Posteriors on the
   Madau-Dickinson shape $(z_{\mathrm{peak}}, \gamma, \kappa)$ for the six
   detector networks (the paper's astrophysical-parameter section), from the
-  same zero-noise Poisson injection and rescaled reference catalog as
-  `cosmology_grid_posteriors.py`, on a **ridge-aligned grid**. NUTS is not
+  same network-recorded Poisson injection and rescaled reference catalog as
+  `cosmology_grid_posteriors.py`, with the response-aware `modes` likelihood,
+  on a **ridge-aligned grid**. NUTS is not
   used: the posterior is too thin and curved for it to sample reliably. The data pin the
   spectrum amplitude to about $10^{-4}$ to $10^{-3}$ of the prior range, so the
   posterior is a thin curved sheet that a uniform grid steps over. The grid runs
@@ -83,11 +87,12 @@ Every notebook here drives the `astrogwb.paper` configuration layer, so they all
   under `default_cache_dir() / "ensembles"` (`spectra_ensemble`) and shared
   with `shot_noise_coverage.py`.
 - **`shot_noise_coverage.py`** — marimo notebook. Calibration of the
-  shot-noise likelihood for $H_0$: the Poisson ensemble of
-  `ensemble_spectrum.py` as injections (read from the shared cache),
-  plus Gaussian detector noise per network, scored on an $H_0$ grid against an
+  shot-noise likelihood for $H_0$: the catalogs of the Poisson ensemble of
+  `ensemble_spectrum.py`, each recorded by every network
+  (`network_spectra_ensemble`, cached one file per network and draw), plus
+  Gaussian detector noise per network, scored on an $H_0$ grid against an
   independent `IMRPhenomXAS_NRTidalv3` reference catalog with the `detector`,
-  `amplitude` and `fixed` likelihoods. Compares the model's $\rho s$ with the
+  `amplitude`, `fixed` and `amplitude_sky` (no response) likelihoods. Compares the model's $\rho s$ with the
   injections' realized scatter, and reports 68%/95% coverage and the mean and
   variance of $z = (\bar H_0 - H_0^{\mathrm{true}})/\mathrm{sd}$ with
   bootstrap errors, and a PIT/$z$ figure at the fiducial network; writes

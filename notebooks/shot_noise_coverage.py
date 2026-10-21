@@ -24,9 +24,14 @@ with app.setup(hide_code=True):
     from numpy.typing import NDArray
     from scipy import stats
 
-    from astrogwb.detector import effective_psd, gaussian_bin_scale
+    from astrogwb.detector import (
+        effective_psd,
+        gaussian_bin_scale,
+        sample_network_response,
+    )
     from astrogwb.frequency import frequency_mask
     from astrogwb.gwb.importance import (
+        INCLINATION_SECOND_MOMENT,
         reference_catalog,
         reference_catalog_stem,
     )
@@ -52,6 +57,7 @@ with app.setup(hide_code=True):
         save_figures,
         use_paper_style,
     )
+    from astrogwb.paper.posteriors import network_injection_metadata
     from astrogwb.populations import build_population
     from astrogwb.simulators.core import batch_keys, load, write
     from astrogwb.simulators.polarization_power import (
@@ -60,7 +66,7 @@ with app.setup(hide_code=True):
     )
     from astrogwb.simulators.spectra import (
         BackgroundSpectralDensityMetadata,
-        spectra_ensemble,
+        network_spectra_ensemble,
     )
 
     # Log-likelihood of every injection at every grid point, (M, G): data is
@@ -101,10 +107,19 @@ def _():
 
     $$
     S_h^{\rm cat}(f) = \frac{1}{T} \sum_{i=1}^{N_{\rm ev}}
-    \left[ |\tilde h_{+,i}(f)|^2 + |\tilde h_{\times,i}(f)|^2 \right],
+    r_i(f) \left[ |\tilde h_{+,i}(f)|^2 + |\tilde h_{\times,i}(f)|^2 \right],
     \qquad
     \left\langle S_h^{\rm cat}(f) \right\rangle = S_h(f|\Lambda).
     $$
+
+    Each source reaches the network through its own antenna patterns at its
+    sky position and polarization angle: $r_i(f)$ is its network response,
+    the optimally weighted sum over detector pairs of its cross-power relative
+    to its sky-averaged power, with $\langle r \rangle = 1$ over isotropic
+    orientations. The injections are drawn this way
+    (`NetworkSpectralDensitySimulator`), so the six networks record one catalog
+    as six spectra, and the shot noise of each carries its own
+    $\langle r_f r_{f'} \rangle$.
 
     The data add detector noise, and the finite catalog adds shot noise
     $n_{\rm shot} \equiv S_h^{\rm cat} - S_h(f|\Lambda)$:
@@ -212,7 +227,8 @@ def _():
     $$
 
     This is exact when the shot noise is perfectly correlated across bins, and an
-    upper bound otherwise. For an injection without detector noise, the amplitude
+    upper bound otherwise. Every $V_k$ and $\sigma_\epsilon$ below carries the
+    network's response, from isotropic response draws. For an injection without detector noise, the amplitude
     estimator above gives $\hat\epsilon = \hat A_{\rm MLE}/A_t - 1$. With
     detector noise too, the relative amplitude has variance
     $\rho^{-2} + \sigma_\epsilon^2$, and the ratio of shot to detector scatter is
@@ -248,6 +264,7 @@ def _():
     | `detector` | $0$ |
     | `amplitude` | $\sigma_\epsilon(\Lambda)\, S_h(\Lambda)$, with $\sigma_\epsilon$ re-evaluated at every grid point |
     | `fixed` | $\sigma_\epsilon(\Lambda_t)\, S_h(\Lambda)$, with $\sigma_\epsilon$ frozen at the true values |
+    | `amplitude_sky` | `amplitude` with the sky-averaged $\sigma_\epsilon$, no response: what the response adds |
 
     ### Calibration statistics
 
@@ -278,8 +295,10 @@ def _():
 
     ### What the notebook does
 
-    - $M$ independent Poisson catalogs at $\Lambda_t$ are the injections
-      $S_h^{\rm cat}$, shared with `notebooks/ensemble_spectrum.py`.
+    - $M$ independent Poisson catalogs at $\Lambda_t$, each recorded by every
+      network, are the injections $S_h^{\rm cat}$. They are the catalogs of the
+      sky-averaged ensemble of `notebooks/ensemble_spectrum.py` (same record
+      and keys), seen through the per-source response.
     - Each gets $R$ detector-noise draws $n_{\rm det}$. Detector noise is free next
       to an injection, and the error on $\mathrm{Var}(z)$ is then set by the $M$
       shot-noise draws rather than by $\sqrt{2/M}$ of a single detector draw.
@@ -307,8 +326,9 @@ def _():
     ROOT_DIR = Path(__file__).resolve().parents[1]
     FIGURES = ROOT_DIR / FIGURES_DIR / "shot_noise_coverage"
 
-    # The injections are the Poisson ensemble of ensemble_spectrum.py:
-    # the same record, seed and cache, so the draws are made once for both.
+    # The injections are the catalogs of the Poisson ensemble of
+    # ensemble_spectrum.py, as each network records them: the same record and
+    # keys, with the network added, so each network's draws have their own key.
     num_injections = 1000
     ensemble_seed = 41
     noise_seed = 2000  # detector noise, one stream per network
@@ -322,8 +342,12 @@ def _():
     num_samples = 2**14  # on a scrambled Sobol net; see importance_convergence.py
     redshift_nodes = 32
     catalog_chunk_size = 4096
-    chunk_size = 16_384  # injection waveforms per reduced chunk
+    # Injection waveforms per reduced chunk: peak memory is (pairs, F, chunk)
+    # for the 12 detector pairs of the six networks.
+    chunk_size = 8192
     grid_chunk_size = 8
+    # Isotropic draws of each network's response, which its shot noise carries.
+    response_draws, response_seed = 32_768, 0
 
     observation_time = 1.0  # years
     minimum_frequency = 2.0
@@ -342,6 +366,7 @@ def _():
         catalog_chunk_size = 512
         chunk_size = 512
         grid_chunk_size = 4
+        response_draws = 64
         h0_window, h0_size = (40.0, 100.0), 31
         write_figures_default = False
 
@@ -386,6 +411,10 @@ def _():
         waveform=waveform,
         population=population,
     )
+    network_injections = {
+        name: network_injection_metadata(injection_metadata, registry, name)
+        for name in network_names
+    }
     ensemble_dir = default_cache_dir() / "ensembles"
 
     write_figures = mo.ui.switch(value=write_figures_default, label="Write figures")
@@ -408,9 +437,9 @@ def _():
         grid_chunk_size,
         h0_size,
         h0_window,
-        injection_metadata,
         maximum_frequency,
         minimum_frequency,
+        network_injections,
         network_names,
         noise_draws,
         noise_seed,
@@ -419,6 +448,8 @@ def _():
         population,
         redshift_nodes,
         registry,
+        response_draws,
+        response_seed,
         write_figures,
     )
 
@@ -494,7 +525,7 @@ def posterior_statistics(
     log_density: NDArray[np.float64],
     truth: float,
 ) -> dict[str, NDArray[np.float64]]:
-    """PIT of the truth, mean and sd of each grid posterior.
+    """PIT of the truth, mean, sd, ``z`` and bias of each grid posterior.
 
     ``log_density`` is ``(M, G)``. The PIT is the posterior CDF at the truth,
     by the trapezoid rule; a calibrated posterior gives a uniform PIT.
@@ -512,7 +543,13 @@ def posterior_statistics(
     pit = np.array([np.interp(truth, grid, row) for row in cdf])
     mean = np.trapezoid(grid * density, grid, axis=-1)
     sd = np.sqrt(np.trapezoid((grid - mean[:, None]) ** 2 * density, grid, axis=-1))
-    return {"pit": pit, "mean": mean, "sd": sd, "z": (mean - truth) / sd}
+    return {
+        "pit": pit,
+        "mean": mean,
+        "sd": sd,
+        "z": (mean - truth) / sd,
+        "bias": mean - truth,
+    }
 
 
 @app.function(hide_code=True)
@@ -523,7 +560,7 @@ def coverage_row(
     n_bootstrap: int = 2000,
     seed: int = 0,
 ) -> dict[str, float]:
-    """Interval coverage and the mean and variance of ``z``, with errors.
+    """Interval coverage, the mean and variance of ``z`` and the bias, with errors.
 
     The statistics are ``(num_injections * R,)``, injection-major: ``R``
     detector-noise draws per injection. Those draws share their injection's
@@ -531,7 +568,9 @@ def coverage_row(
     over injections, each resampled with all of its noise draws.
     """
 
-    def summary(pit: NDArray[np.float64], z: NDArray[np.float64]) -> dict:
+    def summary(
+        pit: NDArray[np.float64], z: NDArray[np.float64], bias: NDArray[np.float64]
+    ) -> dict:
         axes = (-2, -1)
         values = {
             f"cover {mass:.0%}": np.mean(
@@ -541,14 +580,17 @@ def coverage_row(
         }
         values["mean z"] = np.mean(z, axis=axes)
         values["var z"] = np.var(z, axis=axes)
+        values["bias"] = np.mean(bias, axis=axes)
         return values
 
-    pit = statistics["pit"].reshape(num_injections, -1)
-    z = statistics["z"].reshape(num_injections, -1)
+    pit, z, bias = (
+        statistics[name].reshape(num_injections, -1) for name in ("pit", "z", "bias")
+    )
     index = np.random.default_rng(seed).integers(
         0, num_injections, size=(n_bootstrap, num_injections)
     )
-    point, resampled = summary(pit, z), summary(pit[index], z[index])
+    point = summary(pit, z, bias)
+    resampled = summary(pit[index], z[index], bias[index])
     row: dict[str, float] = {}
     for name, value in point.items():
         row[name] = float(value)
@@ -786,8 +828,9 @@ def _():
     ## Model on the grid
 
     The rescaled spectrum and its shot-noise variance at every $H_0$ grid
-    point, once; then $s^2$ at the fiducial per network (the adopted `fixed`
-    variant) and at every grid point (`amplitude`).
+    point, once; then, with each network's response, $s^2$ at the fiducial
+    (`fixed`) and at every grid point (`amplitude`, the adopted variant), and
+    the sky-averaged $s^2$ at every grid point (`amplitude_sky`).
     """)
 
 
@@ -805,6 +848,7 @@ def _(
     per_network,
     population,
     redshift_nodes,
+    responses,
 ):
     catalog_data = ensure_reference_catalog(
         catalog_metadata, catalog_seed, CATALOGS_ROOT, chunk_size=catalog_chunk_size
@@ -836,8 +880,7 @@ def _(
 
     # s^2 of each network: the catalog projected on its noise-weighted template.
     @jax.jit
-    def _relative_variance(likelihood, h0, scale, mask):
-        network = LikelihoodNetwork(scale, mask)
+    def _relative_variance(likelihood, h0, network):
         return jax.lax.map(
             lambda value: likelihood.relative_variance(
                 {**FIDUCIALS, "H0": value}, network
@@ -846,19 +889,31 @@ def _(
             batch_size=grid_chunk_size,
         )
 
-    grid_relative_variance = {
-        _name: _relative_variance(
-            likelihood, jnp.asarray(h0_grid), jnp.asarray(_scale), jnp.asarray(_mask)
+    def _network(name, response=True):
+        scale, mask = per_network[name]
+        network = LikelihoodNetwork(jnp.asarray(scale), jnp.asarray(mask))
+        if not response:
+            return network
+        network = network._replace(response=responses[name])
+        # Held so s^2 is not projected once per response draw at every point;
+        # exact, as no density site varies.
+        return network._replace(
+            response_moments=likelihood.response_moments(FIDUCIALS, network)
         )
-        for _name, (_scale, _mask) in per_network.items()
+
+    grid_relative_variance = {
+        _name: _relative_variance(likelihood, jnp.asarray(h0_grid), _network(_name))
+        for _name in per_network
+    }
+    sky_relative_variance = {
+        _name: _relative_variance(
+            likelihood, jnp.asarray(h0_grid), _network(_name, response=False)
+        )
+        for _name in per_network
     }
     fiducial_relative_variance = {
-        _name: float(
-            likelihood.relative_variance(
-                FIDUCIALS, LikelihoodNetwork(jnp.asarray(_scale), jnp.asarray(_mask))
-            )
-        )
-        for _name, (_scale, _mask) in per_network.items()
+        _name: float(likelihood.relative_variance(FIDUCIALS, _network(_name)))
+        for _name in per_network
     }
     return (
         fiducial_prediction,
@@ -868,6 +923,7 @@ def _(
         grid_relative_variance,
         h0_grid,
         likelihood,
+        sky_relative_variance,
     )
 
 
@@ -894,14 +950,29 @@ def _(
     return (per_network,)
 
 
+@app.cell
+def _(frequencies, network_names, registry, response_draws, response_seed):
+    responses = {}
+    for _name in network_names:
+        _detectors, _sensitivities = registry.build_network(_name)
+        responses[_name] = sample_network_response(
+            jax.random.key(response_seed),
+            response_draws,
+            frequencies,
+            _detectors,
+            _sensitivities,
+        )
+    return (responses,)
+
+
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
     ## Injections
 
-    $M$ Poisson spectra at the fiducials: the ensemble of
-    `notebooks/ensemble_spectrum.py`, read from the shared cache
-    (`spectra_ensemble`, one file per draw).
+    $M$ Poisson catalogs at the fiducials, each recorded by every network, from
+    one waveform pass per catalog (`network_spectra_ensemble`), cached one file
+    per network and draw.
     """)
 
 
@@ -911,20 +982,25 @@ def _(
     ensemble_dir,
     ensemble_seed,
     frequencies,
-    injection_metadata,
+    network_injections,
     num_injections,
 ):
-    _ensemble = spectra_ensemble(
-        injection_metadata,
+    _ensembles = network_spectra_ensemble(
+        list(network_injections.values()),
         ensemble_seed,
         num_injections,
         ensemble_dir,
         chunk_size=chunk_size,
+        source_chunk_size=65_536,
     )
-    injections = _ensemble["spectral_density"]
-    injected_events = np.asarray(_ensemble["n_events"])
-    print(f"injection record {injection_metadata.key()}, seed {ensemble_seed}")
-    assert injections.shape[1] == frequencies.size
+    injections = {
+        _name: _ensemble["spectral_density"]
+        for _name, _ensemble in zip(network_injections, _ensembles, strict=True)
+    }
+    injected_events = np.asarray(_ensembles[0]["n_events"])
+    for _name, _metadata in network_injections.items():
+        print(f"{_name}: injection record {_metadata.key()}, seed {ensemble_seed}")
+        assert injections[_name].shape[1] == frequencies.size
     print(
         f"{num_injections} injections, events {injected_events.min():,} to "
         f"{injected_events.max():,}"
@@ -982,7 +1058,7 @@ def _(fiducial_prediction, fiducial_relative_variance, injections, per_network):
         _norm = np.sum(_template**2 * _weight)
         _rho = np.sqrt(_norm)
         _model = _rho * np.sqrt(fiducial_relative_variance[_name])
-        _eps = (injections - _template) @ (_template * _weight) / _norm
+        _eps = (injections[_name] - _template) @ (_template * _weight) / _norm
         _empirical = _rho * np.std(_eps, ddof=1)
         _rows.append(
             {
@@ -1015,7 +1091,8 @@ def _():
 
     **Figure (variance).** The diagonal $\hat C_{kk}$ against frequency, over the
     bins the fiducial network can use, with the model's per-bin
-    $V_k / S_h^t(f_k)^2$ from the reference catalog for comparison.
+    $V_k / S_h^t(f_k)^2$ from the reference catalog, with the network's
+    $\langle r_f^2 \rangle$, for comparison.
 
     **Figure (correlation).** The heatmap of $\hat R_{kl}$. A block of
     correlation close to 1 is the band where shot noise acts as a single
@@ -1031,6 +1108,7 @@ def _(
     frequencies,
     injections,
     per_network,
+    responses,
 ):
     _template = np.asarray(fiducial_prediction)
     _mask = per_network[fiducial_network][1] & (_template > 0.0)
@@ -1038,10 +1116,21 @@ def _(
     # Squared SNR of the template in each usable bin: the weight of a bin in the
     # likelihood, and the whitening of the shot noise by the detector noise.
     eps_snr_squared = (_template[_mask] / per_network[fiducial_network][0][_mask]) ** 2
-    eps_samples = (injections[:, _mask] - _template[_mask]) / _template[_mask]
+    eps_samples = (
+        injections[fiducial_network][:, _mask] - _template[_mask]
+    ) / _template[_mask]
     eps_covariance = np.cov(eps_samples, rowvar=False)
     eps_variance = np.diag(eps_covariance)
-    model_variance = np.asarray(fiducial_variance)[_mask] / _template[_mask] ** 2
+    # The per-bin variance with the response's <r_f^2> for the inclination's.
+    _orientation = (
+        np.mean(np.asarray(responses[fiducial_network]) ** 2, axis=0)
+        / INCLINATION_SECOND_MOMENT
+    )
+    model_variance = (
+        np.asarray(fiducial_variance)[_mask]
+        * _orientation[_mask]
+        / _template[_mask] ** 2
+    )
     eps_correlation = eps_covariance / np.sqrt(np.outer(eps_variance, eps_variance))
 
     variance_figure, (_ax, _ax_ratio) = plt.subplots(
@@ -1053,7 +1142,7 @@ def _(
     )
     _ax.loglog(eps_frequencies, eps_variance, label="injections")
     _ax.loglog(eps_frequencies, model_variance, "--", label="model")
-    _ax.set(ylabel=r"$\mathrm{Var}[\epsilon(f)]$", ylim=(1e-6, 1e-5))
+    _ax.set(ylabel=r"$\mathrm{Var}[\epsilon(f)]$")
     _ax.legend(fontsize="small")
     _ax_ratio.semilogx(eps_frequencies, model_variance / eps_variance)
     _ax_ratio.axhline(1.0, color="0.5", lw=1)
@@ -1249,9 +1338,12 @@ def _():
     catalog (`ImportanceGaussianLikelihood.catalog_covariance`), with no Poisson
     realizations:
     $\mathrm{Cov}[S_k, S_{k'}] = (\mathcal{R}/T)\,\langle P_k P_{k'} \rangle$,
-    on the redshift nodes, importance weights and inclination factor of the
-    per-bin variance $V_k$. Its diagonal is $V_k$ up to the interpolation order
-    of the square.
+    on the redshift nodes and importance weights of the per-bin variance
+    $V_k$, with the network's response correlation
+    $\langle r_k r_{k'} \rangle$ in place of the inclination factor (a
+    Hadamard product). Its diagonal is $V_k$ up to the interpolation order of
+    the square. The response decorrelates the bins, so the perpendicular
+    modes it adds are what the `"modes"` likelihood keeps.
 
     **Table.** Per network, $\kappa^2$, the extreme eigenvalues of $\Delta$,
     $\lambda_{\max}(P C P)$, $\|P C \mathbf{e}\|$ and the Kullback-Leibler
@@ -1290,18 +1382,16 @@ def _():
 
 
 @app.cell
-def _(FIDUCIALS, fiducial_prediction, fiducial_variance, likelihood, per_network):
+def _(
+    FIDUCIALS,
+    fiducial_prediction,
+    fiducial_variance,
+    likelihood,
+    per_network,
+    responses,
+):
     _template = np.asarray(fiducial_prediction)
-    catalog_covariance = np.asarray(likelihood.catalog_covariance(FIDUCIALS))
-    # Campbell's diagonal squares the interpolated source spectrum; V_k
-    # interpolates the squared one, which can only be larger (Jensen).
     _positive = _template > 0.0
-    _diagonal_ratio = (
-        np.diag(catalog_covariance)[_positive]
-        / np.asarray(fiducial_variance)[_positive]
-    )
-    print(f"diag Cov / V_k: {_diagonal_ratio.min():.5f} to {_diagonal_ratio.max():.5f}")
-    assert np.all(_diagonal_ratio <= 1.0 + 1e-10)
 
     _shape_parameters = ("z_peak", "gamma", "kappa")
     _derivatives = {
@@ -1321,8 +1411,25 @@ def _(FIDUCIALS, fiducial_prediction, fiducial_variance, likelihood, per_network
     delta_eigenvalues = {}
     covariance_eigenvalues = {}
     for _name, (_scale, _mask) in per_network.items():
+        _network = LikelihoodNetwork(
+            jnp.asarray(_scale), jnp.asarray(_mask), response=responses[_name]
+        )
+        _catalog_covariance = np.asarray(
+            likelihood.catalog_covariance(FIDUCIALS, _network)
+        )
+        # Campbell's diagonal squares the interpolated source spectrum; V_k
+        # interpolates the squared one, which can only be larger (Jensen).
+        _orientation = (
+            np.mean(np.asarray(responses[_name]) ** 2, axis=0)
+            / INCLINATION_SECOND_MOMENT
+        )
+        _diagonal_ratio = (
+            np.diag(_catalog_covariance)[_positive]
+            / (np.asarray(fiducial_variance) * _orientation)[_positive]
+        )
+        assert np.all(_diagonal_ratio <= 1.0 + 1e-10), _name
         _keep = _mask & _positive
-        _covariance = catalog_covariance[np.ix_(_keep, _keep)]
+        _covariance = _catalog_covariance[np.ix_(_keep, _keep)]
         _metrics, delta_eigenvalues[_name] = common_shape_metrics(
             _covariance,
             _template[_keep],
@@ -1331,11 +1438,7 @@ def _(FIDUCIALS, fiducial_prediction, fiducial_variance, likelihood, per_network
         )
         _whitened = _covariance / np.outer(_scale[_keep], _scale[_keep])
         covariance_eigenvalues[_name] = np.linalg.eigvalsh(_whitened)[::-1]
-        _relative = float(
-            likelihood.relative_variance(
-                FIDUCIALS, LikelihoodNetwork(jnp.asarray(_scale), jnp.asarray(_mask))
-            )
-        )
+        _relative = float(likelihood.relative_variance(FIDUCIALS, _network))
         np.testing.assert_allclose(
             _metrics["kappa^2"], _metrics["rho"] ** 2 * _relative, rtol=1e-8
         )
@@ -1424,8 +1527,12 @@ def _():
     $$
     \mathrm{Var}(z) = 1 + (\rho\,\sigma_\epsilon)^2 \ \text{(detector)},
     \qquad
-    \mathrm{Var}(z) = 1 \ \text{(amplitude, fixed)}.
+    \mathrm{Var}(z) = 1 \ \text{(amplitude, fixed)},
     $$
+
+    and `amplitude_sky` falls short of 1 by the response's share of
+    $\sigma_\epsilon^2$. `bias` is the mean of $\bar H_0 - H_0^t$ in
+    km/s/Mpc, and `mean z` the same bias in posterior standard deviations.
 
     The errors resample whole injections, each with all of its $R$ noise draws,
     because those draws share one realization of $n_{\rm shot}$ and are not
@@ -1445,10 +1552,11 @@ def _(
     noise_draws,
     noise_seed,
     per_network,
+    sky_relative_variance,
 ):
     _label = dict(DETECTOR_NETWORKS)
     _log_prior = np.asarray(PRIORS["H0"].log_prob(jnp.asarray(h0_grid)))
-    _count, _bins = injections.shape
+    _count, _bins = injections[next(iter(per_network))].shape
     statistics: dict[tuple[str, str], dict[str, NDArray[np.float64]]] = {}
     _rows = []
     for _k, (_name, (_scale, _mask)) in enumerate(per_network.items()):
@@ -1460,7 +1568,7 @@ def _(
             )
         )
         _data = jnp.asarray(
-            (injections[:, None, :] + _noise * _scale).reshape(-1, _bins)
+            (injections[_name][:, None, :] + _noise * _scale).reshape(-1, _bins)
         )
         _s2_fixed = jnp.asarray(fiducial_relative_variance[_name])
         _s2_grid = grid_relative_variance[_name]
@@ -1468,6 +1576,9 @@ def _(
             "detector": jnp.zeros_like(grid_prediction),
             "amplitude": amplitude_direction(grid_prediction, _s2_grid),
             "fixed": amplitude_direction(grid_prediction, _s2_fixed),
+            "amplitude_sky": amplitude_direction(
+                grid_prediction, sky_relative_variance[_name]
+            ),
         }
         for _variant, _direction in _directions.items():
             _log_density = (
@@ -1502,7 +1613,7 @@ def _():
     mo.md(r"""
     **Figure.** At the fiducial network it plots the distributions of the two
     calibration statistics over the $M \times R$ posteriors, for `detector`
-    (solid) and `fixed` (dashed). The `amplitude` variant is in the table but not
+    (solid) and `amplitude` (dashed). The other variants are in the table but not
     plotted.
 
     - *Left:* a histogram of $\mathrm{PIT}$ against the uniform density,
@@ -1527,7 +1638,7 @@ def _(
     coverage_figure, (_ax_pit, _ax_z) = plt.subplots(1, 2, figsize=(9, 3.6))
     _bins = np.linspace(0.0, 1.0, 11)
     _z_grid = np.linspace(-4.0, 4.0, 201)
-    for _variant, _style in (("detector", "-"), ("fixed", "--")):
+    for _variant, _style in (("detector", "-"), ("amplitude", "--")):
         _stats = statistics[fiducial_network, _variant]
         _ax_pit.hist(
             _stats["pit"],

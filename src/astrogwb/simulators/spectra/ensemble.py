@@ -12,19 +12,24 @@ and an interrupted run resumes where it stopped.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
 
 from astrogwb.simulators.core import batch_keys, load, write
 from astrogwb.simulators.spectra.metadata import BackgroundSpectralDensityMetadata
+from astrogwb.simulators.spectra.network import (
+    JointNetworkSpectralDensitySimulator,
+    NetworkSpectralDensityMetadata,
+)
 from astrogwb.simulators.spectra.simulator import (
     BackgroundSpectralDensityData,
     BackgroundSpectralDensitySimulator,
     stack_spectra,
 )
 
-__all__ = ["spectra_ensemble", "spectra_ensemble_path"]
+__all__ = ["network_spectra_ensemble", "spectra_ensemble", "spectra_ensemble_path"]
 
 
 def spectra_ensemble_path(
@@ -82,13 +87,7 @@ def spectra_ensemble(
     for index in range(num_draws):
         path = spectra_ensemble_path(directory, metadata, seed, index)
         if path.is_file():
-            data, recorded, attrs = load(path, BackgroundSpectralDensityMetadata)
-            if recorded.key() != metadata.key() or int(attrs["seed"]) != seed:
-                raise ValueError(
-                    f"{path} records {recorded.key()} at seed {attrs.get('seed')}, "
-                    f"not the requested {metadata.key()} at seed {seed}"
-                )
-            parts.append(data)  # ty: ignore[invalid-argument-type]
+            parts.append(_load_draw(path, metadata, seed))
             continue
         if simulator is None:
             simulator = BackgroundSpectralDensitySimulator(
@@ -97,6 +96,84 @@ def spectra_ensemble(
         drawn = simulator(keys[index])
         write(path, drawn, metadata, seed=seed)
         parts.append(drawn)
+    return _stack(parts)
+
+
+def network_spectra_ensemble(
+    metadata: Sequence[NetworkSpectralDensityMetadata],
+    seed: int,
+    num_draws: int,
+    directory: str | Path,
+    *,
+    chunk_size: int = 128,
+    source_chunk_size: int | None = None,
+) -> list[BackgroundSpectralDensityData]:
+    """:func:`spectra_ensemble` of several networks, drawn jointly.
+
+    Each network's draws are cached under its own key, exactly where
+    :func:`spectra_ensemble_path` puts them, so one network can be read back
+    alone. A draw missing for any network is simulated for all of them with
+    :class:`~astrogwb.simulators.spectra.JointNetworkSpectralDensitySimulator`,
+    whose contract on ``metadata`` this shares: one waveform pass per draw,
+    whatever the number of networks. Draw ``i`` of every network uses
+    ``batch_keys(seed, num_draws)[i]``, so the networks see the same sources.
+
+    Parameters
+    ----------
+    metadata:
+        One record per network, differing only in the network.
+    seed, num_draws, directory, chunk_size, source_chunk_size:
+        As for :func:`spectra_ensemble`.
+
+    Returns
+    -------
+    list of BackgroundSpectralDensityData
+        Each network's draws stacked along the leading axis, in ``metadata``
+        order.
+
+    Raises
+    ------
+    ValueError
+        If a cached file records another metadata or seed.
+    """
+    keys = batch_keys(seed, num_draws)
+    simulator: JointNetworkSpectralDensitySimulator | None = None
+    parts: list[list[BackgroundSpectralDensityData]] = [[] for _ in metadata]
+    for index in range(num_draws):
+        paths = [
+            spectra_ensemble_path(directory, record, seed, index) for record in metadata
+        ]
+        if all(path.is_file() for path in paths):
+            for part, path, record in zip(parts, paths, metadata, strict=True):
+                part.append(_load_draw(path, record, seed))
+            continue
+        if simulator is None:
+            simulator = JointNetworkSpectralDensitySimulator(
+                metadata, chunk_size=chunk_size, source_chunk_size=source_chunk_size
+            )
+        for part, path, record, drawn in zip(
+            parts, paths, metadata, simulator(keys[index]), strict=True
+        ):
+            write(path, drawn, record, seed=seed)
+            part.append(drawn)
+    return [_stack(part) for part in parts]
+
+
+def _load_draw(
+    path: Path, metadata: BackgroundSpectralDensityMetadata, seed: int
+) -> BackgroundSpectralDensityData:
+    """A cached draw, checked against the record and seed it was asked for."""
+    data, recorded, attrs = load(path, type(metadata))
+    if recorded.key() != metadata.key() or int(attrs["seed"]) != seed:
+        raise ValueError(
+            f"{path} records {recorded.key()} at seed {attrs.get('seed')}, "
+            f"not the requested {metadata.key()} at seed {seed}"
+        )
+    return data  # ty: ignore[invalid-return-type]
+
+
+def _stack(parts: list[BackgroundSpectralDensityData]) -> BackgroundSpectralDensityData:
+    """:func:`stack_spectra`, with the spectral density as float64."""
     stacked = stack_spectra(parts)
     stacked["spectral_density"] = np.asarray(
         stacked["spectral_density"], dtype=np.float64

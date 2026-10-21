@@ -208,6 +208,10 @@ class ChunkedNetworkSum:
     those as the extra columns :data:`EXTRINSIC_COLUMNS`. Chunking, padding,
     masking and compilation are those of :class:`ChunkedPowerSum`, whose
     contracts this shares; peak memory is ``(P, F, chunk_size)``.
+
+    ``pairs`` replaces every :math:`a < b` with the index pairs given, in
+    that order, so several networks can share one pass over the union of
+    their detectors (:class:`~astrogwb.simulators.spectra.JointNetworkSpectralDensitySimulator`).
     """
 
     def __init__(
@@ -216,16 +220,21 @@ class ChunkedNetworkSum:
         detectors: Sequence[DetectorSpec],
         *,
         chunk_size: int,
+        pairs: Sequence[tuple[int, int]] | None = None,
     ) -> None:
         if chunk_size <= 0:
             raise ValueError("chunk_size must be positive")
         self._generator = generator
         self._detectors = list(detectors)
-        self._pairs = [
-            (first, second)
-            for first in range(len(self._detectors))
-            for second in range(first + 1, len(self._detectors))
-        ]
+        self._pairs = (
+            [(first, second) for first, second in pairs]
+            if pairs is not None
+            else [
+                (first, second)
+                for first in range(len(self._detectors))
+                for second in range(first + 1, len(self._detectors))
+            ]
+        )
         self._chunk_size = chunk_size
         self._num_frequencies = int(np.shape(generator.frequencies)[0])
         self._reduce = jax.jit(self._loop)

@@ -4,7 +4,6 @@ __generated_with = "0.25.0"
 app = marimo.App()
 
 with app.setup(hide_code=True):
-    import dataclasses
     import os
     from collections.abc import Callable, Mapping, Sequence
     from functools import partial
@@ -55,8 +54,8 @@ with app.setup(hide_code=True):
     )
     from astrogwb.paper.posteriors import (
         ensure_reference_catalog,
-        injection_spectrum,
         network_data,
+        network_injection_metadata,
         noise_digest,
         settings_digest,
         shot_noise_variant,
@@ -67,6 +66,7 @@ with app.setup(hide_code=True):
     )
     from astrogwb.simulators.spectra import (
         BackgroundSpectralDensityMetadata,
+        network_spectra_ensemble,
     )
 
 
@@ -79,10 +79,15 @@ def _():
     Gaussian spectrum likelihood is evaluated at every grid point and cached,
     so the figures can be iterated on without recomputing anything.
 
-    The data are a **zero-noise Poisson injection**: one Poisson-count
-    spectrum drawn at the fiducials, with no Gaussian noise added on top. It is
-    a catalog realization $S_h^{\mathrm{cat}}$, so it carries physical shot
-    noise about the expected spectrum, which the likelihood models. The
+    The data are a **zero-noise Poisson injection**: one Poisson catalog drawn
+    at the fiducials, with no Gaussian noise added on top, as each network
+    records it. Every source reaches a network through its own antenna
+    patterns at an isotropic sky position, and the detector pairs are combined
+    with the optimal cross-correlation weights
+    (`NetworkSpectralDensitySimulator`), so the six networks see one catalog
+    but record six spectra. Each is a catalog realization
+    $S_h^{\mathrm{cat}}$ that carries physical shot noise about the expected
+    spectrum, which each network's likelihood models with its own response. The
     model spectrum is a **rescaled reference-redshift catalog**: intrinsic
     draws at the same fiducials, each generated once at the window's lower
     edge and rescaled to the Gauss-Legendre redshift nodes. The two are drawn
@@ -109,14 +114,18 @@ def _():
 
     **Likelihood.** In each bin the observed spectrum is Gaussian about the
     predicted one with scale $\sigma_i = S_{\mathrm{eff},i}/\sqrt{2T\Delta f_i}$.
-    The network only changes $\sigma$ (and which bins are usable), so each grid
-    point is predicted once and all six networks' likelihoods are evaluated on
-    that one prediction.
+    The network changes $\sigma$, which bins are usable, the data it recorded
+    and the response its shot noise carries, but not the expected spectrum, so
+    each grid point is predicted once and all six networks' likelihoods are
+    evaluated on that one prediction.
 
     **Shot noise.** The data are one finite catalog, so they also scatter
     about the expected spectrum $S$ with the per-bin variance $V_f$ of a
     Poisson sum (Campbell's theorem), computed from the same reference catalog
-    with every factor of the quadrature squared. Within the band almost all of
+    with every factor of the quadrature squared and the inclination factor
+    replaced by the network's response correlation
+    $\langle r_f r_{f'} \rangle$, from isotropic response draws. Within the
+    band almost all of
     it is one flat amplitude mode, $S^{\mathrm{cat}} \approx S(1 + \epsilon)$,
     so it enters as $\epsilon \sim \mathcal{N}(0, s^2)$ marginalized: a
     rank-one covariance $D + s^2 S S^T$, inverted in closed form, with $s$ the
@@ -172,7 +181,9 @@ def _():
     num_marginal_samples = 2**18  # grid draws per plot, for the marginals and corners
     redshift_nodes = 32  # Gauss-Legendre nodes in 1/(1 + z); costs no waveforms
     catalog_chunk_size = 4096  # reference waveforms per lax.map batch
-    chunk_size = 16_384  # injection waveforms per reduced chunk
+    # Injection waveforms per reduced chunk: peak memory is (pairs, F, chunk)
+    # for the 12 detector pairs of the six networks.
+    chunk_size = 4096
     grid_chunk_size = 8  # grid points per lax.map batch; bounds peak memory
 
     observation_time = 1.0  # years
@@ -196,15 +207,16 @@ def _():
     # Likelihood variants evaluated per problem, and the one every figure
     # shows. "amplitude" evaluates s^2 at each grid point, so sigma_eps depends
     # on Lambda; "fixed" would pin it at the fiducial (the A/B section compares).
-    # "modes" keeps the leading eigenmodes of the catalog covariance with the
-    # per-source network response, from `response_draws` isotropic draws.
+    # Every variant's shot noise carries the per-source network response, from
+    # `response_draws` isotropic draws, as the network injections do; "modes"
+    # keeps the leading eigenmodes of that catalog covariance.
     likelihood_variant = "amplitude"
     problem_variants = {
         "H0": ("detector", "amplitude", "fixed", "modes"),
         "H0_Omega_m": ("detector", "amplitude", "fixed", "modes"),
         "xi_0_xi_n": ("detector", "amplitude", "fixed", "per_frequency", "modes"),
     }
-    response_draws, response_seed = 8192, 0
+    response_draws, response_seed = 32_768, 0
     modes_tolerance, max_modes = 1e-3, 32  # dropped eigenvalue sum, noise units
     ab_tolerance = 0.05
 
@@ -274,6 +286,11 @@ def _():
         waveform=waveform,
         population=population,
     )
+    # The one catalog as each network records it.
+    network_injections = {
+        name: network_injection_metadata(injection_metadata, registry, name)
+        for name in network_names
+    }
 
     write_figures = mo.ui.switch(value=write_figures_default, label="Write figures")
     write_figures
@@ -296,13 +313,13 @@ def _():
         frequencies,
         grid_chunk_size,
         grid_specs,
-        injection_metadata,
         likelihood_variant,
         marginal_seed,
         max_modes,
         maximum_frequency,
         minimum_frequency,
         modes_tolerance,
+        network_injections,
         network_names,
         num_marginal_samples,
         observation_time,
@@ -376,7 +393,6 @@ def evaluate_grid(
     chunk_size: int | None,
     axes: Mapping[str, tuple[float, float, int]],
     fixed: Mapping[str, float],
-    observed: NDArray[np.float64],
     per_network: Mapping[str, dict[str, object]],
     relative_variance: NDArray[np.float64] | None,
 ) -> tuple[dict[str, NDArray], dict[str, NDArray]]:
@@ -396,11 +412,10 @@ def evaluate_grid(
         ``(low, high, size)`` of each swept parameter.
     fixed
         Every other parameter, pinned at its fiducial.
-    observed
-        Observed spectrum ``(F,)``.
     per_network
-        :func:`network_data` by network name, with ``response``, ``modes`` and
-        ``mode_blocks`` for the ``"modes"`` mode.
+        :func:`network_data` by network name, with the network's ``observed``
+        spectrum and ``response`` draws, and ``modes`` and ``mode_blocks`` for
+        the ``"modes"`` mode.
     relative_variance
         :math:`s^2` per network, in ``per_network`` order, for the ``"fixed"``
         mode; ``None`` otherwise.
@@ -414,11 +429,14 @@ def evaluate_grid(
     grids = {name: np.linspace(lo, hi, n) for name, (lo, hi, n) in axes.items()}
     jax_grids = {name: jnp.asarray(grid) for name, grid in grids.items()}
     names = list(per_network)
-    # The "modes" mode reads each network's response, basis and node blocks.
-    modes = {
+    # Every network scores its own data with its own response; the "modes"
+    # mode also reads each network's basis and node blocks.
+    fields = ("observed", "response", "response_moments")
+    if likelihood.shot_noise == "modes":
+        fields += ("modes", "mode_blocks")
+    leaves = {
         field: jnp.stack([jnp.asarray(per_network[n][field]) for n in names])
-        for field in ("response", "modes", "mode_blocks")
-        if likelihood.shot_noise == "modes"
+        for field in fields
     }
     networks = LikelihoodNetwork(
         scale=jnp.stack([jnp.asarray(per_network[n]["scale"]) for n in names]),
@@ -426,11 +444,11 @@ def evaluate_grid(
         relative_variance=(
             None if relative_variance is None else jnp.asarray(relative_variance)
         ),
-        **modes,
+        **leaves,
     )
     batched = np.asarray(
         grid_log_posterior(
-            dataclasses.replace(likelihood, observed=jnp.asarray(observed)),
+            likelihood,
             priors,
             jax_grids,
             fixed=fixed,
@@ -452,7 +470,6 @@ def grid_posterior(
     priors: Mapping[str, dist.Distribution],
     chunk_size: int | None,
     fiducials: Mapping[str, float],
-    observed: NDArray[np.float64],
     per_network: Mapping[str, dict[str, object]],
     settings: Mapping[str, object],
     cache_dir: Path,
@@ -477,10 +494,9 @@ def grid_posterior(
         Grid points per batch.
     fiducials
         Every parameter; those not in ``axes`` are pinned at their value.
-    observed
-        Observed spectrum ``(F,)``.
     per_network
-        :func:`network_data` by network name.
+        :func:`network_data` by network name, with each network's
+        ``observed`` spectrum and ``response``.
     settings
         Everything else the cached values depend on, for the digest.
     cache_dir
@@ -503,7 +519,6 @@ def grid_posterior(
             chunk_size,
             axes,
             fixed,
-            observed,
             per_network,
             relative_variance,
         ),
@@ -714,7 +729,9 @@ def _():
     The reference catalog generates every intrinsic draw once, at the
     window's lower edge, so its power is `(F_ref, N)`. It is generated in
     `lax.map` batches on a miss and read from `outputs/catalogs/` afterwards.
-    The injection is one Poisson spectrum, cached beside the posteriors.
+    The injection is one Poisson catalog recorded by every network, drawn in
+    one waveform pass shared by the networks (`network_spectra_ensemble`) and
+    cached beside the posteriors, one file per network.
 
     The rescaled spectrum is built in the same cell as the catalog, once.
     The population is built a single time because it hashes by identity. Each
@@ -772,17 +789,25 @@ def _(
     chunk_size,
     data_seed,
     frequencies,
-    injection_metadata,
+    network_injections,
 ):
-    observed, injection_frequencies, num_injected = injection_spectrum(
-        injection_metadata,
+    # Draw 0 of `data_seed`: the key of the sky-averaged injection, so the
+    # networks record the same sources it summed.
+    _drawn = network_spectra_ensemble(
+        list(network_injections.values()),
         data_seed,
-        cache_dir
-        / f"{cache_name_prefix}injection_{injection_metadata.key()}_{data_seed}.npz",
+        1,
+        cache_dir / f"{cache_name_prefix}network_injections",
         chunk_size=chunk_size,
     )
-    validate_matching_frequency_grids(injection_frequencies, frequencies)
-    print(f"injection: {num_injected:,} Poisson events")
+    observed = {}
+    for _name, _data in zip(network_injections, _drawn, strict=True):
+        validate_matching_frequency_grids(_data["frequencies"], frequencies)
+        observed[_name] = _data["spectral_density"][0]
+    print(
+        f"injection: {int(_drawn[0]['n_events'][0]):,} Poisson events, "
+        f"recorded by {len(observed)} networks"
+    )
     return (observed,)
 
 
@@ -793,14 +818,15 @@ def _(
     catalog_seed,
     data_seed,
     frequencies,
-    injection_metadata,
     likelihood,
     max_modes,
     maximum_frequency,
     minimum_frequency,
     modes_tolerance,
+    network_injections,
     network_names,
     observation_time,
+    observed,
     problem_variants,
     redshift_nodes,
     registry,
@@ -818,33 +844,40 @@ def _(
         )
         for name in network_names
     }
-    # The "modes" mode: response draws, and the basis and node blocks of the
-    # catalog covariance at the fiducials, padded to one k so networks stack.
+    # Every network's data, response draws and the per-node moments under the
+    # response, held so s^2 is not projected once per draw at every point; for
+    # the "modes" mode, also the basis and node blocks of the catalog
+    # covariance at the fiducials, padded to one k so networks stack. No
+    # density site varies, so the held moments are exact.
     _uses_modes = any("modes" in v for v in problem_variants.values())
-    for _name, _data in per_network.items() if _uses_modes else ():
+    for _name, _data in per_network.items():
         _detectors, _sensitivities = registry.build_network(_name)
+        _network = LikelihoodNetwork(
+            jnp.asarray(_data["scale"]),
+            jnp.asarray(_data["frequency_mask"]),
+            response=sample_network_response(
+                jax.random.key(response_seed),
+                response_draws,
+                frequencies,
+                _detectors,
+                _sensitivities,
+            ),
+        )
+        _data.update(
+            observed=observed[_name],
+            response=_network.response,
+            response_moments=likelihood.response_moments(FIDUCIALS, _network),
+        )
+        if not _uses_modes:
+            continue
         _network = likelihood.with_shot_noise_modes(
             FIDUCIALS,
-            LikelihoodNetwork(
-                jnp.asarray(_data["scale"]),
-                jnp.asarray(_data["frequency_mask"]),
-                response=sample_network_response(
-                    jax.random.key(response_seed),
-                    response_draws,
-                    frequencies,
-                    _detectors,
-                    _sensitivities,
-                ),
-            ),
+            _network,
             tolerance=modes_tolerance,
             max_modes=max_modes,
             num_modes=max_modes,
         )
-        _data.update(
-            response=_network.response,
-            modes=_network.modes,
-            mode_blocks=_network.mode_blocks,
-        )
+        _data.update(modes=_network.modes, mode_blocks=_network.mode_blocks)
     # Everything a cached log density depends on besides its own axes.
     cache_settings = {
         "version": __version__,
@@ -854,12 +887,13 @@ def _(
         "band": (minimum_frequency, maximum_frequency),
         "observation_time": observation_time,
         "density_sites": (),
-        "injection": injection_metadata.key(),
+        "injection": {n: m.key() for n, m in network_injections.items()},
         "reference_catalog": catalog_metadata.key(),
         "redshift_nodes": redshift_nodes,
         # The amplitude mode's s^2: the catalog projected on each template.
         "relative_variance": "projected",
-        "modes": (response_draws, response_seed, modes_tolerance, max_modes),
+        "response": (response_draws, response_seed),
+        "modes": (modes_tolerance, max_modes),
     }
     labelled_networks = [(n, l) for n, l in DETECTOR_NETWORKS if n in network_names]
     return cache_settings, labelled_networks, per_network
@@ -870,10 +904,10 @@ def _():
     mo.md(r"""
     ### Shot noise at the fiducials
 
-    The relative amplitude scatter $s$ of one catalog realization and the
-    optimal SNR $\rho$ of the expected spectrum, per network. $\rho s$ is the
-    shot noise in units of the detector's amplitude error; it does not depend
-    on the observation time. `notebooks/spectrum_snrs.py` measures it
+    The relative amplitude scatter $s$ of one catalog realization, with the
+    network's response, and the optimal SNR $\rho$ of the expected spectrum,
+    per network. $\rho s$ is the shot noise in units of the detector's
+    amplitude error; it does not depend on the observation time. `notebooks/spectrum_snrs.py` measures it
     empirically from Poisson ensembles, about 0.48 for the fiducial network.
     """)
     return
@@ -890,7 +924,12 @@ def _(FIDUCIALS, likelihood, per_network):
         _s2 = float(
             likelihood.relative_variance(
                 FIDUCIALS,
-                LikelihoodNetwork(_data["scale"], _data["frequency_mask"]),
+                LikelihoodNetwork(
+                    _data["scale"],
+                    _data["frequency_mask"],
+                    response=jnp.asarray(_data["response"]),
+                    response_moments=jnp.asarray(_data["response_moments"]),
+                ),
             )
         )
         _snr = float(
@@ -908,7 +947,7 @@ def _(FIDUCIALS, likelihood, per_network):
     shot_noise_table = pd.DataFrame(_rows)
     fiducial_relative_variance = shot_noise_table["s2"].to_numpy()
     shot_noise_table.drop(columns="s2")
-    return (fiducial_relative_variance,)
+    return fiducial_relative_variance, shot_noise_table
 
 
 @app.cell(hide_code=True)
@@ -945,7 +984,6 @@ def _(
     grid_chunk_size,
     grid_specs,
     likelihood_variant,
-    observed,
     per_network,
     problem_variants,
     likelihood,
@@ -960,7 +998,6 @@ def _(
         priors=PRIORS,
         chunk_size=grid_chunk_size,
         fiducials=FIDUCIALS,
-        observed=observed,
         per_network=per_network,
         cache_dir=cache_dir,
         prefix=cache_name_prefix,
@@ -1016,7 +1053,6 @@ def _(
     grid_chunk_size,
     grid_specs,
     likelihood_variant,
-    observed,
     per_network,
     problem_variants,
     likelihood,
@@ -1031,7 +1067,6 @@ def _(
         priors=PRIORS,
         chunk_size=grid_chunk_size,
         fiducials=FIDUCIALS,
-        observed=observed,
         per_network=per_network,
         cache_dir=cache_dir,
         prefix=cache_name_prefix,
@@ -1126,7 +1161,6 @@ def _(
     grid_chunk_size,
     grid_specs,
     likelihood_variant,
-    observed,
     per_network,
     problem_variants,
     likelihood,
@@ -1141,7 +1175,6 @@ def _(
         priors=PRIORS,
         chunk_size=grid_chunk_size,
         fiducials=FIDUCIALS,
-        observed=observed,
         per_network=per_network,
         cache_dir=cache_dir,
         prefix=cache_name_prefix,
@@ -1411,7 +1444,7 @@ def _(h0_omega_m_summary_rows, h0_summary_rows, xi_summary_rows):
         [*h0_summary_rows, *h0_omega_m_summary_rows, *xi_summary_rows]
     )
     summary
-    return
+    return (summary,)
 
 
 @app.cell
@@ -1420,12 +1453,18 @@ def _(
     h0_marginal,
     h0_omega_m_corner,
     h0_omega_m_marginal,
+    shot_noise_table,
     shot_noise_variants_figure,
+    summary,
     write_figures,
     xi_corner,
     xi_marginal,
 ):
     if write_figures.value:
+        FIGURES.mkdir(parents=True, exist_ok=True)
+        # The tables' inputs: intervals, and rho and s per network.
+        summary.to_csv(FIGURES / "summary.csv", index=False)
+        shot_noise_table.to_csv(FIGURES / "shot_noise.csv", index=False)
         save_figures(
             {
                 FIGURES / "marginals_H0.pdf": h0_marginal,
