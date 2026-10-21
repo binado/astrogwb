@@ -35,6 +35,8 @@ rotation during a long signal is not modelled.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -50,6 +52,7 @@ from astrogwb.simulators.spectra.simulator import (
 )
 
 __all__ = [
+    "JointNetworkSpectralDensitySimulator",
     "NetworkSpectralDensityMetadata",
     "NetworkSpectralDensitySimulator",
     "draw_extrinsic_angles",
@@ -130,14 +133,8 @@ class NetworkSpectralDensitySimulator:
         self._reducer = ChunkedNetworkSum(
             self._generator, metadata.detectors, chunk_size=chunk_size
         )
-        terms = pair_terms(
-            np.asarray(self._generator.frequencies),
-            metadata.detectors,
-            metadata.sensitivities(),
-        )
-        self._weights = np.stack([term.weight for term in terms])
-        self._denominator = np.sum(
-            [term.weight * term.overlap for term in terms], axis=0
+        self._weights, self._denominator = _pair_weights(
+            np.asarray(self._generator.frequencies), metadata
         )
 
     @property
@@ -154,42 +151,22 @@ class NetworkSpectralDensitySimulator:
         has a finite weight return zero, as
         :func:`~astrogwb.detector.network_response` does.
         """
-        pair_sums = np.asarray(pair_sums)
-        weights = self._weights.reshape(
-            self._weights.shape[0], *([1] * (pair_sums.ndim - 2)), -1
-        )
-        numerator = _PAIR_RESPONSE_DENOMINATOR * np.sum(weights * pair_sums, axis=0)
-        usable = self._denominator > 0.0
-        return np.where(
-            usable, numerator / np.where(usable, self._denominator, 1.0), 0.0
-        )
+        return _combine_pairs(self._weights, self._denominator, pair_sums)
 
     def reduce(
         self, population: PopulationData, angle_key: jax.Array
     ) -> BackgroundSpectralDensityData:
         """The network spectrum of ``population``, its extrinsic angles drawn from ``angle_key``."""
-        sources = dict(population["source_parameters"])
         count = int(population["count"])
-        rate = np.asarray(population["total_merger_rate"])
         angles = draw_extrinsic_angles(angle_key, count)
-        pair_sums = self._reducer({**sources, **angles})
-        density = normalize_spectra(
+        pair_sums = self._reducer({**population["source_parameters"], **angles})
+        return _network_data(
             self.combine(np.asarray(pair_sums)),
-            count=self._metadata.count,
-            total_merger_rate=rate,
-            observation_seconds=self._population.observation_seconds,
-            num_events=self._metadata.num_events,
+            population,
+            self._metadata,
+            self._population.observation_seconds,
+            np.asarray(self._generator.frequencies),
         )
-        return {
-            "frequencies": np.asarray(self._generator.frequencies),
-            "spectral_density": density[np.newaxis, :],
-            "n_events": np.asarray([count], dtype=np.int64),
-            "total_merger_rate": rate[np.newaxis],
-            "hyperparameters": {
-                name: np.asarray(value)[np.newaxis]
-                for name, value in population["hyperparameters"].items()
-            },
-        }
 
     def __call__(self, key: jax.Array) -> BackgroundSpectralDensityData:
         """The network spectrum of the draw at ``key``.
@@ -198,3 +175,148 @@ class NetworkSpectralDensitySimulator:
         with ``jax.random.fold_in(key, 1)``.
         """
         return self.reduce(self._population(key), jax.random.fold_in(key, 1))
+
+
+class JointNetworkSpectralDensitySimulator:
+    """Network spectra of several networks from one pass over each draw.
+
+    ``simulator(key)[n]`` equals
+    ``NetworkSpectralDensitySimulator(metadata[n])(key)`` up to the order of
+    floating-point sums: the population and the extrinsic angles are drawn
+    once, from the same keys, and every network's spectrum is combined from
+    the per-pair cross-powers of the union of the networks' detectors. A pair
+    depends only on its two detectors, so it is computed once however many
+    networks share it, and the waveforms -- the expensive half -- once per
+    draw rather than once per network. Every network then sees the same
+    sources at the same sky positions.
+
+    The ``metadata`` must differ only in ``detectors`` and
+    ``psd_references``, and a site code shared by two networks must name the
+    same detector; this is trusted, not checked. Settings are those of
+    :class:`NetworkSpectralDensitySimulator`; peak memory is
+    ``(P, F, chunk_size)`` for the ``P`` distinct pairs.
+    """
+
+    def __init__(
+        self,
+        metadata: Sequence[NetworkSpectralDensityMetadata],
+        *,
+        chunk_size: int = 128,
+        source_chunk_size: int | None = None,
+        validate_sources: bool = True,
+    ) -> None:
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be positive")
+        self._metadata = list(metadata)
+        self._population, self._generator = draw_components(
+            self._metadata[0],
+            source_chunk_size=chunk_size
+            if source_chunk_size is None
+            else source_chunk_size,
+            validate_sources=validate_sources,
+        )
+        detectors = list(
+            dict.fromkeys(
+                name for record in self._metadata for name in record.detectors
+            )
+        )
+        pairs: list[tuple[int, int]] = []
+        #: Each network's rows of the joint pair sums, in its own a < b order.
+        self._rows: list[list[int]] = []
+        for record in self._metadata:
+            rows = []
+            for first in range(len(record.detectors)):
+                for second in range(first + 1, len(record.detectors)):
+                    pair = (
+                        detectors.index(record.detectors[first]),
+                        detectors.index(record.detectors[second]),
+                    )
+                    if pair not in pairs:
+                        pairs.append(pair)
+                    rows.append(pairs.index(pair))
+            self._rows.append(rows)
+        self._reducer = ChunkedNetworkSum(
+            self._generator, detectors, chunk_size=chunk_size, pairs=pairs
+        )
+        frequencies = np.asarray(self._generator.frequencies)
+        self._weights = [
+            _pair_weights(frequencies, record) for record in self._metadata
+        ]
+
+    @property
+    def metadata(self) -> list[NetworkSpectralDensityMetadata]:
+        """The records this simulator draws, in output order."""
+        return list(self._metadata)
+
+    def __call__(self, key: jax.Array) -> list[BackgroundSpectralDensityData]:
+        """The spectrum of every network for the draw at ``key``, in ``metadata`` order."""
+        population = self._population(key)
+        count = int(population["count"])
+        angles = draw_extrinsic_angles(jax.random.fold_in(key, 1), count)
+        pair_sums = np.asarray(
+            self._reducer({**population["source_parameters"], **angles})
+        )
+        frequencies = np.asarray(self._generator.frequencies)
+        return [
+            _network_data(
+                _combine_pairs(weights, denominator, pair_sums[rows]),
+                population,
+                record,
+                self._population.observation_seconds,
+                frequencies,
+            )
+            for record, rows, (weights, denominator) in zip(
+                self._metadata, self._rows, self._weights, strict=True
+            )
+        ]
+
+
+def _pair_weights(
+    frequencies: NDArray[np.float64], metadata: NetworkSpectralDensityMetadata
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """The pair weights ``(P, F)`` and their ORF-weighted sum ``(F,)`` of a network."""
+    terms = pair_terms(frequencies, metadata.detectors, metadata.sensitivities())
+    weights = np.stack([term.weight for term in terms])
+    denominator = np.sum([term.weight * term.overlap for term in terms], axis=0)
+    return weights, denominator
+
+
+def _combine_pairs(
+    weights: NDArray[np.float64],
+    denominator: NDArray[np.float64],
+    pair_sums: ArrayLike,
+) -> NDArray[np.float64]:
+    """:meth:`NetworkSpectralDensitySimulator.combine` with explicit weights."""
+    pair_sums = np.asarray(pair_sums)
+    weights = weights.reshape(weights.shape[0], *([1] * (pair_sums.ndim - 2)), -1)
+    numerator = _PAIR_RESPONSE_DENOMINATOR * np.sum(weights * pair_sums, axis=0)
+    usable = denominator > 0.0
+    return np.where(usable, numerator / np.where(usable, denominator, 1.0), 0.0)
+
+
+def _network_data(
+    combined: NDArray[np.float64],
+    population: PopulationData,
+    metadata: NetworkSpectralDensityMetadata,
+    observation_seconds: float,
+    frequencies: NDArray[np.float64],
+) -> BackgroundSpectralDensityData:
+    """One draw's network spectrum, normalized, as a one-row data record."""
+    rate = np.asarray(population["total_merger_rate"])
+    density = normalize_spectra(
+        combined,
+        count=metadata.count,
+        total_merger_rate=rate,
+        observation_seconds=observation_seconds,
+        num_events=metadata.num_events,
+    )
+    return {
+        "frequencies": frequencies,
+        "spectral_density": density[np.newaxis, :],
+        "n_events": np.asarray([int(population["count"])], dtype=np.int64),
+        "total_merger_rate": rate[np.newaxis],
+        "hyperparameters": {
+            name: np.asarray(value)[np.newaxis]
+            for name, value in population["hyperparameters"].items()
+        },
+    }
