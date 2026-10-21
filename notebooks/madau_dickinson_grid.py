@@ -29,6 +29,7 @@ with app.setup(hide_code=True):
     from numpy.typing import NDArray
     from xarray import DataTree
 
+    from astrogwb.detector import sample_network_response
     from astrogwb.inference import ImportanceGaussianLikelihood
     from astrogwb.inference import Network as LikelihoodNetwork
     from astrogwb.paper.cache import default_cache_dir
@@ -174,8 +175,10 @@ def _():
     $z_{\mathrm{peak}}$ from a Gaussian of width $\sigma$ about $z^*$ of the
     chosen cell.
 
-    **Likelihood.** `likelihood_variant`: `"detector"`, `"amplitude"` or
-    `"fixed"`. `"fixed"` holds the shot-noise variance at its fiducial value.
+    **Likelihood.** `likelihood_variant`: `"detector"`, `"amplitude"`,
+    `"fixed"` or `"modes"`. `"fixed"` holds the shot-noise variance at its
+    fiducial value; `"modes"` keeps the leading eigenmodes of the catalog
+    covariance with the per-source network response.
 
     **Checks.** Per network: the posterior mass in columns where Newton did not
     converge or the ridge sits on the support edge, and how far the quantiles
@@ -212,6 +215,10 @@ def _():
 
     # "detector" | "amplitude" | "fixed": the likelihood every grid uses.
     likelihood_variant = "fixed"
+    # The "modes" variant: isotropic response draws and the basis of the
+    # catalog covariance at the fiducials.
+    response_draws, response_seed = 8192, 0
+    modes_tolerance, max_modes = 1e-3, 32  # dropped eigenvalue sum, noise units
     sampled = ("z_peak", "gamma", "kappa")
     num_gamma, num_kappa = 200, 120  # grid cells over (gamma, kappa)
     num_draws = 20_000  # draws of the posterior, for the plots and summaries
@@ -228,6 +235,7 @@ def _():
         num_gamma, num_kappa = 24, 16
         num_draws = 2_000
         network_names = [fiducial_network]
+        response_draws, max_modes = 64, 4
         write_figures_default = False
         cache_name_prefix = "smoke_"
 
@@ -286,8 +294,10 @@ def _():
         frequencies,
         injection_metadata,
         likelihood_variant,
+        max_modes,
         maximum_frequency,
         minimum_frequency,
+        modes_tolerance,
         network_names,
         num_draws,
         num_gamma,
@@ -296,6 +306,8 @@ def _():
         population,
         redshift_nodes,
         registry,
+        response_draws,
+        response_seed,
         sampled,
         write_figures,
     )
@@ -591,12 +603,16 @@ def _(
     frequencies,
     likelihood,
     likelihood_variant,
+    max_modes,
     maximum_frequency,
     minimum_frequency,
+    modes_tolerance,
     network_names,
     observation_time,
     observed,
     registry,
+    response_draws,
+    response_seed,
 ):
     per_network = {
         name: network_data(
@@ -626,15 +642,35 @@ def _(
     variant_likelihood, _s2, _ = shot_noise_variant(
         likelihood_variant, likelihood, fiducial_relative_variance
     )
+
+    def _network(index: int, name: str, data: dict) -> LikelihoodNetwork:
+        network = LikelihoodNetwork(
+            jnp.asarray(data["scale"]),
+            jnp.asarray(data["frequency_mask"]),
+            None if _s2 is None else jnp.asarray(_s2[index]),
+        )
+        if likelihood_variant != "modes":
+            return network
+        detectors, sensitivities = registry.build_network(name)
+        response = sample_network_response(
+            jax.random.key(response_seed),
+            response_draws,
+            frequencies,
+            detectors,
+            sensitivities,
+        )
+        return likelihood.with_shot_noise_modes(
+            FIDUCIALS,
+            network._replace(response=response),
+            tolerance=modes_tolerance,
+            max_modes=max_modes,
+        )
+
     network_likelihoods = {
         name: dataclasses.replace(
             variant_likelihood,
             observed=jnp.asarray(observed),
-            network=LikelihoodNetwork(
-                jnp.asarray(data["scale"]),
-                jnp.asarray(data["frequency_mask"]),
-                None if _s2 is None else jnp.asarray(_s2[index]),
-            ),
+            network=_network(index, name, data),
         )
         for index, (name, data) in enumerate(per_network.items())
     }

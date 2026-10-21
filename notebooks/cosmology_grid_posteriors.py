@@ -15,6 +15,7 @@ with app.setup(hide_code=True):
     # Backend configuration precedes waveform construction and array creation.
     configure_runtime(num_chains=1)
 
+    import jax
     import jax.numpy as jnp
     import marimo as mo
     import matplotlib.pyplot as plt
@@ -26,6 +27,7 @@ with app.setup(hide_code=True):
     from numpy.typing import NDArray
 
     from astrogwb import __version__
+    from astrogwb.detector import sample_network_response
     from astrogwb.inference import (
         ImportanceGaussianLikelihood,
         grid_log_posterior,
@@ -194,12 +196,16 @@ def _():
     # Likelihood variants evaluated per problem, and the one every figure
     # shows. "amplitude" evaluates s^2 at each grid point, so sigma_eps depends
     # on Lambda; "fixed" would pin it at the fiducial (the A/B section compares).
+    # "modes" keeps the leading eigenmodes of the catalog covariance with the
+    # per-source network response, from `response_draws` isotropic draws.
     likelihood_variant = "amplitude"
     problem_variants = {
-        "H0": ("detector", "amplitude", "fixed"),
-        "H0_Omega_m": ("detector", "amplitude", "fixed"),
-        "xi_0_xi_n": ("detector", "amplitude", "fixed", "per_frequency"),
+        "H0": ("detector", "amplitude", "fixed", "modes"),
+        "H0_Omega_m": ("detector", "amplitude", "fixed", "modes"),
+        "xi_0_xi_n": ("detector", "amplitude", "fixed", "per_frequency", "modes"),
     }
+    response_draws, response_seed = 8192, 0
+    modes_tolerance, max_modes = 1e-3, 32  # dropped eigenvalue sum, noise units
     ab_tolerance = 0.05
 
     SMOKE = os.environ.get("ASTROGWB_NOTEBOOK_SMOKE") == "1"
@@ -212,6 +218,7 @@ def _():
         chunk_size = 512
         grid_chunk_size = 4
         num_marginal_samples = 2000
+        response_draws, max_modes = 64, 4
         write_figures_default = False
         cache_name_prefix = "smoke_"
         h0_window, h0_size = (40.0, 100.0), 7
@@ -292,8 +299,10 @@ def _():
         injection_metadata,
         likelihood_variant,
         marginal_seed,
+        max_modes,
         maximum_frequency,
         minimum_frequency,
+        modes_tolerance,
         network_names,
         num_marginal_samples,
         observation_time,
@@ -301,6 +310,8 @@ def _():
         problem_variants,
         redshift_nodes,
         registry,
+        response_draws,
+        response_seed,
         write_figures,
     )
 
@@ -388,7 +399,8 @@ def evaluate_grid(
     observed
         Observed spectrum ``(F,)``.
     per_network
-        :func:`network_data` by network name.
+        :func:`network_data` by network name, with ``response``, ``modes`` and
+        ``mode_blocks`` for the ``"modes"`` mode.
     relative_variance
         :math:`s^2` per network, in ``per_network`` order, for the ``"fixed"``
         mode; ``None`` otherwise.
@@ -402,12 +414,19 @@ def evaluate_grid(
     grids = {name: np.linspace(lo, hi, n) for name, (lo, hi, n) in axes.items()}
     jax_grids = {name: jnp.asarray(grid) for name, grid in grids.items()}
     names = list(per_network)
+    # The "modes" mode reads each network's response, basis and node blocks.
+    modes = {
+        field: jnp.stack([jnp.asarray(per_network[n][field]) for n in names])
+        for field in ("response", "modes", "mode_blocks")
+        if likelihood.shot_noise == "modes"
+    }
     networks = LikelihoodNetwork(
         scale=jnp.stack([jnp.asarray(per_network[n]["scale"]) for n in names]),
         mask=jnp.stack([jnp.asarray(per_network[n]["frequency_mask"]) for n in names]),
         relative_variance=(
             None if relative_variance is None else jnp.asarray(relative_variance)
         ),
+        **modes,
     )
     batched = np.asarray(
         grid_log_posterior(
@@ -512,12 +531,16 @@ def problem_posteriors(
         variant_likelihood, relative_variance, variant_settings = shot_noise_variant(
             variant, likelihood, fiducial_relative_variance
         )
+        # The basis settings key only the "modes" caches, so the others stay valid.
+        shared = {
+            k: v for k, v in settings.items() if k != "modes" or variant == "modes"
+        }
         posteriors[variant] = grid_posterior(
             run,
             axes,
             variant_likelihood,
             relative_variance,
-            settings={**settings, **variant_settings},
+            settings={**shared, **variant_settings},
             **kwargs,  # ty: ignore[invalid-argument-type]
         )
     return posteriors
@@ -765,17 +788,24 @@ def _(
 
 @app.cell
 def _(
+    FIDUCIALS,
     catalog_metadata,
     catalog_seed,
     data_seed,
     frequencies,
     injection_metadata,
+    likelihood,
+    max_modes,
     maximum_frequency,
     minimum_frequency,
+    modes_tolerance,
     network_names,
     observation_time,
+    problem_variants,
     redshift_nodes,
     registry,
+    response_draws,
+    response_seed,
 ):
     per_network = {
         name: network_data(
@@ -788,6 +818,33 @@ def _(
         )
         for name in network_names
     }
+    # The "modes" mode: response draws, and the basis and node blocks of the
+    # catalog covariance at the fiducials, padded to one k so networks stack.
+    _uses_modes = any("modes" in v for v in problem_variants.values())
+    for _name, _data in per_network.items() if _uses_modes else ():
+        _detectors, _sensitivities = registry.build_network(_name)
+        _network = likelihood.with_shot_noise_modes(
+            FIDUCIALS,
+            LikelihoodNetwork(
+                jnp.asarray(_data["scale"]),
+                jnp.asarray(_data["frequency_mask"]),
+                response=sample_network_response(
+                    jax.random.key(response_seed),
+                    response_draws,
+                    frequencies,
+                    _detectors,
+                    _sensitivities,
+                ),
+            ),
+            tolerance=modes_tolerance,
+            max_modes=max_modes,
+            num_modes=max_modes,
+        )
+        _data.update(
+            response=_network.response,
+            modes=_network.modes,
+            mode_blocks=_network.mode_blocks,
+        )
     # Everything a cached log density depends on besides its own axes.
     cache_settings = {
         "version": __version__,
@@ -802,6 +859,7 @@ def _(
         "redshift_nodes": redshift_nodes,
         # The amplitude mode's s^2: the catalog projected on each template.
         "relative_variance": "projected",
+        "modes": (response_draws, response_seed, modes_tolerance, max_modes),
     }
     labelled_networks = [(n, l) for n, l in DETECTOR_NETWORKS if n in network_names]
     return cache_settings, labelled_networks, per_network

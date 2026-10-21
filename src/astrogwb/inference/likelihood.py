@@ -53,8 +53,11 @@ from .compound_poisson import (
 from .shot_noise import (
     _keep,
     amplitude_direction,
+    low_rank_gaussian_log_likelihood,
+    pad_modes,
     per_frequency_direction,
     rank_one_gaussian_log_likelihood,
+    shot_noise_modes,
 )
 
 __all__ = [
@@ -68,10 +71,11 @@ __all__ = [
 ]
 
 #: The shot-noise term of a likelihood: an amplitude mode with the projected
-#: :math:`s^2` per point and network, the per-frequency mode, or an amplitude
-#: mode with a fixed :math:`s^2` (``Network.relative_variance``). ``None`` is
-#: the diagonal Gaussian.
-type ShotNoiseMode = Literal["amplitude", "per_frequency", "fixed"]
+#: :math:`s^2` per point and network, the per-frequency mode, an amplitude
+#: mode with a fixed :math:`s^2` (``Network.relative_variance``), or ``k``
+#: eigenmodes of the catalog covariance (``Network.modes``). ``None`` is the
+#: diagonal Gaussian.
+type ShotNoiseMode = Literal["amplitude", "per_frequency", "fixed", "modes"]
 
 #: ``(mean, variance | None, extras)``, what ``predict`` returns.
 type Prediction = tuple[jax.Array, jax.Array | None, Mapping[str, jax.Array]]
@@ -83,8 +87,9 @@ class Network(NamedTuple):
     r"""The detector-network half of a likelihood.
 
     Stacking K networks means stacking each leaf along a new leading axis, and
-    every network in a stack must share one structure: all of ``mask``,
-    ``relative_variance`` and ``response`` ``None``, or all arrays of one shape.
+    every network in a stack must share one structure: each optional leaf
+    ``None`` in all of them, or arrays of one shape (pad ``modes`` with
+    :func:`~astrogwb.inference.shot_noise.pad_modes`).
 
     Attributes
     ----------
@@ -114,12 +119,33 @@ class Network(NamedTuple):
         rather than multiplying it: in the projected variance, the per-bin
         variance of the ``"per_frequency"`` mode and the inclination nodes of
         the compound-Poisson point set. ``None`` keeps the sky-averaged power.
+    modes:
+        The shot-noise basis :math:`U` of the ``"modes"`` mode, ``(F, k)``:
+        orthonormal over the counted bins in whitened coordinates
+        (:func:`~astrogwb.inference.shot_noise.shot_noise_modes`). Zero
+        columns are inert.
+    mode_blocks:
+        The per-node blocks :math:`M_z` of the shot noise in the basis,
+        ``(Z, k, k)``
+        (:meth:`ImportanceGaussianLikelihood.mode_blocks`), held to skip
+        recomputing them at every point. They do not depend on the parameters
+        while the importance weights do not, that is with no ``density_sites``;
+        the caller is trusted to hold them only then. ``None`` computes them.
+    mode_covariance:
+        The whitened shot-noise covariance in the basis, :math:`B`,
+        ``(k, k)``, which
+        :meth:`ImportanceGaussianLikelihood.log_likelihood` sets per point
+        in the ``"modes"`` mode, as it sets ``relative_variance`` in the
+        ``"amplitude"`` mode.
     """
 
     scale: jax.Array
     mask: jax.Array | None = None
     relative_variance: jax.Array | None = None
     response: jax.Array | None = None
+    modes: jax.Array | None = None
+    mode_blocks: jax.Array | None = None
+    mode_covariance: jax.Array | None = None
 
 
 def _orientation_covariance(network: Network | None) -> jax.Array | float:
@@ -172,11 +198,25 @@ def shot_noise_log_likelihood(
     and ``"fixed"`` take :math:`s^2` from ``network.relative_variance`` (the
     projected variance at this point for the first, a constant for the second),
     ``"per_frequency"`` takes :math:`u_f = \sqrt{V_f}` from ``variance``.
+    ``"modes"`` is the low-rank covariance of ``network.modes`` and
+    ``network.mode_covariance``
+    (:func:`~astrogwb.inference.shot_noise.low_rank_gaussian_log_likelihood`).
     ``None`` is the diagonal Gaussian and ignores ``variance``. ``mode`` is
     static; the inputs each mode reads are required and not checked.
     """
     if mode is None:
         return gaussian_log_likelihood(mean, observed, network.scale, network.mask)
+    if mode == "modes":
+        assert network.modes is not None
+        assert network.mode_covariance is not None
+        return low_rank_gaussian_log_likelihood(
+            observed,
+            mean,
+            network.scale,
+            network.modes,
+            network.mode_covariance,
+            network.mask,
+        )
     if mode in ("amplitude", "fixed"):
         assert network.relative_variance is not None
         direction = amplitude_direction(mean, network.relative_variance)
@@ -407,7 +447,7 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
     gram:
         The Gram matrix of the catalog, :math:`\sum_i P_i P_i^T / N`,
         ``(F_ref, F_ref)``. Held only when ``density_sites`` is empty and
-        ``shot_noise`` is ``"amplitude"``: the second moment of the projected
+        ``shot_noise`` is ``"amplitude"`` or ``"modes"``: the second moment of the projected
         power is then a quadratic form in it, whose cost does not grow with the
         catalog, and it is formed once here. ``None`` otherwise, and every
         source is projected at every evaluation. A cache of ``power`` as well.
@@ -469,7 +509,8 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         :meth:`log_likelihood` and :meth:`__call__` require them, and nothing
         checks this. ``shot_noise="amplitude"`` or ``"per_frequency"`` stores
         the squared power and needs ``observation_time`` in years;
-        ``"fixed"`` takes :math:`s^2` from ``network.relative_variance``.
+        ``"fixed"`` takes :math:`s^2` from ``network.relative_variance``;
+        ``"modes"`` needs ``observation_time`` and ``network.modes``.
 
         The caller is trusted to pass a reference catalog of ``metadata`` and a
         waveform the contracts of :mod:`astrogwb.gwb.importance` hold for.
@@ -489,7 +530,7 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
             ),
             gram=(
                 jnp.asarray(power @ power.T / power.shape[1])
-                if constant and shot_noise == "amplitude"
+                if constant and shot_noise in ("amplitude", "modes")
                 else None
             ),
             observation_seconds=(
@@ -668,36 +709,174 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         """
         assert self.observation_seconds is not None
         shared = self._shared(params)
-        weights = jnp.exp(shared.log_weights) / shared.log_weights.shape[0]
-        gram = (self.power * weights) @ self.power.T
+        num_bins = self.query_log_frequencies.shape[0]
+        covariance, _ = self._fold_node_moments(
+            shared,
+            lambda carry, moment, kernel: (carry + kernel * moment, None),
+            jnp.zeros((num_bins, num_bins)),
+        )
+        # Symmetric to round-off only; made exact for eigh and Cholesky.
+        covariance = 0.5 * (covariance + covariance.T)
+        network = self.network if network is None else network
+        return _orientation_covariance(network) * covariance / self.observation_seconds
+
+    def _fold_node_moments(
+        self, shared: _SharedTerms, step: Callable, init: Any
+    ) -> tuple[Any, Any]:
+        r"""Scan ``step(carry, moment, kernel)`` over the redshift nodes.
+
+        ``moment`` is node :math:`z`'s second moment of the power on the observed
+        grid, :math:`s_z^4 W_z G W_z^T` (the ``amplitude`` rescaling squared,
+        :math:`W_z` the node's interpolation and :math:`G` the weighted Gram
+        matrix of the catalog), ``(F, F)``, and ``kernel`` is
+        :meth:`_variance_kernel` there. Returns the final carry and the stacked
+        outputs, as :func:`jax.lax.scan` does.
+        """
+        if self.gram is None:
+            weights = jnp.exp(shared.log_weights) / shared.log_weights.shape[0]
+            gram = (self.power * weights) @ self.power.T
+        else:
+            gram = self.gram
         identity = jnp.eye(self.log_reference_frequencies.shape[0])
 
-        def node_covariance(carry: jax.Array, node: tuple) -> tuple[jax.Array, None]:
-            query, amplitude, kernel = node
+        def node(carry: Any, inputs: tuple) -> tuple[Any, Any]:
+            query, amplitude, kernel = inputs
             interpolation = jax.vmap(
                 lambda reference: jnp.interp(
                     query, self.log_reference_frequencies, reference, right=0.0
                 ),
                 out_axes=1,
             )(identity)
-            return carry + (kernel * amplitude**2) * (
-                interpolation @ gram @ interpolation.T
-            ), None
+            moment = amplitude**2 * (interpolation @ gram @ interpolation.T)
+            return step(carry, moment, kernel)
 
-        num_bins = self.query_log_frequencies.shape[0]
-        covariance, _ = jax.lax.scan(
-            node_covariance,
-            jnp.zeros((num_bins, num_bins)),
+        return jax.lax.scan(
+            node,
+            init,
             (
                 self.query_log_frequencies.T,
                 self.amplitude,
                 self._variance_kernel(shared),
             ),
         )
-        # Symmetric to round-off only; made exact for eigh and Cholesky.
-        covariance = 0.5 * (covariance + covariance.T)
+
+    def _projected_cross_moment(
+        self, shared: _SharedTerms, projectors: jax.Array
+    ) -> jax.Array:
+        r""":meth:`_projected_second_moment` for ``k`` projectors at once, ``(Z, k, k)``.
+
+        Entry :math:`(z, i, j)` is the weighted mean over draws of
+        :math:`a_{z i} a_{z j}`, the source projected on ``projectors[i]`` and
+        ``projectors[j]`` at node :math:`z`; ``projectors`` is ``(k, F)``.
+        """
+        if self.gram is None:
+            projected = jax.vmap(self._project)(projectors)
+            weights = jnp.exp(shared.log_weights) / shared.log_weights.shape[0]
+            return jnp.einsum("izn,jzn,n->zij", projected, projected, weights)
+        nodes = jax.vmap(self._node_projectors)(projectors)
+        return self.amplitude[:, None, None] ** 2 * jnp.einsum(
+            "izf,fg,jzg->zij", nodes, self.gram, nodes
+        )
+
+    def _mode_blocks(self, shared: _SharedTerms, network: Network) -> jax.Array:
+        assert network.modes is not None
+        keep = _keep(network.mask, network.scale)
+        projectors = jnp.where(
+            keep[:, None],
+            network.modes / jnp.where(keep, network.scale, 1.0)[:, None],
+            0.0,
+        ).T
+        if network.response is None:
+            return INCLINATION_SECOND_MOMENT * self._projected_cross_moment(
+                shared, projectors
+            )
+        orientation = _orientation_covariance(network)
+        _, blocks = self._fold_node_moments(
+            shared,
+            lambda carry, moment, kernel: (
+                carry,
+                projectors @ (moment * orientation) @ projectors.T,
+            ),
+            0.0,
+        )
+        return blocks
+
+    def mode_blocks(
+        self, params: Mapping[str, ArrayLike], network: Network | None = None
+    ) -> jax.Array:
+        r"""The per-node shot noise in ``network.modes``, ``(Z, k, k)``.
+
+        With :math:`\tilde U = U / \sigma` over the counted bins,
+
+        .. math::
+
+            M_z = \tilde U^T \left( s_z^4 W_z G W_z^T \circ R \right) \tilde U,
+
+        with :math:`R = \langle r_f r_{f'} \rangle` under a
+        ``network.response`` and the constant
+        :data:`~astrogwb.gwb.importance.INCLINATION_SECOND_MOMENT` otherwise
+        (then contracted as projections, without the dense moment). The
+        whitened shot-noise covariance in the basis is
+        :math:`B = \sum_z \kappa_z M_z / T`, with :math:`\kappa_z` the
+        :meth:`_variance_kernel`, so :math:`U B U^T` is the whitened
+        :meth:`catalog_covariance` restricted to the basis. Hold the result
+        on ``network.mode_blocks`` to skip this at every point; that is exact
+        while the importance weights do not vary. Requires
+        ``observation_seconds`` for :meth:`log_likelihood`.
+        """
         network = self.network if network is None else network
-        return _orientation_covariance(network) * covariance / self.observation_seconds
+        assert network is not None
+        return self._mode_blocks(self._shared(params), network)
+
+    def with_shot_noise_modes(
+        self,
+        params: Mapping[str, ArrayLike],
+        network: Network,
+        *,
+        tolerance: float = 1e-3,
+        max_modes: int = 32,
+        num_modes: int | None = None,
+        hold_blocks: bool | None = None,
+    ) -> Network:
+        """``network`` with the shot-noise basis of the ``"modes"`` mode.
+
+        The basis is :func:`~astrogwb.inference.shot_noise.shot_noise_modes` of
+        :meth:`catalog_covariance` at ``params`` under ``network`` (with its
+        ``response``), padded with zero columns to ``num_modes`` when given, so
+        that networks stack. ``hold_blocks`` also holds :meth:`mode_blocks` at
+        ``params``; by default it does when no importance weight varies (no
+        ``density_sites``), where they are exact at every point. Call outside
+        JAX transformations.
+        """
+        modes = shot_noise_modes(
+            self.catalog_covariance(params, network),
+            network.scale,
+            network.mask,
+            tolerance=tolerance,
+            max_modes=max_modes,
+        )
+        if num_modes is not None:
+            modes = pad_modes(modes, num_modes)
+        network = network._replace(modes=modes)
+        if hold_blocks is None:
+            hold_blocks = not self.density_sites
+        if hold_blocks:
+            network = network._replace(mode_blocks=self.mode_blocks(params, network))
+        return network
+
+    def _mode_covariance(self, shared: _SharedTerms, network: Network) -> jax.Array:
+        r""":math:`B = \sum_z \kappa_z M_z / T`, ``(k, k)``."""
+        assert self.observation_seconds is not None
+        blocks = (
+            self._mode_blocks(shared, network)
+            if network.mode_blocks is None
+            else network.mode_blocks
+        )
+        covariance = (
+            jnp.einsum("z,zij->ij", self._variance_kernel(shared), blocks)
+            / self.observation_seconds
+        )
+        return 0.5 * (covariance + covariance.T)
 
     def log_likelihood_from_prediction(
         self, prediction: Prediction, network: Network
@@ -732,6 +911,10 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
                 relative_variance=self._projected_relative_variance(
                     shared, prediction[0], network
                 )
+            )
+        elif self.shot_noise == "modes":
+            network = network._replace(
+                mode_covariance=self._mode_covariance(shared, network)
             )
         return self.log_likelihood_from_prediction(prediction, network), prediction[2]
 

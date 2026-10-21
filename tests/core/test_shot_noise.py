@@ -10,8 +10,11 @@ import pytest
 from astrogwb.inference.shot_noise import (
     amplitude_direction,
     amplitude_shot_noise_variance,
+    low_rank_gaussian_log_likelihood,
+    pad_modes,
     per_frequency_direction,
     rank_one_gaussian_log_likelihood,
+    shot_noise_modes,
 )
 
 
@@ -158,3 +161,159 @@ def test_per_frequency_direction_of_a_flat_relative_scatter_is_the_amplitude_one
         amplitude_direction(template, 0.03**2),
         rtol=1e-14,
     )
+
+
+def _whitened_dense(
+    observed: np.ndarray,
+    prediction: np.ndarray,
+    scale: np.ndarray,
+    modes: np.ndarray,
+    block: np.ndarray,
+) -> float:
+    root = np.diag(scale)
+    covariance = root @ (np.eye(scale.size) + modes @ block @ modes.T) @ root
+    return float(
+        dist.MultivariateNormal(
+            jnp.asarray(prediction), jnp.asarray(covariance)
+        ).log_prob(jnp.asarray(observed))
+    )
+
+
+@pytest.fixture
+def modes() -> np.ndarray:
+    """Two orthonormal columns over five bins."""
+    rng = np.random.default_rng(1)
+    return np.linalg.qr(rng.normal(size=(5, 2)))[0]
+
+
+@pytest.fixture
+def block() -> np.ndarray:
+    return np.array([[2.0, 0.3], [0.3, 0.5]])
+
+
+def test_low_rank_log_likelihood_matches_the_dense_gaussian(
+    template: np.ndarray,
+    observed: np.ndarray,
+    scale: np.ndarray,
+    modes: np.ndarray,
+    block: np.ndarray,
+) -> None:
+    value = low_rank_gaussian_log_likelihood(observed, template, scale, modes, block)
+
+    assert float(value) == pytest.approx(
+        _whitened_dense(observed, template, scale, modes, block), rel=1e-12
+    )
+
+
+def test_low_rank_log_likelihood_of_one_mode_is_the_rank_one_one(
+    template: np.ndarray, observed: np.ndarray, scale: np.ndarray
+) -> None:
+    direction = np.array([0.5, -0.2, 0.3, 0.1, 0.4])
+    whitened = direction / scale
+    norm = np.linalg.norm(whitened)
+
+    value = low_rank_gaussian_log_likelihood(
+        observed, template, scale, (whitened / norm)[:, None], np.array([[norm**2]])
+    )
+
+    assert float(value) == pytest.approx(
+        float(rank_one_gaussian_log_likelihood(observed, template, scale, direction)),
+        rel=1e-12,
+    )
+
+
+def test_zero_padded_modes_change_nothing(
+    template: np.ndarray,
+    observed: np.ndarray,
+    scale: np.ndarray,
+    modes: np.ndarray,
+    block: np.ndarray,
+) -> None:
+    padded_block = np.pad(block, ((0, 3), (0, 3)))
+
+    padded = low_rank_gaussian_log_likelihood(
+        observed, template, scale, pad_modes(modes, 5), padded_block
+    )
+
+    assert float(padded) == pytest.approx(
+        float(
+            low_rank_gaussian_log_likelihood(observed, template, scale, modes, block)
+        ),
+        rel=1e-14,
+    )
+
+
+def test_low_rank_log_likelihood_drops_masked_bins_with_infinite_scale(
+    template: np.ndarray,
+    observed: np.ndarray,
+    scale: np.ndarray,
+    block: np.ndarray,
+) -> None:
+    keep = np.array([True, False, True, True, False])
+    kept_modes = np.linalg.qr(np.random.default_rng(2).normal(size=(3, 2)))[0]
+    modes = np.zeros((5, 2))
+    modes[keep] = kept_modes
+    infinite = np.where(keep, scale, np.inf)
+
+    value = low_rank_gaussian_log_likelihood(
+        observed, template, infinite, modes, block, keep
+    )
+
+    assert np.isfinite(float(value))
+    assert float(value) == pytest.approx(
+        _whitened_dense(observed[keep], template[keep], scale[keep], kept_modes, block),
+        rel=1e-12,
+    )
+
+
+@pytest.fixture
+def spectrum_covariance() -> np.ndarray:
+    """A covariance with whitened eigenvalues 1, 1e-3, 1e-9 and 1e-12."""
+    rng = np.random.default_rng(3)
+    basis = np.linalg.qr(rng.normal(size=(4, 4)))[0]
+    return basis @ np.diag([1.0, 1e-3, 1e-9, 1e-12]) @ basis.T
+
+
+@pytest.mark.parametrize(
+    ("tolerance", "expected"),
+    [(2e-3, 1), (1e-3, 2), (1e-10, 3), (0.0, 4)],
+)
+def test_shot_noise_modes_keep_the_fewest_modes_within_the_dropped_budget(
+    spectrum_covariance: np.ndarray, tolerance: float, expected: int
+) -> None:
+    """The dropped eigenvalues sum below ``tolerance``, in noise units."""
+    modes = shot_noise_modes(spectrum_covariance, np.ones(4), tolerance=tolerance)
+
+    assert modes.shape == (4, expected)
+    np.testing.assert_allclose(
+        np.asarray(modes.T @ modes), np.eye(expected), atol=1e-12
+    )
+
+
+def test_shot_noise_modes_warn_when_the_cap_stops_them_short(
+    spectrum_covariance: np.ndarray,
+) -> None:
+    with pytest.warns(UserWarning, match="the budget needs k = 3"):
+        modes = shot_noise_modes(
+            spectrum_covariance, np.ones(4), tolerance=1e-10, max_modes=2
+        )
+
+    assert modes.shape == (4, 2)
+
+
+def test_shot_noise_modes_do_not_warn_within_the_cap(
+    spectrum_covariance: np.ndarray, recwarn: pytest.WarningsRecorder
+) -> None:
+    shot_noise_modes(spectrum_covariance, np.ones(4), tolerance=1e-3, max_modes=2)
+
+    assert not [w for w in recwarn if issubclass(w.category, UserWarning)]
+
+
+def test_shot_noise_modes_are_zero_in_masked_bins(
+    spectrum_covariance: np.ndarray,
+) -> None:
+    mask = np.array([True, True, False, True])
+
+    modes = shot_noise_modes(spectrum_covariance, np.ones(4), mask)
+
+    assert np.all(np.asarray(modes)[~mask] == 0.0)
