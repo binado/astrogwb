@@ -65,6 +65,7 @@ from numpy.typing import ArrayLike
 
 __all__ = [
     "build_power_kernel",
+    "build_stokes_kernel",
     "check_sources",
     "next_smooth_even",
     "ripple_parameters",
@@ -400,30 +401,15 @@ def build_power_kernel(
     ``IMRPhenomXPHM`` across the production band.
     """
     # Imported here, not at module scope -- see the module docstring.
-    import ripplegw
     from ripplegw.interfaces import AmplitudePhaseWaveform
 
     from astrogwb.waveform.polarization_power import polarization_power
 
-    metadata = _approximant_metadata(approximant)
-    if not use_taper_in_tidal_corrections and not metadata.get("is_tidal", False):
-        raise ValueError(
-            "use_taper_in_tidal_corrections=False is only supported for tidal "
-            "Ripple approximants"
-        )
-
-    config: dict[str, float | bool] = {"f_ref": reference_frequency}
-    if not use_taper_in_tidal_corrections:
-        config["no_taper"] = True
-    try:
-        waveform = ripplegw.waveform(approximant, **config)
-    except TypeError as error:
-        if not use_taper_in_tidal_corrections:
-            raise ValueError(
-                f"{approximant} is tidal but does not support "
-                "use_taper_in_tidal_corrections=False"
-            ) from error
-        raise
+    waveform = _build_ripple_waveform(
+        approximant,
+        reference_frequency,
+        use_taper_in_tidal_corrections=use_taper_in_tidal_corrections,
+    )
 
     if isinstance(waveform, AmplitudePhaseWaveform):
 
@@ -441,6 +427,110 @@ def build_power_kernel(
 
         return amplitude_power
 
+    evaluate_polarizations = _polarization_evaluator(waveform)
+
+    def full_polarization_power(
+        frequencies: jax.Array, events: Mapping[str, jax.Array]
+    ) -> jax.Array:
+        plus, cross = evaluate_polarizations(frequencies, events)
+        return polarization_power(plus, cross)
+
+    return full_polarization_power
+
+
+def build_stokes_kernel(
+    approximant: str,
+    reference_frequency: float,
+    *,
+    use_taper_in_tidal_corrections: bool = True,
+) -> Callable[[jax.Array, Mapping[str, jax.Array]], jax.Array]:
+    """Return a vmapped ``(frequencies, events) -> stokes`` evaluator, ``(4, F, N)``.
+
+    The Stokes counterpart of :func:`build_power_kernel`, dispatched the same
+    way. A :class:`~ripplegw.interfaces.AmplitudePhaseWaveform` evaluates only
+    its amplitude, and
+    :func:`~astrogwb.waveform.polarization_power.quadrupolar_stokes` supplies
+    the inclination dependence; its :math:`I` is the power kernel's output bit
+    for bit. Other models evaluate :math:`\\tilde h_+, \\tilde h_\\times` and
+    reduce them with
+    :func:`~astrogwb.waveform.polarization_power.polarization_stokes`. Higher
+    modes make those depend on ``phase_c``, which the caller then has to
+    supply. Not jitted, and NaN-guarded, as :func:`build_power_kernel` is.
+    """
+    # Imported here, not at module scope -- see the module docstring.
+    from ripplegw.interfaces import AmplitudePhaseWaveform
+
+    from astrogwb.waveform.polarization_power import (
+        polarization_stokes,
+        quadrupolar_stokes,
+    )
+
+    waveform = _build_ripple_waveform(
+        approximant,
+        reference_frequency,
+        use_taper_in_tidal_corrections=use_taper_in_tidal_corrections,
+    )
+
+    if isinstance(waveform, AmplitudePhaseWaveform):
+
+        def amplitude_stokes(
+            frequencies: jax.Array, events: Mapping[str, jax.Array]
+        ) -> jax.Array:
+            amplitudes = jax.vmap(
+                lambda event: waveform.amplitude(frequencies, dict(event)),
+                in_axes=0,
+            )(events)
+            return jnp.nan_to_num(quadrupolar_stokes(amplitudes, events["iota"]))
+
+        return amplitude_stokes
+
+    evaluate_polarizations = _polarization_evaluator(waveform)
+
+    def full_polarization_stokes(
+        frequencies: jax.Array, events: Mapping[str, jax.Array]
+    ) -> jax.Array:
+        plus, cross = evaluate_polarizations(frequencies, events)
+        return polarization_stokes(plus, cross)
+
+    return full_polarization_stokes
+
+
+def _build_ripple_waveform(
+    approximant: str,
+    reference_frequency: float,
+    *,
+    use_taper_in_tidal_corrections: bool,
+) -> Any:
+    """Construct the Ripple waveform object once, shared by both kernels."""
+    # Imported here, not at module scope -- see the module docstring.
+    import ripplegw
+
+    metadata = _approximant_metadata(approximant)
+    if not use_taper_in_tidal_corrections and not metadata.get("is_tidal", False):
+        raise ValueError(
+            "use_taper_in_tidal_corrections=False is only supported for tidal "
+            "Ripple approximants"
+        )
+
+    config: dict[str, float | bool] = {"f_ref": reference_frequency}
+    if not use_taper_in_tidal_corrections:
+        config["no_taper"] = True
+    try:
+        return ripplegw.waveform(approximant, **config)
+    except TypeError as error:
+        if not use_taper_in_tidal_corrections:
+            raise ValueError(
+                f"{approximant} is tidal but does not support "
+                "use_taper_in_tidal_corrections=False"
+            ) from error
+        raise
+
+
+def _polarization_evaluator(
+    waveform: Any,
+) -> Callable[[jax.Array, Mapping[str, jax.Array]], tuple[jax.Array, jax.Array]]:
+    """``(frequencies, events) -> (plus, cross)``, each ``(N, F)`` and NaN-guarded."""
+
     def one_event(
         frequencies: jax.Array, event: Mapping[str, jax.Array]
     ) -> tuple[jax.Array, jax.Array]:
@@ -450,12 +540,4 @@ def build_power_kernel(
             jnp.nan_to_num(polarizations["c"]),
         )
 
-    evaluate_polarizations = jax.vmap(one_event, in_axes=(None, 0))
-
-    def full_polarization_power(
-        frequencies: jax.Array, events: Mapping[str, jax.Array]
-    ) -> jax.Array:
-        plus, cross = evaluate_polarizations(frequencies, events)
-        return polarization_power(plus, cross)
-
-    return full_polarization_power
+    return jax.vmap(one_event, in_axes=(None, 0))
