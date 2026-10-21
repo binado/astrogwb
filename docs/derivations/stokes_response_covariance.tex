@@ -1,0 +1,486 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{bm}
+\usepackage{booktabs}
+\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+
+\newcommand{\avg}[1]{\left\langle #1 \right\rangle}
+\newcommand{\Tr}{\operatorname{Tr}}
+\renewcommand{\Re}{\operatorname{Re}}
+\renewcommand{\Im}{\operatorname{Im}}
+\newcommand{\bh}{\bm{h}}
+\newcommand{\bF}{\bm{F}}
+\newcommand{\bOmega}{\hat{\bm{\Omega}}}
+\newcommand{\cG}{\mathcal{G}}
+\newcommand{\cF}{\mathfrak{F}}
+\newcommand{\ft}[1]{\tilde{#1}}
+
+\newtheorem{proposition}{Proposition}
+\theoremstyle{remark}
+\newtheorem{remark}{Remark}
+
+\title{The cross-correlation estimator of a CBC background\\
+in Stokes form: matrix notation, covariance factorization,\\
+and the analytic network-response moment}
+\author{astrogwb working note}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We rewrite the single-event contribution to the cross-correlation estimator of
+Zhong, Iacovelli, Mandic and Berti~\cite{Zhong2026} (their Eqs.~16 and~19) as a
+trace over the polarization matrix of the source, expand it in Pauli matrices,
+and obtain a contraction of the Stokes four-vector with a four-vector pair
+response. For dominant-quadrupole sources whose extrinsic angles are independent
+of their intrinsic parameters, the second moment of the estimator factorizes
+into a Hadamard product of an intrinsic power moment and an angular response
+moment. The angular moment reduces to three constants of the inclination and
+three sky integrals, each a finite sum of spherical Bessel functions; a product
+quadrature evaluates it exactly, which we check against Monte Carlo draws.
+\end{abstract}
+
+%------------------------------------------------------------------------------
+\section{The estimator}
+%------------------------------------------------------------------------------
+
+Following~\cite{Zhong2026}, the cross-correlation estimator of segment $I$ in a
+bin of width $\delta f = 1/\tau$ around $f$ is
+\begin{equation}
+  \hat C_f^{(I)} = \frac{\kappa_f}{\gamma_{12;f}}
+  \Re\!\left[\ft d_{1;f}^{(I)*}\, \ft d_{2;f}^{(I)}\right],
+  \qquad
+  \kappa_f \equiv \frac{20\pi^2 f^3}{3 H_0^2 \tau},
+  \label{eq:estimator}
+\end{equation}
+with $\gamma_{12;f}$ the isotropic overlap reduction function (ORF), normalized
+to one for co-located, co-aligned L-shaped detectors. Neglecting overlapping
+chirps and signals that span several segments, the segment average is a
+compound-Poisson sum over events plus detector noise~\cite[Eq.~14]{Zhong2026},
+\begin{equation}
+  \bar C_f = \frac{1}{N_{\rm seg}} \sum_{i=1}^{N_{\rm tot}} X_f^{(i)}
+  + \bar n_f,
+  \qquad
+  X_f^{(i)} = \frac{\kappa_f}{\gamma_{12;f}}
+  \Re\!\left[\ft h_{1;f}^{(i)*}\, \ft h_{2;f}^{(i)}\right],
+  \label{eq:compound}
+\end{equation}
+with $N_{\rm tot} \sim \mathrm{Poisson}(N_{\rm seg} R \tau)$.
+
+\paragraph{Detector-space matrix form.}
+Stack the two data streams as $\ft{\bm d} = (\ft d_1, \ft d_2)^T$. Since
+$\ft{\bm d}^\dagger \sigma_1 \ft{\bm d} = 2 \Re[\ft d_1^* \ft d_2]$,
+\begin{equation}
+  \hat C_f = \frac{\kappa_f}{2\gamma_{12;f}}\, \ft{\bm d}^\dagger \sigma_1 \ft{\bm d}.
+  \label{eq:quadratic}
+\end{equation}
+For a network of $n$ detectors the optimal combination of all pairs $a<b$ with
+weights $w_{ab} = \gamma_{ab}/(S_a S_b)$ is the same quadratic form with
+$\sigma_1/\gamma_{12}$ replaced by the symmetric, zero-diagonal $n\times n$ matrix
+\begin{equation}
+  W_{ab} = W_{ba} = \frac{w_{ab}}{\sum_{c<d} w_{cd}\,\gamma_{cd}}, \qquad
+  W_{aa} = 0 .
+  \label{eq:network-matrix}
+\end{equation}
+
+%------------------------------------------------------------------------------
+\section{Polarization matrix and Pauli expansion}
+%------------------------------------------------------------------------------
+
+\paragraph{The signal.}
+Write the two polarizations and the antenna patterns of detector $a$ as
+two-vectors, $\bh = (\ft h_+, \ft h_\times)^T$ and
+$\bF_a = (F_a^+, F_a^\times)^T$. Eq.~(17) of~\cite{Zhong2026} reads
+\begin{equation}
+  \ft h_a = e^{-i\alpha_a}\, \bF_a^T \bh, \qquad
+  \alpha_a = 2\pi f\, \bOmega\cdot\bm x_a / c ,
+\end{equation}
+so the signal in the detector vector is $\ft{\bm d} = \cF \bh$ with the
+$n \times 2$ response matrix $\cF_{aA} = e^{-i\alpha_a} F_a^A$.
+
+\paragraph{The polarization matrix.}
+The source enters only through the Hermitian, positive semidefinite matrix
+\begin{equation}
+  \rho \equiv \bh\, \bh^\dagger
+  = \begin{pmatrix}
+      |\ft h_+|^2 & \ft h_+ \ft h_\times^* \\
+      \ft h_\times \ft h_+^* & |\ft h_\times|^2
+    \end{pmatrix}.
+\end{equation}
+With the Stokes parameters of~\cite[Eq.~18]{Zhong2026},
+$I = |\ft h_+|^2 + |\ft h_\times|^2$, $Q = |\ft h_+|^2 - |\ft h_\times|^2$,
+$U = 2\Re[\ft h_+^* \ft h_\times]$, $V = 2\Im[\ft h_+^* \ft h_\times]$, the
+off-diagonal entry is $\ft h_+ \ft h_\times^* = \tfrac12 (U - iV)$ and
+\begin{equation}
+  \boxed{\;
+  \rho = \tfrac12 \left( I\,\mathbf 1 + Q\,\sigma_3 + U\,\sigma_1 + V\,\sigma_2 \right)
+  \equiv \tfrac12\, S_\mu\, \sigma^\mu ,
+  \qquad
+  S_\mu = (I, Q, U, V), \quad
+  \sigma^\mu = (\mathbf 1, \sigma_3, \sigma_1, \sigma_2) .
+  \;}
+  \label{eq:rho}
+\end{equation}
+Here $Q$ pairs with $\sigma_3$ (the diagonal difference), and $U$, $V$ with the
+real and imaginary off-diagonal Pauli matrices. Repeated Greek indices are
+summed with no metric; $\Tr[\sigma^\mu \sigma^\nu] = 2\delta^{\mu\nu}$.
+
+\paragraph{Eq.~19 as a trace.}
+Inserting $\ft{\bm d} = \cF\bh$ in Eq.~\eqref{eq:quadratic},
+\begin{equation}
+  \Re\!\left[\ft h_1^* \ft h_2\right]
+  = \tfrac12\, \bh^\dagger \cF^\dagger \sigma_1 \cF\, \bh
+  = \tfrac12 \Tr\!\left[\rho\; \cF^\dagger \sigma_1 \cF\right],
+  \qquad
+  \cF^\dagger \sigma_1 \cF = M + M^\dagger, \quad
+  M = e^{i\phi_f}\, \bF_1 \bF_2^T ,
+  \label{eq:trace}
+\end{equation}
+with $\phi_f = \alpha_1 - \alpha_2 = 2\pi f\, \bOmega\cdot(\bm x_1 - \bm x_2)/c$, the
+phase of~\cite{Zhong2026}. Expanding the Hermitian $2\times2$ matrix
+$\tfrac12 \cF^\dagger\sigma_1\cF$ in the same basis,
+$\tfrac12\cF^\dagger\sigma_1\cF = \tfrac12 \cG_\mu \sigma^\mu$, and using
+$\Tr[\sigma^\mu\sigma^\nu] = 2\delta^{\mu\nu}$:
+
+\begin{proposition}[Four-vector form of Eq.~19]
+\begin{equation}
+  \boxed{\;
+  \Re\!\left[\ft h_1^* \ft h_2\right] = \tfrac12\, S_\mu\, \cG^\mu ,
+  \qquad
+  \cG^\mu = \tfrac12 \Tr\!\left[\sigma^\mu\, \cF^\dagger \sigma_1 \cF\right]
+          = \Re\!\left[ e^{i\phi_f}\, \bF_2^T \sigma^\mu \bF_1 \right] .
+  \;}
+  \label{eq:four-vector}
+\end{equation}
+Componentwise, with
+$A_I = \bF_1^T \bF_2$, $A_Q = \bF_1^T\sigma_3\bF_2$, $A_U = \bF_1^T\sigma_1\bF_2$
+and $A_V = F_1^+F_2^\times - F_1^\times F_2^+$ (so that
+$\bF_2^T\sigma_2\bF_1 = i A_V$),
+\begin{equation}
+  \cG^\mu = \left( \cos\phi_f\, A_I,\; \cos\phi_f\, A_Q,\;
+                   \cos\phi_f\, A_U,\; -\sin\phi_f\, A_V \right),
+\end{equation}
+and the coefficients of~\cite[Eq.~19]{Zhong2026} are
+$G_\mu = \tfrac12 \cG^\mu$.
+\end{proposition}
+
+The sine reaches only $V$ because $\sigma_2$ is the only antisymmetric Pauli
+matrix: the real, symmetric pattern product $\bF_1\bF_2^T + \bF_2\bF_1^T$
+cannot couple to it, while the antisymmetric part, which multiplies
+$i\sin\phi_f$, couples only to it. A co-located pair ($\phi_f = 0$) is blind to
+circular polarization. For a network, $\sigma_1/\gamma_{12}$ becomes $W$ of
+Eq.~\eqref{eq:network-matrix} and
+$\cG^\mu_{\rm net} = \tfrac12\Tr[\sigma^\mu\cF^\dagger W \cF]
+= \sum_{a<b} W_{ab}\, \cG^\mu_{ab}$.
+
+\begin{remark}[Sign conventions]
+$\bOmega$ in~\cite{Zhong2026} is the propagation direction. The code
+(\texttt{stokes\_cross\_power} in \texttt{astrogwb.detector}) uses the
+direction to the source $\hat{\bm n} = -\bOmega$ and
+$\phi_{ab} = 2\pi f\,\hat{\bm n}\cdot(\bm x_b - \bm x_a)/c$, which is the same
+phase for $(a,b) = (1,2)$.
+\end{remark}
+
+\subsection{Structure of the four-vectors}
+
+\paragraph{One source is fully polarized.}
+$\rho = \bh\bh^\dagger$ has rank one, so
+\begin{equation}
+  \det\rho = \tfrac14\left(I^2 - Q^2 - U^2 - V^2\right) = 0 :
+\end{equation}
+the Stokes vector of every deterministic source is null with respect to
+$\eta = \mathrm{diag}(1,-1,-1,-1)$. A sum of sources is partially polarized
+(time-like $S$); only in the limit of many sources does it approach the
+unpolarized $(I,0,0,0)$ assumed by the sky-averaged ORF. The geometrical shot
+noise and polarization leakage of~\cite{Zhong2026} are the finite-catalog
+departure from that limit.
+
+\paragraph{Polarization angle.}
+A rotation of the polarization frame by $\psi$ acts on $\bh$ as
+$R(\psi) = e^{-2i\psi\sigma_2}$, so $\rho \to R\rho R^\dagger$: $I$ and $V$ are
+invariant and $(Q,U)$ rotate by $4\psi$. Equivalently it acts on the patterns.
+With the complex pattern $\mathbb F_a \equiv F_a^+ + iF_a^\times$, which
+transforms as $\mathbb F_a \to e^{\mp 2i\psi}\mathbb F_a$,
+\begin{equation}
+  A_I + i A_V = \mathbb F_1^*\, \mathbb F_2, \qquad
+  A_Q + i A_U = \mathbb F_1\, \mathbb F_2 ,
+  \label{eq:complex-patterns}
+\end{equation}
+so $A_I$, $A_V$ have spin~0 and $A_Q + iA_U$ has spin~4. In terms of the
+helicity vector $\bm\epsilon = \hat{\bm m} + i\hat{\bm n}$ of the polarization
+frame, $e^+ + ie^\times = \bm\epsilon\otimes\bm\epsilon$ and
+$\mathbb F_a = \bm\epsilon^T D_a \bm\epsilon$ with $D_a$ the detector tensor.
+
+\paragraph{The dominant quadrupole.}
+For the $(2,2)$ mode in the LAL convention, $\ft h_+ = -\tfrac12(1+c^2)\ft h_0$
+and $\ft h_\times = i c\, \ft h_0$ with $c = \cos\iota$, so
+\begin{equation}
+  S_\mu = |\ft h_0|^2\, s_\mu(\iota), \qquad
+  s_\mu = \left( g,\; \tfrac14(1-c^2)^2,\; 0,\; -c(1+c^2) \right), \qquad
+  g = \tfrac14(1+c^2)^2 + c^2 ,
+  \label{eq:quadrupole}
+\end{equation}
+null as it must be: $g^2 - s_Q^2 = c^2(1+c^2)^2 = s_V^2$. All frequency
+dependence is in $|\ft h_0|^2$, which depends on masses and distance only;
+$\psi$ generates $U$ through the rotation above.
+
+%------------------------------------------------------------------------------
+\section{Covariance factorization}
+%------------------------------------------------------------------------------
+
+\paragraph{Campbell's theorem.}
+The $n$-th cumulant of the compound-Poisson sum~\eqref{eq:compound} is
+$\mathcal K_n(\bar X_f) = \avg{N_{\rm tot}}\, N_{\rm seg}^{-n}
+\avg{(X_f)^n}_\theta$, Eq.~15 of~\cite{Zhong2026}. The same argument for two bins gives the full
+frequency covariance, which~\cite{Zhong2026} does not use:
+\begin{equation}
+  \mathrm{Cov}\!\left[\bar C_f, \bar C_{f'}\right]
+  = \frac{\avg{N_{\rm tot}}}{N_{\rm seg}^2}\, \avg{X_f X_{f'}}_\theta
+  + \delta_{ff'}\,\sigma_f^2 ,
+  \label{eq:campbell}
+\end{equation}
+with $\sigma_f^2$ the detector-noise variance.
+
+\paragraph{Factorization.}
+Split the source parameters into intrinsic ones $\theta_{\rm int}$ (masses,
+redshift) and extrinsic ones $\theta_{\rm ext} = (\bOmega, \psi, \iota)$. With
+Eqs.~\eqref{eq:four-vector} and~\eqref{eq:quadrupole},
+\begin{equation}
+  X_f = \underbrace{\frac{\kappa_f}{5}\,\avg{g}\, |\ft h_{0;f}|^2}_{\textstyle P_f(\theta_{\rm int})}
+  \;\times\;
+  \underbrace{\frac{s_\mu \cG^\mu_{{\rm net};f}}{\avg{s_\mu \cG^\mu_{{\rm net};f}}}}_{\textstyle r_f(\theta_{\rm ext})} ,
+  \qquad
+  \avg{s_\mu \cG^\mu_{ab}} = \tfrac25\avg{g}\,\gamma_{ab},
+  \label{eq:split}
+\end{equation}
+where $P_f$ is the orientation-averaged contribution of the source and
+$\avg{r_f} = 1$. The mean uses that the $\psi$ average removes $A_Q$ and $A_U$
+(spin~4), that the $\iota$ average removes $s_V$ (odd in $c$), and that
+$\avg{A_I\cos\phi_f}_{\bOmega} = \tfrac25 \gamma_{ab}$, the isotropic ORF in
+the normalization above.
+
+\begin{proposition}[Hadamard factorization]
+If $\theta_{\rm ext}$ is independent of $\theta_{\rm int}$ and the waveform is
+the dominant quadrupole, then
+\begin{equation}
+  \boxed{\;
+  \avg{X_f X_{f'}}_\theta
+  = \avg{P_f P_{f'}}_{\theta_{\rm int}} \;
+    \avg{r_f r_{f'}}_{\theta_{\rm ext}} ,
+  \qquad
+  \mathrm{Cov}_{\rm cat} = \frac{\avg{N_{\rm tot}}}{N_{\rm seg}^2}
+  \Big( \avg{P P^T} \circ \avg{r r^T} \Big) .
+  \;}
+  \label{eq:hadamard}
+\end{equation}
+\end{proposition}
+
+In the code's convention of integrating over the full observation $T$ rather
+than averaging segments, the prefactor is $\mathcal R / T$
+(\texttt{ImportanceGaussianLikelihood.catalog\_covariance}).
+
+\paragraph{The three components of~\cite{Zhong2026}.}
+Writing $r_f - 1$ with Eq.~\eqref{eq:split},
+\begin{equation}
+  r_f - 1
+  = \underbrace{\frac{g\,\cG^I_f}{\avg{g\,\cG^I_f}} - 1}_{\text{geometrical shot noise}}
+  \;+\;
+  \underbrace{\frac{s_Q\cG^Q_f + s_V\cG^V_f}{\avg{g\,\cG^I_f}}}_{\text{polarization leakage}} ,
+\end{equation}
+where the first term also carries the inclination dependence of the intensity,
+which~\cite{Zhong2026} keep inside $I^{(i)}$ (their ``mean intensity''). The
+remaining scatter of $P_f$ between sources, from distances and masses, is the
+Poisson shot noise proper. Eq.~\eqref{eq:hadamard} contains all three.
+
+\paragraph{Projection on the mean signal.}
+With $c_f = S_f/\sigma_f^2$ and $S_f = \avg{\bar C_f}$, the amplitude estimator
+$\hat B = \bm c^T \bar{\bm C} / \bm c^T \bm S$ has relative catalog variance
+\begin{equation}
+  s^2 = \frac{\bm c^T\, \mathrm{Cov}_{\rm cat}\, \bm c}{(\bm c^T \bm S)^2}
+  = \frac{\avg{N_{\rm tot}}}{N_{\rm seg}^2}\,
+    \frac{\avg{\left(\textstyle\sum_f c_f P_f r_f\right)^2}}{(\bm c^T\bm S)^2},
+  \label{eq:projected}
+\end{equation}
+the variance that the \texttt{"amplitude"} likelihood adds to $\rho^{-2}$.
+
+\paragraph{When the factorization fails.}
+\begin{itemize}
+  \item \emph{Higher modes}: the ratios of the Stokes parameters then depend on
+        frequency and masses, so $s_\mu$ no longer factors out of $S_\mu$.
+  \item \emph{Earth rotation}: a signal long compared with a sidereal day sees
+        time-averaged patterns, and the averaging depends on the
+        detector-frame chirp mass $(1+z)\mathcal M$ and on $f$, coupling
+        $r_f$ to $\theta_{\rm int}$. The static-detector $\avg{r_f r_{f'}}$ is
+        then an upper bound at low frequency.
+  \item \emph{Selection on SNR}: removing resolved sources by an SNR threshold
+        correlates the surviving orientations with distance. A redshift cut
+        $z > z_{\min}$, as here and in~\cite{Zhong2026}, does not.
+\end{itemize}
+
+%------------------------------------------------------------------------------
+\section{The angular moment}
+%------------------------------------------------------------------------------
+
+We need, for every pair of pairs $(ab, cd)$ and bins $(f, f')$,
+\begin{equation}
+  \avg{r_f r_{f'}}
+  = \frac{\sum_{a<b}\sum_{c<d} w_{ab}(f)\, w_{cd}(f')\,
+          \avg{\Xi_{ab;f}\,\Xi_{cd;f'}}}
+         {\left(\tfrac25\avg{g}\right)^2 D_f D_{f'}},
+  \qquad
+  \Xi_{ab;f} = s_\mu \cG^\mu_{ab;f}, \quad
+  D_f = \sum_{a<b} w_{ab}\gamma_{ab} .
+\end{equation}
+
+\paragraph{Polarization angle and inclination.}
+Since $s_U = 0$,
+$\Xi_{ab} = \cos\phi_{ab}\,(g A_I^{ab} + s_Q A_Q^{ab}) - \sin\phi_{ab}\, s_V A_V^{ab}$.
+By Eq.~\eqref{eq:complex-patterns} the $\psi$ average removes every product of a
+spin-0 and a spin-4 factor, and
+\begin{equation}
+  \avg{A_Q^{ab} A_Q^{cd}}_\psi
+  = \tfrac12 \Re\!\left[\mathbb F_a \mathbb F_b\, \mathbb F_c^* \mathbb F_d^*\right]
+  = \tfrac12\left(A_Q^{ab}A_Q^{cd} + A_U^{ab}A_U^{cd}\right).
+\end{equation}
+The inclination is uniform in $c \in [-1,1]$ and independent of the sky, so its
+moments are constants,
+\begin{equation}
+  \avg{g} = \tfrac45, \quad
+  \avg{g^2} = \tfrac{284}{315}, \quad
+  \avg{s_Q^2} = \tfrac{8}{315}, \quad
+  \avg{s_V^2} = \tfrac{92}{105}, \quad
+  \avg{g\, s_V} = \avg{s_Q s_V} = 0 ,
+\end{equation}
+and $\avg{g\,s_Q} = \tfrac{4}{63}$ multiplies only spin-mixed terms, which vanish.
+(The sky-averaged inclination factor of the code is
+$\avg{g^2}/\avg{g}^2 = 355/252$.) Therefore
+\begin{equation}
+  \boxed{\;
+  \avg{\Xi_{ab;f}\,\Xi_{cd;f'}}
+  = \avg{g^2}\, \Gamma^{II}_{ab,cd}(f,f')
+  + \avg{s_Q^2}\, \Gamma^{QQ}_{ab,cd}(f,f')
+  + \avg{s_V^2}\, \Gamma^{VV}_{ab,cd}(f,f') ,
+  \;}
+  \label{eq:three-terms}
+\end{equation}
+with three ``two-pair ORFs'', sky averages over $\bOmega$ at any fixed $\psi$:
+\begin{align}
+  \Gamma^{II}_{ab,cd}(f,f') &= \avg{\cos\phi_{ab;f}\cos\phi_{cd;f'}\;
+      A_I^{ab} A_I^{cd}}_{\bOmega}, \\
+  \Gamma^{QQ}_{ab,cd}(f,f') &= \tfrac12\avg{\cos\phi_{ab;f}\cos\phi_{cd;f'}\;
+      \left(A_Q^{ab}A_Q^{cd} + A_U^{ab}A_U^{cd}\right)}_{\bOmega}, \\
+  \Gamma^{VV}_{ab,cd}(f,f') &= \avg{\sin\phi_{ab;f}\sin\phi_{cd;f'}\;
+      A_V^{ab} A_V^{cd}}_{\bOmega}.
+\end{align}
+The weights $\avg{g^2} : \avg{s_V^2} : \avg{s_Q^2} \approx 1 : 0.97 : 0.03$
+show that the circular-polarization leakage of separated pairs can be as large as
+the intensity term, while the linear leakage is small.
+
+\paragraph{Sky integrals in closed form.}
+Each pattern is $F_a^A = D_a^{ij} e^A_{ij}(\bOmega,\psi)$. The
+$\psi$-invariant products in $\Gamma$ are built from
+$\bm\epsilon_i\bm\epsilon_j^* = P_{ij} - i\varepsilon_{ijk}\Omega_k$, with
+$P_{ij} = \delta_{ij} - \Omega_i\Omega_j$ the transverse projector (the sign of
+the second term is fixed by the handedness of the frame). Every product of four
+patterns is therefore a polynomial in $\bOmega$ of degree at most eight,
+contracted with $D_a\otimes D_b\otimes D_c\otimes D_d$. The phases combine as
+\begin{equation}
+  \cos\phi_{ab;f}\cos\phi_{cd;f'}
+  = \tfrac12\Re\!\left[e^{i\bm k_-\cdot\bOmega} + e^{i\bm k_+\cdot\bOmega}\right],
+  \qquad
+  \bm k_\pm = \frac{2\pi}{c}\left(f\,\Delta\bm x_{ab} \pm f'\,\Delta\bm x_{cd}\right),
+\end{equation}
+and likewise for $\sin\sin$, so each $\Gamma$ is a sum of moments
+$\avg{\Omega_{i_1}\cdots\Omega_{i_n} e^{i\bm k\cdot\bOmega}}$ with $n\le8$. These
+follow from the generating function
+$\avg{e^{i\bm k\cdot\bOmega}} = j_0(k)$:
+\begin{equation}
+  \avg{\Omega_{i_1}\cdots\Omega_{i_n}\, e^{i\bm k\cdot\bOmega}}
+  = (-i)^n\, \partial_{k_{i_1}}\cdots\partial_{k_{i_n}}\, j_0(k)
+  = \sum_{p=0}^{\lfloor n/2\rfloor} i^{\,n} (-1)^{p}\,
+    \big\{\delta^{p}\,\hat k^{\,n-2p}\big\}_{i_1\cdots i_n}\,
+    \frac{j_{n-p}(k)}{k^{p}},
+  \label{eq:moments}
+\end{equation}
+where $\{\delta^p\hat k^{n-2p}\}$ is the sum over the distinct ways of
+distributing the indices over $p$ Kronecker deltas and $n-2p$ factors of
+$\hat k$, and we used $(k^{-1}\mathrm d/\mathrm dk)^m j_0 = (-1)^m j_m / k^m$.
+Contracting with the detector tensors leaves a finite combination of
+$j_m(k_\pm)$, $m\le 8$, with coefficients that are scalar invariants of
+$D_a, D_b, D_c, D_d$ and $\hat{\bm k}_\pm$. This is the four-detector
+generalization of the closed form of the ORF~\cite{Flanagan1993}, which is the
+$n\le4$ case of the same construction, and the ground-based analogue of the
+four-pulsar average behind the variance of the Hellings--Downs
+correlation~\cite{Allen2023}.
+
+\paragraph{Exact quadrature.}
+In practice the closed form need not be written out. The integrand of
+$\avg{r_f r_{f'}}$ is a trigonometric polynomial in $\psi$ with harmonics
+$e^{2in\psi}$, $|n|\le 4$, and a polynomial of degree eight in $c=\cos\iota$;
+on the sky it is a degree-eight polynomial times plane waves of wavenumber at
+most $k_{\max} = 2\pi f_{\max}(|\Delta\bm x_{ab}| + |\Delta\bm x_{cd}|)/c$.
+Hence
+\begin{itemize}
+  \item $K \ge 5$ trapezoid nodes in $\psi\in[0,\pi)$ and $J \ge 5$
+        Gauss--Legendre nodes in $c$ are exact (or both averages are done
+        analytically as above);
+  \item $N$ Gauss--Legendre nodes in $\cos\theta$ times $M$ trapezoid nodes in
+        the azimuth converge faster than exponentially once
+        $N \gtrsim (k_{\max} + 8)/2$ and $M \gtrsim k_{\max} + 8$.
+\end{itemize}
+Weighted nodes replace the $L$ isotropic draws of
+\texttt{sample\_network\_response}, whose relative error on $\avg{r^2}$ is
+$\sqrt{\avg{r^4}/\avg{r^2}^2 - 1}\,/\sqrt{L}$.
+
+\paragraph{Check.}
+Table~\ref{tab:check} compares the quadrature with $2^{20}$ isotropic draws for
+the SNR-weighted moment $\avg{R^2}$, $R = \sum_f u_f r_f$ with
+$u_f = (S_f/\sigma_f)^2/\sum_{f'}(S_{f'}/\sigma_{f'})^2$, which is the
+response factor of Eq.~\eqref{eq:projected} if
+$\avg{P_fP_{f'}}\propto S_fS_{f'}$. The quadrature uses
+$32\times64$ sky nodes, $K = 8$ and $J = 5$, and agrees to all digits shown with
+$96\times192$ sky nodes. The draws share seeds across networks, hence one common
+fluctuation.
+
+\begin{table}[h]
+  \centering
+  \small
+  \begin{tabular}{lccc}
+    \toprule
+    Network & quadrature ($8.2\times10^4$ nodes) & Monte Carlo ($2^{20}$ draws)
+            & $\avg{R^4}/\avg{R^2}^2$ \\
+    \midrule
+    ET-2L (misaligned) + CE & $7.245190$ & $7.219 \pm 0.017$ & $6.85$ \\
+    ET-2L (aligned) + CE    & $2.276385$ & $2.266 \pm 0.005$ & $5.75$ \\
+    ET triangle             & $1.985314$ & $1.978 \pm 0.004$ & $5.39$ \\
+    \bottomrule
+  \end{tabular}
+  \caption{SNR-weighted response second moment. The quadrature takes under a
+  second per network; the draws, about twenty.}
+  \label{tab:check}
+\end{table}
+
+\begin{thebibliography}{9}
+\bibitem{Zhong2026}
+H.~Zhong, F.~Iacovelli, V.~Mandic and E.~Berti,
+``All you need is not $\Omega_{\rm gw}$: beyond the mean of the
+cross-correlation estimator when searching for an astrophysical
+gravitational-wave background,''
+\href{https://arxiv.org/abs/2608.11119}{arXiv:2608.11119} (2026).
+
+\bibitem{Flanagan1993}
+\'E.~\'E.~Flanagan,
+``Sensitivity of the Laser Interferometer Gravitational Wave Observatory to a
+stochastic background, and its dependence on the detector orientations,''
+Phys.\ Rev.\ D \textbf{48}, 2389 (1993).
+
+\bibitem{Allen2023}
+B.~Allen,
+``Variance of the Hellings--Downs correlation,''
+Phys.\ Rev.\ D \textbf{107}, 043018 (2023).
+\end{thebibliography}
+
+\end{document}
