@@ -16,6 +16,7 @@ from astrogwb.waveform.polarization_power import (
     polarization_power,
     polarization_stokes,
     quadrupolar_stokes,
+    quadrupolar_stokes_factors,
 )
 
 __all__ = [
@@ -29,5 +30,6 @@ __all__ = [
     "polarization_power",
     "polarization_stokes",
     "quadrupolar_stokes",
+    "quadrupolar_stokes_factors",
     "termination_frequency",
 ]
