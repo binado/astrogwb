@@ -52,7 +52,10 @@ with app.setup(hide_code=True):
     from astrogwb.paper.config.detectors import DetectorRegistry
     from astrogwb.paper.config.runs import CATALOGS_ROOT, FIGURES_DIR
     from astrogwb.paper.plotting import (
+        DETECTOR_COMPARISON_LEGEND,
         DETECTOR_NETWORKS,
+        Network,
+        detector_network_styles,
         parameter_label,
         save_figures,
         use_paper_style,
@@ -1668,6 +1671,89 @@ def _(
     return (coverage_figure,)
 
 
+@app.function(hide_code=True)
+def central_coverage(
+    pit: NDArray[np.float64], levels: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    r"""Fraction of posteriors whose central interval of each level holds the truth.
+
+    The central interval of credibility :math:`p` holds the truth when
+    :math:`|2\,\mathrm{PIT} - 1| < p`, so this is the empirical CDF of
+    :math:`|2\,\mathrm{PIT} - 1|` at ``levels``: the P-P curve, the identity
+    for a calibrated posterior.
+    """
+    return np.mean(np.abs(2.0 * pit[:, None] - 1.0) < levels[None, :], axis=0)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    **P-P plot.** The fraction of the $M \times R$ posteriors whose central
+    credible interval of level $p$ holds $H_0^t$, against $p$, for every
+    network: *left*, the `amplitude` likelihood with the network's response;
+    *right*, the same likelihood with the sky-averaged $\sigma_\epsilon$
+    (`amplitude_sky`). A calibrated posterior lies on the diagonal. The lower
+    panels show the difference from it, with the 95% binomial band of $M$
+    independent catalogs. The $R$ noise draws of one catalog share its shot
+    noise, so the effective sample size lies between $M$ and $M R$, and the
+    band is conservative.
+    """)
+
+
+@app.cell
+def _(
+    num_injections,
+    registry,
+    statistics: dict[tuple[str, str], dict[str, NDArray[np.float64]]],
+):
+    _networks = [
+        Network(name, label, registry.networks[name], registry)
+        for name, label in DETECTOR_NETWORKS
+    ]
+    _colors, _linestyles = detector_network_styles(_networks)
+    _levels = np.linspace(0.0, 1.0, 201)
+    _band = 1.96 * np.sqrt(_levels * (1.0 - _levels) / num_injections)
+    pp_figure, _axes = plt.subplots(
+        2,
+        2,
+        figsize=(9.0, 5.4),
+        sharex=True,
+        sharey="row",
+        height_ratios=(3, 1.4),
+    )
+    for _column, (_variant, _title) in enumerate(
+        (("amplitude", "with response"), ("amplitude_sky", "sky-averaged"))
+    ):
+        _ax, _ax_residual = _axes[:, _column]
+        _ax.plot([0.0, 1.0], [0.0, 1.0], color="0.5", lw=1)
+        _ax_residual.fill_between(_levels, -_band, _band, color="0.85", lw=0)
+        _ax_residual.axhline(0.0, color="0.5", lw=1)
+        for _network, _color, _linestyle in zip(
+            _networks, _colors, _linestyles, strict=True
+        ):
+            _covered = central_coverage(
+                statistics[_network.name, _variant]["pit"], _levels
+            )
+            _style = {"color": _color, "linestyle": _linestyle, "lw": 1.2}
+            _ax.plot(_levels, _covered, label=_network.label, **_style)
+            _ax_residual.plot(_levels, _covered - _levels, **_style)
+        _ax.set(title=_title, xlim=(0.0, 1.0), ylim=(0.0, 1.0))
+        _ax_residual.set(xlabel="Credible level $p$")
+    _axes[0, 0].set_ylabel("Fraction covered")
+    _axes[1, 0].set_ylabel("Covered $- p$")
+    pp_figure.legend(
+        *_axes[0, 0].get_legend_handles_labels(),
+        **{
+            **DETECTOR_COMPARISON_LEGEND,
+            "loc": "upper center",
+            "bbox_to_anchor": (0.5, 1.0),
+        },
+    )
+    pp_figure.tight_layout(rect=(0.0, 0.0, 1.0, 0.89))
+    pp_figure
+    return (pp_figure,)
+
+
 @app.cell
 def _(
     FIGURES,
@@ -1680,6 +1766,7 @@ def _(
     coverage_figure,
     distribution_figure,
     model_against_injections,
+    pp_figure,
     qq_figure,
     variance_figure,
     write_figures,
@@ -1688,6 +1775,7 @@ def _(
         save_figures(
             {
                 FIGURES / "coverage_H0.pdf": coverage_figure,
+                FIGURES / "coverage_pp_H0.pdf": pp_figure,
                 FIGURES / "shot_noise_variance.pdf": variance_figure,
                 FIGURES / "shot_noise_correlation.pdf": correlation_figure,
                 FIGURES / "shot_noise_distribution.pdf": distribution_figure,

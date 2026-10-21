@@ -96,7 +96,8 @@ Every notebook here drives the `astrogwb.paper` configuration layer, so they all
   injections' realized scatter, and reports 68%/95% coverage and the mean and
   variance of $z = (\bar H_0 - H_0^{\mathrm{true}})/\mathrm{sd}$ with
   bootstrap errors, and a PIT/$z$ figure at the fiducial network; writes
-  `coverage_H0.pdf`, `coverage_H0.csv` and
+  `coverage_H0.pdf`, a P-P plot of the central intervals with and without the
+  response (`coverage_pp_H0.pdf`), `coverage_H0.csv` and
   `shot_noise_model_vs_injections.csv`.
 
 Open a notebook from the repository root:

@@ -100,7 +100,11 @@ bootstrapped over catalogs. The `amplitude` likelihood with the response:
 | ET-2L + CE | 0.667(5) | 0.948(2) | 1.033(19) | $-0.00(2)$ | $+0.007(11)$ | 1.043(24) |
 
 - The intervals cover at their nominal rates, to within 1.6 percentage points
-  at 68% and 0.5 at 95%.
+  at 68% and 0.5 at 95%. The P-P plot
+  (`outputs/figures/shot_noise_coverage/coverage_pp_H0.pdf`) shows it at every
+  level: with the response all six networks lie on the diagonal, inside the
+  95% binomial band of 1000 catalogs; with the sky-averaged $\sigma_B$ they
+  fall below it by up to 10 points (ET-2L + CE, near $p = 0.75$).
 - Without the response the same likelihood under-covers: 68% coverage
   0.666, 0.634, 0.627, 0.607, 0.660, 0.582 with the sky-averaged $\sigma_B$
   (`amplitude_sky`), and 0.42 to 0.66 with detector noise only.
