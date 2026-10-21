@@ -6,6 +6,8 @@ contribution: gwmock ships only the long-wavelength, co-located limit
 ORF (angle-based ``g1/g2/g3`` expansion) for resolved detector geometry,
 :func:`isotropic_overlap_reduction_function`, and the response of a pair to
 one source, :func:`overlap_reduction_function`, whose isotropic average it is.
+Both single-source responses go through :func:`stokes_cross_power`, which
+takes any source's polarization Stokes parameters.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from jax.typing import ArrayLike as JaxArrayLike
 from numpy.typing import ArrayLike, NDArray
 
 from astrogwb.constants import EARTH_MEAN_RADIUS_IN_METERS, SPEED_OF_LIGHT
+from astrogwb.waveform.polarization_power import quadrupolar_stokes_factors
 
 from ._types import DetectorSpec
 from .geometry import resolve_detector
@@ -465,6 +468,98 @@ def _polarization_tensors(
     return direction, plus, cross
 
 
+def stokes_cross_power(
+    frequencies: JaxArrayLike,
+    detector_1: DetectorSpec,
+    detector_2: DetectorSpec,
+    polar_cosine: JaxArrayLike,
+    azimuth: JaxArrayLike,
+    polarization: JaxArrayLike,
+    stokes: JaxArrayLike,
+) -> jax.Array:
+    r"""The cross-power one source leaves in a detector pair, from its Stokes parameters.
+
+    .. math::
+
+        K_{ab} = \mathrm{Re}\left[e^{i\phi_{ab}} H_a^* H_b\right]
+            = \frac12\left[\cos\phi_{ab}\,(I A_I + Q A_Q + U A_U)
+              - \sin\phi_{ab}\, V A_V\right],
+
+    with :math:`H_a = h_+ F^+_a + h_\times F^\times_a`, the delay phase
+    :math:`\phi_{ab} = 2\pi f\, \hat n \cdot (\vec x_b - \vec x_a)/c` and
+
+    .. math::
+
+        A_I = F^+_a F^+_b + F^\times_a F^\times_b, \quad
+        A_Q = F^+_a F^+_b - F^\times_a F^\times_b, \quad
+        A_U = F^+_a F^\times_b + F^\times_a F^+_b, \quad
+        A_V = F^+_a F^\times_b - F^\times_a F^+_b.
+
+    :math:`(I, Q, U, V)` are the source's Stokes parameters in its radiation
+    frame (:mod:`astrogwb.waveform.polarization_power`), and the polarization
+    angle :math:`\psi` rotates the antenna patterns rather than them. :math:`V`
+    enters only through the delay, so a co-located pair is blind to circular
+    polarization. Averaged over an isotropic sky and uniform :math:`\psi`,
+    :math:`\langle K_{ab} \rangle = I\, \gamma_{ab} / 5` with :math:`\gamma_{ab}`
+    the :func:`isotropic_overlap_reduction_function`.
+
+    Detectors are resolved with
+    :func:`~astrogwb.detector.geometry.resolve_detector`; arm tilts and
+    elevation are ignored, as in the isotropic ORF.
+
+    Parameters
+    ----------
+    frequencies:
+        Frequencies in Hz, ``(F,)``.
+    detector_1, detector_2:
+        ``str`` site codes or gwmock ``CustomDetector`` instances.
+    polar_cosine, azimuth:
+        Cosine of the polar angle and the azimuth of the direction to the
+        source, Earth-fixed (z towards the North pole, x towards Greenwich).
+    polarization:
+        Polarization angle :math:`\psi` in radians. The three angles broadcast
+        to a shape ``(...)``.
+    stokes:
+        :math:`(I, Q, U, V)`, broadcasting to ``(4, ..., F)``.
+
+    Returns
+    -------
+    jax.Array
+        Shape ``(..., F)``.
+    """
+    tensor_1, position_1 = _detector_frame(detector_1)
+    tensor_2, position_2 = _detector_frame(detector_2)
+    polar_cosine, azimuth, polarization = jnp.broadcast_arrays(
+        polar_cosine, azimuth, polarization
+    )
+    direction, plus, cross = _polarization_tensors(polar_cosine, azimuth, polarization)
+
+    def patterns(tensor: np.ndarray) -> tuple[jax.Array, jax.Array]:
+        return (
+            jnp.einsum("...ij,ij->...", plus, tensor),
+            jnp.einsum("...ij,ij->...", cross, tensor),
+        )
+
+    plus_1, cross_1 = patterns(tensor_1)
+    plus_2, cross_2 = patterns(tensor_2)
+    response_i = plus_1 * plus_2 + cross_1 * cross_2
+    response_q = plus_1 * plus_2 - cross_1 * cross_2
+    response_u = plus_1 * cross_2 + cross_1 * plus_2
+    response_v = plus_1 * cross_2 - cross_1 * plus_2
+
+    delay = direction @ jnp.asarray(position_2 - position_1) / C_LIGHT
+    phase = 2.0 * jnp.pi * delay[..., None] * jnp.asarray(frequencies, dtype=float)
+    intensity, linear_q, linear_u, circular = jnp.asarray(stokes)
+    linear = (
+        intensity * response_i[..., None]
+        + linear_q * response_q[..., None]
+        + linear_u * response_u[..., None]
+    )
+    return 0.5 * (
+        jnp.cos(phase) * linear - jnp.sin(phase) * circular * response_v[..., None]
+    )
+
+
 def overlap_reduction_function(
     frequencies: JaxArrayLike,
     detector_1: DetectorSpec,
@@ -483,18 +578,17 @@ def overlap_reduction_function(
             e^{2\pi i f \hat n \cdot (\vec x_b - \vec x_a)/c}\right],
         \qquad H_a = h_+ F^+_a + h_\times F^\times_a,
 
-    with :math:`h_+ = (1 + \cos^2\iota)/2` and :math:`h_\times = i\cos\iota` the
-    polarization amplitudes and :math:`F^{+,\times}_a = D_a : e^{+,\times}` the
-    antenna patterns of a source at :math:`\hat n` (Earth-fixed) with
-    polarization angle :math:`\psi`. The factor :math:`25/4` inverts the
-    isotropic mean of the bracket for co-located aligned L-shaped detectors, so
-    averaging over an isotropic sky, uniform :math:`\psi` and uniform
-    :math:`\cos\iota` gives :func:`isotropic_overlap_reduction_function`. A
-    detector paired with itself gives :math:`(25/4)|H_a|^2`.
-
-    Detectors are resolved with
-    :func:`~astrogwb.detector.geometry.resolve_detector`; arm tilts and
-    elevation are ignored, as in the isotropic ORF.
+    with :math:`h_+ = -(1 + \cos^2\iota)/2` and :math:`h_\times = i\cos\iota`
+    the :math:`(2, 2)` polarization amplitudes in the LAL convention Ripple
+    follows, and :math:`F^{+,\times}_a = D_a : e^{+,\times}` the antenna patterns
+    of a source at :math:`\hat n` (Earth-fixed) with polarization angle
+    :math:`\psi`. It is :func:`stokes_cross_power` of the unit-amplitude
+    :func:`~astrogwb.waveform.polarization_power.quadrupolar_stokes_factors`.
+    The factor :math:`25/4` inverts the isotropic mean of the bracket for
+    co-located aligned L-shaped detectors, so averaging over an isotropic sky,
+    uniform :math:`\psi` and uniform :math:`\cos\iota` gives
+    :func:`isotropic_overlap_reduction_function`. A detector paired with itself
+    gives :math:`(25/4)|H_a|^2`.
 
     Parameters
     ----------
@@ -515,23 +609,19 @@ def overlap_reduction_function(
     jax.Array
         Shape ``(..., F)``.
     """
-    tensor_1, position_1 = _detector_frame(detector_1)
-    tensor_2, position_2 = _detector_frame(detector_2)
     polar_cosine, azimuth, polarization, cos_inclination = jnp.broadcast_arrays(
         polar_cosine, azimuth, polarization, cos_inclination
     )
-    direction, plus, cross = _polarization_tensors(polar_cosine, azimuth, polarization)
-    h_plus = 0.5 * (1.0 + cos_inclination**2)
-    h_cross = 1j * cos_inclination
-
-    def response(tensor: np.ndarray) -> jax.Array:
-        f_plus = jnp.einsum("...ij,ij->...", plus, tensor)
-        f_cross = jnp.einsum("...ij,ij->...", cross, tensor)
-        return h_plus * f_plus + h_cross * f_cross
-
-    product = jnp.conj(response(tensor_1)) * response(tensor_2)
-    delay = direction @ jnp.asarray(position_2 - position_1) / C_LIGHT
-    phase = jnp.exp(
-        2j * jnp.pi * delay[..., None] * jnp.asarray(frequencies, dtype=float)
+    stokes = quadrupolar_stokes_factors(cos_inclination)[..., None]
+    return (
+        stokes_cross_power(
+            frequencies,
+            detector_1,
+            detector_2,
+            polar_cosine,
+            azimuth,
+            polarization,
+            stokes,
+        )
+        / _ISOTROPIC_PAIR_RESPONSE
     )
-    return jnp.real(product[..., None] * phase) / _ISOTROPIC_PAIR_RESPONSE

@@ -14,6 +14,7 @@ from .overlap import (
     overlap_reduction_function,
     pairwise_overlap_reduction_function,
     relative_orientation,
+    stokes_cross_power,
 )
 from .psd import resolve_psd_path
 from .response import network_response, sample_network_response
@@ -46,4 +47,5 @@ __all__ = [
     "resolve_detector",
     "resolve_psd_path",
     "sample_network_response",
+    "stokes_cross_power",
 ]
