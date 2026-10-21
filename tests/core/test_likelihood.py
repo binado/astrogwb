@@ -467,6 +467,27 @@ def test_vmap_over_networks_equals_one_evaluation_per_network(
     assert all(value.shape == () for value in extras.values())
 
 
+@pytest.mark.parametrize("mode", MODES, ids=str)
+def test_each_network_scores_its_own_observed_spectrum(
+    catalog: Any, networks: Network, mode: str | None
+) -> None:
+    likelihood = _likelihood(catalog, mode)
+    params = {**FIDUCIALS, "H0": 70.0}
+    observed = likelihood.observed * jnp.array([[1.0], [0.97], [1.02]])
+
+    stacked, _ = jax.vmap(
+        likelihood.log_likelihood, in_axes=(None, 0), out_axes=(0, None)
+    )(params, networks._replace(observed=observed))
+
+    singles = [
+        dataclasses.replace(likelihood, observed=observed[k]).log_likelihood(
+            params, _single(networks, k)
+        )[0]
+        for k in range(NUM_NETWORKS)
+    ]
+    np.testing.assert_allclose(stacked, jnp.stack(singles), rtol=1e-10)
+
+
 def _walk(jaxpr: Any) -> Iterator[Any]:
     """Every equation of ``jaxpr``, recursing into its sub-jaxprs."""
     for equation in jaxpr.eqns:
@@ -731,6 +752,26 @@ def test_the_relative_variance_is_the_hadamard_covariance_along_the_projector(
         projector @ covariance @ projector / (projector @ mean) ** 2
     ) == pytest.approx(
         float(amplitude_likelihood.relative_variance(FIDUCIALS, network)), rel=1e-10
+    )
+
+
+@pytest.mark.parametrize("index", range(NUM_NETWORKS))
+def test_held_response_moments_give_the_relative_variance_of_the_draws(
+    amplitude_likelihood: ImportanceGaussianLikelihood,
+    networks: Network,
+    varying_response: jax.Array,
+    index: int,
+) -> None:
+    network = _single(networks, index)._replace(response=varying_response)
+    held = network._replace(
+        response_moments=amplitude_likelihood.response_moments(FIDUCIALS, network)
+    )
+    params = {**FIDUCIALS, "H0": 70.0}
+
+    assert float(amplitude_likelihood.relative_variance(params, held)) == (
+        pytest.approx(
+            float(amplitude_likelihood.relative_variance(params, network)), rel=1e-10
+        )
     )
 
 
