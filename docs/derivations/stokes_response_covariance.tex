@@ -4,6 +4,7 @@
 \usepackage{amsmath,amssymb,amsthm}
 \usepackage{bm}
 \usepackage{booktabs}
+\usepackage{float}
 \usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
 
 \newcommand{\avg}[1]{\left\langle #1 \right\rangle}
@@ -416,6 +417,137 @@ $n\le4$ case of the same construction, and the ground-based analogue of the
 four-pulsar average behind the variance of the Hellings--Downs
 correlation~\cite{Allen2023}.
 
+\paragraph{Multipole form.}
+The sum~\eqref{eq:moments} collapses further. Write the $\psi$-invariant
+integrands as
+$\Pi^{II} = A_I^{ab}A_I^{cd}$,
+$\Pi^{QQ} = \tfrac12(A_Q^{ab}A_Q^{cd} + A_U^{ab}A_U^{cd})$ and
+$\Pi^{VV} = A_V^{ab}A_V^{cd}$. Each is a polynomial of degree at most eight in
+$\bOmega$, so its angular content stops at $\ell = 8$, and each is even under
+$\bOmega\to-\bOmega$ ($A_V$ and $A_U$ change sign, $A_I$ and $A_Q$ do not), so
+only even $\ell$ appear. With the plane-wave expansion
+$e^{i\bm k\cdot\bOmega} = \sum_\ell (2\ell+1)\, i^\ell j_\ell(k)\,
+P_\ell(\hat{\bm k}\cdot\bOmega)$,
+\begin{equation}
+  \avg{\Pi\, e^{i\bm k\cdot\bOmega}}_{\bOmega}
+  = \sum_{\ell = 0,2,4,6,8} (2\ell+1)\,(-1)^{\ell/2}\, j_\ell(k)\,
+    \pi_\ell(\hat{\bm k}),
+  \qquad
+  \pi_\ell(\hat{\bm k}) = \avg{\Pi(\bOmega)\,
+    P_\ell(\hat{\bm k}\cdot\bOmega)}_{\bOmega},
+  \label{eq:multipole}
+\end{equation}
+which is real. Combining the two phases as in Eq.~(26), and
+$\sin\phi_{ab;f}\sin\phi_{cd;f'} = \tfrac12\Re[e^{i\bm k_-\cdot\bOmega} -
+e^{i\bm k_+\cdot\bOmega}]$ for $\Gamma^{VV}$,
+\begin{equation}
+  \boxed{\;
+  \Gamma^{XX}_{ab,cd}(f,f') = \frac12 \sum_{\pm} \epsilon^{XX}_\pm
+    \sum_{\ell = 0,2,4,6,8} (2\ell+1)\,(-1)^{\ell/2}\,
+    j_\ell(k_\pm)\, \pi^{XX}_\ell(\hat{\bm k}_\pm)
+  \;}
+  \label{eq:two-pair-orf}
+\end{equation}
+with $\epsilon^{II}_\pm = \epsilon^{QQ}_\pm = 1$ and
+$\epsilon^{VV}_\pm = \mp 1$.
+For $\ell \le 4$ and $\Pi = A_I^{ab}$ alone, the same construction gives the
+isotropic ORF,
+$\gamma_{ab}(f) = \tfrac52 \sum_{\ell=0,2,4}(2\ell+1)(-1)^{\ell/2}\,
+j_\ell(k)\, \pi_\ell[A_I^{ab}](\hat{\bm k})$ with
+$\bm k = 2\pi f\,\Delta\bm x_{ab}/c$, which is the closed form
+of~\cite{Flanagan1993}: two patterns reach $\ell = 4$, four reach $\ell = 8$.
+
+\paragraph{Forty-five numbers per pair of pairs.}
+With $\Pi_{\ell m} = \int \mathrm d\bOmega\, \Pi(\bOmega)\, Y^*_{\ell m}(\bOmega)$
+and the addition theorem
+$P_\ell(\hat{\bm k}\cdot\bOmega) = \frac{4\pi}{2\ell+1}\sum_m
+Y_{\ell m}(\hat{\bm k})\,Y^*_{\ell m}(\bOmega)$,
+\begin{equation}
+  (2\ell+1)\,\pi_\ell(\hat{\bm k}) = \sum_{m=-\ell}^{\ell}
+    \Pi_{\ell m}\, Y_{\ell m}(\hat{\bm k}),
+\end{equation}
+so that
+\begin{equation}
+  \Gamma^{XX}_{ab,cd}(f,f') = \frac12\sum_\pm \epsilon^{XX}_\pm
+  \sum_{\ell\,\rm even}^{8} (-1)^{\ell/2}\, j_\ell(k_\pm)
+  \sum_{m} \Pi^{XX}_{\ell m}\, Y_{\ell m}(\hat{\bm k}_\pm).
+  \label{eq:harmonic}
+\end{equation}
+For each pair of pairs and each of $II$, $QQ$, $VV$, the
+$1 + 5 + 9 + 13 + 17 = 45$ coefficients $\Pi_{\ell m}$ (45 real numbers, since
+$\Pi$ is real and $\Pi_{\ell,-m} = (-1)^m\Pi^*_{\ell m}$) depend only on the
+detector tensors. All frequency dependence then sits in $j_\ell(k_\pm)$ and in
+the directions $\hat{\bm k}_\pm(f,f')$, so Eq.~\eqref{eq:harmonic} gives the
+full $F\times F$ block explicitly.
+
+\paragraph{The same pair.}
+For $cd = ab$ (or parallel baselines) $\hat{\bm k}_\pm = \pm\Delta\hat{\bm x}_{ab}$
+for every $(f,f')$, and $\pi_\ell$ is even in $\hat{\bm k}$, so the five
+multipoles are constants and
+\begin{equation}
+  \Gamma^{XX}_{ab,ab}(f,f') = \frac12 \sum_\pm \epsilon^{XX}_\pm
+  \sum_{\ell = 0,2,4,6,8} (2\ell+1)\,(-1)^{\ell/2}\,
+  \pi^{XX}_\ell\big(\Delta\hat{\bm x}_{ab}\big)\;
+  j_\ell\!\left(\frac{2\pi |f\pm f'|\,|\Delta\bm x_{ab}|}{c}\right):
+\end{equation}
+the response correlation of one pair depends on the two bins only through
+$f\pm f'$, and decorrelates on the scale $c/|\Delta\bm x_{ab}|$.
+
+\paragraph{Exact multipoles.}
+In a frame with polar axis $\hat{\bm k}$, $\Pi\,P_\ell$ has azimuthal harmonics
+$|m| \le 8$ and, after the azimuthal average, is a polynomial of degree at
+most 16 in $\mu = \hat{\bm k}\cdot\bOmega$. Nine Gauss--Legendre nodes in $\mu$
+and $M \ge 9$ trapezoid nodes in azimuth (we use 17) therefore give every
+$\pi_\ell$ exactly, independently of $k$. Evaluate Eq.~\eqref{eq:two-pair-orf}
+with $j_\ell$ itself (for example \texttt{scipy.special.spherical\_jn}) rather
+than its elementary $\sin k$, $\cos k$ form, whose terms up to $k^{-9}$ cancel
+catastrophically as $k \to 0$, that is for nearby bins and short baselines.
+
+\paragraph{Validation.}
+On the packaged geometry of S2, R2 (ET-2L, misaligned) and C1 (CE Hanford):
+\begin{itemize}
+  \item the $\ell\le4$ form reproduces
+        \texttt{isotropic\_overlap\_reduction\_function} for S2--C1 to twelve
+        digits at 5, 30 and 200\,Hz ($+0.232813658228$, $-0.015303275555$,
+        $+0.002328551043$), and the $\ell = 6, 8$ multipoles of $A_I$ alone
+        vanish to $10^{-17}$;
+  \item Eq.~\eqref{eq:two-pair-orf} on the $9\times17$ grid agrees with a
+        $200\times400$ brute-force sky quadrature to 10--11 significant
+        digits (Table~\ref{tab:two-pair}).
+\end{itemize}
+
+\begin{table}[ht]
+  \centering
+  \small
+  \begin{tabular}{lcccc}
+    \toprule
+    Pairs & $(f, f')$ [Hz] & $\Gamma^{II}$ & $\Gamma^{QQ}$ & $\Gamma^{VV}$ \\
+    \midrule
+    S2C1 $\times$ S2C1 & $(10, 10)$
+      & $+3.3775025974\times10^{-2}$ & $+3.0064142131\times10^{-2}$
+      & $+3.9402350621\times10^{-2}$ \\
+    S2C1 $\times$ R2C1 & $(10, 17)$
+      & $+8.0941043916\times10^{-3}$ & $+1.1493714444\times10^{-3}$
+      & $-5.2373201804\times10^{-3}$ \\
+    S2R2 $\times$ R2C1 & $(23, 6)$
+      & $+9.3111051890\times10^{-4}$ & $+2.8520297874\times10^{-2}$
+      & $+8.3486515793\times10^{-4}$ \\
+    S2C1 $\times$ R2C1 & $(150, 90)$
+      & $-1.9235379575\times10^{-4}$ & $+3.4883349186\times10^{-4}$
+      & $+3.9757883079\times10^{-4}$ \\
+    \bottomrule
+  \end{tabular}
+  \caption{Two-pair ORFs from Eq.~\eqref{eq:two-pair-orf}. The brute-force
+  quadrature agrees in every digit shown except the last of
+  $\Gamma^{QQ}$ at $(150, 90)$\,Hz ($\ldots187$).}
+  \label{tab:two-pair}
+\end{table}
+
+For S2R2 $\times$ R2C1, $\Gamma^{QQ}$ exceeds $\Gamma^{II}$ thirtyfold: the
+misaligned ET pair barely couples to intensity but does couple to linear
+polarization, which the small weight $\avg{s_Q^2} = 8/315$ keeps from
+dominating Eq.~\eqref{eq:three-terms}.
+
 \paragraph{Exact quadrature.}
 In practice the closed form need not be written out. The integrand of
 $\avg{r_f r_{f'}}$ is a trigonometric polynomial in $\psi$ with harmonics
@@ -445,7 +577,7 @@ $32\times64$ sky nodes, $K = 8$ and $J = 5$, and agrees to all digits shown with
 $96\times192$ sky nodes. The draws share seeds across networks, hence one common
 fluctuation.
 
-\begin{table}[h]
+\begin{table}[H]
   \centering
   \small
   \begin{tabular}{lccc}
