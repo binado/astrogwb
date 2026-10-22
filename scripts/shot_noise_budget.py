@@ -137,59 +137,83 @@ def term_response(
 OUTPUT = ROOT_DIR / FIGURES_DIR / "shot_noise_budget"
 
 
+def variance_budget(row: pd.Series) -> dict[str, float]:
+    r"""The total variance of the fractional amplitude, split into additive pieces.
+
+    :math:`\rho^{-2} + \sigma_{\rm shot}^2` with :math:`\sigma_{\rm shot}^2 =
+    N^{-1}\, \mathcal I\, \langle \bar r^2 \rangle`, the effects switched on in
+    order and each cross term given to the later one: detector noise
+    :math:`\rho^{-2}`, pure Poisson :math:`1/N`, amplitude spread
+    :math:`(\mathcal I - 1)/N`, geometric shot noise (direction, polarization
+    angle and inclination, in the intensity term)
+    :math:`\mathcal I (\langle \bar r^2 \rangle_{\mathcal I} - 1)/N`, and the
+    linear and circular Stokes terms :math:`\mathcal I \langle \bar r^2
+    \rangle_{X}/N`. The Stokes shares are rescaled to sum to one, removing
+    their Monte Carlo closure error, so the pieces sum to the total exactly.
+    """
+    shares = np.array([row.share_intensity, row.share_linear, row.share_circular])
+    shares = shares / shares.sum()
+    scale = row.intrinsic / row.num_sources
+    return {
+        "detector": 1.0 / row.rho**2,
+        "poisson": 1.0 / row.num_sources,
+        "amplitude": (row.intrinsic - 1.0) / row.num_sources,
+        "geometric": scale * (shares[0] * row.r_bar_squared - 1.0),
+        "linear": scale * shares[1] * row.r_bar_squared,
+        "circular": scale * shares[2] * row.r_bar_squared,
+    }
+
+
 def latex_table(table: pd.DataFrame) -> str:
-    """The paper's per-network shot-noise budget table."""
+    """The paper's per-network variance budget table."""
     intrinsic = float(table["intrinsic"].mean())
     num_sources = float(table["num_sources"].iloc[0])
-    sky = float(np.sqrt(intrinsic * INCLINATION_SECOND_MOMENT))
-    closure = float(np.max(np.abs(table["share_closure"] - 1.0)))
     lines = [
         r"\begin{table}[htpb]",
         r"\centering",
+        r"\small",
+        r"\setlength{\tabcolsep}{3.5pt}",
         (
-            r"\caption{Shot-noise floor of each network at the fiducial parameters for "
-            r"$T=1$~year, with the response of the stacked per-pair data. "
-            r"$\sigma_{\rm shot}\sqrt N$ is the floor in units of the Poisson limit, "
-            rf"for $N\simeq{num_sources / 1e5:.1f}\times10^5$ sources. "
-            r"$\langle\bar r^2\rangle$ is the response factor of "
-            r"eq.~\eqref{eq:shot-noise-three-factors}, defined as "
-            r"$355/252$ times the ratio of $\sigma_{\rm shot}^2$ to its sky-averaged "
-            r"value; the intrinsic factor $\langle Q_{\rm int}^2\rangle/"
-            rf"\langle Q_{{\rm int}}\rangle^2\simeq{intrinsic:.2f}$ is common to all "
-            rf"networks, so the sky-averaged floor is ${sky:.2f}/\sqrt N$. The next "
-            r"three columns split $\sigma_{\rm shot}^2$ into the intensity, linear "
-            r"and circular terms of eq.~\eqref{eq:response-moment-main}; they sum to "
-            rf"one within ${100 * closure:.0f}\%$, the Monte Carlo error of the "
-            rf"${RESPONSE_DRAWS}$ response draws.}}"
+            r"\caption{Variance budget of the fractional amplitude at the fiducial "
+            r"parameters for $T=1$~year, with the response of the stacked per-pair "
+            r"data. The first columns compare the detector-noise-only uncertainty "
+            r"$1/\rho$ with the total $(\rho^{-2}+\sigma_{\rm shot}^2)^{1/2}$ and "
+            r"give their ratio. The remaining columns split the total variance, in "
+            r"percent: detector noise, $\rho^{-2}$; pure Poisson noise, $1/N$ for "
+            rf"$N\simeq{num_sources / 1e5:.1f}\times10^5$ sources; the spread of "
+            r"source amplitudes from distances and masses, $(\mathcal I-1)/N$ with "
+            r"$\mathcal I=\langle Q_{\rm int}^2\rangle/\langle Q_{\rm int}\rangle^2"
+            rf"\simeq{intrinsic:.2f}$; geometric shot noise from the direction, "
+            r"polarization angle and inclination of the sources, the intensity term "
+            r"of eq.~\eqref{eq:response-moment-main}; and the polarization leakage "
+            r"of its linear and circular terms. The effects are switched on in this "
+            r"order, and each cross term is assigned to the later effect.}"
         ),
         r"\label{tab:shot-noise-budget}",
-        r"\begin{tabular}{lrrrrrrr}",
+        r"\begin{tabular}{lrrrrrrrrr}",
         r"\toprule",
         (
-            r"Detector Network & $10^3\sigma_{\rm shot}$ & $\sigma_{\rm shot}\sqrt N$ "
-            r"& $\langle\bar r^2\rangle$ & $\mathcal I$ & $\mathcal Q$ & $\mathcal V$ "
-            r"& $\rho\sigma_{\rm shot}$ \\"
+            r"& \multicolumn{3}{c}{Uncertainty} "
+            r"& \multicolumn{6}{c}{Share of the variance (\%)} \\"
+        ),
+        r"\cmidrule(lr){2-4}\cmidrule(lr){5-10}",
+        (
+            r"Detector Network & $1/\rho$ & total & ratio & detector & Poisson "
+            r"& amplitude & geometric & linear & circular \\"
         ),
         r"\midrule",
     ]
     for row in table.itertuples():
-        shares = [
-            f"{100 * value:.0f}\\%"
-            for value in (row.share_intensity, row.share_linear, row.share_circular)
+        parts = variance_budget(row)
+        total = sum(parts.values())
+        cells = [
+            row.network,
+            f"{100 / row.rho:.2f}\\%",
+            f"{100 * np.sqrt(total):.2f}\\%",
+            f"{np.sqrt(total) * row.rho:.2f}",
+            *(f"{100 * value / total:.1f}" for value in parts.values()),
         ]
-        lines.append(
-            " & ".join(
-                [
-                    row.network,
-                    f"{1e3 * row.sigma_shot:.2f}",
-                    f"{row.sigma_shot_sqrt_n:.2f}",
-                    f"{row.r_bar_squared:.2f}",
-                    *shares,
-                    f"{row.rho_sigma_shot:.2f}",
-                ]
-            )
-            + r" \\"
-        )
+        lines.append(" & ".join(cells) + r" \\")
     lines += [r"\bottomrule", r"\end{tabular}", r"\end{table}"]
     return "\n".join(lines) + "\n"
 
@@ -202,7 +226,7 @@ def main() -> None:
     if parser.parse_args().tex_only:
         table = pd.read_csv(OUTPUT / "shot_noise_budget.csv")
         if "num_sources" not in table:
-            table["num_sources"] = 7.134e5
+            table["num_sources"] = 7.134e5  # older CSVs predate the column
         (OUTPUT / "shot_noise_budget.tex").write_text(latex_table(table))
         return
     fiducial = fiducials(root=ROOT_DIR)
