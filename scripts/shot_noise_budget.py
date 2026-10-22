@@ -176,10 +176,11 @@ def latex_table(table: pd.DataFrame) -> str:
         (
             r"\caption{Variance budget of the fractional amplitude at the fiducial "
             r"parameters for $T=1$~year, with the response of the stacked per-pair "
-            r"data. The first columns compare the detector-noise-only uncertainty "
-            r"$1/\rho$ with the total $(\rho^{-2}+\sigma_{\rm shot}^2)^{1/2}$ and "
-            r"give their ratio. The remaining columns split the total variance, in "
-            r"percent: detector noise, $\rho^{-2}$; pure Poisson noise, $1/N$ for "
+            r"data. The first column is the relative amplitude uncertainty "
+            r"$\sigma_x/x=(\rho^{-2}+\sigma_{\rm shot}^2)^{1/2}$ of "
+            r"eq.~\eqref{eq:amplitude-relative-uncertainty}. The others split its "
+            r"square, in percent: detector noise, $\rho^{-2}$; pure Poisson noise, "
+            r"$1/N$ for "
             rf"$N\simeq{num_sources / 1e5:.1f}\times10^5$ sources; the spread of "
             r"source amplitudes from distances and masses, $(\mathcal I-1)/N$ with "
             r"$\mathcal I=\langle Q_{\rm int}^2\rangle/\langle Q_{\rm int}\rangle^2"
@@ -190,15 +191,12 @@ def latex_table(table: pd.DataFrame) -> str:
             r"order, and each cross term is assigned to the later effect.}"
         ),
         r"\label{tab:shot-noise-budget}",
-        r"\begin{tabular}{lrrrrrrrrr}",
+        r"\begin{tabular}{lrrrrrrr}",
         r"\toprule",
+        r"& & \multicolumn{6}{c}{Share of $(\sigma_x/x)^2$ (\%)} \\",
+        r"\cmidrule(lr){3-8}",
         (
-            r"& \multicolumn{3}{c}{Uncertainty} "
-            r"& \multicolumn{6}{c}{Share of the variance (\%)} \\"
-        ),
-        r"\cmidrule(lr){2-4}\cmidrule(lr){5-10}",
-        (
-            r"Detector Network & $1/\rho$ & total & ratio & detector & Poisson "
+            r"Detector Network & $\sigma_x/x$ & detector & Poisson "
             r"& amplitude & geometric & linear & circular \\"
         ),
         r"\midrule",
@@ -208,9 +206,7 @@ def latex_table(table: pd.DataFrame) -> str:
         total = sum(parts.values())
         cells = [
             row.network,
-            f"{100 / row.rho:.2f}\\%",
             f"{100 * np.sqrt(total):.2f}\\%",
-            f"{np.sqrt(total) * row.rho:.2f}",
             *(f"{100 * value / total:.1f}" for value in parts.values()),
         ]
         lines.append(" & ".join(cells) + r" \\")
