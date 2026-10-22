@@ -26,7 +26,7 @@ with app.setup(hide_code=True):
     from numpy.typing import NDArray
 
     from astrogwb import __version__
-    from astrogwb.detector import sample_network_response
+    from astrogwb.detector import sample_pair_response
     from astrogwb.inference import (
         ImportanceGaussianLikelihood,
         grid_log_posterior,
@@ -54,9 +54,10 @@ with app.setup(hide_code=True):
     )
     from astrogwb.paper.posteriors import (
         ensure_reference_catalog,
-        network_data,
         network_injection_metadata,
+        network_pair_data,
         noise_digest,
+        pad_pairs,
         settings_digest,
         shot_noise_variant,
     )
@@ -205,16 +206,19 @@ def _():
     xi_n_window, xi_n_size = (0.3, 3.0), 55  # prior range
 
     # Likelihood variants evaluated per problem, and the one every figure
-    # shows. "amplitude" evaluates s^2 at each grid point, so sigma_eps depends
-    # on Lambda; "fixed" would pin it at the fiducial (the A/B section compares).
-    # Every variant's shot noise carries the per-source network response, from
-    # `response_draws` isotropic draws, as the network injections do; "modes"
-    # keeps the leading eigenmodes of that catalog covariance.
-    likelihood_variant = "amplitude"
+    # shows. "modes" keeps the leading eigenmodes of the dense catalog
+    # covariance of the stacked per-pair data, the paper's likelihood;
+    # "amplitude" keeps only the rank-one amplitude term with s^2 evaluated at
+    # each grid point, and "fixed" pins s^2 at the fiducial (the A/B section
+    # compares). Every variant's shot noise carries the per-source network
+    # response, from `response_draws` isotropic draws, as the injections do.
+    likelihood_variant = "modes"
     problem_variants = {
         "H0": ("detector", "amplitude", "fixed", "modes"),
         "H0_Omega_m": ("detector", "amplitude", "fixed", "modes"),
-        "xi_0_xi_n": ("detector", "amplitude", "fixed", "per_frequency", "modes"),
+        # No per_frequency: it reads the per-pair response draws at every
+        # point, (L, P, F) per network, which do not fit stacked.
+        "xi_0_xi_n": ("detector", "amplitude", "fixed", "modes"),
     }
     response_draws, response_seed = 32_768, 0
     modes_tolerance, max_modes = 1e-3, 32  # dropped eigenvalue sum, noise units
@@ -413,9 +417,9 @@ def evaluate_grid(
     fixed
         Every other parameter, pinned at its fiducial.
     per_network
-        :func:`network_data` by network name, with the network's ``observed``
-        spectrum and ``response`` draws, and ``modes`` and ``mode_blocks`` for
-        the ``"modes"`` mode.
+        :func:`network_pair_data` by network name, with the network's stacked
+        per-pair ``observed`` data and held ``response_moments``, and
+        ``modes`` and ``mode_blocks`` for the ``"modes"`` mode.
     relative_variance
         :math:`s^2` per network, in ``per_network`` order, for the ``"fixed"``
         mode; ``None`` otherwise.
@@ -429,9 +433,10 @@ def evaluate_grid(
     grids = {name: np.linspace(lo, hi, n) for name, (lo, hi, n) in axes.items()}
     jax_grids = {name: jnp.asarray(grid) for name, grid in grids.items()}
     names = list(per_network)
-    # Every network scores its own data with its own response; the "modes"
-    # mode also reads each network's basis and node blocks.
-    fields = ("observed", "response", "response_moments")
+    # Every network scores its own per-pair data through its own response,
+    # held as per-node moments (the draws themselves are too large to stack);
+    # the "modes" mode also reads each network's basis and node blocks.
+    fields = ("observed", "response_moments", "pair_overlap")
     if likelihood.shot_noise == "modes":
         fields += ("modes", "mode_blocks")
     leaves = {
@@ -803,7 +808,7 @@ def _(
     observed = {}
     for _name, _data in zip(network_injections, _drawn, strict=True):
         validate_matching_frequency_grids(_data["frequencies"], frequencies)
-        observed[_name] = _data["spectral_density"][0]
+        observed[_name] = pad_pairs(_data["pair_spectral_density"][0])
     print(
         f"injection: {int(_drawn[0]['n_events'][0]):,} Poisson events, "
         f"recorded by {len(observed)} networks"
@@ -834,7 +839,7 @@ def _(
     response_seed,
 ):
     per_network = {
-        name: network_data(
+        name: network_pair_data(
             registry,
             name,
             frequencies,
@@ -844,28 +849,32 @@ def _(
         )
         for name in network_names
     }
-    # Every network's data, response draws and the per-node moments under the
-    # response, held so s^2 is not projected once per draw at every point; for
-    # the "modes" mode, also the basis and node blocks of the catalog
-    # covariance at the fiducials, padded to one k so networks stack. No
-    # density site varies, so the held moments are exact.
+    # Every network's per-pair data and the per-node moments under its per-pair
+    # response, held so s^2 is not projected once per draw at every point and
+    # the (L, P, F) draws are dropped; for the "modes" mode, also the basis
+    # and node blocks of the catalog covariance at the fiducials, padded to one
+    # k so networks stack. No density site varies, so the held moments are
+    # exact.
     _uses_modes = any("modes" in v for v in problem_variants.values())
     for _name, _data in per_network.items():
         _detectors, _sensitivities = registry.build_network(_name)
         _network = LikelihoodNetwork(
             jnp.asarray(_data["scale"]),
             jnp.asarray(_data["frequency_mask"]),
-            response=sample_network_response(
-                jax.random.key(response_seed),
-                response_draws,
-                frequencies,
-                _detectors,
-                _sensitivities,
+            response=jnp.asarray(
+                pad_pairs(
+                    sample_pair_response(
+                        jax.random.key(response_seed),
+                        response_draws,
+                        frequencies,
+                        _detectors,
+                    )
+                )
             ),
+            pair_overlap=jnp.asarray(_data["pair_overlap"]),
         )
         _data.update(
             observed=observed[_name],
-            response=_network.response,
             response_moments=likelihood.response_moments(FIDUCIALS, _network),
         )
         if not _uses_modes:
@@ -878,6 +887,7 @@ def _(
             num_modes=max_modes,
         )
         _data.update(modes=_network.modes, mode_blocks=_network.mode_blocks)
+    del _network
     # Everything a cached log density depends on besides its own axes.
     cache_settings = {
         "version": __version__,
@@ -893,6 +903,7 @@ def _(
         # The amplitude mode's s^2: the catalog projected on each template.
         "relative_variance": "projected",
         "response": (response_draws, response_seed),
+        "data": "stacked_pairs",
         "modes": (modes_tolerance, max_modes),
     }
     labelled_networks = [(n, l) for n, l in DETECTOR_NETWORKS if n in network_names]
@@ -927,14 +938,13 @@ def _(FIDUCIALS, likelihood, per_network):
                 LikelihoodNetwork(
                     _data["scale"],
                     _data["frequency_mask"],
-                    response=jnp.asarray(_data["response"]),
                     response_moments=jnp.asarray(_data["response_moments"]),
+                    pair_overlap=jnp.asarray(_data["pair_overlap"]),
                 ),
             )
         )
-        _snr = float(
-            np.sqrt(np.sum(np.where(_keep, (np.asarray(_spectrum) / _sigma) ** 2, 0)))
-        )
+        _expected = np.asarray(_data["pair_overlap"]) * np.asarray(_spectrum)
+        _snr = float(np.sqrt(np.sum(np.where(_keep, (_expected / _sigma) ** 2, 0))))
         _rows.append(
             {
                 "network": _label[_name],

@@ -141,6 +141,58 @@ def gaussian_bin_scale(
     )
 
 
+def pair_bin_scale(
+    frequencies: ArrayLike,
+    detectors: Sequence[DetectorSpec],
+    sensitivities: Mapping[str, Sensitivity],
+    observation_time: float,
+) -> jax.Array:
+    r"""Per-bin Gaussian noise scale of every pair's cross-power, ``(P, F)``.
+
+    .. math::
+
+        \sigma_{ab,i} = \frac{\sqrt{S_{n,a} S_{n,b}}}{\tfrac{2}{5}
+            \sqrt{2 T \Delta f_i}},
+
+    the scale of a pair's cross-power whose mean is :math:`\gamma_{ab} S_h`
+    (the per-pair spectra of
+    :class:`~astrogwb.simulators.spectra.NetworkSpectralDensitySimulator`),
+    pairs in the order of :func:`pair_terms`. It is not divided by
+    :math:`\gamma_{ab}`, so it stays finite at the ORF's zeros, and the pairs
+    combine to the network: :math:`\sum_{a<b} \gamma_{ab,i}^2 /
+    \sigma_{ab,i}^2 = 1/\sigma_i^2` with :math:`\sigma_i` the
+    :func:`gaussian_bin_scale` of :func:`effective_psd`. Infinite where a noise
+    curve is.
+
+    Parameters
+    ----------
+    frequencies:
+        The frequency grid in Hz; bin widths as for :func:`gaussian_bin_scale`.
+    detectors, sensitivities:
+        As for :func:`effective_psd`.
+    observation_time:
+        Observation time in years.
+    """
+    frequencies = np.asarray(frequencies, dtype=float)
+    det_list = list(detectors)
+    psds = [
+        np.asarray(sensitivities[name](frequencies), dtype=float)
+        for name in detector_names(det_list)
+    ]
+    modes = np.sqrt(
+        2.0 * years_to_seconds(observation_time) * np.asarray(bin_widths(frequencies))
+    )
+    with np.errstate(invalid="ignore"):
+        scale = np.stack(
+            [
+                np.sqrt(psds[first] * psds[second])
+                for first in range(len(det_list))
+                for second in range(first + 1, len(det_list))
+            ]
+        ) / (_OVERLAP_REDUCTION_FUNCTION_NORM * modes)
+    return jnp.asarray(np.where(np.isnan(scale), np.inf, scale))
+
+
 def log_frequency_noise_scale(
     effective_psd: jax.Array,
     frequencies: jax.Array,
