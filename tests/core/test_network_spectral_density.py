@@ -361,6 +361,46 @@ def test_network_spectra_ensemble_caches_each_network_under_its_own_key(
     )
 
 
+def test_network_spectra_ensemble_from_start_draws_the_tail_of_the_ensemble(
+    tmp_path: Path, joint_metadata: list[NetworkSpectralDensityMetadata]
+) -> None:
+    full = network_spectra_ensemble(
+        joint_metadata, 41, 3, tmp_path / "full", chunk_size=4
+    )
+
+    tail = network_spectra_ensemble(
+        joint_metadata, 41, 3, tmp_path / "tail", start=1, chunk_size=4
+    )
+
+    for whole, part in zip(full, tail, strict=True):
+        np.testing.assert_array_equal(
+            part["pair_spectral_density"], whole["pair_spectral_density"][1:]
+        )
+
+
+def test_network_spectra_ensemble_reads_ranges_drawn_apart_and_merged(
+    tmp_path: Path, joint_metadata: list[NetworkSpectralDensityMetadata]
+) -> None:
+    """Two machines, one range each: copying the files gives the whole ensemble."""
+    network_spectra_ensemble(joint_metadata, 41, 1, tmp_path / "a", chunk_size=4)
+    network_spectra_ensemble(
+        joint_metadata, 41, 2, tmp_path / "b", start=1, chunk_size=4
+    )
+    for record in joint_metadata:
+        moved = spectra_ensemble_path(tmp_path / "b", record, 41, 1)
+        moved.rename(spectra_ensemble_path(tmp_path / "a", record, 41, 1))
+    written = {path: path.stat().st_mtime_ns for path in (tmp_path / "a").rglob("*.h5")}
+
+    merged = network_spectra_ensemble(
+        joint_metadata, 41, 2, tmp_path / "a", chunk_size=4
+    )
+
+    assert {
+        path: path.stat().st_mtime_ns for path in (tmp_path / "a").rglob("*.h5")
+    } == written
+    assert all(part["spectral_density"].shape[0] == 2 for part in merged)
+
+
 def test_extrinsic_angles_are_isotropic_columns() -> None:
     angles = draw_extrinsic_angles(jax.random.key(0), 10_000)
 
