@@ -97,7 +97,13 @@ and `cache_dir=<path>` go in the same `--config` group (the default cache is
 `default_cache_dir()` puts it on Linux).
 
 Each job exports `INPUT="*"` and `OUTPUT="*"` and runs the script under
-`job-nanny` whenever it is on `PATH`, as the cluster requires.
+`job-nanny` whenever it is on `PATH`, as the cluster requires. `job-nanny`
+runs the job in a node-local copy of the working directory, which has no
+`.venv`, so jobs run `uv run --active --no-sync`: `--active` takes the shared
+venv from `VIRTUAL_ENV`, which `uv run` sets when it starts the controller.
+Start the controller with `uv run` as above, never with a bare `snakemake`.
+The draws themselves go straight to `cache_dir`, an absolute path on the
+shared filesystem, so only the log comes back through `OUTPUT`.
 
 ## Monitor and resume
 

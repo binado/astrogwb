@@ -86,8 +86,12 @@ for _start, _stop in BATCHES:
         threads: THREADS
         # INPUT, OUTPUT and job-nanny are the cluster's job requirements, as in
         # the retired run_mcmc rule; job-nanny is used wherever it is on PATH.
-        # --no-sync: the shared venv is synced once on the login node; a
-        # hundred jobs each syncing it at once would race on the filesystem.
+        # job-nanny runs the command in a node-local copy of the working
+        # directory without .venv, so `uv run` alone would create an empty
+        # venv there. --active uses VIRTUAL_ENV instead, the shared venv the
+        # controller was started from with `uv run`. --no-sync: that venv is
+        # synced once on the login node; a hundred jobs each syncing it at
+        # once would race on the filesystem.
         shell:
             """
             export INPUT="*"
@@ -96,7 +100,7 @@ for _start, _stop in BATCHES:
             if command -v job-nanny >/dev/null 2>&1; then
                 NANNY=job-nanny
             fi
-            $NANNY uv run --frozen --no-sync \
+            $NANNY uv run --active --frozen --no-sync \
                 python scripts/draw_coverage_injections.py \
                 --cache-dir {params.cache_dir:q} \
                 --start {params.start} --stop {params.stop} > {log:q} 2>&1
