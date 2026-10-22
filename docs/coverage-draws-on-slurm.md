@@ -17,14 +17,28 @@ files exist and only resubmits what is missing.
 
 | Setting | Value | Why |
 | --- | --- | --- |
-| draws per job (`batch`) | 10 | long enough that queue wait and the ~1 min of import and JIT per job do not dominate, short enough that a failed job loses little |
-| CPUs per job (`threads`) | 4 | XLA's CPU threads within one waveform pass |
-| `mem_mb` | 6000 | two draws on an M4 peaked at 2.1 GB RSS (`/usr/bin/time -l`), with `chunk_size=8192` and `source_chunk_size=65_536`; ~3x headroom |
-| `runtime` | 90 min | ~7 CPU-min per draw on an M4, so ~20-30 min for 10 draws on 4 cluster cores; a job killed at its limit loses its whole batch |
-| `jobs` | 100 | all of 1000 draws in flight at once |
+| draws per job (`batch`) | 5 | short jobs that schedule easily and lose little on failure, while the ~1 min of import and JIT per job stays a small share |
+| CPUs per job (`threads`) | 8 | XLA spreads each waveform chunk over the job's CPUs |
+| `mem_mb` | 8000 | two draws on an M4 peaked at 2.1 GB RSS (`/usr/bin/time -l`), with `chunk_size=8192` and `source_chunk_size=65_536`; headroom for per-thread buffers |
+| `runtime` | 60 min | the first cluster batch, 10 draws on 4 cores, took 50-90 min; 8 cores should bring 5 draws to ~15-30 min |
+| `jobs` | 100 | all of 500 draws in flight at once |
 
-Calibrate on the first batch (below) and change `batch`, `threads` or the
-profile's resources before submitting the rest.
+After a batch finishes, `sacct` gives its time and CPU use:
+
+```bash
+sacct -u $USER -S today --format=JobID,JobName%40,AllocCPUS,Elapsed,TotalCPU,MaxRSS,State
+```
+
+`TotalCPU / (Elapsed x AllocCPUS)` is how busy the cores were: near 1, more
+`threads` would still help; well below, prefer more jobs with fewer threads.
+The draw files' timestamps give the time per draw:
+
+```bash
+ls -l --time-style=+%H:%M ~/.cache/astrogwb/ensembles/c6644e48729b2472/
+```
+
+Change `batch` and `threads` with `--config`, and `runtime` and `mem_mb` in
+the profile.
 
 ## One-time setup on the cluster
 
@@ -71,14 +85,11 @@ profile's whole list, `mem_mb` and `runtime` included.
 ## Submit
 
 The Snakemake controller stays on the login node for the whole run, so start
-it in `tmux` (or `screen`). Calibrate on one batch first:
+it in `tmux` (or `screen`). Calibrate on one batch first, and check it with
+`sacct` as in [Job sizing](#job-sizing):
 
 ```bash
-uv run --no-sync snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm --config start=500 stop=510
-```
-
-```bash
-sacct -u $USER -S today --format=JobID,JobName%40,Elapsed,MaxRSS,State
+uv run --no-sync snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm --config start=510 stop=515
 ```
 
 Then dry-run and submit the rest:
