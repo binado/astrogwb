@@ -15,9 +15,14 @@ import json
 from pathlib import Path
 
 import numpy as np
-from numpy.typing import NDArray
+from numpy.typing import ArrayLike, NDArray
 
-from astrogwb.detector import effective_psd, gaussian_bin_scale
+from astrogwb.detector import (
+    effective_psd,
+    gaussian_bin_scale,
+    pair_bin_scale,
+    pair_terms,
+)
 from astrogwb.frequency import frequency_mask
 from astrogwb.gwb.importance import reference_catalog, reference_catalog_stem
 from astrogwb.inference import ImportanceGaussianLikelihood
@@ -38,7 +43,9 @@ __all__ = [
     "injection_spectrum",
     "network_data",
     "network_injection_metadata",
+    "network_pair_data",
     "noise_digest",
+    "pad_pairs",
     "settings_digest",
     "shot_noise_variant",
 ]
@@ -219,6 +226,67 @@ def network_data(
     return {"scale": jnp.where(mask, scale, 1.0), "frequency_mask": mask}
 
 
+#: The most detector pairs of a paper network (ET triangle + CE); networks
+#: with fewer are padded to it so they stack.
+MAX_PAIRS = 6
+
+
+def pad_pairs(values: ArrayLike, num_pairs: int = MAX_PAIRS) -> NDArray:
+    """Pad the pair axis (second to last) of ``values`` with zeros to ``num_pairs``."""
+    values = np.asarray(values)
+    widths = [(0, 0)] * values.ndim
+    widths[-2] = (0, num_pairs - values.shape[-2])
+    return np.pad(values, widths)
+
+
+def network_pair_data(
+    registry: DetectorRegistry,
+    name: str,
+    frequencies: NDArray[np.float64],
+    *,
+    observation_time: float,
+    minimum_frequency: float,
+    maximum_frequency: float,
+    num_pairs: int = MAX_PAIRS,
+) -> dict[str, object]:
+    """The per-pair Gaussian scale, usable-entry mask and ORF of one network.
+
+    The stacked-pair counterpart of :func:`network_data`: ``scale`` is
+    :func:`~astrogwb.detector.pair_bin_scale`, ``pair_overlap`` the isotropic
+    ORF of each pair, pairs in the order of
+    :func:`~astrogwb.detector.pair_terms`, padded to ``num_pairs`` with masked
+    rows of zero overlap and unit scale so networks stack. Entries outside the
+    band or with an infinite scale are masked and given a scale of one.
+
+    Returns
+    -------
+    dict
+        ``scale``, ``frequency_mask`` and ``pair_overlap``, ``(num_pairs, F)``,
+        as :class:`~astrogwb.inference.Network` fields.
+    """
+    import jax.numpy as jnp
+
+    grid = np.asarray(frequencies)
+    geometry, sensitivities = registry.build_network(name)
+    scale = np.asarray(pair_bin_scale(grid, geometry, sensitivities, observation_time))
+    overlap = np.stack(
+        [term.overlap for term in pair_terms(grid, geometry, sensitivities)]
+    )
+    band = np.asarray(
+        frequency_mask(
+            jnp.asarray(grid), fmin=minimum_frequency, fmax=maximum_frequency
+        )
+    )
+    mask = band & np.isfinite(scale) & (scale > 0.0)
+    padded_scale = np.ones((num_pairs, grid.size))
+    padded_scale[: scale.shape[0]] = np.where(mask, scale, 1.0)
+    return {
+        "scale": jnp.asarray(padded_scale),
+        "frequency_mask": jnp.asarray(pad_pairs(mask, num_pairs)),
+        "pair_overlap": jnp.asarray(pad_pairs(overlap, num_pairs)),
+    }
+
+
 def noise_digest(per_network: dict[str, dict[str, object]]) -> dict[str, str]:
     """Short hash of each network's per-bin noise, for the cache digest.
 
@@ -239,7 +307,9 @@ def noise_digest(per_network: dict[str, dict[str, object]]) -> dict[str, str]:
     digests = {}
     for name, data in per_network.items():
         hasher = hashlib.sha256()
-        for key in ("scale", "frequency_mask"):
+        for key in ("scale", "frequency_mask", "pair_overlap"):
+            if key not in data:
+                continue
             hasher.update(np.asarray(data[key]).tobytes())
         digests[name] = hasher.hexdigest()[:12]
     return digests
