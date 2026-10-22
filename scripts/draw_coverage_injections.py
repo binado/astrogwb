@@ -15,6 +15,9 @@ match the directories the notebook reads.
 
     uv run python scripts/draw_coverage_injections.py --keys
     uv run python scripts/draw_coverage_injections.py --start 0 --stop 250
+
+``workflow/coverage_draws.smk`` runs this script as SLURM jobs, each a small
+range of draws; see ``docs/coverage-draws-on-slurm.md``.
 """
 
 from __future__ import annotations
@@ -86,12 +89,18 @@ def main() -> None:
     parser.add_argument("--start", type=int, default=0, help="first draw index")
     parser.add_argument("--stop", type=int, help="one past the last draw index")
     parser.add_argument(
+        "--cache-dir",
+        type=Path,
+        default=default_cache_dir(),
+        help="cache root; draws land under <cache-dir>/ensembles (default: %(default)s)",
+    )
+    parser.add_argument(
         "--keys", action="store_true", help="print each network's key and exit"
     )
     args = parser.parse_args()
 
     records = injection_records()
-    directory = default_cache_dir() / "ensembles"
+    directory = args.cache_dir / "ensembles"
     if args.keys:
         for (name, _), record in zip(DETECTOR_NETWORKS, records, strict=True):
             print(f"{record.key()}  {name}")

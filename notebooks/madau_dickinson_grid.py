@@ -29,7 +29,7 @@ with app.setup(hide_code=True):
     from numpy.typing import NDArray
     from xarray import DataTree
 
-    from astrogwb.detector import sample_network_response
+    from astrogwb.detector import sample_pair_response
     from astrogwb.inference import ImportanceGaussianLikelihood
     from astrogwb.inference import Network as LikelihoodNetwork
     from astrogwb.paper.cache import default_cache_dir
@@ -51,8 +51,9 @@ with app.setup(hide_code=True):
     )
     from astrogwb.paper.posteriors import (
         ensure_reference_catalog,
-        network_data,
         network_injection_metadata,
+        network_pair_data,
+        pad_pairs,
         shot_noise_variant,
     )
     from astrogwb.populations import build_population
@@ -610,7 +611,7 @@ def _(
     observed = {}
     for _name, _data in zip(network_injections, _drawn, strict=True):
         validate_matching_frequency_grids(_data["frequencies"], frequencies)
-        observed[_name] = _data["spectral_density"][0]
+        observed[_name] = pad_pairs(_data["pair_spectral_density"][0])
     print(
         f"injection: {int(_drawn[0]['n_events'][0]):,} Poisson events, "
         f"recorded by {len(observed)} networks"
@@ -636,7 +637,7 @@ def _(
     response_seed,
 ):
     per_network = {
-        name: network_data(
+        name: network_pair_data(
             registry,
             name,
             frequencies,
@@ -646,62 +647,61 @@ def _(
         )
         for name in network_names
     }
-    # Each network's response draws, which its shot noise carries.
+    # Each network's per-pair response draws, which its shot noise carries,
+    # reduced to what the likelihood holds: the per-node moments (so s^2 is
+    # not projected once per draw at every point; exact, as no density site
+    # varies) and, for the "modes" variant, the basis and node blocks. The
+    # (L, P, F) draws are then dropped.
+    base_networks = {}
     for _name, _data in per_network.items():
-        _detectors, _sensitivities = registry.build_network(_name)
-        _data["response"] = sample_network_response(
-            jax.random.key(response_seed),
-            response_draws,
-            frequencies,
-            _detectors,
-            _sensitivities,
+        _detectors, _ = registry.build_network(_name)
+        _base = LikelihoodNetwork(
+            jnp.asarray(_data["scale"]),
+            jnp.asarray(_data["frequency_mask"]),
+            response=jnp.asarray(
+                pad_pairs(
+                    sample_pair_response(
+                        jax.random.key(response_seed),
+                        response_draws,
+                        frequencies,
+                        _detectors,
+                    )
+                )
+            ),
+            pair_overlap=jnp.asarray(_data["pair_overlap"]),
         )
+        _base = _base._replace(
+            response_moments=likelihood.response_moments(FIDUCIALS, _base)
+        )
+        if likelihood_variant == "modes":
+            _base = likelihood.with_shot_noise_modes(
+                FIDUCIALS, _base, tolerance=modes_tolerance, max_modes=max_modes
+            )
+        base_networks[_name] = _base._replace(response=None)
     # The fiducial s^2 per network; only the "fixed" variant uses it.
     fiducial_relative_variance = np.array(
         [
-            float(
-                likelihood.relative_variance(
-                    FIDUCIALS,
-                    LikelihoodNetwork(
-                        jnp.asarray(data["scale"]),
-                        jnp.asarray(data["frequency_mask"]),
-                        response=jnp.asarray(data["response"]),
-                    ),
-                )
-            )
-            for data in per_network.values()
+            float(likelihood.relative_variance(FIDUCIALS, network))
+            for network in base_networks.values()
         ]
     )
     variant_likelihood, _s2, _ = shot_noise_variant(
         likelihood_variant, likelihood, fiducial_relative_variance
     )
 
-    def _network(index: int, data: dict) -> LikelihoodNetwork:
-        network = LikelihoodNetwork(
-            jnp.asarray(data["scale"]),
-            jnp.asarray(data["frequency_mask"]),
-            None if _s2 is None else jnp.asarray(_s2[index]),
-            response=data["response"],
-        )
-        # Held so s^2 is not projected once per response draw at every point;
-        # exact, as no density site varies.
-        network = network._replace(
-            response_moments=likelihood.response_moments(FIDUCIALS, network)
-        )
-        if likelihood_variant != "modes":
-            return network
-        return likelihood.with_shot_noise_modes(
-            FIDUCIALS, network, tolerance=modes_tolerance, max_modes=max_modes
-        )
+    def _network(index: int, name: str) -> LikelihoodNetwork:
+        if _s2 is None:
+            return base_networks[name]
+        return base_networks[name]._replace(relative_variance=jnp.asarray(_s2[index]))
 
     # Each network scores the spectrum it recorded.
     network_likelihoods = {
         name: dataclasses.replace(
             variant_likelihood,
             observed=jnp.asarray(observed[name]),
-            network=_network(index, data),
+            network=_network(index, name),
         )
-        for index, (name, data) in enumerate(per_network.items())
+        for index, name in enumerate(per_network)
     }
     labelled_networks = [(n, l) for n, l in DETECTOR_NETWORKS if n in network_names]
     return labelled_networks, network_likelihoods
