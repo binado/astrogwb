@@ -206,12 +206,13 @@ def _():
     xi_n_window, xi_n_size = (0.3, 3.0), 55  # prior range
 
     # Likelihood variants evaluated per problem, and the one every figure
-    # shows. "amplitude" evaluates s^2 at each grid point, so sigma_eps depends
-    # on Lambda; "fixed" would pin it at the fiducial (the A/B section compares).
-    # Every variant's shot noise carries the per-source network response, from
-    # `response_draws` isotropic draws, as the network injections do; "modes"
-    # keeps the leading eigenmodes of that catalog covariance.
-    likelihood_variant = "amplitude"
+    # shows. "modes" keeps the leading eigenmodes of the dense catalog
+    # covariance of the stacked per-pair data, the paper's likelihood;
+    # "amplitude" keeps only the rank-one amplitude term with s^2 evaluated at
+    # each grid point, and "fixed" pins s^2 at the fiducial (the A/B section
+    # compares). Every variant's shot noise carries the per-source network
+    # response, from `response_draws` isotropic draws, as the injections do.
+    likelihood_variant = "modes"
     problem_variants = {
         "H0": ("detector", "amplitude", "fixed", "modes"),
         "H0_Omega_m": ("detector", "amplitude", "fixed", "modes"),
