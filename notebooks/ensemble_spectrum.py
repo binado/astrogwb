@@ -13,6 +13,7 @@ with app.setup(hide_code=True):
     # Backend configuration precedes waveform construction and array creation.
     configure_runtime(num_chains=1)
 
+    import jax
     import jax.numpy as jnp
     import marimo as mo
     import matplotlib.pyplot as plt
@@ -27,7 +28,11 @@ with app.setup(hide_code=True):
     from scipy.optimize import brentq
 
     from astrogwb.cosmology import luminosity_distance
-    from astrogwb.detector import effective_psd, gaussian_bin_scale
+    from astrogwb.detector import (
+        effective_psd,
+        gaussian_bin_scale,
+        sample_network_response,
+    )
     from astrogwb.frequency import frequency_mask
     from astrogwb.gwb import (
         characteristic_noise,
@@ -952,10 +957,11 @@ def _():
     catalog is generated at the redshift where $d_L = 1$ Mpc, below every
     window, and rescaled to each window's nodes, so the scan costs no
     waveforms. Per network it computes $\rho$ and the relative shot-noise
-    scatter $s$ of the amplitude at the fiducials, and from them the relative
+    scatter $s$ of the amplitude at the fiducials, with the network's
+    per-source response, and from them the relative
     uncertainty of the amplitude, $\sigma_{\mathrm{tot}}/A = (\rho^{-2} + s^2)^{1/2}$.
-    At $z_{\min}$ of the ensemble, $\rho s$ is checked against the measured
-    $\rho\,\mathrm{sd}(\epsilon)$ of section 8.
+    At $z_{\min}$ of the ensemble, the sky-averaged $\rho s$ is checked
+    against the measured $\rho\,\mathrm{sd}(\epsilon)$ of section 8.
     """)
     return
 
@@ -973,7 +979,11 @@ def _(SMOKE, ROOT_DIR, approximant, metadata, minimum_frequencies):
         [np.geomspace(0.01, 0.3, 60, endpoint=False), np.linspace(0.3, 1.5, 61)]
     )
     scan_chunk_size = 4096
+    # The shot noise carries each network's per-source response, from these
+    # isotropic draws, as in the grid and coverage notebooks.
+    scan_response_draws, scan_response_seed = 32_768, 0
     if SMOKE:
+        scan_response_draws = 64
         scan_num_samples = 64
         scan_redshift_nodes = 8
         scan_redshifts = np.geomspace(0.05, 3.0, 5)
@@ -1014,6 +1024,8 @@ def _(SMOKE, ROOT_DIR, approximant, metadata, minimum_frequencies):
         scan_hyperparameters,
         scan_redshift_nodes,
         scan_redshifts,
+        scan_response_draws,
+        scan_response_seed,
         scan_seed,
     )
 
@@ -1112,6 +1124,9 @@ def minimum_redshift_scan(
     minimum_frequency: float,
     maximum_frequency: float,
     num_redshift_nodes: int,
+    *,
+    response_draws: int | None = None,
+    response_seed: int = 0,
 ) -> pd.DataFrame:
     r"""The SNR and shot-noise scatter of the amplitude against the window edge.
 
@@ -1119,8 +1134,9 @@ def minimum_redshift_scan(
     evaluated at ``hyperparameters``; then, per network, :math:`\rho` is the
     SNR of the expected spectrum and :math:`s` the relative standard deviation
     of its shot noise projected on the network's noise-weighted template
-    (:meth:`astrogwb.inference.ImportanceGaussianLikelihood.relative_variance`). The relative
-    uncertainty of the amplitude is :math:`(\rho^{-2} + s^2)^{1/2}`.
+    (:meth:`astrogwb.inference.ImportanceGaussianLikelihood.relative_variance`),
+    with the network's per-source response when ``response_draws`` is given.
+    The relative uncertainty of the amplitude is :math:`(\rho^{-2} + s^2)^{1/2}`.
 
     Parameters
     ----------
@@ -1143,6 +1159,10 @@ def minimum_redshift_scan(
         Analysis band in Hz.
     num_redshift_nodes
         Quadrature nodes per window.
+    response_draws, response_seed
+        Isotropic draws of each network's response
+        (:func:`~astrogwb.detector.sample_network_response`), which the shot
+        noise then carries; ``None`` keeps the sky-averaged shot noise.
 
     Returns
     -------
@@ -1162,10 +1182,24 @@ def minimum_redshift_scan(
             & jnp.isfinite(noise)
             & (noise > 0.0)
         )
+        response = (
+            None
+            if response_draws is None
+            else sample_network_response(
+                jax.random.key(response_seed),
+                response_draws,
+                grid,
+                geometry,
+                sensitivities,
+            )
+        )
         networks[label] = (
             noise,
-            gaussian_bin_scale(noise, observation_time, grid),
-            keep,
+            LikelihoodNetwork(
+                gaussian_bin_scale(noise, observation_time, grid),
+                keep,
+                response=response,
+            ),
         )
     records = []
     for edge in redshifts:
@@ -1181,16 +1215,21 @@ def minimum_redshift_scan(
             minimum_redshift=float(edge),
         )
         spectrum, _, _ = likelihood.predict(hyperparameters)
-        for label, (noise, scale, keep) in networks.items():
+        for label, (noise, network) in networks.items():
             snr = float(
-                spectral_snr(spectrum, noise, seconds, grid, frequency_mask=keep)
+                spectral_snr(
+                    spectrum, noise, seconds, grid, frequency_mask=network.mask
+                )
             )
-            scatter = float(
-                jnp.sqrt(
-                    likelihood.relative_variance(
-                        hyperparameters, LikelihoodNetwork(scale, keep)
+            if network.response is not None:
+                # One fold over the nodes, not one projection per draw.
+                network = network._replace(
+                    response_moments=likelihood.response_moments(
+                        hyperparameters, network
                     )
                 )
+            scatter = float(
+                jnp.sqrt(likelihood.relative_variance(hyperparameters, network))
             )
             records.append(
                 {
@@ -1267,6 +1306,8 @@ def _(
     scan_hyperparameters,
     scan_redshift_nodes,
     scan_redshifts,
+    scan_response_draws,
+    scan_response_seed,
     scan_seed,
     coba_rows,
 ):
@@ -1289,6 +1330,8 @@ def _(
         minimum_frequencies[0],
         maximum_frequency,
         scan_redshift_nodes,
+        response_draws=scan_response_draws,
+        response_seed=scan_response_seed,
     )
     return (scan,)
 
@@ -1324,10 +1367,11 @@ def _():
     mo.md(r"""
     ### Check against the ensemble
 
-    At the window edge of the ensemble, the model's $\rho s$ (a property of the
-    expected spectrum) should match the $\rho\,\mathrm{sd}(\epsilon)$ measured
-    on the draws in section 8, and the optimum shows how much the choice of
-    edge matters for each network.
+    At the window edge of the ensemble, the model's sky-averaged $\rho s$ (a
+    property of the expected spectrum) should match the
+    $\rho\,\mathrm{sd}(\epsilon)$ measured on the sky-averaged draws of
+    section 8; the response-aware $\rho s$ of the scan is beside it. The
+    optimum shows how much the choice of edge matters for each network.
     """)
     return
 
@@ -1347,11 +1391,13 @@ def _(
     scan_chunk_size,
     scan_hyperparameters,
     scan_redshift_nodes,
+    scan_response_draws,
+    scan_response_seed,
     scan_seed,
     shot_noise,
 ):
     _edge = float(metadata.population.model_kwargs["minimum_redshift"])
-    _at_edge = minimum_redshift_scan(
+    _arguments = (
         ensure_reference_catalog(
             scan_catalog_metadata,
             scan_seed,
@@ -1369,6 +1415,12 @@ def _(
         minimum_frequencies[0],
         maximum_frequency,
         scan_redshift_nodes,
+    )
+    _at_edge = minimum_redshift_scan(*_arguments).set_index("network")
+    _with_response = minimum_redshift_scan(
+        *_arguments,
+        response_draws=scan_response_draws,
+        response_seed=scan_response_seed,
     ).set_index("network")
     _best = scan.loc[
         scan.groupby("network")["relative_uncertainty"].idxmin()
@@ -1377,7 +1429,8 @@ def _(
         {
             "rho sd(eps), draws": shot_noise["rho sd(eps)"],
             "rho s, model": _at_edge["snr"] * _at_edge["scatter"],
-            "sigma_tot/A at edge (%)": 100.0 * _at_edge["relative_uncertainty"],
+            "rho s, with response": _with_response["snr"] * _with_response["scatter"],
+            "sigma_tot/A at edge (%)": 100.0 * _with_response["relative_uncertainty"],
             "best z_min": _best["minimum_redshift"],
             "sigma_tot/A at best (%)": 100.0 * _best["relative_uncertainty"],
         }

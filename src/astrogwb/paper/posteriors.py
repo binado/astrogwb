@@ -30,12 +30,14 @@ from astrogwb.simulators.polarization_power import (
 from astrogwb.simulators.spectra import (
     BackgroundSpectralDensityMetadata,
     BackgroundSpectralDensitySimulator,
+    NetworkSpectralDensityMetadata,
 )
 
 __all__ = [
     "ensure_reference_catalog",
     "injection_spectrum",
     "network_data",
+    "network_injection_metadata",
     "noise_digest",
     "settings_digest",
     "shot_noise_variant",
@@ -156,6 +158,30 @@ def injection_spectrum(
         path, spectral_density=observed, frequencies=frequencies, n_events=num_injected
     )
     return observed, frequencies, num_injected
+
+
+def network_injection_metadata(
+    metadata: BackgroundSpectralDensityMetadata,
+    registry: DetectorRegistry,
+    name: str,
+) -> NetworkSpectralDensityMetadata:
+    """The injection ``metadata`` as the network ``name`` records it.
+
+    The registry's detectors of the network, in declared order, with their
+    ``psd_reference``. Its key differs from the sky-averaged record's, so the
+    two caches never mix. The record names detectors by site code, which
+    resolves to the packaged geometry: a registry geometry override is not
+    carried into it.
+    """
+    detectors = list(registry.networks[name])
+    return NetworkSpectralDensityMetadata(
+        **metadata.model_dump(),
+        detectors=detectors,
+        psd_references={
+            detector: registry.detectors[detector].psd_reference
+            for detector in detectors
+        },
+    )
 
 
 def network_data(

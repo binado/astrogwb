@@ -47,6 +47,7 @@ from astrogwb.constants import MPC_IN_SECONDS, SOLAR_MASS_IN_SECONDS
 from astrogwb.frequency import frequency_grid
 from astrogwb.utils import require_x64
 from astrogwb.waveform.generator.base import PolarizationPowerGenerator
+from astrogwb.waveform.polarization_power import quadrupolar_stokes
 
 __all__ = [
     "AnalyticInspiralGenerator",
@@ -315,6 +316,28 @@ class AnalyticInspiralGenerator(PolarizationPowerGenerator):
         return inspiral_polarization_power(
             frequencies, prepared_parameters, alpha=self.metadata.alpha
         ).T
+
+    def _generate_stokes_batch(
+        self, source_parameters: Mapping[str, ArrayLike]
+    ) -> jax.Array:
+        r"""Quadrupolar Stokes parameters ``(4, F, N)`` of the closed form.
+
+        The face-on power is :math:`2 A^2`, since :math:`g(0) = 2` exactly, which
+        gives the amplitude
+        :func:`~astrogwb.waveform.polarization_power.quadrupolar_stokes` needs.
+        """
+        prepared_parameters = {
+            name: jnp.asarray(values) for name, values in source_parameters.items()
+        }
+        assert self.metadata.alpha is not None
+        count = next(iter(prepared_parameters.values())).shape[0]
+        inclination = prepared_parameters.get("inclination", jnp.zeros(count))
+        face_on = inspiral_polarization_power(
+            self.frequencies,
+            {**prepared_parameters, "inclination": jnp.zeros_like(inclination)},
+            alpha=self.metadata.alpha,
+        )
+        return quadrupolar_stokes(jnp.sqrt(face_on / 2.0), inclination)
 
     def __call__(
         self, source_parameters: Mapping[str, ArrayLike]

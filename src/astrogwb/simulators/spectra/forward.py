@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Literal
+from collections.abc import Mapping, Sequence
+from typing import Any, Literal
 
 import jax
 import jax.numpy as jnp
@@ -12,6 +12,7 @@ import numpyro
 from jax.typing import ArrayLike
 from numpy.typing import NDArray
 
+from astrogwb.detector import DetectorSpec, stokes_cross_power
 from astrogwb.populations._types import PopulationModel
 from astrogwb.simulators.population.simulator import bucket_size
 from astrogwb.utils import array_dict_shape
@@ -27,6 +28,12 @@ PACK_RATIO = 1.5
 #: amplitude. Required in every source model's returned mapping; see
 #: :mod:`astrogwb.gwb.importance`, which reads the same key.
 _LUMINOSITY_DISTANCE = "luminosity_distance"
+
+#: The extra source columns :class:`ChunkedNetworkSum` reads: the cosine of the
+#: polar angle and the azimuth of the direction to the source (Earth-fixed), and
+#: the polarization angle, as :func:`~astrogwb.detector.stokes_cross_power`
+#: takes them.
+EXTRINSIC_COLUMNS = ("polar_cosine", "azimuth", "polarization")
 
 
 def _require_luminosity_distance(sources: Mapping[str, jax.Array]) -> None:
@@ -184,23 +191,129 @@ class ChunkedPowerSum:
     def __call__(self, sources: Mapping[str, ArrayLike]) -> jax.Array:
         """The ``(F,)`` power sum; an empty draw returns zeros."""
         _require_luminosity_distance(sources)  # ty: ignore[invalid-argument-type]
-        columns = {name: np.asarray(values) for name, values in sources.items()}
-        shapes = {name: values.shape for name, values in columns.items()}
-        if (
-            any(len(shape) != 1 for shape in shapes.values())
-            or len(set(shapes.values())) != 1
-        ):
-            raise ValueError(f"sources must be flat arrays of one length; got {shapes}")
-        n = next(iter(columns.values())).shape[0]
-        if n == 0:
+        padded, count = _pad_sources(sources, self._chunk_size)
+        if count == 0:
             return jnp.zeros(self._num_frequencies)
+        return self._reduce(padded, jnp.asarray(count))
 
-        pad = bucket_size(n, self._chunk_size, PACK_RATIO) - n
-        padded = {
-            name: np.concatenate([values, np.repeat(values[:1], pad)])
-            for name, values in columns.items()
-        }
-        return self._reduce(padded, jnp.asarray(n))
+
+class ChunkedNetworkSum:
+    r"""The cross-power of one draw's sources in every detector pair, ``(P, F)``.
+
+    Row :math:`p` is :math:`\sum_i K_{ab, i}(f)` for the :math:`p`-th pair
+    :math:`a < b` of ``detectors``, with :math:`K_{ab, i}` the
+    :func:`~astrogwb.detector.stokes_cross_power` of source :math:`i`: its
+    Stokes parameters from the generator, seen through the antenna patterns
+    and delay of its sky position and polarization angle. ``sources`` carry
+    those as the extra columns :data:`EXTRINSIC_COLUMNS`. Chunking, padding,
+    masking and compilation are those of :class:`ChunkedPowerSum`, whose
+    contracts this shares; peak memory is ``(P, F, chunk_size)``.
+
+    ``pairs`` replaces every :math:`a < b` with the index pairs given, in
+    that order, so several networks can share one pass over the union of
+    their detectors (:class:`~astrogwb.simulators.spectra.JointNetworkSpectralDensitySimulator`).
+    """
+
+    def __init__(
+        self,
+        generator: PolarizationPowerGenerator,
+        detectors: Sequence[DetectorSpec],
+        *,
+        chunk_size: int,
+        pairs: Sequence[tuple[int, int]] | None = None,
+    ) -> None:
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be positive")
+        self._generator = generator
+        self._detectors = list(detectors)
+        self._pairs = (
+            [(first, second) for first, second in pairs]
+            if pairs is not None
+            else [
+                (first, second)
+                for first in range(len(self._detectors))
+                for second in range(first + 1, len(self._detectors))
+            ]
+        )
+        self._chunk_size = chunk_size
+        self._num_frequencies = int(np.shape(generator.frequencies)[0])
+        self._reduce = jax.jit(self._loop)
+
+    @property
+    def pairs(self) -> list[tuple[int, int]]:
+        """The detector index pairs, in the order of the rows."""
+        return list(self._pairs)
+
+    def _loop(self, sources: Mapping[str, jax.Array], count: jax.Array) -> jax.Array:
+        chunk = self._chunk_size
+        frequencies = jnp.asarray(self._generator.frequencies)
+
+        def body(index: jax.Array, total: jax.Array) -> jax.Array:
+            start = index * chunk
+            batch = {
+                name: jax.lax.dynamic_slice_in_dim(values, start, chunk)
+                for name, values in sources.items()
+            }
+            mask = (jnp.arange(chunk) + start) < count
+            # (4, F, chunk) -> (4, chunk, F), with the padding rows zeroed.
+            stokes = jnp.swapaxes(self._generator.generate_stokes_batch(batch), 1, 2)
+            stokes = jnp.where(mask[None, :, None], stokes, 0.0)
+            return total + jnp.stack(
+                [
+                    stokes_cross_power(
+                        frequencies,
+                        self._detectors[first],
+                        self._detectors[second],
+                        batch["polar_cosine"],
+                        batch["azimuth"],
+                        batch["polarization"],
+                        stokes,
+                    ).sum(axis=0)
+                    for first, second in self._pairs
+                ]
+            )
+
+        return jax.lax.fori_loop(
+            0,
+            (count + chunk - 1) // chunk,
+            body,
+            jnp.zeros((len(self._pairs), self._num_frequencies), dtype=jnp.float64),
+        )
+
+    def __call__(self, sources: Mapping[str, ArrayLike]) -> jax.Array:
+        """The ``(P, F)`` cross-power sums; an empty draw returns zeros."""
+        _require_luminosity_distance(sources)  # ty: ignore[invalid-argument-type]
+        padded, count = _pad_sources(sources, self._chunk_size)
+        if count == 0:
+            return jnp.zeros((len(self._pairs), self._num_frequencies))
+        return self._reduce(padded, jnp.asarray(count))
+
+
+def _pad_sources(
+    sources: Mapping[str, ArrayLike], chunk_size: int
+) -> tuple[dict[str, NDArray[Any]], int]:
+    """Flat columns padded to a geometric capacity, and the real source count.
+
+    Padding rows repeat the first source -- a physical source, so the waveform
+    stays finite -- and are masked out by the caller; an empty draw is returned
+    unpadded.
+    """
+    columns = {name: np.asarray(values) for name, values in sources.items()}
+    shapes = {name: values.shape for name, values in columns.items()}
+    if (
+        any(len(shape) != 1 for shape in shapes.values())
+        or len(set(shapes.values())) != 1
+    ):
+        raise ValueError(f"sources must be flat arrays of one length; got {shapes}")
+    n = next(iter(columns.values())).shape[0]
+    if n == 0:
+        return columns, 0
+    pad = bucket_size(n, chunk_size, PACK_RATIO) - n
+    padded = {
+        name: np.concatenate([values, np.repeat(values[:1], pad)])
+        for name, values in columns.items()
+    }
+    return padded, n
 
 
 def normalize_spectra(

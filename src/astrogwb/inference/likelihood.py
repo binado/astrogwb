@@ -137,6 +137,21 @@ class Network(NamedTuple):
         :meth:`ImportanceGaussianLikelihood.log_likelihood` sets per point
         in the ``"modes"`` mode, as it sets ``relative_variance`` in the
         ``"amplitude"`` mode.
+    observed:
+        The spectrum this network recorded, ``(F,)``, in place of the
+        likelihood's ``observed``. A network sees each source through its own
+        response, so networks observing one catalog record different spectra;
+        stacked, each is scored against its own while the prediction is
+        shared. ``None`` uses the likelihood's.
+    response_moments:
+        The per-node second moments of the power under ``response``,
+        :math:`s_z^4 W_z G W_z^T \circ R`, ``(Z, F, F)``
+        (:meth:`ImportanceGaussianLikelihood.response_moments`). Held, the
+        ``"amplitude"`` mode's :math:`s^2` is one quadratic form per node at
+        every point, instead of one projection of the catalog per response
+        draw. Like ``mode_blocks`` they are exact while the importance weights
+        do not vary, that is with no ``density_sites``; the caller is trusted to
+        hold them only then. ``None`` projects every draw.
     """
 
     scale: jax.Array
@@ -146,6 +161,15 @@ class Network(NamedTuple):
     modes: jax.Array | None = None
     mode_blocks: jax.Array | None = None
     mode_covariance: jax.Array | None = None
+    observed: jax.Array | None = None
+    response_moments: jax.Array | None = None
+
+
+def _observed(observed: jax.Array | None, network: Network) -> jax.Array:
+    """The data ``network`` is scored against: its own, else ``observed``."""
+    data = observed if network.observed is None else network.observed
+    assert data is not None
+    return data
 
 
 def _orientation_covariance(network: Network | None) -> jax.Array | float:
@@ -262,7 +286,9 @@ class GaussianLikelihood:
     ) -> jax.Array:
         """The log-likelihood of ``prediction`` under ``network``, shape ``()``."""
         mean, _, _ = prediction
-        return gaussian_log_likelihood(mean, self.observed, network.scale, network.mask)
+        return gaussian_log_likelihood(
+            mean, _observed(self.observed, network), network.scale, network.mask
+        )
 
     def log_likelihood(
         self, params: Mapping[str, ArrayLike], network: Network | None = None
@@ -640,14 +666,20 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         projects :math:`P_f\, r_l(f)` instead, on the projector
         :math:`c_f\, r_l(f)`, and the squares are averaged over draws; this is
         :math:`\mathbf{c}^T \mathrm{Cov}\, \mathbf{c}` of the Hadamard
-        covariance. Otherwise the inclination factor
-        :data:`~astrogwb.gwb.importance.INCLINATION_SECOND_MOMENT` multiplies.
+        covariance, which held ``network.response_moments`` give directly as
+        :math:`\mathbf{c}^T K_z \mathbf{c}` per node. Otherwise the inclination
+        factor :data:`~astrogwb.gwb.importance.INCLINATION_SECOND_MOMENT`
+        multiplies.
         """
         assert self.observation_seconds is not None
         projector = _template_projector(mean, network)
         if network.response is None:
             second_moment = INCLINATION_SECOND_MOMENT * self._projected_second_moment(
                 shared, projector
+            )
+        elif network.response_moments is not None:
+            second_moment = jnp.einsum(
+                "f,zfg,g->z", projector, network.response_moments, projector
             )
         else:
             second_moment = jnp.mean(
@@ -828,6 +860,28 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         assert network is not None
         return self._mode_blocks(self._shared(params), network)
 
+    def response_moments(
+        self, params: Mapping[str, ArrayLike], network: Network | None = None
+    ) -> jax.Array:
+        r"""The per-node second moments of the power under ``network.response``.
+
+        :math:`K_z = s_z^4 W_z G W_z^T \circ R`, ``(Z, F, F)``, with
+        :math:`R = \langle r_f r_{f'} \rangle` of the response draws, so the
+        projected second moment along :math:`\mathbf{c}` at node :math:`z` is
+        :math:`\mathbf{c}^T K_z \mathbf{c}` whatever the number of draws. Hold
+        the result on ``network.response_moments``; that is exact while the
+        importance weights do not vary. Requires ``network.response``.
+        """
+        network = self.network if network is None else network
+        assert network is not None and network.response is not None
+        orientation = _orientation_covariance(network)
+        _, moments = self._fold_node_moments(
+            self._shared(params),
+            lambda carry, moment, kernel: (carry, moment * orientation),
+            0.0,
+        )
+        return moments
+
     def with_shot_noise_modes(
         self,
         params: Mapping[str, ArrayLike],
@@ -889,13 +943,12 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         from the inclination factor to :math:`\langle r_f^2 \rangle`.
         """
         mean, variance, _ = prediction
-        assert self.observed is not None
         if variance is not None and network.response is not None:
             variance = (
                 variance * _orientation_variance(network) / INCLINATION_SECOND_MOMENT
             )
         return shot_noise_log_likelihood(
-            mean, variance, self.observed, network, self.shot_noise
+            mean, variance, _observed(self.observed, network), network, self.shot_noise
         )
 
     def log_likelihood(
@@ -1126,7 +1179,6 @@ class ImportanceCompoundPoissonLikelihood(_ImportanceCatalog):
         self, params: Mapping[str, ArrayLike], network: Network | None = None
     ) -> tuple[jax.Array, Mapping[str, jax.Array]]:
         """``(log L, extras)`` at ``params`` under ``network`` (the instance's by default)."""
-        assert self.observed is not None
         shared = self._shared(params)
         mean, extras = self._mean(shared)
         network = self.network if network is None else network
@@ -1137,7 +1189,7 @@ class ImportanceCompoundPoissonLikelihood(_ImportanceCatalog):
 
         keep = _keep(network.mask, mean)
         safe_scale = jnp.where(keep, network.scale, 1.0)
-        residual = self.observed - mean
+        residual = _observed(self.observed, network) - mean
         whitened = jnp.where(keep, residual / safe_scale, 0.0)
         along = projector @ residual
         chi_squared_perp = jnp.sum(whitened * whitened) - along**2 / squared_snr

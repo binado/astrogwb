@@ -13,6 +13,7 @@ from astrogwb.frequency import frequency_grid
 from astrogwb.utils import require_x64
 from astrogwb.waveform.generator._ripple import (
     build_power_kernel,
+    build_stokes_kernel,
     check_sources,
     next_smooth_even,
     ripple_parameters,
@@ -45,10 +46,18 @@ class RippleGenerator(PolarizationPowerGenerator):
     values are not validated here -- see :meth:`check_sources`.
     """
 
-    __slots__ = ("_band", "_frequencies", "_kernel", "_n_samples", "_segment_duration")
+    __slots__ = (
+        "_band",
+        "_frequencies",
+        "_kernel",
+        "_n_samples",
+        "_segment_duration",
+        "_stokes_kernel",
+    )
     _band: slice
     _frequencies: np.ndarray
     _kernel: Callable[[jax.Array, Mapping[str, jax.Array]], jax.Array]
+    _stokes_kernel: Callable[[jax.Array, Mapping[str, jax.Array]], jax.Array]
     _n_samples: int | None
     _segment_duration: float | None
 
@@ -86,13 +95,21 @@ class RippleGenerator(PolarizationPowerGenerator):
         object.__setattr__(self, "_n_samples", n_samples)
         object.__setattr__(self, "_frequencies", grid)
         object.__setattr__(self, "_band", band)
+        kernel_options = {
+            "use_taper_in_tidal_corrections": metadata.use_taper_in_tidal_corrections
+        }
         object.__setattr__(
             self,
             "_kernel",
             build_power_kernel(
-                metadata.approximant,
-                metadata.reference_frequency,
-                use_taper_in_tidal_corrections=metadata.use_taper_in_tidal_corrections,
+                metadata.approximant, metadata.reference_frequency, **kernel_options
+            ),
+        )
+        object.__setattr__(
+            self,
+            "_stokes_kernel",
+            build_stokes_kernel(
+                metadata.approximant, metadata.reference_frequency, **kernel_options
             ),
         )
 
@@ -221,6 +238,19 @@ class RippleGenerator(PolarizationPowerGenerator):
         events = ripple_parameters(self.metadata.approximant, source_parameters)
         power = self._kernel(jnp.asarray(self._frequencies), events)
         return power[self._band, :]
+
+    @require_x64
+    def _generate_stokes_batch(
+        self, source_parameters: Mapping[str, ArrayLike]
+    ) -> jax.Array:
+        """Generate Stokes parameters ``(4, frequency, sample)`` via Ripple.
+
+        The same grid and band as :meth:`_generate_batch`, whose power is the
+        :math:`I` slice.
+        """
+        events = ripple_parameters(self.metadata.approximant, source_parameters)
+        stokes = self._stokes_kernel(jnp.asarray(self._frequencies), events)
+        return stokes[:, self._band, :]
 
     def __call__(
         self, source_parameters: Mapping[str, ArrayLike]
