@@ -24,6 +24,12 @@ the sky-averaged spectrum, and the scatter about it is the per-source response
 that :class:`~astrogwb.inference.likelihood.Network` models as a Hadamard
 covariance. It is the noise-free estimator: detector noise is not added.
 
+Each pair is also kept apart, as ``pair_spectral_density``
+:math:`Y_{ab} = 5 k D_{ab}`, the cross-power of the stacked per-pair data. Its
+mean is :math:`\gamma_{ab} S_h`, not divided by :math:`\gamma_{ab}`, which
+crosses zero, and :func:`combine_pair_spectra` returns the network spectrum
+from it.
+
 The inclination enters once, through the population's own :math:`\iota_i` in
 the Stokes parameters. The extrinsic angles -- direction, polarization angle
 and coalescence phase -- are drawn here from a key folded off the draw's, so the
@@ -55,6 +61,7 @@ __all__ = [
     "JointNetworkSpectralDensitySimulator",
     "NetworkSpectralDensityMetadata",
     "NetworkSpectralDensitySimulator",
+    "combine_pair_spectra",
     "draw_extrinsic_angles",
 ]
 
@@ -70,14 +77,26 @@ class NetworkSpectralDensityMetadata(BackgroundSpectralDensityMetadata):
     :func:`~astrogwb.detector.resolve_detector`, and ``psd_references``, the
     :class:`~astrogwb.detector.Sensitivity` reference of each, keyed by site
     code. The pair weights depend on both, so both are part of :meth:`key`.
+    ``pair_spectra`` keeps each pair's spectrum, ``pair_spectral_density``,
+    beside the network one. It is part of :meth:`key` too, so a record cached
+    before the pairs were kept is never served in place of one that keeps them.
     """
 
     detectors: list[str]
     psd_references: dict[str, str]
+    pair_spectra: bool = True
 
     def sensitivities(self) -> dict[str, Sensitivity]:
         """The noise curve of every detector, keyed by site code."""
         return {name: Sensitivity(self.psd_references[name]) for name in self.detectors}
+
+    def pairs(self) -> list[tuple[str, str]]:
+        """The site codes of every pair :math:`a < b`, in the order of the pair axis."""
+        return [
+            (first, second)
+            for index, first in enumerate(self.detectors)
+            for second in self.detectors[index + 1 :]
+        ]
 
 
 def draw_extrinsic_angles(key: jax.Array, count: int) -> dict[str, jax.Array]:
@@ -159,9 +178,12 @@ class NetworkSpectralDensitySimulator:
         """The network spectrum of ``population``, its extrinsic angles drawn from ``angle_key``."""
         count = int(population["count"])
         angles = draw_extrinsic_angles(angle_key, count)
-        pair_sums = self._reducer({**population["source_parameters"], **angles})
+        pair_sums = np.asarray(
+            self._reducer({**population["source_parameters"], **angles})
+        )
         return _network_data(
-            self.combine(np.asarray(pair_sums)),
+            self.combine(pair_sums),
+            pair_sums,
             population,
             self._metadata,
             self._population.observation_seconds,
@@ -260,6 +282,7 @@ class JointNetworkSpectralDensitySimulator:
         return [
             _network_data(
                 _combine_pairs(weights, denominator, pair_sums[rows]),
+                pair_sums[rows],
                 population,
                 record,
                 self._population.observation_seconds,
@@ -294,23 +317,51 @@ def _combine_pairs(
     return np.where(usable, numerator / np.where(usable, denominator, 1.0), 0.0)
 
 
+def combine_pair_spectra(
+    pair_spectral_density: ArrayLike,
+    frequencies: ArrayLike,
+    metadata: NetworkSpectralDensityMetadata,
+) -> NDArray[np.float64]:
+    r"""The network spectrum of per-pair spectra ``(..., P, F)``, ``(..., F)``.
+
+    :math:`\sum_{a<b} w_{ab} Y_{ab} / \sum_{a<b} w_{ab} \gamma_{ab}` with the
+    optimal weights of :func:`~astrogwb.detector.pair_terms`, the pairs in the
+    order of :meth:`NetworkSpectralDensityMetadata.pairs`. Applied to a record's
+    ``pair_spectral_density`` it returns its ``spectral_density``. Bins where no
+    pair has a finite weight return zero.
+    """
+    weights, denominator = _pair_weights(np.asarray(frequencies), metadata)
+    numerator = np.sum(weights * np.asarray(pair_spectral_density), axis=-2)
+    usable = denominator > 0.0
+    return np.where(usable, numerator / np.where(usable, denominator, 1.0), 0.0)
+
+
 def _network_data(
     combined: NDArray[np.float64],
+    pair_sums: NDArray[np.float64],
     population: PopulationData,
     metadata: NetworkSpectralDensityMetadata,
     observation_seconds: float,
     frequencies: NDArray[np.float64],
 ) -> BackgroundSpectralDensityData:
-    """One draw's network spectrum, normalized, as a one-row data record."""
+    """One draw's network spectrum, normalized, as a one-row data record.
+
+    ``pair_sums`` are the draw's :math:`D_{ab}`, ``(P, F)``, kept as
+    ``pair_spectral_density`` when ``metadata.pair_spectra`` is set.
+    """
     rate = np.asarray(population["total_merger_rate"])
-    density = normalize_spectra(
-        combined,
-        count=metadata.count,
-        total_merger_rate=rate,
-        observation_seconds=observation_seconds,
-        num_events=metadata.num_events,
-    )
-    return {
+
+    def normalize(power_sum: NDArray[np.float64]) -> NDArray[np.float64]:
+        return normalize_spectra(
+            power_sum,
+            count=metadata.count,
+            total_merger_rate=rate,
+            observation_seconds=observation_seconds,
+            num_events=metadata.num_events,
+        )
+
+    density = normalize(combined)
+    record: BackgroundSpectralDensityData = {
         "frequencies": frequencies,
         "spectral_density": density[np.newaxis, :],
         "n_events": np.asarray([int(population["count"])], dtype=np.int64),
@@ -320,3 +371,8 @@ def _network_data(
             for name, value in population["hyperparameters"].items()
         },
     }
+    if metadata.pair_spectra:
+        record["pair_spectral_density"] = normalize(
+            _PAIR_RESPONSE_DENOMINATOR * pair_sums
+        )[np.newaxis]
+    return record
