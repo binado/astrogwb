@@ -4,6 +4,7 @@ from .effective_psd import (
     effective_psd,
     gaussian_bin_scale,
     log_frequency_noise_scale,
+    pair_bin_scale,
     pair_terms,
 )
 from .geometry import load_detector, resolve_detector
@@ -46,6 +47,7 @@ __all__ = [
     "log_frequency_noise_scale",
     "network_response",
     "overlap_reduction_function",
+    "pair_bin_scale",
     "pair_response",
     "pair_terms",
     "pairwise_overlap_reduction_function",

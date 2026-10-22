@@ -16,6 +16,12 @@ shares one prediction:
 
 ``log_likelihood(params, network)`` composes them and ``__call__(params)`` uses
 the network the instance carries.
+
+A network scores either one combined spectrum, ``(F,)``, or the stacked
+per-pair data of its detector pairs, ``(P, F)`` with mean
+:math:`\gamma_{ab} S` (``Network.pair_overlap``). The prediction is ``(F,)``
+in both cases, so the expensive stage stays shared; the network expands it and
+flattens its own leaves onto one data axis, pair-major.
 """
 
 from __future__ import annotations
@@ -91,19 +97,29 @@ class Network(NamedTuple):
     ``None`` in all of them, or arrays of one shape (pad ``modes`` with
     :func:`~astrogwb.inference.shot_noise.pad_modes`).
 
+    Without ``pair_overlap`` the network scores one combined spectrum and
+    every per-entry leaf has a trailing ``(F,)`` axis. With it, the network
+    scores the stacked per-pair data :math:`d_{ab,k}`, whose mean is
+    :math:`\gamma_{ab}(f_k) S(f_k)`, and those leaves are ``(P, F)``, flattened
+    pair-major onto one data axis of length ``D = P F``. A combined spectrum
+    is the case ``P = 1`` with unit gain, so both share every code path.
+
     Attributes
     ----------
     scale:
-        Per-bin standard deviation, ``(F,)``.
+        Per-entry standard deviation, ``(F,)`` or ``(P, F)``
+        (:func:`~astrogwb.detector.pair_bin_scale` for pairs).
     mask:
-        Boolean ``(F,)`` of the bins counted; ``None`` counts all. Masked bins
-        contribute exactly zero, whatever their ``scale``.
+        Boolean, shaped as ``scale``, of the entries counted; ``None`` counts
+        all. Masked entries contribute exactly zero, whatever their ``scale``.
     relative_variance:
         A fixed :math:`s^2`, shape ``()``, for the ``"fixed"`` shot-noise mode.
     response:
         Equally weighted isotropic draws of the network response
         :math:`r_l(f)` on the likelihood's frequency grid, ``(L, F)``
-        (:func:`~astrogwb.detector.response.sample_network_response`). Sky
+        (:func:`~astrogwb.detector.response.sample_network_response`), or of
+        every pair's unnormalized response :math:`r_{l,ab}(f)`, ``(L, P, F)``
+        (:func:`~astrogwb.detector.response.sample_pair_response`). Sky
         position and orientation are independent of the catalog, so the
         catalog covariance becomes the Hadamard product
 
@@ -118,9 +134,12 @@ class Network(NamedTuple):
         :data:`~astrogwb.gwb.importance.INCLINATION_SECOND_MOMENT` everywhere
         rather than multiplying it: in the projected variance, the per-bin
         variance of the ``"per_frequency"`` mode and the inclination nodes of
-        the compound-Poisson point set. ``None`` keeps the sky-averaged power.
+        the compound-Poisson point set. ``None`` keeps the sky-averaged power,
+        which reaches each pair as :math:`\gamma_{ab}` times it. With pairs,
+        the covariance indices run over (pair, bin) and the factor is
+        :math:`\langle r_{ab}(f)\, r_{cd}(f') \rangle`.
     modes:
-        The shot-noise basis :math:`U` of the ``"modes"`` mode, ``(F, k)``:
+        The shot-noise basis :math:`U` of the ``"modes"`` mode, ``(D, k)``:
         orthonormal over the counted bins in whitened coordinates
         (:func:`~astrogwb.inference.shot_noise.shot_noise_modes`). Zero
         columns are inert.
@@ -138,20 +157,27 @@ class Network(NamedTuple):
         in the ``"modes"`` mode, as it sets ``relative_variance`` in the
         ``"amplitude"`` mode.
     observed:
-        The spectrum this network recorded, ``(F,)``, in place of the
+        The data this network recorded, shaped as ``scale``, in place of the
         likelihood's ``observed``. A network sees each source through its own
         response, so networks observing one catalog record different spectra;
         stacked, each is scored against its own while the prediction is
         shared. ``None`` uses the likelihood's.
     response_moments:
-        The per-node second moments of the power under ``response``,
-        :math:`s_z^4 W_z G W_z^T \circ R`, ``(Z, F, F)``
+        The per-node second moments of the power under ``response``, collapsed
+        over the pairs, :math:`s_z^4 W_z G W_z^T \circ \bar R`, ``(Z, F, F)``
         (:meth:`ImportanceGaussianLikelihood.response_moments`). Held, the
         ``"amplitude"`` mode's :math:`s^2` is one quadratic form per node at
         every point, instead of one projection of the catalog per response
         draw. Like ``mode_blocks`` they are exact while the importance weights
-        do not vary, that is with no ``density_sites``; the caller is trusted to
-        hold them only then. ``None`` projects every draw.
+        do not vary, that is with no ``density_sites``, and for the ``scale``
+        and ``mask`` they were formed under; the caller is trusted to hold
+        them only then. ``None`` projects every draw.
+    pair_overlap:
+        The isotropic ORF :math:`\gamma_{ab}(f_k)` of every pair, ``(P, F)``,
+        in the order of :func:`~astrogwb.detector.pair_terms`; the gain from
+        the predicted spectrum to each pair's mean. Pad networks with fewer
+        pairs with zero rows and masked entries to stack them. ``None`` scores
+        a combined spectrum.
     """
 
     scale: jax.Array
@@ -163,32 +189,91 @@ class Network(NamedTuple):
     mode_covariance: jax.Array | None = None
     observed: jax.Array | None = None
     response_moments: jax.Array | None = None
+    pair_overlap: jax.Array | None = None
+
+
+def _flat(values: jax.Array | None) -> jax.Array | None:
+    """A per-entry leaf on the flat data axis, pair-major, ``(D,)``."""
+    return None if values is None else jnp.reshape(values, -1)
+
+
+def _num_pairs(network: Network | None) -> int:
+    """The pairs ``network`` stacks; one for a combined spectrum."""
+    if network is None or network.pair_overlap is None:
+        return 1
+    return network.pair_overlap.shape[0]
+
+
+def _pair_overlap(network: Network, num_bins: int) -> jax.Array:
+    """``network.pair_overlap``, or unit gain for a combined spectrum, ``(P, F)``."""
+    if network.pair_overlap is None:
+        return jnp.ones((1, num_bins))
+    return network.pair_overlap
+
+
+def _expand(mean: jax.Array, network: Network) -> jax.Array:
+    r"""The predicted data :math:`\gamma_{ab} S` on the flat data axis, ``(D,)``."""
+    return jnp.reshape(_pair_overlap(network, mean.shape[-1]) * mean, -1)
 
 
 def _observed(observed: jax.Array | None, network: Network) -> jax.Array:
-    """The data ``network`` is scored against: its own, else ``observed``."""
+    """The data ``network`` is scored against, flat: its own, else ``observed``."""
     data = observed if network.observed is None else network.observed
     assert data is not None
-    return data
+    return jnp.reshape(data, -1)
 
 
 def _orientation_covariance(network: Network | None) -> jax.Array | float:
-    r"""The orientation factor of a second moment of the power, ``()`` or ``(F, F)``.
+    r"""The orientation factor of a second moment of the power, ``()`` or ``(D, D)``.
 
     :data:`~astrogwb.gwb.importance.INCLINATION_SECOND_MOMENT` for the
-    sky-averaged power, else :math:`\langle r_f r_{f'} \rangle` of the
-    network's response draws, which multiplies elementwise.
+    sky-averaged power of a combined spectrum, that constant times
+    :math:`\gamma_{ab} \gamma_{cd}` for the sky-averaged power of pairs, else
+    :math:`\langle r_{ab}(f)\, r_{cd}(f') \rangle` of the network's response
+    draws. It multiplies the moment, tiled over the pairs, elementwise.
     """
     if network is None or network.response is None:
-        return INCLINATION_SECOND_MOMENT
-    return network.response.T @ network.response / network.response.shape[0]
+        if network is None or network.pair_overlap is None:
+            return INCLINATION_SECOND_MOMENT
+        overlap = jnp.reshape(network.pair_overlap, -1)
+        return INCLINATION_SECOND_MOMENT * jnp.outer(overlap, overlap)
+    draws = jnp.reshape(network.response, (network.response.shape[0], -1))
+    return draws.T @ draws / draws.shape[0]
 
 
 def _orientation_variance(network: Network) -> jax.Array | float:
-    r"""The diagonal of :func:`_orientation_covariance`, ``()`` or ``(F,)``."""
+    r"""The diagonal of :func:`_orientation_covariance`, ``()`` or ``(D,)``."""
     if network.response is None:
-        return INCLINATION_SECOND_MOMENT
-    return jnp.mean(network.response**2, axis=0)
+        if network.pair_overlap is None:
+            return INCLINATION_SECOND_MOMENT
+        return INCLINATION_SECOND_MOMENT * jnp.reshape(network.pair_overlap, -1) ** 2
+    draws = jnp.reshape(network.response, (network.response.shape[0], -1))
+    return jnp.mean(draws**2, axis=0)
+
+
+def _collapsed_response(
+    weights: jax.Array, network: Network, num_bins: int
+) -> tuple[jax.Array, float]:
+    r"""Per-entry ``weights`` summed over the pairs under each response draw.
+
+    Rows :math:`q_{l,k} = \sum_{ab} c_{ab,k}\, r_{l,ab}(f_k)`, ``(L, F)``, and
+    the factor :math:`\kappa` such that
+    :math:`\mathbf{c}^T (M \circ R)\, \mathbf{c} = \kappa \langle
+    \mathbf{q}_l^T M \mathbf{q}_l \rangle_l` for any moment :math:`M` of
+    shape ``(F, F)`` tiled over the pairs. Without a response the one row
+    sums the weights against :math:`\gamma_{ab}` (unit gain for a combined
+    spectrum) and :math:`\kappa` is the inclination factor. So every
+    contraction with the catalog stays at length ``F`` whatever ``P`` is.
+    ``weights`` is ``(D,)``.
+    """
+    pairs = jnp.reshape(weights, (-1, num_bins))
+    if network.response is None:
+        overlap = _pair_overlap(network, num_bins)
+        return jnp.sum(pairs * overlap, axis=0)[None], INCLINATION_SECOND_MOMENT
+    draws = jnp.reshape(
+        network.response, (network.response.shape[0], pairs.shape[0], num_bins)
+    )
+    return jnp.sum(pairs * draws, axis=1), 1.0
 
 
 def gaussian_log_likelihood(
@@ -227,29 +312,29 @@ def shot_noise_log_likelihood(
     (:func:`~astrogwb.inference.shot_noise.low_rank_gaussian_log_likelihood`).
     ``None`` is the diagonal Gaussian and ignores ``variance``. ``mode`` is
     static; the inputs each mode reads are required and not checked.
+
+    ``mean`` is the predicted spectrum, ``(F,)``, which ``network`` expands to
+    its data (see :class:`Network`); ``observed`` and ``variance`` are already
+    on the flat data axis, ``(D,)``.
     """
+    expanded = _expand(jnp.asarray(mean), network)
+    observed = jnp.reshape(jnp.asarray(observed), -1)
+    scale, mask = _flat(network.scale), _flat(network.mask)
     if mode is None:
-        return gaussian_log_likelihood(mean, observed, network.scale, network.mask)
+        return gaussian_log_likelihood(expanded, observed, scale, mask)
     if mode == "modes":
         assert network.modes is not None
         assert network.mode_covariance is not None
         return low_rank_gaussian_log_likelihood(
-            observed,
-            mean,
-            network.scale,
-            network.modes,
-            network.mode_covariance,
-            network.mask,
+            observed, expanded, scale, network.modes, network.mode_covariance, mask
         )
     if mode in ("amplitude", "fixed"):
         assert network.relative_variance is not None
-        direction = amplitude_direction(mean, network.relative_variance)
+        direction = amplitude_direction(expanded, network.relative_variance)
     else:
         assert variance is not None
         direction = per_frequency_direction(variance)
-    return rank_one_gaussian_log_likelihood(
-        observed, mean, network.scale, direction, network.mask
-    )
+    return rank_one_gaussian_log_likelihood(observed, expanded, scale, direction, mask)
 
 
 @dataclass(frozen=True)
@@ -287,7 +372,10 @@ class GaussianLikelihood:
         """The log-likelihood of ``prediction`` under ``network``, shape ``()``."""
         mean, _, _ = prediction
         return gaussian_log_likelihood(
-            mean, _observed(self.observed, network), network.scale, network.mask
+            _expand(mean, network),
+            _observed(self.observed, network),
+            _flat(network.scale),
+            _flat(network.mask),
         )
 
     def log_likelihood(
@@ -427,14 +515,18 @@ class _ImportanceCatalog:
 
 
 def _template_projector(mean: jax.Array, network: Network) -> jax.Array:
-    r""":math:`c_f = S_f / \sigma_f^2` over the counted bins with signal, else 0, ``(F,)``.
+    r""":math:`c = \gamma_{ab} S / \sigma^2` over the counted entries with signal, ``(D,)``.
 
-    :math:`\mathbf{c}^T \mathbf{S} = \rho^2`, the template's squared SNR, and
-    :math:`\mathbf{c}^T \mathbf{d} / \rho^2` the amplitude estimator.
+    Zero elsewhere. :math:`\mathbf{c}^T \mathbf{\mu} = \rho^2`, the template's
+    squared SNR with :math:`\mathbf{\mu}` the expanded mean, and
+    :math:`\mathbf{c}^T \mathbf{d} / \rho^2` the amplitude estimator. For a
+    combined spectrum it is :math:`S_f / \sigma_f^2`. A negative
+    :math:`\gamma_{ab}` gives a negative entry and a positive contribution.
     """
-    keep = _keep(network.mask, mean) & (mean > 0.0)
-    safe_scale = jnp.where(keep, network.scale, 1.0)
-    return jnp.where(keep, mean / safe_scale**2, 0.0)
+    expanded = _expand(mean, network)
+    keep = _keep(_flat(network.mask), expanded) & (expanded != 0.0)
+    safe_scale = jnp.where(keep, _flat(network.scale), 1.0)
+    return jnp.where(keep, expanded / safe_scale**2, 0.0)
 
 
 @dataclass(frozen=True)
@@ -663,36 +755,36 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         :math:`j` the projection is the transposed interpolation of
         :math:`\mathbf{c}` contracted with the catalog, ``(Z, F_ref) @ (F_ref, N)``,
         once per network. Under a ``network.response`` each draw :math:`l`
-        projects :math:`P_f\, r_l(f)` instead, on the projector
-        :math:`c_f\, r_l(f)`, and the squares are averaged over draws; this is
-        :math:`\mathbf{c}^T \mathrm{Cov}\, \mathbf{c}` of the Hadamard
-        covariance, which held ``network.response_moments`` give directly as
-        :math:`\mathbf{c}^T K_z \mathbf{c}` per node. Otherwise the inclination
-        factor :data:`~astrogwb.gwb.importance.INCLINATION_SECOND_MOMENT`
-        multiplies.
+        projects the source on :math:`\sum_{ab} c_{ab,f}\, r_{l,ab}(f)`, the
+        projector summed over the pairs under that draw, and the squares are
+        averaged over draws; this is :math:`\mathbf{c}^T \mathrm{Cov}\,
+        \mathbf{c}` of the Hadamard covariance. Since
+        :math:`c_{ab,f} = S_f\, g_{ab,f}` with :math:`g` fixed by the network,
+        held ``network.response_moments`` give it directly as
+        :math:`\mathbf{S}^T K_z \mathbf{S}` per node. Without a response the
+        inclination factor :data:`~astrogwb.gwb.importance.INCLINATION_SECOND_MOMENT`
+        multiplies, and each pair sees the source through :math:`\gamma_{ab}`.
         """
         assert self.observation_seconds is not None
         projector = _template_projector(mean, network)
-        if network.response is None:
-            second_moment = INCLINATION_SECOND_MOMENT * self._projected_second_moment(
-                shared, projector
-            )
-        elif network.response_moments is not None:
+        if network.response_moments is not None:
             second_moment = jnp.einsum(
-                "f,zfg,g->z", projector, network.response_moments, projector
+                "f,zfg,g->z", mean, network.response_moments, mean
             )
         else:
-            second_moment = jnp.mean(
-                jax.lax.map(
-                    lambda draw: self._projected_second_moment(
-                        shared, projector * draw
+            rows, factor = _collapsed_response(projector, network, mean.shape[-1])
+            if rows.shape[0] == 1:
+                second_moment = factor * self._projected_second_moment(shared, rows[0])
+            else:
+                second_moment = factor * jnp.mean(
+                    jax.lax.map(
+                        lambda row: self._projected_second_moment(shared, row), rows
                     ),
-                    network.response,
-                ),
-                axis=0,
-            )
+                    axis=0,
+                )
         variance = second_moment @ self._variance_kernel(shared)
-        return variance / self.observation_seconds / (projector @ mean) ** 2
+        squared_snr = projector @ _expand(mean, network)
+        return variance / self.observation_seconds / squared_snr**2
 
     def relative_variance(
         self, params: Mapping[str, ArrayLike], network: Network | None = None
@@ -714,7 +806,7 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
     def catalog_covariance(
         self, params: Mapping[str, ArrayLike], network: Network | None = None
     ) -> jax.Array:
-        r"""The shot-noise covariance of a Poisson catalog at ``params``, ``(F, F)``.
+        r"""The shot-noise covariance of a Poisson catalog at ``params``, ``(D, D)``.
 
         Campbell's theorem for the compound-Poisson sum of per-source spectra,
 
@@ -736,7 +828,9 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         :meth:`predict` up to the interpolation order of the square, which it
         never exceeds. Under ``network`` (the instance's by default) with a
         ``response``, the inclination factor is replaced by the Hadamard product
-        with :math:`\langle r_f r_{f'} \rangle` (see :class:`Network`).
+        with :math:`\langle r_f r_{f'} \rangle` (see :class:`Network`). For a
+        network of pairs the moment is tiled over (pair, pair) blocks before
+        the product, so the indices run over the flat data axis.
         Requires ``observation_seconds``; ``squared_power`` is not used.
         """
         assert self.observation_seconds is not None
@@ -750,7 +844,12 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         # Symmetric to round-off only; made exact for eigh and Cholesky.
         covariance = 0.5 * (covariance + covariance.T)
         network = self.network if network is None else network
-        return _orientation_covariance(network) * covariance / self.observation_seconds
+        num_pairs = _num_pairs(network)
+        return (
+            _orientation_covariance(network)
+            * jnp.tile(covariance, (num_pairs, num_pairs))
+            / self.observation_seconds
+        )
 
     def _fold_node_moments(
         self, shared: _SharedTerms, step: Callable, init: Any
@@ -812,22 +911,34 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
 
     def _mode_blocks(self, shared: _SharedTerms, network: Network) -> jax.Array:
         assert network.modes is not None
-        keep = _keep(network.mask, network.scale)
+        scale = _flat(network.scale)
+        assert scale is not None
+        keep = _keep(_flat(network.mask), scale)
         projectors = jnp.where(
             keep[:, None],
-            network.modes / jnp.where(keep, network.scale, 1.0)[:, None],
+            network.modes / jnp.where(keep, scale, 1.0)[:, None],
             0.0,
         ).T
+        num_bins = self.query_log_frequencies.shape[0]
         if network.response is None:
+            # Rank one per pair: each mode sums its pairs against the ORF.
+            collapsed = jnp.sum(
+                jnp.reshape(projectors, (projectors.shape[0], -1, num_bins))
+                * _pair_overlap(network, num_bins),
+                axis=1,
+            )
             return INCLINATION_SECOND_MOMENT * self._projected_cross_moment(
-                shared, projectors
+                shared, collapsed
             )
         orientation = _orientation_covariance(network)
+        num_pairs = _num_pairs(network)
         _, blocks = self._fold_node_moments(
             shared,
             lambda carry, moment, kernel: (
                 carry,
-                projectors @ (moment * orientation) @ projectors.T,
+                projectors
+                @ (jnp.tile(moment, (num_pairs, num_pairs)) * orientation)
+                @ projectors.T,
             ),
             0.0,
         )
@@ -865,16 +976,29 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
     ) -> jax.Array:
         r"""The per-node second moments of the power under ``network.response``.
 
-        :math:`K_z = s_z^4 W_z G W_z^T \circ R`, ``(Z, F, F)``, with
-        :math:`R = \langle r_f r_{f'} \rangle` of the response draws, so the
-        projected second moment along :math:`\mathbf{c}` at node :math:`z` is
-        :math:`\mathbf{c}^T K_z \mathbf{c}` whatever the number of draws. Hold
-        the result on ``network.response_moments``; that is exact while the
-        importance weights do not vary. Requires ``network.response``.
+        :math:`K_z = s_z^4 W_z G W_z^T \circ \bar R`, ``(Z, F, F)``, with the
+        response correlation collapsed over the pairs,
+
+        .. math::
+
+            \bar R_{ff'} = \sum_{ab, cd} g_{ab,f}\,
+                \langle r_{ab}(f)\, r_{cd}(f') \rangle\, g_{cd,f'}, \qquad
+            g_{ab,f} = \gamma_{ab,f} / \sigma_{ab,f}^2,
+
+        over the counted entries (:math:`\gamma = 1` for a combined spectrum).
+        The template projector is :math:`c_{ab,f} = S_f\, g_{ab,f}`, so the
+        projected second moment at node :math:`z` is
+        :math:`\mathbf{S}^T K_z \mathbf{S}` whatever the number of draws and
+        pairs. Hold the result on ``network.response_moments``; that is exact
+        while the importance weights do not vary, and for this network's
+        ``scale`` and ``mask``. Requires ``network.response``.
         """
         network = self.network if network is None else network
         assert network is not None and network.response is not None
-        orientation = _orientation_covariance(network)
+        num_bins = self.query_log_frequencies.shape[0]
+        weights = _template_projector(jnp.ones(num_bins), network)
+        rows, factor = _collapsed_response(weights, network, num_bins)
+        orientation = factor * rows.T @ rows / rows.shape[0]
         _, moments = self._fold_node_moments(
             self._shared(params),
             lambda carry, moment, kernel: (carry, moment * orientation),
@@ -904,8 +1028,8 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         """
         modes = shot_noise_modes(
             self.catalog_covariance(params, network),
-            network.scale,
-            network.mask,
+            _flat(network.scale),
+            _flat(network.mask),
             tolerance=tolerance,
             max_modes=max_modes,
         )
@@ -939,13 +1063,18 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
 
         In the ``"amplitude"`` mode :math:`s^2` is ``network.relative_variance``,
         which :meth:`log_likelihood` sets from :meth:`relative_variance`. A
-        ``network.response`` rescales the per-bin variance of ``prediction``
-        from the inclination factor to :math:`\langle r_f^2 \rangle`.
+        ``network.response`` or ``network.pair_overlap`` rescales the per-bin
+        variance of ``prediction`` from the inclination factor to the diagonal
+        of the orientation factor, tiled over the pairs.
         """
         mean, variance, _ = prediction
-        if variance is not None and network.response is not None:
+        if variance is not None and (
+            network.response is not None or network.pair_overlap is not None
+        ):
             variance = (
-                variance * _orientation_variance(network) / INCLINATION_SECOND_MOMENT
+                jnp.tile(variance, _num_pairs(network))
+                * _orientation_variance(network)
+                / INCLINATION_SECOND_MOMENT
             )
         return shot_noise_log_likelihood(
             mean, variance, _observed(self.observed, network), network, self.shot_noise
@@ -1043,8 +1172,9 @@ class ImportanceCompoundPoissonLikelihood(_ImportanceCatalog):
     :meth:`~ImportanceGaussianLikelihood.relative_variance`.
 
     The instance is a pytree as :class:`ImportanceGaussianLikelihood` is, and
-    vmaps over stacked networks the same way. ``method`` and the node counts
-    are static. Its cost is a few passes over the
+    vmaps over stacked networks the same way. It scores a combined spectrum
+    only: a network with ``pair_overlap`` is not supported. ``method`` and the
+    node counts are static. Its cost is a few passes over the
     :math:`Z \times N \times L` point set per network and evaluation.
 
     Attributes
