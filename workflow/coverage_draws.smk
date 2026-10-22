@@ -1,7 +1,7 @@
 # Coverage-notebook injection draws, one job per batch of draw indices.
 #
-#   snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm \
-#       --config start=500 stop=1000 --dry-run
+#   uv run --no-sync snakemake -s workflow/coverage_draws.smk \
+#       --profile workflow/profiles/slurm --config start=500 stop=1000 --dry-run
 #
 # Each job runs scripts/draw_coverage_injections.py --start i --stop j, which
 # writes draw k of every network to <cache_dir>/ensembles/<key>/41-<k>.h5.
@@ -9,8 +9,9 @@
 # files merge by copying, and a batch whose files all exist is skipped: a
 # rerun resumes, and files copied in from another machine are not redrawn.
 #
-# The workflow imports nothing from astrogwb, so Snakemake can live in its own
-# tool environment. The six keys below are what the script prints with
+# Snakemake comes from the project venv (the `cluster` dependency group), so
+# the controller and its jobs share the interpreter the script runs in. The
+# six keys below are what the script prints with
 # --keys; they name the outputs. A script that drew under other keys would
 # leave these paths missing, and Snakemake fails that job on a
 # MissingOutputException rather than reporting it done.

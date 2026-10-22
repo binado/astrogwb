@@ -1,8 +1,8 @@
 # Coverage draws on SLURM, CPU only:
-#   snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm \
-#       --config start=500 stop=1000 --dry-run
-# Needs snakemake and snakemake-executor-plugin-slurm on the login node, and
-# the project venv synced; see docs/coverage-draws-on-slurm.md.
+#   uv run --no-sync snakemake -s workflow/coverage_draws.smk \
+#       --profile workflow/profiles/slurm --config start=500 stop=1000 --dry-run
+# Needs the project venv synced with the `cluster` group; see
+# docs/coverage-draws-on-slurm.md.
 # Job logs land under .snakemake/slurm_logs/, the script's own under logs/.
 executor: slurm
 # Concurrent jobs in the queue; 1000 draws at 10 per job is 100 jobs.

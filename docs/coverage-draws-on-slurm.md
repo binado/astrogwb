@@ -33,13 +33,14 @@ Same commit as the Macs, CPU-only JAX (the default wheel):
 ```bash
 git clone git@github.com:binado/astrogwb.git && cd astrogwb
 git checkout <commit>
-uv sync --extra notebook --group dev
-uv tool install 'snakemake>=9.24' --with 'snakemake-executor-plugin-slurm>=1.5'
+uv sync --extra notebook --group dev --group cluster
 ```
 
-Snakemake lives in its own tool environment: the workflow imports nothing from
-`astrogwb`, and the jobs run the project venv with `uv run --frozen --no-sync`,
-so the hundred concurrent jobs never race to sync it.
+The `cluster` group puts Snakemake and its SLURM executor plugin in the
+project venv, so the controller and every job run the interpreter the script
+does. Every command below uses `uv run --no-sync`, and so do the jobs: a plain
+`uv run` would sync the venv back to the default groups and remove Snakemake,
+and the hundred concurrent jobs must never race to sync it.
 
 Check the keys. They name the output directories, so they must match the
 Macs' exactly:
@@ -73,7 +74,7 @@ The Snakemake controller stays on the login node for the whole run, so start
 it in `tmux` (or `screen`). Calibrate on one batch first:
 
 ```bash
-snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm --config start=500 stop=510
+uv run --no-sync snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm --config start=500 stop=510
 ```
 
 ```bash
@@ -83,11 +84,11 @@ sacct -u $USER -S today --format=JobID,JobName%40,Elapsed,MaxRSS,State
 Then dry-run and submit the rest:
 
 ```bash
-snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm --config start=500 stop=1000 --dry-run
+uv run --no-sync snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm --config start=500 stop=1000 --dry-run
 ```
 
 ```bash
-snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm --config start=500 stop=1000
+uv run --no-sync snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm --config start=500 stop=1000
 ```
 
 For the whole ensemble, use `start=0 stop=1000`. `batch=<n>`, `threads=<n>`
