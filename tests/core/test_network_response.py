@@ -17,7 +17,10 @@ from astrogwb.detector import (
     load_sensitivity_map,
     network_response,
     overlap_reduction_function,
+    pair_response,
+    pair_terms,
     sample_network_response,
+    sample_pair_response,
     stokes_cross_power,
 )
 from astrogwb.waveform import polarization_stokes
@@ -129,6 +132,71 @@ def test_a_misaligned_pair_scatters_more_than_an_aligned_one() -> None:
         return np.asarray(jnp.var(draws, axis=0))
 
     assert np.all(variance(["S1", "R1"]) < variance(["S2", "R2"]))
+
+
+@pytest.mark.parametrize(
+    ("detectors", "pairs"),
+    [
+        (["S1", "R1"], [("S1", "R1")]),
+        (
+            ["E1", "E2", "E3", "C1"],
+            [
+                ("E1", "E2"),
+                ("E1", "E3"),
+                ("E1", "C1"),
+                ("E2", "E3"),
+                ("E2", "C1"),
+                ("E3", "C1"),
+            ],
+        ),
+    ],
+)
+def test_pair_response_stacks_each_pairs_orf_in_a_less_than_b_order(
+    detectors: list[str], pairs: list[tuple[str, str]]
+) -> None:
+    angles = _isotropic_angles(jax.random.key(4), 100)
+
+    stacked = pair_response(FREQUENCIES, detectors, *angles)
+
+    assert stacked.shape == (100, len(pairs), FREQUENCIES.size)
+    for index, (first, second) in enumerate(pairs):
+        np.testing.assert_array_equal(
+            np.asarray(stacked[:, index]),
+            np.asarray(overlap_reduction_function(FREQUENCIES, first, second, *angles)),
+        )
+
+
+def test_pair_response_draws_combine_to_the_network_response_draws() -> None:
+    """Same key, same angles: the optimal combination of the pairs is the network."""
+    detectors = ["E1", "E2", "E3", "C1"]
+    sensitivities = load_sensitivity_map(detectors)
+    terms = pair_terms(FREQUENCIES, detectors, sensitivities)
+    weights = np.stack([term.weight for term in terms])
+    denominator = np.sum([term.weight * term.overlap for term in terms], axis=0)
+
+    pairs = sample_pair_response(jax.random.key(5), 200, FREQUENCIES, detectors)
+    network = sample_network_response(
+        jax.random.key(5), 200, FREQUENCIES, detectors, sensitivities
+    )
+
+    np.testing.assert_allclose(
+        np.sum(weights * np.asarray(pairs), axis=1) / denominator,
+        np.asarray(network),
+        rtol=1e-12,
+    )
+
+
+def test_pair_response_has_each_pairs_isotropic_orf_as_its_mean() -> None:
+    detectors = ["S2", "R2", "C1"]
+    draws = sample_pair_response(jax.random.key(6), NUM_DRAWS, FREQUENCIES, detectors)
+    expected = np.stack(
+        [
+            isotropic_overlap_reduction_function(FREQUENCIES, first, second)
+            for first, second in [("S2", "R2"), ("S2", "C1"), ("R2", "C1")]
+        ]
+    )
+
+    assert np.all(_standard_errors(draws, expected) < MAX_STANDARD_ERRORS)
 
 
 def _random_stokes(key: jax.Array, num_draws: int) -> jax.Array:

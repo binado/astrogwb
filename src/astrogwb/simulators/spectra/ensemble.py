@@ -7,7 +7,9 @@ draws each one once: draw ``i`` of ``seed`` is
 ``simulator(batch_keys(seed, n)[i])``, and because those keys are
 prefix-stable it does not depend on ``n``. So every caller asking for the same
 record and seed shares the same files, whatever ensemble size each asks for,
-and an interrupted run resumes where it stopped.
+and an interrupted run resumes where it stopped. ``start`` draws a later slice
+alone, so machines sharing one cache directory can each draw a disjoint range
+of indices and the files merge by copying.
 """
 
 from __future__ import annotations
@@ -48,10 +50,11 @@ def spectra_ensemble(
     num_draws: int,
     directory: str | Path,
     *,
+    start: int = 0,
     chunk_size: int = 128,
     source_chunk_size: int | None = None,
 ) -> BackgroundSpectralDensityData:
-    """Draws ``0 .. num_draws - 1`` of ``metadata`` at ``seed``, stacked.
+    """Draws ``start .. num_draws - 1`` of ``metadata`` at ``seed``, stacked.
 
     A missing draw is simulated and written with :func:`~astrogwb.simulators.core.write`,
     which records the metadata and seed beside the data; a cached one is read
@@ -67,9 +70,13 @@ def spectra_ensemble(
     seed:
         Draw ``i`` uses ``batch_keys(seed, num_draws)[i]``.
     num_draws:
-        Ensemble size; a smaller one reads a prefix of a larger one's files.
+        Ensemble size, one past the last index; a smaller one reads a prefix
+        of a larger one's files.
     directory:
         Cache root; see :func:`spectra_ensemble_path`.
+    start:
+        The first index, ``0 <= start < num_draws``. Draw ``i`` is the same
+        whatever ``start`` is.
 
     Returns
     -------
@@ -84,7 +91,7 @@ def spectra_ensemble(
     keys = batch_keys(seed, num_draws)
     simulator: BackgroundSpectralDensitySimulator | None = None
     parts: list[BackgroundSpectralDensityData] = []
-    for index in range(num_draws):
+    for index in range(start, num_draws):
         path = spectra_ensemble_path(directory, metadata, seed, index)
         if path.is_file():
             parts.append(_load_draw(path, metadata, seed))
@@ -105,6 +112,7 @@ def network_spectra_ensemble(
     num_draws: int,
     directory: str | Path,
     *,
+    start: int = 0,
     chunk_size: int = 128,
     source_chunk_size: int | None = None,
 ) -> list[BackgroundSpectralDensityData]:
@@ -122,7 +130,7 @@ def network_spectra_ensemble(
     ----------
     metadata:
         One record per network, differing only in the network.
-    seed, num_draws, directory, chunk_size, source_chunk_size:
+    seed, num_draws, directory, start, chunk_size, source_chunk_size:
         As for :func:`spectra_ensemble`.
 
     Returns
@@ -139,7 +147,7 @@ def network_spectra_ensemble(
     keys = batch_keys(seed, num_draws)
     simulator: JointNetworkSpectralDensitySimulator | None = None
     parts: list[list[BackgroundSpectralDensityData]] = [[] for _ in metadata]
-    for index in range(num_draws):
+    for index in range(start, num_draws):
         paths = [
             spectra_ensemble_path(directory, record, seed, index) for record in metadata
         ]

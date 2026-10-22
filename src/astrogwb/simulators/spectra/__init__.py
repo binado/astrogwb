@@ -20,6 +20,7 @@ from astrogwb.simulators.spectra.network import (
     JointNetworkSpectralDensitySimulator,
     NetworkSpectralDensityMetadata,
     NetworkSpectralDensitySimulator,
+    combine_pair_spectra,
     draw_extrinsic_angles,
 )
 from astrogwb.simulators.spectra.poisson_counts import poisson_counts_forward_model
@@ -40,6 +41,7 @@ __all__ = [
     "JointNetworkSpectralDensitySimulator",
     "NetworkSpectralDensityMetadata",
     "NetworkSpectralDensitySimulator",
+    "combine_pair_spectra",
     "draw_extrinsic_angles",
     "network_spectra_ensemble",
     "normalize_spectra",
