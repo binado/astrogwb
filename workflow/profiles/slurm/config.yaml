@@ -5,7 +5,7 @@
 # docs/coverage-draws-on-slurm.md.
 # Job logs land under .snakemake/slurm_logs/, the script's own under logs/.
 executor: slurm
-# Concurrent jobs in the queue; 1000 draws at 10 per job is 100 jobs.
+# Concurrent jobs in the queue; 500 draws at 5 per job is 100 jobs.
 jobs: 100
 # Batches are separate rules, so job arrays would bundle nothing.
 keep-going: true
@@ -21,10 +21,12 @@ default-resources:
   slurm_partition: short
   # Uncomment for clusters that require it:
   # slurm_account: <account>
-  # Two draws peaked at 2.1 GB RSS on an M4 (/usr/bin/time -l); ~3x headroom,
-  # since an out-of-memory kill loses the whole batch.
-  mem_mb: 6000
-  # The same two draws took ~7 CPU-minutes each, import and JIT included:
-  # on 4 cluster cores, 10 draws should take ~20-30 min. Generous on purpose:
-  # a job killed at its limit loses its whole batch.
-  runtime: 90
+  # Two draws peaked at 2.1 GB RSS on an M4 (/usr/bin/time -l); XLA's
+  # per-thread buffers grow with `threads`, and an out-of-memory kill loses
+  # the whole batch, so ~4x headroom at 8 threads.
+  mem_mb: 8000
+  # The first cluster batch, 10 draws on 4 cores, took 50-90 min: 5-9 min a
+  # draw. 8 cores should bring 5 draws to ~15-30 min; 60 leaves room for
+  # imperfect thread scaling, since a job killed at its limit loses its
+  # whole batch.
+  runtime: 60

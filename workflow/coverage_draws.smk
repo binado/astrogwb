@@ -18,9 +18,9 @@
 #
 # Config (override with --config key=value):
 #   start, stop  draw indices [start, stop)               default 500, 1000
-#   batch        draws per job                            default 10
+#   batch        draws per job                            default 5
 #   cache_dir    cache root, the script's --cache-dir     default $XDG_CACHE_HOME/astrogwb
-#   threads      CPUs per job                             default 4
+#   threads      CPUs per job                             default 8
 
 import os
 from pathlib import Path
@@ -40,8 +40,8 @@ _XDG_CACHE = os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache"
 CACHE_DIR = Path(config.get("cache_dir", Path(_XDG_CACHE) / "astrogwb"))
 START = int(config.get("start", 500))
 STOP = int(config.get("stop", 1000))
-BATCH = int(config.get("batch", 10))
-THREADS = int(config.get("threads", 4))
+BATCH = int(config.get("batch", 5))
+THREADS = int(config.get("threads", 8))
 
 if not 0 <= START < STOP or BATCH < 1:
     raise ValueError(f"need 0 <= start < stop and batch >= 1, got {START}, {STOP}, {BATCH}")
