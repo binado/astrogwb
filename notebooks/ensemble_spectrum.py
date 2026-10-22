@@ -31,7 +31,9 @@ with app.setup(hide_code=True):
     from astrogwb.detector import (
         effective_psd,
         gaussian_bin_scale,
-        sample_network_response,
+        pair_bin_scale,
+        pair_terms,
+        sample_pair_response,
     )
     from astrogwb.frequency import frequency_mask
     from astrogwb.gwb import (
@@ -1160,9 +1162,10 @@ def minimum_redshift_scan(
     num_redshift_nodes
         Quadrature nodes per window.
     response_draws, response_seed
-        Isotropic draws of each network's response
-        (:func:`~astrogwb.detector.sample_network_response`), which the shot
-        noise then carries; ``None`` keeps the sky-averaged shot noise.
+        Isotropic draws of each network's per-pair response
+        (:func:`~astrogwb.detector.sample_pair_response`), which the shot
+        noise of the stacked per-pair data then carries; ``None`` keeps the
+        sky-averaged shot noise.
 
     Returns
     -------
@@ -1173,37 +1176,9 @@ def minimum_redshift_scan(
     target = build_population(population.model_name, **population.model_kwargs)
     grid = jnp.asarray(frequencies)
     seconds = years_to_seconds(observation_time)
-    networks = {}
-    for name, label in rows:
-        geometry, sensitivities = registry.build_network(name)
-        noise = jnp.asarray(effective_psd(grid, geometry, sensitivities))
-        keep = (
-            frequency_mask(grid, fmin=minimum_frequency, fmax=maximum_frequency)
-            & jnp.isfinite(noise)
-            & (noise > 0.0)
-        )
-        response = (
-            None
-            if response_draws is None
-            else sample_network_response(
-                jax.random.key(response_seed),
-                response_draws,
-                grid,
-                geometry,
-                sensitivities,
-            )
-        )
-        networks[label] = (
-            noise,
-            LikelihoodNetwork(
-                gaussian_bin_scale(noise, observation_time, grid),
-                keep,
-                response=response,
-            ),
-        )
-    records = []
-    for edge in redshifts:
-        likelihood = ImportanceGaussianLikelihood.from_catalog(
+    band = frequency_mask(grid, fmin=minimum_frequency, fmax=maximum_frequency)
+    likelihoods = [
+        ImportanceGaussianLikelihood.from_catalog(
             data,
             catalog_metadata,
             population=target,
@@ -1214,22 +1189,52 @@ def minimum_redshift_scan(
             observation_time=observation_time,
             minimum_redshift=float(edge),
         )
-        spectrum, _, _ = likelihood.predict(hyperparameters)
-        for label, (noise, network) in networks.items():
+        for edge in redshifts
+    ]
+    spectra = [likelihood.predict(hyperparameters)[0] for likelihood in likelihoods]
+    records = []
+    # One network at a time: its (L, P, F) per-pair response draws are large.
+    for name, label in rows:
+        geometry, sensitivities = registry.build_network(name)
+        noise = jnp.asarray(effective_psd(grid, geometry, sensitivities))
+        combined_keep = band & jnp.isfinite(noise) & (noise > 0.0)
+        scale = pair_bin_scale(grid, geometry, sensitivities, observation_time)
+        keep = band & jnp.isfinite(scale) & (scale > 0.0)
+        network = LikelihoodNetwork(
+            jnp.where(keep, scale, 1.0),
+            keep,
+            response=(
+                None
+                if response_draws is None
+                else sample_pair_response(
+                    jax.random.key(response_seed), response_draws, grid, geometry
+                )
+            ),
+            pair_overlap=jnp.asarray(
+                np.stack(
+                    [term.overlap for term in pair_terms(grid, geometry, sensitivities)]
+                )
+            ),
+        )
+        for edge, likelihood, spectrum in zip(
+            redshifts, likelihoods, spectra, strict=True
+        ):
+            # The pairs combine to the network's SNR (a sufficient statistic).
             snr = float(
                 spectral_snr(
-                    spectrum, noise, seconds, grid, frequency_mask=network.mask
+                    spectrum, noise, seconds, grid, frequency_mask=combined_keep
                 )
             )
+            held = network
             if network.response is not None:
                 # One fold over the nodes, not one projection per draw.
-                network = network._replace(
+                held = network._replace(
                     response_moments=likelihood.response_moments(
                         hyperparameters, network
                     )
                 )
             scatter = float(
-                jnp.sqrt(likelihood.relative_variance(hyperparameters, network))
+                jnp.sqrt(likelihood.relative_variance(hyperparameters, held))
             )
             records.append(
                 {
@@ -1240,6 +1245,7 @@ def minimum_redshift_scan(
                     "relative_uncertainty": float(np.hypot(1.0 / snr, scatter)),
                 }
             )
+        del network
     return pd.DataFrame.from_records(records)
 
 

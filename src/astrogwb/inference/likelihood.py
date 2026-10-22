@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, NamedTuple, Self
+from typing import Any, Literal, NamedTuple, Self, overload
 
 import jax
 import jax.numpy as jnp
@@ -192,6 +192,10 @@ class Network(NamedTuple):
     pair_overlap: jax.Array | None = None
 
 
+@overload
+def _flat(values: jax.Array) -> jax.Array: ...
+@overload
+def _flat(values: jax.Array | None) -> jax.Array | None: ...
 def _flat(values: jax.Array | None) -> jax.Array | None:
     """A per-entry leaf on the flat data axis, pair-major, ``(D,)``."""
     return None if values is None else jnp.reshape(values, -1)
@@ -912,7 +916,6 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
     def _mode_blocks(self, shared: _SharedTerms, network: Network) -> jax.Array:
         assert network.modes is not None
         scale = _flat(network.scale)
-        assert scale is not None
         keep = _keep(_flat(network.mask), scale)
         projectors = jnp.where(
             keep[:, None],
