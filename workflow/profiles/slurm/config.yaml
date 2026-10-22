@@ -1,0 +1,30 @@
+# Coverage draws on SLURM, CPU only:
+#   snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm \
+#       --config start=500 stop=1000 --dry-run
+# Needs snakemake and snakemake-executor-plugin-slurm on the login node, and
+# the project venv synced; see docs/coverage-draws-on-slurm.md.
+# Job logs land under .snakemake/slurm_logs/, the script's own under logs/.
+executor: slurm
+# Concurrent jobs in the queue; 1000 draws at 10 per job is 100 jobs.
+jobs: 100
+# Batches are separate rules, so job arrays would bundle nothing.
+keep-going: true
+rerun-incomplete: true
+# Re-run a batch only when a file is missing. Changing `batch` renames every
+# rule; with the default triggers, files Snakemake already wrote would then be
+# redrawn for a changed rule body.
+rerun-triggers: mtime
+# Outputs land on a shared filesystem the controller polls.
+latency-wait: 120
+retries: 1
+default-resources:
+  # Uncomment for clusters that require them:
+  # slurm_account: <account>
+  # slurm_partition: <cpu partition>
+  # Two draws peaked at 2.1 GB RSS on an M4 (/usr/bin/time -l); ~3x headroom,
+  # since an out-of-memory kill loses the whole batch.
+  mem_mb: 6000
+  # The same two draws took ~7 CPU-minutes each, import and JIT included:
+  # on 4 cluster cores, 10 draws should take ~20-30 min. Generous on purpose:
+  # a job killed at its limit loses its whole batch.
+  runtime: 90
