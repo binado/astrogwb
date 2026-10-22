@@ -61,9 +61,11 @@ The same six are written into the workflow; if the script ever drew under
 other keys, each job would fail on a `MissingOutputException` rather than
 pass.
 
-If the cluster needs an account or partition, uncomment `slurm_account` /
-`slurm_partition` in the profile, or pass
-`--default-resources slurm_account=<account> slurm_partition=<partition>`.
+Jobs go to the `short` partition, whose time limit must cover the profile's
+90-minute `runtime`. If the cluster needs an account, uncomment
+`slurm_account` in the profile. Change either one in the profile rather than
+with `--default-resources` on the command line, which would replace the
+profile's whole list, `mem_mb` and `runtime` included.
 
 ## Submit
 

@@ -18,9 +18,9 @@ rerun-triggers: mtime
 latency-wait: 120
 retries: 1
 default-resources:
-  # Uncomment for clusters that require them:
+  slurm_partition: short
+  # Uncomment for clusters that require it:
   # slurm_account: <account>
-  # slurm_partition: <cpu partition>
   # Two draws peaked at 2.1 GB RSS on an M4 (/usr/bin/time -l); ~3x headroom,
   # since an out-of-memory kill loses the whole batch.
   mem_mb: 6000
