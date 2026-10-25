@@ -96,6 +96,12 @@ dev = [
     "ruff>=0.16.1",
     "ty>=0.0.69",
 ]
+# Snakemake on SLURM, for workflow/coverage_draws.smk. It runs from the
+# project venv, so its jobs see the same interpreter as the scripts they run.
+cluster = [
+    "snakemake>=9.24",
+    "snakemake-executor-plugin-slurm>=1.5",
+]
 
 [tool.uv]
 default-groups = ["dev"]
