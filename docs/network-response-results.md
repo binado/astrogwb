@@ -49,20 +49,26 @@ and the pair weights at the median-SNR frequency (10-12 Hz):
 
 | Network | $10^3\sigma_B$ old | new | $\zeta=\rho\sigma_B$ old | new | $\sigma_{H_0}$ old | new | $\sigma_{H_0}/H_0$ (%) old | new | $(\rho^{-2}+\sigma_B^2)^{1/2}$ (%) new | $\sigma_{H_0}$ new/old |
 |---|---|---|---|---|---|---|---|---|---|---|
-| ET-$\Delta$ | 2.16 | 2.55 | 0.41 | 0.48 | 0.388 | 0.401 | 0.574 | 0.592 | 0.588 | 1.031 |
-| ET-$\Delta$ + CE | 2.16 | 2.91 | 0.51 | 0.69 | 0.321 | 0.351 | 0.475 | 0.519 | 0.512 | 1.093 |
-| ET-2L-par | 2.16 | 2.62 | 1.10 | 1.33 | 0.199 | 0.223 | 0.294 | 0.330 | 0.328 | 1.125 |
-| ET-2L-par + CE | 2.16 | 2.72 | 1.18 | 1.49 | 0.192 | 0.223 | 0.284 | 0.330 | 0.327 | 1.164 |
-| ET-2L | 2.16 | 7.60 | 0.10 | 0.34 | 1.533 | 1.645 | 2.265 | 2.432 | 2.371 | 1.074 |
-| ET-2L + CE | 2.16 | 4.78 | 0.35 | 0.78 | 0.443 | 0.542 | 0.655 | 0.801 | 0.780 | 1.222 |
+| ET-$\Delta$ | 2.16 | 2.55 | 0.41 | 0.48 | 0.388 | 0.401 | 0.574 | 0.592 | 0.588 | 1.033 |
+| ET-$\Delta$ + CE | 2.16 | 2.91 | 0.51 | 0.69 | 0.321 | 0.350 | 0.475 | 0.518 | 0.512 | 1.091 |
+| ET-2L-par | 2.16 | 2.62 | 1.10 | 1.33 | 0.199 | 0.223 | 0.294 | 0.330 | 0.328 | 1.122 |
+| ET-2L-par + CE | 2.16 | 2.72 | 1.18 | 1.49 | 0.192 | 0.223 | 0.284 | 0.329 | 0.327 | 1.159 |
+| ET-2L | 2.16 | 7.60 | 0.10 | 0.34 | 1.533 | 1.643 | 2.265 | 2.428 | 2.371 | 1.072 |
+| ET-2L + CE | 2.16 | 4.78 | 0.35 | 0.78 | 0.443 | 0.537 | 0.655 | 0.794 | 0.780 | 1.212 |
 
 $\rho$ is unchanged (188.6, 237.4, 507.5, 548.7, 44.5, 162.2). $\sigma_{H_0}$ is
-the half-width of the 68% HDI of the `amplitude` grid posterior, in
-km s$^{-1}$ Mpc$^{-1}$; $H_0 = 67.66$.
+the half-width of the 68% HDI of the grid posterior, in
+km s$^{-1}$ Mpc$^{-1}$; $H_0 = 67.66$. Old is the paper's `amplitude`
+likelihood; new is the `"modes"` likelihood (the leading eigenmodes of the
+whitened fiducial catalog covariance, dropped eigenvalue sum $10^{-3}$, with
+their block evaluated at each grid point), which the H0, $(H_0, \Omega_m)$ and
+$(\Xi_0, n)$ grids now report, as the Madau-Dickinson grid already did. Against
+`amplitude` on the same injection it changes the half-widths by at most 0.9%
+(ET-2L + CE, 0.542 to 0.537) and $\sigma_{\Xi_0}$ by at most 0.7%.
 
 - $\sigma_B$ now spans $2.6$-$7.6\times10^{-3}$ instead of $2.2\times10^{-3}$
   for every network.
-- $\sigma_{H_0}$ grows by 3% to 22%; the relative precision spans 0.33% to 2.4%
+- $\sigma_{H_0}$ grows by 3% to 21%; the relative precision spans 0.33% to 2.4%
   (was 0.28% to 2.3%).
 - $\sigma_{H_0}/H_0$ follows $(\rho^{-2}+\sigma_B^2)^{1/2}$ to within 3% (was
   1%); each network now fits its own realization.
@@ -76,10 +82,12 @@ km s$^{-1}$ Mpc$^{-1}$; $H_0 = 67.66$.
   $H_0^{\rm MAP} = H_{0,t} / (\hat x - \tfrac12 v'(\hat x))$ with
   $\hat x = 1 + \hat\epsilon$ and $v = \rho^{-2} + x^2\sigma_B^2$, that is
   $H_{0,t}/(1+\hat\epsilon)$ up to $O(\sigma_B^2) < 0.004$; the grid MAPs match
-  it to a few $10^{-4}$. Here $\hat\epsilon = -1.05$, $-2.01$, $-0.99$, $-1.28$,
-  $-1.47$, $-2.40\,\sigma_B$, so the medians are 67.85, 68.07, 67.84, 67.90,
-  68.50, 68.45, that is $+0.47$, $+1.15$, $+0.80$, $+1.08$, $+0.51$,
-  $+1.46$ posterior standard deviations. The networks share sources and
+  it to a few $10^{-4}$, and the `"modes"` grid MAPs agree with them to
+  one grid step (0.02; ET-2L peaks at 68.40 instead of 68.42). Here $\hat\epsilon = -1.05$, $-2.01$, $-0.99$, $-1.28$,
+  $-1.47$, $-2.40\,\sigma_B$, so the `"modes"` medians are 67.85, 68.06, 67.84,
+  67.89, 68.48, 68.45, that is $+0.47$, $+1.14$, $+0.81$, $+1.05$, $+0.50$,
+  $+1.46$ posterior standard deviations. The peaks sit $0.18$ to
+  $0.78$ km s$^{-1}$ Mpc$^{-1}$ above the fiducial. The networks share sources and
   angles, so their fluctuations are correlated; this realization is low for
   all of them. The sky-averaged spectrum of the same catalog has
   $\hat\epsilon = -0.49\,\sigma_B$.
@@ -151,13 +159,14 @@ from 1000 realizations of the network simulator, for ET-2L-par + CE.
 | Network | $\sigma_{\Xi_0}$ old | new | new/old | $\sigma_{\Xi_0}/(\rho^{-2}+\sigma_B^2)^{1/2}$ new | $\sigma_n$ new |
 |---|---|---|---|---|---|
 | ET-$\Delta$ | 0.00591 | 0.00616 | 1.043 | 1.048 | 0.737 |
-| ET-$\Delta$ + CE | 0.00490 | 0.00574 | 1.171 | 1.122 | 0.737 |
-| ET-2L-par | 0.00308 | 0.00357 | 1.159 | 1.089 | 0.737 |
-| ET-2L-par + CE | 0.00298 | 0.00367 | 1.231 | 1.122 | 0.737 |
-| ET-2L | 0.02312 | 0.02484 | 1.074 | 1.048 | 0.738 |
-| ET-2L + CE | 0.00674 | 0.00916 | 1.359 | 1.174 | 0.737 |
+| ET-$\Delta$ + CE | 0.00490 | 0.00572 | 1.167 | 1.118 | 0.737 |
+| ET-2L-par | 0.00308 | 0.00357 | 1.158 | 1.088 | 0.737 |
+| ET-2L-par + CE | 0.00298 | 0.00365 | 1.223 | 1.114 | 0.737 |
+| ET-2L | 0.02312 | 0.02481 | 1.073 | 1.047 | 0.738 |
+| ET-2L + CE | 0.00674 | 0.00910 | 1.349 | 1.166 | 0.737 |
 
-- $\sigma_{\Xi_0}$ grows by 4% to 36%.
+- New is the `"modes"` likelihood, as for $H_0$. $\sigma_{\Xi_0}$ grows by 4% to
+  35%.
 - It exceeds $(\rho^{-2}+\sigma_B^2)^{1/2}$ by 5% to 17% (was within 5.5%). The
   $\Xi_0$ marginal integrates over $n$, whose degeneracy gives it elongated
   tails whose extent depends on the realization each network recorded.
