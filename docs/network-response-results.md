@@ -124,7 +124,7 @@ bootstrapped over catalogs. The `amplitude` likelihood with the response:
   these networks: $\sigma_B$ moves by $\pm1.4\%$ between seeds at 8192 draws and
   is still converging at $2.6\times10^5$ (4.82, 4.86, 4.88$\times10^{-3}$ for
   ET-2L + CE at 32768, 65536, 262144 draws, against 5.03 measured). It is the
-  1-3% of the Hadamard check of `scripts/network_spectra_hadamard.py`.
+  1-3% of the Hadamard covariance check.
 
 ## Shot-noise figure
 
