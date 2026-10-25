@@ -18,7 +18,7 @@ same layout is used in memory and in files, with metadata kept separately.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 import jax
 import numpy as np
@@ -53,10 +53,14 @@ class BackgroundSpectralDensityData(TypedDict):
     ``(D, F)``; ``n_events``, ``total_merger_rate`` and every ``hyperparameters``
     column are ``(D,)``. A simulator call or reduction has ``D=1``;
     :func:`stack_spectra` concatenates draws without adding another axis.
+    ``pair_spectral_density``, ``(D, P, F)``, is present only for a network that
+    keeps its pairs apart
+    (:class:`~astrogwb.simulators.spectra.NetworkSpectralDensityMetadata`).
     """
 
     frequencies: NDArray[np.float64]
     spectral_density: NDArray[np.float64]
+    pair_spectral_density: NotRequired[NDArray[np.float64]]
     n_events: NDArray[np.int64]
     total_merger_rate: NDArray[np.float64]
     hyperparameters: dict[str, NDArray[np.float64]]
@@ -191,15 +195,15 @@ def stack_spectra(
 ) -> BackgroundSpectralDensityData:
     """Concatenate spectra along their existing leading draw axis.
 
-    The non-empty sequence must share one frequency grid and hyperparameter
-    names. Construction guarantees matching column shapes; the result keeps
+    The non-empty sequence must share one frequency grid, hyperparameter
+    names and, when the first has them, per-pair spectra. Construction guarantees matching column shapes; the result keeps
     the first grid once, without re-validating the data.
     """
 
     def stack(name: str) -> NDArray[Any]:
         return np.concatenate([part[name] for part in parts], axis=0)  # ty: ignore[invalid-key]
 
-    return {
+    stacked: BackgroundSpectralDensityData = {
         "frequencies": parts[0]["frequencies"],
         "spectral_density": stack("spectral_density"),
         "n_events": stack("n_events"),
@@ -211,3 +215,6 @@ def stack_spectra(
             for name in parts[0]["hyperparameters"]
         },
     }
+    if "pair_spectral_density" in parts[0]:
+        stacked["pair_spectral_density"] = stack("pair_spectral_density")
+    return stacked

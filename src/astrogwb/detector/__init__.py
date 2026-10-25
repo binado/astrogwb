@@ -17,7 +17,12 @@ from .overlap import (
     stokes_cross_power,
 )
 from .psd import resolve_psd_path
-from .response import network_response, sample_network_response
+from .response import (
+    network_response,
+    pair_response,
+    sample_network_response,
+    sample_pair_response,
+)
 from .sensitivity import (
     Sensitivity,
     load_sensitivities_for_network,
@@ -41,11 +46,13 @@ __all__ = [
     "log_frequency_noise_scale",
     "network_response",
     "overlap_reduction_function",
+    "pair_response",
     "pair_terms",
     "pairwise_overlap_reduction_function",
     "relative_orientation",
     "resolve_detector",
     "resolve_psd_path",
     "sample_network_response",
+    "sample_pair_response",
     "stokes_cross_power",
 ]

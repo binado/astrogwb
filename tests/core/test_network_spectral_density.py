@@ -14,7 +14,11 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from astrogwb.detector import network_response, stokes_cross_power
+from astrogwb.detector import (
+    isotropic_overlap_reduction_function,
+    network_response,
+    stokes_cross_power,
+)
 from astrogwb.distributions.config import DistributionConfig
 from astrogwb.populations import PopulationMetadata
 from astrogwb.simulators.core import batch_keys, load, write
@@ -24,6 +28,7 @@ from astrogwb.simulators.spectra import (
     JointNetworkSpectralDensitySimulator,
     NetworkSpectralDensityMetadata,
     NetworkSpectralDensitySimulator,
+    combine_pair_spectra,
     draw_extrinsic_angles,
     network_spectra_ensemble,
     spectra_ensemble_path,
@@ -185,6 +190,65 @@ def test_network_simulator_combines_pairs_as_the_network_response(
     np.testing.assert_allclose(combined, 0.8 * np.asarray(response), rtol=1e-10)
 
 
+def test_network_simulator_pair_spectra_combine_to_its_network_spectrum(
+    network_simulator: NetworkSpectralDensitySimulator,
+    network_metadata: NetworkSpectralDensityMetadata,
+) -> None:
+    draw = network_simulator(batch_keys(41, 1)[0])
+
+    combined = combine_pair_spectra(
+        draw["pair_spectral_density"], draw["frequencies"], network_metadata
+    )
+
+    assert draw["pair_spectral_density"].shape == (1, 3, draw["frequencies"].size)
+    np.testing.assert_allclose(combined, draw["spectral_density"], rtol=1e-12)
+
+
+def test_network_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum(
+    network_simulator: NetworkSpectralDensitySimulator,
+    network_metadata: NetworkSpectralDensityMetadata,
+    background_metadata: BackgroundSpectralDensityMetadata,
+) -> None:
+    """Draw by draw the sources agree, so the ratio isolates each pair's response."""
+    background = BackgroundSpectralDensitySimulator(background_metadata, chunk_size=4)
+    keys = batch_keys(7, 1_000)
+    ratios = np.array(
+        [
+            network_simulator(key)["pair_spectral_density"][0]
+            / background(key)["spectral_density"]
+            for key in keys
+        ]
+    )
+    frequencies = np.asarray(network_simulator._generator.frequencies)
+    expected = np.stack(
+        [
+            isotropic_overlap_reduction_function(frequencies, first, second)
+            for first, second in network_metadata.pairs()
+        ]
+    )
+    errors = ratios.std(axis=0) / np.sqrt(ratios.shape[0])
+
+    assert np.all(np.abs(ratios.mean(axis=0) - expected) < MAX_STANDARD_ERRORS * errors)
+
+
+def test_network_metadata_without_pair_spectra_omits_them(
+    network_metadata: NetworkSpectralDensityMetadata,
+) -> None:
+    metadata = network_metadata.model_copy(update={"pair_spectra": False})
+
+    draw = NetworkSpectralDensitySimulator(metadata, chunk_size=4)(batch_keys(41, 1)[0])
+
+    assert "pair_spectral_density" not in draw
+
+
+def test_network_metadata_key_depends_on_keeping_the_pair_spectra(
+    network_metadata: NetworkSpectralDensityMetadata,
+) -> None:
+    other = network_metadata.model_copy(update={"pair_spectra": False})
+
+    assert other.key() != network_metadata.key()
+
+
 def test_network_metadata_key_depends_on_the_noise_curves(
     network_metadata: NetworkSpectralDensityMetadata,
 ) -> None:
@@ -224,6 +288,55 @@ def test_joint_simulator_draws_what_each_network_simulator_draws(
     )
 
 
+@pytest.mark.parametrize("index", [0, 1])
+def test_joint_simulator_pair_spectra_combine_to_each_network_spectrum(
+    joint_metadata: list[NetworkSpectralDensityMetadata], index: int
+) -> None:
+    draw = JointNetworkSpectralDensitySimulator(joint_metadata, chunk_size=4)(
+        batch_keys(41, 1)[0]
+    )[index]
+
+    combined = combine_pair_spectra(
+        draw["pair_spectral_density"], draw["frequencies"], joint_metadata[index]
+    )
+
+    np.testing.assert_allclose(combined, draw["spectral_density"], rtol=1e-12)
+
+
+@pytest.mark.parametrize("index", [0, 1])
+def test_joint_simulator_draws_each_network_simulators_pair_spectra(
+    joint_metadata: list[NetworkSpectralDensityMetadata], index: int
+) -> None:
+    key = batch_keys(41, 1)[0]
+    joint = JointNetworkSpectralDensitySimulator(joint_metadata, chunk_size=4)(key)
+
+    single = NetworkSpectralDensitySimulator(joint_metadata[index], chunk_size=4)(key)
+
+    np.testing.assert_allclose(
+        joint[index]["pair_spectral_density"],
+        single["pair_spectral_density"],
+        rtol=1e-12,
+    )
+
+
+def test_network_spectra_ensemble_reads_back_the_pair_spectra_it_wrote(
+    tmp_path: Path, joint_metadata: list[NetworkSpectralDensityMetadata]
+) -> None:
+    drawn = network_spectra_ensemble(joint_metadata, 41, 2, tmp_path, chunk_size=4)
+
+    cached = network_spectra_ensemble(joint_metadata, 41, 2, tmp_path, chunk_size=4)
+
+    for record, fresh, read in zip(joint_metadata, drawn, cached, strict=True):
+        assert read["pair_spectral_density"].shape == (
+            2,
+            len(record.pairs()),
+            read["frequencies"].size,
+        )
+        np.testing.assert_array_equal(
+            read["pair_spectral_density"], fresh["pair_spectral_density"]
+        )
+
+
 def test_network_spectra_ensemble_reads_back_the_draws_it_wrote(
     tmp_path: Path, joint_metadata: list[NetworkSpectralDensityMetadata]
 ) -> None:
@@ -246,6 +359,46 @@ def test_network_spectra_ensemble_caches_each_network_under_its_own_key(
         spectra_ensemble_path(tmp_path, record, 41, 0).is_file()
         for record in joint_metadata
     )
+
+
+def test_network_spectra_ensemble_from_start_draws_the_tail_of_the_ensemble(
+    tmp_path: Path, joint_metadata: list[NetworkSpectralDensityMetadata]
+) -> None:
+    full = network_spectra_ensemble(
+        joint_metadata, 41, 3, tmp_path / "full", chunk_size=4
+    )
+
+    tail = network_spectra_ensemble(
+        joint_metadata, 41, 3, tmp_path / "tail", start=1, chunk_size=4
+    )
+
+    for whole, part in zip(full, tail, strict=True):
+        np.testing.assert_array_equal(
+            part["pair_spectral_density"], whole["pair_spectral_density"][1:]
+        )
+
+
+def test_network_spectra_ensemble_reads_ranges_drawn_apart_and_merged(
+    tmp_path: Path, joint_metadata: list[NetworkSpectralDensityMetadata]
+) -> None:
+    """Two machines, one range each: copying the files gives the whole ensemble."""
+    network_spectra_ensemble(joint_metadata, 41, 1, tmp_path / "a", chunk_size=4)
+    network_spectra_ensemble(
+        joint_metadata, 41, 2, tmp_path / "b", start=1, chunk_size=4
+    )
+    for record in joint_metadata:
+        moved = spectra_ensemble_path(tmp_path / "b", record, 41, 1)
+        moved.rename(spectra_ensemble_path(tmp_path / "a", record, 41, 1))
+    written = {path: path.stat().st_mtime_ns for path in (tmp_path / "a").rglob("*.h5")}
+
+    merged = network_spectra_ensemble(
+        joint_metadata, 41, 2, tmp_path / "a", chunk_size=4
+    )
+
+    assert {
+        path: path.stat().st_mtime_ns for path in (tmp_path / "a").rglob("*.h5")
+    } == written
+    assert all(part["spectral_density"].shape[0] == 2 for part in merged)
 
 
 def test_extrinsic_angles_are_isotropic_columns() -> None:
