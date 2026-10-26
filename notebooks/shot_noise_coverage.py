@@ -31,6 +31,10 @@ with app.setup(hide_code=True):
         sample_pair_response,
     )
     from astrogwb.frequency import frequency_mask
+    from astrogwb.gwb.catalog import (
+        CatalogMetadata,
+        PolarizationPowerData,
+    )
     from astrogwb.gwb.importance import (
         INCLINATION_SECOND_MOMENT,
         reference_catalog,
@@ -52,6 +56,11 @@ with app.setup(hide_code=True):
     )
     from astrogwb.paper.config.detectors import DetectorRegistry
     from astrogwb.paper.config.runs import CATALOGS_ROOT, FIGURES_DIR
+    from astrogwb.paper.ensemble import (
+        EnsembleRecord,
+        network_configuration,
+        network_spectra_ensemble,
+    )
     from astrogwb.paper.plotting import (
         DETECTOR_COMPARISON_LEGEND,
         DETECTOR_NETWORKS,
@@ -62,20 +71,13 @@ with app.setup(hide_code=True):
         use_paper_style,
     )
     from astrogwb.paper.posteriors import (
-        network_injection_metadata,
         network_pair_data,
         pad_pairs,
     )
     from astrogwb.populations import build_population
-    from astrogwb.simulators.core import batch_keys, load, write
-    from astrogwb.simulators.polarization_power import (
-        CatalogMetadata,
-        PolarizationPowerData,
-    )
-    from astrogwb.simulators.spectra import (
-        BackgroundSpectralDensityMetadata,
-        network_spectra_ensemble,
-    )
+    from astrogwb.simulators import PopulationMetadata as RealizationMetadata
+    from astrogwb.simulators import batch_keys
+    from astrogwb.utils.io import load, write
 
     # Log-likelihood of every injection at every grid point, (M, G): data is
     # (M, F), prediction and direction (G, F). One injection at a time, so
@@ -125,7 +127,7 @@ def _():
     the optimally weighted sum over detector pairs of its cross-power relative
     to its sky-averaged power, with $\langle r \rangle = 1$ over isotropic
     orientations. The injections are drawn this way
-    (`NetworkSpectralDensitySimulator`), so the six networks record one catalog
+    (`astrogwb.simulators.BackgroundSimulator`), so the six networks record one catalog
     as six spectra, and the shot noise of each carries its own
     $\langle r_f r_{f'} \rangle$.
 
@@ -418,18 +420,20 @@ def _():
         num_samples=num_samples,
         sampling="sobol",
     )
-    injection_metadata = BackgroundSpectralDensityMetadata(
-        count="fixed" if SMOKE else "poisson",
-        num_events=64 if SMOKE else None,
-        observation_time=observation_time,
-        hyperparameters={**FIDUCIALS},
+    # The one catalog as each network records it. Smoke runs inject a short
+    # observation, a few hundred sources; the spectrum's mean does not depend
+    # on it.
+    network_injections = EnsembleRecord(
+        population=RealizationMetadata(
+            observation_time=1e-4 if SMOKE else observation_time,
+            hyperparameters={**FIDUCIALS},
+            population=population,
+        ),
         waveform=waveform,
-        population=population,
+        networks={
+            name: network_configuration(registry, name) for name in network_names
+        },
     )
-    network_injections = {
-        name: network_injection_metadata(injection_metadata, registry, name)
-        for name in network_names
-    }
     ensemble_dir = default_cache_dir() / "ensembles"
 
     write_figures = mo.ui.switch(value=write_figures_default, label="Write figures")
@@ -1105,7 +1109,7 @@ def _(
     num_injections,
 ):
     _ensembles = network_spectra_ensemble(
-        list(network_injections.values()),
+        network_injections,
         ensemble_seed,
         num_injections,
         ensemble_dir,
@@ -1118,11 +1122,13 @@ def _(
         _name: pad_pairs(_ensemble["pair_spectral_density"]).reshape(
             _ensemble["pair_spectral_density"].shape[0], -1
         )
-        for _name, _ensemble in zip(network_injections, _ensembles, strict=True)
+        for _name, _ensemble in zip(
+            network_injections.networks, _ensembles, strict=True
+        )
     }
     injected_events = np.asarray(_ensembles[0]["n_events"])
-    for _name, _metadata in network_injections.items():
-        print(f"{_name}: injection record {_metadata.key()}, seed {ensemble_seed}")
+    print(f"injection record {network_injections.key()}, seed {ensemble_seed}")
+    for _name in network_injections.networks:
         assert injections[_name].shape[1] % frequencies.size == 0
     print(
         f"{num_injections} injections, events {injected_events.min():,} to "

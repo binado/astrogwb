@@ -30,6 +30,7 @@ with app.setup(hide_code=True):
     from xarray import DataTree
 
     from astrogwb.detector import sample_pair_response
+    from astrogwb.gwb.catalog import CatalogMetadata
     from astrogwb.inference import ImportanceGaussianLikelihood
     from astrogwb.inference import Network as LikelihoodNetwork
     from astrogwb.paper.cache import default_cache_dir
@@ -42,6 +43,11 @@ with app.setup(hide_code=True):
         waveform_metadata,
     )
     from astrogwb.paper.config.runs import CATALOGS_ROOT, FIGURES_DIR
+    from astrogwb.paper.ensemble import (
+        EnsembleRecord,
+        network_configuration,
+        network_spectra_ensemble,
+    )
     from astrogwb.paper.plotting import (
         DETECTOR_NETWORKS,
         plot_corner,
@@ -51,17 +57,12 @@ with app.setup(hide_code=True):
     )
     from astrogwb.paper.posteriors import (
         ensure_reference_catalog,
-        network_injection_metadata,
         network_pair_data,
         pad_pairs,
         shot_noise_variant,
     )
     from astrogwb.populations import build_population
-    from astrogwb.simulators.polarization_power import CatalogMetadata
-    from astrogwb.simulators.spectra import (
-        BackgroundSpectralDensityMetadata,
-        network_spectra_ensemble,
-    )
+    from astrogwb.simulators import PopulationMetadata as RealizationMetadata
 
     # Points of the coarse scan that locates the ridge, Newton iterations that
     # polish it, points of the integration window, and its half width in
@@ -273,19 +274,20 @@ def _():
         num_samples=num_samples,
         sampling="sobol",
     )
-    injection_metadata = BackgroundSpectralDensityMetadata(
-        count="fixed" if SMOKE else "poisson",
-        num_events=64 if SMOKE else None,
-        observation_time=observation_time,
-        hyperparameters={**FIDUCIALS},
+    # The one catalog as each network records it. Smoke runs inject a short
+    # observation, a few hundred sources; the spectrum's mean does not depend
+    # on it.
+    network_injections = EnsembleRecord(
+        population=RealizationMetadata(
+            observation_time=1e-4 if SMOKE else observation_time,
+            hyperparameters={**FIDUCIALS},
+            population=population,
+        ),
         waveform=waveform,
-        population=population,
+        networks={
+            name: network_configuration(registry, name) for name in network_names
+        },
     )
-    # The one catalog as each network records it.
-    network_injections = {
-        name: network_injection_metadata(injection_metadata, registry, name)
-        for name in network_names
-    }
 
     write_figures = mo.ui.switch(value=write_figures_default, label="Write figures")
     write_figures
@@ -602,14 +604,14 @@ def _(
 ):
     # Draw 0 of `data_seed`, shared with cosmology_grid_posteriors.py.
     _drawn = network_spectra_ensemble(
-        list(network_injections.values()),
+        network_injections,
         data_seed,
         1,
         cache_dir / f"{cache_name_prefix}network_injections",
         chunk_size=chunk_size,
     )
     observed = {}
-    for _name, _data in zip(network_injections, _drawn, strict=True):
+    for _name, _data in zip(network_injections.networks, _drawn, strict=True):
         validate_matching_frequency_grids(_data["frequencies"], frequencies)
         observed[_name] = pad_pairs(_data["pair_spectral_density"][0])
     print(

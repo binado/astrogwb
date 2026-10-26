@@ -4,17 +4,18 @@
 #       --profile workflow/profiles/slurm --config start=500 stop=1000 --dry-run
 #
 # Each job runs scripts/draw_coverage_injections.py --start i --stop j, which
-# writes draw k of every network to <cache_dir>/ensembles/<key>/41-<k>.h5.
+# writes draw k, one background over every network's detectors, to
+# <cache_dir>/ensembles/<key>/41-<k>/.
 # Draw k is fixed by (seed, k) alone, so the batches are independent, finished
 # files merge by copying, and a batch whose files all exist is skipped: a
 # rerun resumes, and files copied in from another machine are not redrawn.
 #
 # Snakemake comes from the project venv (the `cluster` dependency group), so
 # the controller and its jobs share the interpreter the script runs in. The
-# six keys below are what the script prints with
-# --keys; they name the outputs. A script that drew under other keys would
-# leave these paths missing, and Snakemake fails that job on a
-# MissingOutputException rather than reporting it done.
+# key below is what the script prints with --keys; it names the outputs. A
+# script that drew under another key would leave these paths missing, and
+# Snakemake fails that job on a MissingOutputException rather than reporting
+# it done.
 #
 # Config (override with --config key=value):
 #   start, stop  draw indices [start, stop)               default 500, 1000
@@ -26,14 +27,7 @@ import os
 from pathlib import Path
 
 SEED = 41
-KEYS = [
-    "c6644e48729b2472",  # ET-triangular
-    "5d8ba6ffa0854f0e",  # ET-triangular-CE-Hanford
-    "ed5877c73ffe9c84",  # ET-2L-aligned
-    "d5913ea9df8a959c",  # ET-2L-aligned-CE-Hanford
-    "e5a046788dc068d1",  # ET-2L-misaligned
-    "348897d7e32aff06",  # ET-2L-misaligned-CE-Hanford
-]
+KEY = "0295b914397ec3c8"  # the six DETECTOR_NETWORKS, one background per draw
 
 # platformdirs' user cache on Linux; on macOS pass cache_dir explicitly.
 _XDG_CACHE = os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache"
@@ -48,11 +42,10 @@ if not 0 <= START < STOP or BATCH < 1:
 
 
 def draw_files(start, stop):
-    """Every network's file of draws [start, stop)."""
+    """The manifest of every draw in [start, stop)."""
     return [
-        str(CACHE_DIR / "ensembles" / key / f"{SEED}-{index}.h5")
+        str(CACHE_DIR / "ensembles" / KEY / f"{SEED}-{index}" / "metadata.toml")
         for index in range(start, stop)
-        for key in KEYS
     ]
 
 
