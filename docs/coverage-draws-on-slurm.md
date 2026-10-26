@@ -3,14 +3,15 @@
 [`notebooks/shot_noise_coverage.py`](../notebooks/shot_noise_coverage.py) reads
 1000 Poisson BNS catalogs, each recorded by the six detector networks.
 [`scripts/draw_coverage_injections.py`](../scripts/draw_coverage_injections.py)
-draws a range of them into `<cache>/ensembles/<key>/41-<i>.h5`, one file per
-network. Draw `i` is fixed by the seed (41) and `i` alone, so any split of the
-indices across machines gives the same files, and they merge by copying.
+draws a range of them into `<cache>/ensembles/<key>/41-<i>/`, one background
+artifact per draw over every network's detectors. Draw `i` is fixed by the seed
+(41) and `i` alone, so any split of the indices across machines gives the same
+directories, and they merge by copying.
 
 [`workflow/coverage_draws.smk`](../workflow/coverage_draws.smk) runs that
 script as SLURM jobs, one per batch of draws, through
 [`workflow/profiles/slurm`](../workflow/profiles/slurm/config.yaml). Its
-outputs are the per-draw files themselves, so a rerun skips every batch whose
+outputs are the per-draw manifests themselves, so a rerun skips every batch whose
 files exist and only resubmits what is missing.
 
 ## Job sizing
@@ -31,10 +32,10 @@ sacct -u $USER -S today --format=JobID,JobName%40,AllocCPUS,Elapsed,TotalCPU,Max
 
 `TotalCPU / (Elapsed x AllocCPUS)` is how busy the cores were: near 1, more
 `threads` would still help; well below, prefer more jobs with fewer threads.
-The draw files' timestamps give the time per draw:
+The draw directories' timestamps give the time per draw:
 
 ```bash
-ls -l --time-style=+%H:%M ~/.cache/astrogwb/ensembles/c6644e48729b2472/
+ls -l --time-style=+%H:%M ~/.cache/astrogwb/ensembles/0295b914397ec3c8/
 ```
 
 Change `batch` and `threads` with `--config`, and `runtime` and `mem_mb` in
@@ -56,24 +57,19 @@ does. Every command below uses `uv run --no-sync`, and so do the jobs: a plain
 `uv run` would sync the venv back to the default groups and remove Snakemake,
 and the hundred concurrent jobs must never race to sync it.
 
-Check the keys. They name the output directories, so they must match the
-Macs' exactly:
+Check the key. It names the output directory, so it must match the Macs'
+exactly:
 
 ```bash
 uv run --no-sync python scripts/draw_coverage_injections.py --keys
 ```
 
 ```text
-c6644e48729b2472  ET-triangular
-5d8ba6ffa0854f0e  ET-triangular-CE-Hanford
-ed5877c73ffe9c84  ET-2L-aligned
-d5913ea9df8a959c  ET-2L-aligned-CE-Hanford
-e5a046788dc068d1  ET-2L-misaligned
-348897d7e32aff06  ET-2L-misaligned-CE-Hanford
+0295b914397ec3c8
 ```
 
-The same six are written into the workflow; if the script ever drew under
-other keys, each job would fail on a `MissingOutputException` rather than
+The same key is written into the workflow; if the script ever drew under
+another key, each job would fail on a `MissingOutputException` rather than
 pass.
 
 Jobs go to the `short` partition, whose time limit must cover the profile's

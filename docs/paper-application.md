@@ -1,8 +1,10 @@
 # The paper application
 
 The reproducibility application for the `astrogwb` research project. It owns
-the shared configuration, the notebooks that produce the paper's figures and
-tables, and the spectrum-simulation script.
+the shared configuration and the notebooks that produce the paper's figures and
+tables. Spectrum realizations come from the package's `astrogwb simulate`
+command and `astrogwb.paper.ensemble` (see [the simulator
+pipeline](simulator-pipeline.md)).
 
 The code ships inside the `astrogwb` wheel as `astrogwb.paper`, behind the
 `paper` extra. Its *assets* -- `config/`, `scripts/` and `notebooks/` -- are not
@@ -10,8 +12,8 @@ packaged, so the application runs only from a checkout, with the repository
 root as the working directory:
 
 ```bash
-uv sync --extra notebook --group dev
-uv run --extra paper python scripts/simulate_spectra.py --help
+uv sync --extra notebook --extra cli --group dev
+uv run astrogwb simulate --help
 ```
 
 The notebooks are marimo notebooks. Open one from the repository root:
@@ -45,12 +47,10 @@ config/detectors.toml                           [networks] membership and option
                                                 [detectors] geometry/PSD/label overrides
 config/plotting.toml                            LaTeX labels and savefig settings
                                                 (presentation; not a config layer)
-config/simulations/spectrum/<name>.toml         a spectrum simulation layer
 ```
 
 The four shared layers (`defaults`, `waveforms`, `populations`, `detectors`)
-are merged by `knf` (which the `knf` CLI also exposes in the shell), optionally
-followed by a simulation layer. The packaged `geometry.toml` and
+are merged by `knf` (which the `knf` CLI also exposes in the shell). The packaged `geometry.toml` and
 `sensitivity.toml` are merged first, using the same `[detectors.<name>]` tables
 as the shared registry file. After the merge, every `"${a.b}"` string resolves
 to the merged value at `a.b`, which is how a catalog names its waveform and
