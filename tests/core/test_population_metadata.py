@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from astrogwb.distributions.config import DistributionConfig
 from astrogwb.populations import PopulationMetadata
-from astrogwb.simulators.population import PopulationDrawMetadata
+from astrogwb.simulators import PopulationMetadata as RealizationMetadata
 
 MODEL_KWARGS = {
     "mass_model": "uniform",
@@ -75,8 +75,8 @@ def test_a_seed_is_not_part_of_the_record() -> None:
         _record(seed=7)
 
 
-def _draw_metadata() -> PopulationDrawMetadata:
-    return PopulationDrawMetadata(
+def _draw_metadata() -> RealizationMetadata:
+    return RealizationMetadata(
         population=_record(),
         hyperparameters={
             "H0": 67.66,
