@@ -77,7 +77,7 @@ Contracts the caller is trusted to honour (nothing here checks them):
   :class:`~astrogwb.distributions.redshift.base.RedshiftDistribution` directly:
   no model is run at the nodes.
 - The catalog is never narrowed with
-  :func:`~astrogwb.simulators.polarization_power.restrict_redshift`: its
+  :func:`~astrogwb.gwb.catalog.restrict_redshift`: its
   reference redshift is the population window's lower edge.
 - The reference catalog's frequency grid starts at or below the observed
   grid's and extends past the highest detector-frame merger frequency at
@@ -104,6 +104,13 @@ from astrogwb.cosmology import (
     normalized_hubble_parameter,
 )
 from astrogwb.distributions.rates import total_merger_rate
+from astrogwb.gwb.catalog import (
+    REDSHIFT_SITE,
+    REDSHIFT_WINDOW_KWARGS,
+    CatalogMetadata,
+    PolarizationPowerData,
+    polarization_power_data,
+)
 from astrogwb.populations._types import Population, PopulationModel, SourceModel
 from astrogwb.populations.evaluation import (
     evaluate_sources,
@@ -112,15 +119,6 @@ from astrogwb.populations.evaluation import (
 )
 from astrogwb.populations.joint import joint_model
 from astrogwb.populations.metadata import PopulationMetadata
-from astrogwb.simulators.polarization_power.metadata import CatalogMetadata
-from astrogwb.simulators.polarization_power.restrict import (
-    REDSHIFT_SITE,
-    REDSHIFT_WINDOW_KWARGS,
-)
-from astrogwb.simulators.polarization_power.simulator import (
-    PolarizationPowerData,
-    polarization_power_data,
-)
 from astrogwb.utils import gauss_legendre_nodes_weights
 
 __all__ = [
@@ -285,7 +283,7 @@ def reference_catalog_stem(metadata: CatalogMetadata, seed: int | np.integer) ->
     """The file stem by convention: ``reference_catalog-<key>-<seed>``.
 
     The prefix keeps it apart from the plain catalog of the same record, which
-    :func:`~astrogwb.simulators.polarization_power.catalog_stem` names.
+    :func:`~astrogwb.gwb.catalog.catalog_stem` names.
     """
     return f"reference_catalog-{metadata.key()}-{int(seed)}"
 

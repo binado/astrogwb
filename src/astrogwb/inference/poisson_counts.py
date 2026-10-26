@@ -56,7 +56,7 @@ Both generators are JAX-native and valid :func:`jax.jit`,
 :class:`~numpyro.infer.Predictive` and :func:`jax.vmap` targets.
 Neither validates physical values during generation -- a traced array cannot
 raise, and forcing the question would sync the host on every chunk. Run
-:func:`validate_source_model` once before inference to check a population
+:func:`~astrogwb.waveform.validation.validate_source_model` once before inference to check a population
 against a generator's waveform family::
 
     from functools import partial
@@ -64,10 +64,8 @@ against a generator's waveform family::
     from numpyro.infer import Predictive
 
     from astrogwb.populations import joint_model
-    from astrogwb.simulators.spectra import (
-        poisson_counts_forward_model,
-        validate_source_model,
-    )
+    from astrogwb.inference.poisson_counts import poisson_counts_forward_model
+    from astrogwb.waveform.validation import validate_source_model
 
     model = joint_model(*population(params))
     validate_source_model(model, generator=generator, rng_key=jax.random.key(0))
@@ -90,18 +88,88 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+import jax
 import jax.numpy as jnp
+import numpy as np
 import numpyro
 import numpyro.distributions as dist
 from jax.typing import ArrayLike
 
 from astrogwb.populations import Population, joint_model
-from astrogwb.utils import years_to_seconds
+from astrogwb.utils import array_dict_shape, years_to_seconds
 from astrogwb.waveform import PolarizationPowerGenerator
-
-from .forward import _require_luminosity_distance, _sum_polarization_power
+from astrogwb.waveform.validation import require_luminosity_distance
 
 _TOTAL_MERGER_RATE_SITE = "total_merger_rate"
+
+
+def _batch_power_sum(
+    generator: PolarizationPowerGenerator,
+    batch_sources: Mapping[str, jax.Array],
+    event_mask: jax.Array,
+) -> jax.Array:
+    """Call ``generate_batch`` on one chunk and return its masked ``(F,)`` sum."""
+    power = jnp.asarray(generator.generate_batch(batch_sources))
+    n_chunk = next(iter(batch_sources.values())).shape[0]
+    if power.ndim != 2 or power.shape[-1] != n_chunk:
+        raise ValueError(
+            "waveform generator must return frequency-first power of "
+            f"shape (F, n_chunk); got {power.shape} for {n_chunk} sources"
+        )
+    return (power * event_mask).sum(axis=1)
+
+
+def _sum_polarization_power(
+    generator: PolarizationPowerGenerator,
+    sources: Mapping[str, jax.Array],
+    event_mask: ArrayLike,
+    *,
+    chunk_size: int,
+) -> jax.Array:
+    """Sum frequency-first polarization power over sources, chunk by chunk.
+
+    Full batches of ``chunk_size`` are reduced with :func:`jax.lax.scan`, so
+    the compiled body is one batch regardless of how many chunks there are; a
+    static remainder is a separate ``generate_batch``. Peak waveform memory is
+    ``(F, chunk_size)`` rather than ``(F, max_events)``.
+
+    ``event_mask`` is sliced alongside each source batch, so inactive capacity
+    slots do not contribute to the sum. The zero carry comes from
+    ``generator.frequencies``, so an empty catalog returns zeros without
+    tracing or calling a waveform kernel at all.
+    """
+    n_events = array_dict_shape(sources)[0]
+    event_mask = jnp.asarray(event_mask)
+    n_full, remainder = divmod(n_events, chunk_size)
+    total = jnp.zeros(np.shape(generator.frequencies)[0], dtype=jnp.float64)
+
+    # A Python branch, not a traced one: n_full is static, and lax.scan over
+    # zero chunks would still trace the waveform body it never runs.
+    if n_full:
+        chunks = {
+            name: values[: n_full * chunk_size].reshape(n_full, chunk_size)
+            for name, values in sources.items()
+        }
+
+        chunk_masks = event_mask[: n_full * chunk_size].reshape(n_full, chunk_size)
+
+        def accumulate(
+            carry: jax.Array,
+            scan_values: tuple[Mapping[str, jax.Array], jax.Array],
+        ) -> tuple[jax.Array, None]:
+            chunk, chunk_mask = scan_values
+            return carry + _batch_power_sum(generator, chunk, chunk_mask), None
+
+        total, _ = jax.lax.scan(
+            accumulate,
+            total,
+            (chunks, chunk_masks),
+        )
+    if remainder:
+        tail = {name: values[n_full * chunk_size :] for name, values in sources.items()}
+        tail_mask = event_mask[n_full * chunk_size :]
+        total = total + _batch_power_sum(generator, tail, tail_mask)
+    return total
 
 
 def poisson_counts_forward_model(
@@ -162,7 +230,7 @@ def poisson_counts_forward_model(
     event_mask = jnp.arange(max_events) < n_events
     with numpyro.plate("events", max_events), numpyro.handlers.mask(mask=event_mask):
         sources = dict(model())
-    _require_luminosity_distance(sources)
+    require_luminosity_distance(sources)
     power_sum = _sum_polarization_power(
         generator,
         sources,

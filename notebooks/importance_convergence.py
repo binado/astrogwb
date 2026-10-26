@@ -25,6 +25,10 @@ with app.setup(hide_code=True):
 
     from astrogwb.detector import effective_psd, gaussian_bin_scale
     from astrogwb.frequency import frequency_mask
+    from astrogwb.gwb.catalog import (
+        CatalogMetadata,
+        PolarizationPowerData,
+    )
     from astrogwb.gwb.importance import (
         reference_catalog,
         reference_catalog_stem,
@@ -41,11 +45,8 @@ with app.setup(hide_code=True):
     from astrogwb.paper.config.runs import CATALOGS_ROOT, FIGURES_DIR
     from astrogwb.paper.plotting import parameter_label, save_figures, use_paper_style
     from astrogwb.populations import Population, build_population
-    from astrogwb.simulators.core import batch_keys, load, write
-    from astrogwb.simulators.polarization_power import (
-        CatalogMetadata,
-        PolarizationPowerData,
-    )
+    from astrogwb.simulators import batch_keys
+    from astrogwb.utils.io import load, write
 
     # One compiled spectrum for every catalog: the likelihood is a pytree
     # argument, so its catalog is a traced input, not a constant, and catalogs

@@ -40,6 +40,7 @@ import pandas as pd
 
 from astrogwb.detector.overlap import stokes_cross_power
 from astrogwb.detector.response import _isotropic_angles
+from astrogwb.gwb.catalog import CatalogMetadata
 from astrogwb.gwb.importance import INCLINATION_SECOND_MOMENT
 from astrogwb.inference import ImportanceGaussianLikelihood
 from astrogwb.inference import Network as LikelihoodNetwork
@@ -53,7 +54,6 @@ from astrogwb.paper.config.runs import CATALOGS_ROOT, FIGURES_DIR
 from astrogwb.paper.plotting import DETECTOR_NETWORKS
 from astrogwb.paper.posteriors import ensure_reference_catalog, network_pair_data
 from astrogwb.populations import build_population
-from astrogwb.simulators.polarization_power import CatalogMetadata
 from astrogwb.waveform import quadrupolar_stokes_factors
 
 ROOT_DIR = Path(__file__).resolve().parents[1]

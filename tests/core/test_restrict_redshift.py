@@ -9,12 +9,12 @@ import pytest
 from numpyro import handlers
 
 from astrogwb.frequency import bin_widths
-from astrogwb.populations import PopulationMetadata, joint_model
-from astrogwb.simulators.polarization_power import (
+from astrogwb.gwb.catalog import (
     CatalogMetadata,
     PolarizationPowerData,
     restrict_redshift,
 )
+from astrogwb.populations import PopulationMetadata, joint_model
 from astrogwb.waveform import WaveformMetadata
 
 #: The population record every draw carries: the density that drew it.

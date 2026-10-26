@@ -27,6 +27,10 @@ import numpy as np
 from jax.typing import ArrayLike
 
 from astrogwb.constants import ISCO_ALPHA
+from astrogwb.gwb.catalog import (
+    CatalogMetadata,
+    PolarizationPowerData,
+)
 from astrogwb.gwb.importance import (
     reference_catalog,
 )
@@ -39,10 +43,6 @@ from astrogwb.populations import (
     joint_model,
 )
 from astrogwb.populations.evaluation import evaluate_sources, sample_sources
-from astrogwb.simulators.polarization_power import (
-    CatalogMetadata,
-    PolarizationPowerData,
-)
 from astrogwb.waveform import AnalyticInspiralGenerator, WaveformMetadata
 
 

@@ -43,6 +43,7 @@ from astrogwb.distributions.delay import PowerLawDelayDistribution
 from astrogwb.distributions.redshift import (
     madau_dickinson_time_delayed_redshift_distribution,
 )
+from astrogwb.gwb.catalog import REDSHIFT_SITE
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
     Population,
@@ -52,7 +53,6 @@ from astrogwb.populations import (
     register_population,
 )
 from astrogwb.populations.evaluation import evaluate_sources, sample_sources
-from astrogwb.simulators.polarization_power import REDSHIFT_SITE
 
 #: The deterministic output governing waveform amplitude.
 LUMINOSITY_DISTANCE_SITE = "luminosity_distance"

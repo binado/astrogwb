@@ -1,4 +1,4 @@
-"""The simulator protocol's plumbing: batched keys and the HDF5 write/load pair."""
+"""Batched keys and the HDF5 write/load pair."""
 
 from __future__ import annotations
 
@@ -10,7 +10,8 @@ import numpy as np
 import pytest
 from pydantic import BaseModel
 
-from astrogwb.simulators.core import batch_keys, content_key, load, write
+from astrogwb.simulators import batch_keys
+from astrogwb.utils.io import content_key, load, write
 
 
 class Record(BaseModel):

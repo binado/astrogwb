@@ -13,12 +13,11 @@ from numpyro import handlers
 from numpyro.infer import Predictive
 
 from astrogwb.constants import ISCO_ALPHA
-from astrogwb.populations import joint_model
-from astrogwb.simulators.spectra import (
+from astrogwb.inference.poisson_counts import (
+    _sum_polarization_power,
     poisson_counts_forward_model,
-    validate_source_model,
 )
-from astrogwb.simulators.spectra.forward import _sum_polarization_power
+from astrogwb.populations import joint_model
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import (
     AnalyticInspiralGenerator,
@@ -26,6 +25,7 @@ from astrogwb.waveform import (
     RippleGenerator,
     WaveformMetadata,
 )
+from astrogwb.waveform.validation import validate_source_model
 
 N_EVENTS = 8
 CHUNK_SIZE = 3

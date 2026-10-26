@@ -41,7 +41,7 @@ from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
 from astrogwb.frequency import frequency_mask
 from astrogwb.gwb import spectral_snr_squared
-from astrogwb.simulators.polarization_power import (
+from astrogwb.gwb.catalog import (
     CatalogMetadata,
     PolarizationPowerData,
 )
