@@ -150,11 +150,16 @@ dependencies = [
     { name = "numpyro" },
     { name = "pydantic" },
     { name = "ripplegw" },
+    { name = "tomli-w" },
 ]
 
 [package.optional-dependencies]
 blackjax = [
     { name = "blackjax" },
+]
+cli = [
+    { name = "h5py" },
+    { name = "typer" },
 ]
 cuda = [
     { name = "jax", extra = ["cuda12"] },
@@ -200,7 +205,6 @@ dev = [
     { name = "pytest" },
     { name = "pytest-xdist" },
     { name = "ruff" },
-    { name = "tomli-w" },
     { name = "ty" },
 ]
 notebook = [
@@ -209,7 +213,6 @@ notebook = [
 test = [
     { name = "pytest" },
     { name = "pytest-xdist" },
-    { name = "tomli-w" },
 ]
 
 [package.metadata]
@@ -218,6 +221,7 @@ requires-dist = [
     { name = "arviz-base", marker = "extra == 'notebook'", specifier = ">=1.2.0" },
     { name = "arviz-plots", marker = "extra == 'notebook'", specifier = ">=1.2.0" },
     { name = "arviz-stats", extras = ["xarray"], marker = "extra == 'notebook'", specifier = ">=1.2.0" },
+    { name = "astrogwb", extras = ["io"], marker = "extra == 'cli'" },
     { name = "astrogwb", extras = ["io", "simulation"], marker = "extra == 'paper'" },
     { name = "astrogwb", extras = ["paper"], marker = "extra == 'notebook'" },
     { name = "blackjax", marker = "extra == 'blackjax'", specifier = ">=1.2" },
@@ -239,8 +243,10 @@ requires-dist = [
     { name = "pyknf", marker = "extra == 'paper'", specifier = ">=0.6,<0.8" },
     { name = "ripplegw", specifier = ">=0.3.1" },
     { name = "scipy", marker = "extra == 'notebook'", specifier = ">=1.10" },
+    { name = "tomli-w", specifier = ">=1.2" },
+    { name = "typer", marker = "extra == 'cli'", specifier = ">=0.16" },
 ]
-provides-extras = ["cuda", "io", "simulation", "tpu", "paper", "notebook", "blackjax"]
+provides-extras = ["cuda", "io", "cli", "simulation", "tpu", "paper", "notebook", "blackjax"]
 
 [package.metadata.requires-dev]
 cluster = [
@@ -252,14 +258,12 @@ dev = [
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "ruff", specifier = ">=0.16.1" },
-    { name = "tomli-w", specifier = ">=1.2" },
     { name = "ty", specifier = ">=0.0.69" },
 ]
 notebook = [{ name = "marimo", specifier = ">=0.25.1" }]
 test = [
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
-    { name = "tomli-w", specifier = ">=1.2" },
 ]
 
 [[package]]
