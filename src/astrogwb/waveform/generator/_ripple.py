@@ -337,7 +337,7 @@ def check_sources(approximant: str, source_parameters: Mapping[str, ArrayLike]) 
     drive a Python exception, and converting one to decide would sync the host
     on every batch. Call it once on a concrete catalog -- or on one eager draw
     from a population, via
-    :func:`~astrogwb.inference.validate_source_model` -- before handing the
+    :func:`~astrogwb.waveform.validation.validate_source_model` -- before handing the
     model to inference.
 
     Raises:
@@ -493,6 +493,28 @@ def build_stokes_kernel(
         return polarization_stokes(plus, cross)
 
     return full_polarization_stokes
+
+
+def build_polarization_kernel(
+    approximant: str,
+    reference_frequency: float,
+    *,
+    use_taper_in_tidal_corrections: bool = True,
+) -> Callable[[jax.Array, Mapping[str, jax.Array]], tuple[jax.Array, jax.Array]]:
+    """Return a vmapped ``(frequencies, events) -> (plus, cross)`` evaluator, each ``(N, F)``.
+
+    Every model, amplitude-phase ones included, evaluates its full complex
+    polarizations here; :func:`build_stokes_kernel`'s amplitude-only shortcut
+    drops the phase, which the polarizations keep. Not jitted, and NaN-guarded,
+    as :func:`build_power_kernel` is.
+    """
+    return _polarization_evaluator(
+        _build_ripple_waveform(
+            approximant,
+            reference_frequency,
+            use_taper_in_tidal_corrections=use_taper_in_tidal_corrections,
+        )
+    )
 
 
 def _build_ripple_waveform(

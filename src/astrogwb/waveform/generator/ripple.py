@@ -12,6 +12,7 @@ from numpy.typing import ArrayLike
 from astrogwb.frequency import frequency_grid
 from astrogwb.utils import require_x64
 from astrogwb.waveform.generator._ripple import (
+    build_polarization_kernel,
     build_power_kernel,
     build_stokes_kernel,
     check_sources,
@@ -51,6 +52,7 @@ class RippleGenerator(PolarizationPowerGenerator):
         "_frequencies",
         "_kernel",
         "_n_samples",
+        "_polarization_kernel",
         "_segment_duration",
         "_stokes_kernel",
     )
@@ -58,6 +60,9 @@ class RippleGenerator(PolarizationPowerGenerator):
     _frequencies: np.ndarray
     _kernel: Callable[[jax.Array, Mapping[str, jax.Array]], jax.Array]
     _stokes_kernel: Callable[[jax.Array, Mapping[str, jax.Array]], jax.Array]
+    _polarization_kernel: Callable[
+        [jax.Array, Mapping[str, jax.Array]], tuple[jax.Array, jax.Array]
+    ]
     _n_samples: int | None
     _segment_duration: float | None
 
@@ -109,6 +114,13 @@ class RippleGenerator(PolarizationPowerGenerator):
             self,
             "_stokes_kernel",
             build_stokes_kernel(
+                metadata.approximant, metadata.reference_frequency, **kernel_options
+            ),
+        )
+        object.__setattr__(
+            self,
+            "_polarization_kernel",
+            build_polarization_kernel(
                 metadata.approximant, metadata.reference_frequency, **kernel_options
             ),
         )
@@ -251,6 +263,18 @@ class RippleGenerator(PolarizationPowerGenerator):
         events = ripple_parameters(self.metadata.approximant, source_parameters)
         stokes = self._stokes_kernel(jnp.asarray(self._frequencies), events)
         return stokes[:, self._band, :]
+
+    @require_x64
+    def _generate_polarizations_batch(
+        self, source_parameters: Mapping[str, ArrayLike]
+    ) -> tuple[jax.Array, jax.Array]:
+        """Generate complex polarizations ``(sample, frequency)`` via Ripple.
+
+        The same grid and band as :meth:`_generate_batch`.
+        """
+        events = ripple_parameters(self.metadata.approximant, source_parameters)
+        plus, cross = self._polarization_kernel(jnp.asarray(self._frequencies), events)
+        return plus[:, self._band], cross[:, self._band]
 
     def __call__(
         self, source_parameters: Mapping[str, ArrayLike]

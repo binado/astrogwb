@@ -26,6 +26,7 @@ from jax.typing import ArrayLike
 __all__ = [
     "polarization_power",
     "polarization_stokes",
+    "quadrupolar_polarizations",
     "quadrupolar_stokes",
     "quadrupolar_stokes_factors",
 ]
@@ -106,6 +107,34 @@ def quadrupolar_stokes(amplitude: ArrayLike, inclination: ArrayLike) -> jax.Arra
     factors = quadrupolar_stokes_factors(jnp.cos(jnp.asarray(inclination)))
     stokes = jnp.asarray(amplitude)[None] ** 2 * factors[:, :, None]
     return jnp.swapaxes(stokes, 1, 2).astype(jnp.float64)
+
+
+def quadrupolar_polarizations(
+    amplitude: ArrayLike, inclination: ArrayLike
+) -> tuple[jax.Array, jax.Array]:
+    r"""Polarizations ``(n, F)`` of the quadrupolar :math:`(2, 2)` mode at zero phase.
+
+    :math:`h_+ = -\tfrac{1 + c^2}{2} A` and :math:`h_\times = i c A` with
+    :math:`c = \cos\iota`, the convention of :func:`quadrupolar_stokes`, whose
+    parameters these reduce to through :func:`polarization_stokes`. The orbital
+    phase of :math:`h_0` is set to zero: it cancels in every product
+    :math:`h^*_a h_b` of one source.
+
+    Parameters
+    ----------
+    amplitude:
+        :math:`A`, ``(n, F)``.
+    inclination:
+        :math:`\iota` in radians, ``(n,)``.
+
+    Returns
+    -------
+    tuple of jax.Array
+        :math:`(\tilde h_+, \tilde h_\times)`, each ``(n, F)`` complex128.
+    """
+    amplitude = jnp.asarray(amplitude).astype(jnp.complex128)
+    cosine = jnp.cos(jnp.asarray(inclination))[:, None]
+    return -0.5 * (1.0 + cosine**2) * amplitude, 1j * cosine * amplitude
 
 
 def quadrupolar_stokes_factors(cos_inclination: ArrayLike) -> jax.Array:
