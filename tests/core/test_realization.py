@@ -16,6 +16,7 @@ from astrogwb_tiny_pipeline import (
 )
 
 from astrogwb.simulators import (
+    BackgroundSimulator,
     DetectorRegistry,
     Realization,
     RealizationSimulator,
@@ -102,7 +103,7 @@ def test_kept_polarizations_give_the_fused_background(
     (tmp_path / BACKGROUND_FILE).unlink()
 
     reprojected = realization.background(
-        simulator=_simulator().background_simulator(NETWORKS),
+        simulator=BackgroundSimulator(NETWORKS, chunk_size=8),
     )
 
     assert POLARIZATION_FILE in _products(tmp_path)
@@ -260,7 +261,7 @@ def test_network_spectra_ensemble_reads_each_stored_network_spectrum(
     stored = Realization.open(ensemble / f"{SEED}-{index}").background()
     np.testing.assert_array_equal(
         triangle["spectral_density"][index],
-        stored.network("triangle").spectral_density,
+        stored.spectra["triangle"].spectral_density,
     )
 
 

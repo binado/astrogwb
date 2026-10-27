@@ -51,7 +51,7 @@ def test_network_data_gives_masked_bins_unit_scale(noise: DetectorNoise) -> None
     mask, scale = np.asarray(data["frequency_mask"]), np.asarray(data["scale"])
 
     np.testing.assert_array_equal(scale[~mask], 1.0)
-    np.testing.assert_array_equal(scale[mask], noise.network(NETWORK).scale[mask])
+    np.testing.assert_array_equal(scale[mask], noise.noise[NETWORK].scale[mask])
 
 
 def test_network_pair_data_pads_to_max_pairs_with_masked_rows(
@@ -76,7 +76,7 @@ def test_network_pair_data_keeps_the_noise_files_overlaps(
     )
 
     np.testing.assert_array_equal(
-        np.asarray(data["pair_overlap"])[:3], noise.network(NETWORK).pair_overlap
+        np.asarray(data["pair_overlap"])[:3], noise.noise[NETWORK].pair_overlap
     )
 
 

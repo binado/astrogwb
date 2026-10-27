@@ -99,8 +99,8 @@ def test_geometry_overrides_change_noise_orfs_and_psd_overrides_change_noise() -
         frequencies, geometry_registry, 1.0, network_names=["pair"]
     )
     assert not np.array_equal(
-        baseline.network("pair").pair_overlap,
-        geometry_noise.network("pair").pair_overlap,
+        baseline.noise["pair"].pair_overlap,
+        geometry_noise.noise["pair"].pair_overlap,
     )
 
     psd_registry = DetectorRegistry(
@@ -114,6 +114,6 @@ def test_geometry_overrides_change_noise_orfs_and_psd_overrides_change_noise() -
     )
     psd_noise = detector_noise(frequencies, psd_registry, 1.0, network_names=["pair"])
     assert not np.array_equal(
-        baseline.network("pair").effective_psd,
-        psd_noise.network("pair").effective_psd,
+        baseline.noise["pair"].effective_psd,
+        psd_noise.noise["pair"].effective_psd,
     )

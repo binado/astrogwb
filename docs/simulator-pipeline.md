@@ -68,7 +68,7 @@ The product is computed through the Stokes contraction
 polarization term. The observation time `T` comes from the population. The
 sum is never divided by the realized count. Each network then keeps its own
 rows, `(P_n, F)`, and their combined spectrum, `(F,)` (see below):
-`artifact.network(name)` returns both. A network sharing detectors with
+`artifact.spectra[name]` returns both. A network sharing detectors with
 another costs no extra projection.
 
 Detectors are stored sorted, whatever order they are declared in, so a
@@ -203,9 +203,8 @@ simulator = RealizationSimulator(
 realizations = simulate_ensemble(simulator, "root/", 41, 100)
 ```
 
-`RealizationSimulator` builds each stage simulator the first time it is
-needed and reuses it, so an ensemble compiles each stage once and a fully
-cached ensemble builds none. `Realization.population()`, `.waveforms()` and
+`RealizationSimulator` builds the stage simulators of each realization it
+runs, so a stage that is already recorded builds none. `Realization.population()`, `.waveforms()` and
 `.background()` read a stage's product. When the product is missing, pass the
 stage simulators to regenerate it.
 
@@ -223,12 +222,12 @@ runs every stage whose metadata is given:
 # Fused: manifest, sources and background
 astrogwb simulate root/41-0 --population-metadata population.toml --seed 41 \
     --index 0 --waveform-metadata waveform.toml \
-    --detector-config config/detectors.toml
+    --background --detector-config config/detectors.toml
 
 # Stage by stage into the same directory
 astrogwb simulate draw/ --population-metadata population.toml --seed 41
 astrogwb simulate draw/ --waveform-metadata waveform.toml --keep-polarizations
-astrogwb simulate draw/ --detector-config config/detectors.toml
+astrogwb simulate draw/ --background --detector-config config/detectors.toml
 
 # The ensemble's detector noise, from one of its realizations
 astrogwb noise root/41-0 root/detector_noise.h5 \
@@ -237,8 +236,8 @@ astrogwb noise root/41-0 root/detector_noise.h5 \
 
 The population and waveform files hold the fields of `PopulationMetadata` and
 `WaveformMetadata` at their top level. Repeat `--detector-config PATH` to merge
-registry layers in argument order. Supplying it to `simulate` enables
-background simulation; the background manifest records each network's detector
+registry layers in argument order. `simulate` runs the background stage with
+`--background`, which goes with `--detector-config`; the background manifest records each network's detector
 pairs. Noise uses the same option and selects the networks recorded in the
 realization. The supplied registry is treated as frozen. Readers trust the
 files they open and preserve the recorded artifact identity. Changing a
@@ -275,7 +274,7 @@ initializes.
 | `astrogwb.paper.ensemble.network_spectra_ensemble`, `NetworkSpectra` | `astrogwb.simulators.network_spectra_ensemble`, `NetworkSpectra` |
 | `scripts/write_ensemble_configs.py`, `paper_networks`, `ensemble_metadata` | `config/detectors.toml` and `config/ensembles/<name>/`, edited by hand |
 | ensemble caches of #389 and #390 (`<cache>/ensembles/<key>/<seed>-<i>/`) | not read; regenerate them with the workflow |
-| one background over the detector union; `BackgroundArtifact.pair_spectra(network)`, `.detectors`, `.pairs` | per-network spectra; `BackgroundArtifact.network(name)`, `.network_names` |
+| one background over the detector union; `BackgroundArtifact.pair_spectra(network)`, `.detectors`, `.pairs` | per-network spectra; `BackgroundArtifact.spectra[name]`, `.pairs[name]` |
 | `Realization.detectors` | `Realization.networks` |
 | `--detector-config` with network and detector layers | repeated `--detector-config PATH` options |
 | `ensure_reference_catalog`, `settings_digest`, `noise_digest`, posterior grid caches | `scripts/draw_reference_catalog.py`; grids are computed on every run |

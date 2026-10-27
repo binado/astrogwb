@@ -523,7 +523,7 @@ def _(frequencies, observation_time, redshift_nodes, reference_catalog_path):
 
 
 @app.cell
-def _(data_seed, ensemble_root, frequencies, network_names, registry):
+def _(data_seed, ensemble_root, frequencies, network_names):
     # Draw 0 of `data_seed`, shared with cosmology_grid_posteriors.py.
     _drawn = network_spectra_ensemble(ensemble_root, data_seed, 1, network_names)
     observed = {}

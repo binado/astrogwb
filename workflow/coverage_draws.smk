@@ -139,7 +139,7 @@ rule simulate:
             --population-metadata {input.population:q} \
             --seed {wildcards.seed} --index {wildcards.index} \
             --waveform-metadata {input.waveform:q} \
-            --detector-config {input.detectors:q} \
+            --background --detector-config {input.detectors:q} \
             --no-keep-sources --chunk-size 8192 --source-chunk-size 65536 \
             --cpu-threads {threads} > {log:q} 2>&1
         """

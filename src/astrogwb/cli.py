@@ -2,28 +2,27 @@
 
 astrogwb simulate DIRECTORY reads population and waveform metadata, then
 runs every configured stage. Repeat --detector-config PATH to merge detector
-registry layers in argument order. Supplying detector config enables background
-simulation. Each run adds the stages it is given to the directory, with the
-settings the directory already records: a later run may give only
---waveform-metadata or --detector-config, and a stage with no settings given is
-left as recorded. --seed goes with --population-metadata, and the
+registry layers in argument order; --background runs the background stage with
+that registry, and the two go together. Each run adds the stages it is given to
+the directory, with the settings the directory already records: a later run may
+give only --waveform-metadata or --background, and a stage with no settings
+given is left as recorded. --seed goes with --population-metadata, and the
 sources are written unless --no-keep-sources, and the polarizations only
 with --keep-polarizations. For example::
 
     astrogwb simulate ensemble/41-0 --population-metadata population.toml \\
         --seed 41 --index 0 --waveform-metadata waveform.toml \\
-        --detector-config config/detectors.toml
+        --background --detector-config config/detectors.toml
 
 The registry contains [detectors.<name>] definitions and [networks]
-memberships. Background manifests record network names only. Noise generation
-also requires the registry::
+memberships. Background manifests record each network's detector pairs. Noise
+generation also requires the registry::
 
     astrogwb noise ensemble/41-0 ensemble/detector_noise.h5 \\
         --detector-config config/detectors.toml
 
-Readers trust the supplied frozen registry and preserve the recorded artifact
-identity without checking registry compatibility. Changing the registry
-requires regenerating affected outputs. Runtime settings (--platform,
+Readers trust the files they open and preserve the recorded artifact identity.
+Changing the registry requires regenerating affected outputs. Runtime settings (--platform,
 --cpu-threads) are applied before the JAX backend initializes.
 """
 
@@ -98,6 +97,9 @@ def simulate(
         Path | None,
         typer.Option(exists=True, dir_okay=False, help="Waveform metadata TOML."),
     ] = None,
+    background: Annotated[
+        bool, typer.Option(help="Run the background stage (with --detector-config).")
+    ] = False,
     detector_config: Annotated[list[Path] | None, DETECTOR_CONFIG_OPTION] = None,
     keep_sources: Annotated[
         bool, typer.Option(help="Write source_parameters.h5.")
@@ -122,6 +124,11 @@ def simulate(
         raise typer.BadParameter(
             "--seed and --population-metadata go together", param_hint="--seed"
         )
+    if background != bool(detector_config):
+        raise typer.BadParameter(
+            "--background and --detector-config go together",
+            param_hint="--background",
+        )
     from astrogwb.detector.config import load_detector_config
     from astrogwb.simulators import PopulationMetadata, simulate_realization
     from astrogwb.waveform import WaveformMetadata
@@ -138,9 +145,7 @@ def simulate(
             if waveform_metadata is None
             else WaveformMetadata.model_validate(_read_toml(waveform_metadata))
         ),
-        background=None
-        if not detector_config
-        else load_detector_config(detector_config),
+        background=load_detector_config(detector_config) if detector_config else None,
         seed=seed,
         index=index,
         keep_sources=keep_sources,
@@ -153,8 +158,6 @@ def simulate(
         f"realization {realization.id}: {realization.count} sources, "
         f"{', '.join(products) or 'no products'} -> {directory}"
     )
-    if not detector_config:
-        typer.echo("no --detector-config: background left as recorded")
 
 
 @app.command()
@@ -187,6 +190,6 @@ def noise(
         background.frequencies,
         registry,
         recorded.population_metadata.observation_time,
-        network_names=background.network_names,
+        network_names=tuple(background.spectra),
     ).write(output)
-    typer.echo(f"noise of {', '.join(background.network_names)} -> {output}")
+    typer.echo(f"noise of {', '.join(background.spectra)} -> {output}")

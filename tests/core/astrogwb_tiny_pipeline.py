@@ -44,7 +44,7 @@ def assert_same_spectra(
     assert actual.spectra.keys() == expected.spectra.keys()
     for name, spectrum in expected.spectra.items():
         for field, values in spectrum._asdict().items():
-            np.testing.assert_array_equal(getattr(actual.network(name), field), values)
+            np.testing.assert_array_equal(getattr(actual.spectra[name], field), values)
 
 
 def population_metadata(observation_time: float = 1e-4) -> PopulationMetadata:

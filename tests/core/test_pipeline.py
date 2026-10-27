@@ -119,7 +119,7 @@ def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum(
         }
         part = dataclasses.replace(realization, source_parameters=sources)
         power = np.asarray(generator.generate_batch(sources)).sum(axis=1)
-        spectra = background(waveforms(part)).network("triangle").pair_spectral_density
+        spectra = background(waveforms(part)).spectra["triangle"].pair_spectral_density
         ratios.append(spectra / (power / realization.observation_seconds))
     ratios = np.asarray(ratios)
     expected = np.stack(
@@ -152,7 +152,7 @@ def test_a_staged_realization_reads_back_the_fused_background(
     assert_same_spectra(staged, fused)
     assert staged.key() == fused.key()
     assert staged.count == population.count
-    assert staged.network_names == tuple(sorted(NETWORKS.networks))
+    assert tuple(staged.spectra) == tuple(sorted(NETWORKS.networks))
 
 
 def test_an_empty_realization_has_zero_spectra(
@@ -165,7 +165,7 @@ def test_an_empty_realization_has_zero_spectra(
 
     assert empty.count == 0
     for name in NETWORKS.networks:
-        pairs, combined = background.network(name)
+        pairs, combined = background.spectra[name]
         assert pairs.shape == (len(NETWORKS.pairs(name)), waveforms.frequencies.size)
         assert not np.any(pairs) and not np.any(combined)
 
@@ -191,8 +191,8 @@ def test_each_network_holds_its_rows_of_a_single_network_projection(
     alone = BackgroundSimulator(alone_registry, chunk_size=8)(waveforms(population))
 
     np.testing.assert_array_equal(
-        projected.network(name).pair_spectral_density,
-        alone.network(name).pair_spectral_density,
+        projected.spectra[name].pair_spectral_density,
+        alone.spectra[name].pair_spectral_density,
     )
 
 
@@ -200,7 +200,7 @@ def test_each_network_holds_its_rows_of_a_single_network_projection(
 def test_the_network_spectrum_combines_its_pair_spectra(
     projected: BackgroundArtifact, name: str
 ) -> None:
-    pairs, combined = projected.network(name)
+    pairs, combined = projected.spectra[name]
 
     np.testing.assert_array_equal(
         combined,
@@ -231,12 +231,12 @@ def test_custom_detector_geometry_is_used_for_projection(
     )
     moved = (
         BackgroundSimulator(registry)(waveforms(population))
-        .network("custom")
+        .spectra["custom"]
         .pair_spectral_density
     )
     original = (
         BackgroundSimulator(reference)(waveforms(population))
-        .network("custom")
+        .spectra["custom"]
         .pair_spectral_density
     )
     assert not np.array_equal(moved, original)
@@ -258,8 +258,8 @@ def test_psd_override_preserves_pair_spectra_and_changes_combination(
         },
         networks=mixed.networks,
     )
-    baseline = BackgroundSimulator(mixed)(waveforms(population)).network("mixed")
-    overridden = BackgroundSimulator(changed)(waveforms(population)).network("mixed")
+    baseline = BackgroundSimulator(mixed)(waveforms(population)).spectra["mixed"]
+    overridden = BackgroundSimulator(changed)(waveforms(population)).spectra["mixed"]
     np.testing.assert_array_equal(
         baseline.pair_spectral_density, overridden.pair_spectral_density
     )

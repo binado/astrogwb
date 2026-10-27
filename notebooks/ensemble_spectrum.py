@@ -560,7 +560,7 @@ def _():
 
 
 @app.cell
-def _(ensemble_root, network_names, num_draws, seed, registry):
+def _(ensemble_root, network_names, num_draws, seed):
     _ensembles = network_spectra_ensemble(ensemble_root, seed, num_draws, network_names)
     frequencies = np.asarray(_ensembles[0]["frequencies"], dtype=np.float64)
     # Each network's spectra (M, F), by network name.

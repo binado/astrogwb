@@ -90,10 +90,6 @@ class DetectorNoise:
     frequencies: NDArray[np.float64]
     noise: dict[str, NetworkNoise]
 
-    def network(self, name: str) -> NetworkNoise:
-        """The noise of the network ``name``."""
-        return self.noise[name]
-
     def write(self, path: str | Path) -> Path:
         """Write the noise to the HDF5 file ``path``, atomically.
 

@@ -632,7 +632,7 @@ def _(frequencies, observation_time, redshift_nodes, reference_catalog_path):
 
 
 @app.cell
-def _(data_seed, ensemble_root, frequencies, injection, network_names, registry):
+def _(data_seed, ensemble_root, frequencies, injection, network_names):
     # Draw 0 of `data_seed`: the key of the sky-averaged injection, so the
     # networks record the same sources it summed.
     _drawn = network_spectra_ensemble(ensemble_root, data_seed, 1, network_names)

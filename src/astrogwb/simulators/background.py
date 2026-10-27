@@ -270,15 +270,6 @@ class BackgroundArtifact:
     identity: str | None = None
     chunk_size: int | None = None
 
-    @property
-    def network_names(self) -> tuple[str, ...]:
-        """The names of the networks, sorted."""
-        return tuple(self.spectra)
-
-    def network(self, name: str) -> NetworkSpectrum:
-        """The pair spectra ``(P_n, F)`` and network spectrum ``(F,)`` of ``name``."""
-        return self.spectra[name]
-
     def key(self) -> str:
         """The recorded background identity."""
         if self.identity is None:
@@ -287,7 +278,7 @@ class BackgroundArtifact:
 
     def table(self, registry: DetectorRegistry) -> dict[str, Any]:
         """The ``[background]`` table using the supplied registry."""
-        return background_table(self.waveform_key, registry, self.network_names)
+        return background_table(self.waveform_key, registry, tuple(self.spectra))
 
     def write(self, path: str | Path) -> Path:
         """Write the spectra to the HDF5 file ``path``, atomically.

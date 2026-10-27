@@ -34,7 +34,7 @@ def test_noise_metadata_stores_network_pairs_and_round_trips(
     assert recorded.metadata.pairs == {"pair": (("R1", "S1"),)}
     assert "detectors" not in recorded.metadata.model_dump()
     np.testing.assert_array_equal(
-        recorded.network("pair").pair_overlap, noise.network("pair").pair_overlap
+        recorded.noise["pair"].pair_overlap, noise.noise["pair"].pair_overlap
     )
 
 

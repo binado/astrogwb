@@ -959,7 +959,6 @@ def _(
     injected_metadata,
     network_names,
     num_injections,
-    registry,
 ):
     _ensembles = network_spectra_ensemble(
         ensemble_root, ensemble_seed, num_injections, network_names

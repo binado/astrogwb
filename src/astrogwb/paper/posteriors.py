@@ -63,7 +63,7 @@ def network_data(
     """
     import jax.numpy as jnp
 
-    network = noise.network(name)
+    network = noise.noise[name]
     psd = network.effective_psd
     mask = (
         _band(noise, minimum_frequency, maximum_frequency)
@@ -114,7 +114,7 @@ def network_pair_data(
     """
     import jax.numpy as jnp
 
-    network = noise.network(name)
+    network = noise.noise[name]
     scale = network.pair_scale
     band = _band(noise, minimum_frequency, maximum_frequency)
     mask = band & np.isfinite(scale) & (scale > 0.0)
