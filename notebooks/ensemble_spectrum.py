@@ -5,7 +5,7 @@ app = marimo.App()
 
 with app.setup(hide_code=True):
     import os
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
     from pathlib import Path
 
     from astrogwb.paper.runtime import configure_runtime
@@ -42,6 +42,10 @@ with app.setup(hide_code=True):
         spectral_snr,
         spectral_snr_squared_per_log_frequency,
     )
+    from astrogwb.gwb.catalog import (
+        CatalogMetadata,
+        PolarizationPowerData,
+    )
     from astrogwb.gwb.importance import reference_catalog, reference_catalog_stem
     from astrogwb.inference import ImportanceGaussianLikelihood
     from astrogwb.inference import Network as LikelihoodNetwork
@@ -54,6 +58,11 @@ with app.setup(hide_code=True):
     )
     from astrogwb.paper.config.detectors import DetectorRegistry
     from astrogwb.paper.config.runs import CATALOGS_ROOT, FIGURES_DIR
+    from astrogwb.paper.ensemble import (
+        EnsembleRecord,
+        network_configuration,
+        network_spectra_ensemble,
+    )
     from astrogwb.paper.plotting import (
         DETECTOR_COMPARISON_LEGEND,
         DETECTOR_NETWORKS,
@@ -65,16 +74,10 @@ with app.setup(hide_code=True):
     )
     from astrogwb.populations import build_population
     from astrogwb.populations.metadata import PopulationMetadata
-    from astrogwb.simulators.core import batch_keys, load, write
-    from astrogwb.simulators.polarization_power import (
-        CatalogMetadata,
-        PolarizationPowerData,
-    )
-    from astrogwb.simulators.spectra import (
-        BackgroundSpectralDensityMetadata,
-        spectra_ensemble,
-    )
+    from astrogwb.simulators import DetectorConfiguration, batch_keys
+    from astrogwb.simulators import PopulationMetadata as RealizationMetadata
     from astrogwb.utils import years_to_seconds
+    from astrogwb.utils.io import load, write
 
     # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes.
     # Restore them so plotting behaves as expected after the imports above.
@@ -87,7 +90,8 @@ def _():
     # Ensemble spectra, SNR table and characteristic amplitudes
 
     The paper's spectrum figure and SNR tables, from one Poisson ensemble of
-    background spectra drawn with `IMRPhenomXAS_NRTidalv3`. For each paper network and
+    network realizations drawn with `IMRPhenomXAS_NRTidalv3`: every network
+    records the same catalogs, each through its own pairs and weights. For each paper network and
     several values of the lower band edge $f_{\min}$ it reports the SNR of every
     draw, summarized as the mean over draws, as LaTeX
     tables (one with the ET-COBA PSD for ET-$\Delta$, one with the ET-D PSD). The
@@ -96,8 +100,8 @@ def _():
     the draws. The same draws give the shot noise of a single realization about
     the mean.
 
-    The ensemble is cached one draw per file
-    (`astrogwb.simulators.spectra.spectra_ensemble`) under
+    The ensemble is cached one background per draw
+    (`astrogwb.paper.ensemble.network_spectra_ensemble`) under
     `default_cache_dir() / "ensembles"`, shared with
     `notebooks/shot_noise_coverage.py`, which uses the same record and seed
     as its injections. A single interactive draw lives in
@@ -160,8 +164,8 @@ def _():
     mo.md(r"""
     ## 2. Configuration
 
-    Setting `ASTROGWB_NOTEBOOK_SMOKE=1` swaps in a tiny ensemble with fixed
-    counts so the whole notebook runs in seconds.
+    Setting `ASTROGWB_NOTEBOOK_SMOKE=1` swaps in a tiny ensemble of short
+    observations so the whole notebook runs in seconds.
     """)
     return
 
@@ -194,26 +198,24 @@ def _():
         num_draws = 3
         chunk_size = 8
 
-    metadata = BackgroundSpectralDensityMetadata(
-        count="fixed" if SMOKE else "poisson",
-        num_events=64 if SMOKE else None,
-        observation_time=observation_time,
+    # Keep these settings in sync with shot_noise_coverage.py, which reads the
+    # same cached draws: fine spacing through the SNR peak, then a log tail
+    # for a 1024-point grid. A smoke run injects a short observation.
+    population = RealizationMetadata(
+        observation_time=1e-4 if SMOKE else observation_time,
         hyperparameters={**fiducials(root=ROOT_DIR)},
-        # Keep fine spacing through the SNR peak, then use a log tail for a
-        # 1024-point grid. Keep these settings in sync with shot_noise_coverage.py,
-        # which reads the same cached draws.
-        waveform=waveform_metadata(
-            root=ROOT_DIR,
-            approximant=approximant,
-            frequency_resolution=0.125,
-            turnover_frequency=100.0,
-            dlogf=0.01266,
-        ),
         population=population_metadata(
             root=ROOT_DIR,
             minimum_redshift=minimum_redshift,
             maximum_redshift=maximum_redshift,
         ),
+    )
+    waveform = waveform_metadata(
+        root=ROOT_DIR,
+        approximant=approximant,
+        frequency_resolution=0.125,
+        turnover_frequency=100.0,
+        dlogf=0.01266,
     )
     registry = detector_registry(root=ROOT_DIR)
 
@@ -240,6 +242,20 @@ def _():
     }
     coba_rows = DETECTOR_NETWORKS
     etd_rows = tuple((etd_swap.get(name, name), label) for name, label in coba_rows)
+    # Every row's network records the same draws. An ET-D row is its ET-COBA
+    # network's pairs, weighted with the ET-D noise curve.
+    _networks = {name: network_configuration(registry, name) for name, _ in coba_rows}
+    for _base, _swapped in etd_swap.items():
+        _networks[_swapped] = DetectorConfiguration(
+            detectors=_networks[_base].detectors,
+            psd_references={
+                detector: etd_psd if detector.startswith("E") else reference
+                for detector, reference in _networks[_base].psd_references.items()
+            },
+        )
+    metadata = EnsembleRecord(
+        population=population, waveform=waveform, networks=_networks
+    )
     return (
         BASE_DIR,
         ROOT_DIR,
@@ -288,7 +304,7 @@ def shot_noise_table(
     registry: DetectorRegistry,
     rows: Sequence[tuple[str, str]],
     frequencies: NDArray[np.float64],
-    draws: NDArray[np.float64],
+    draws: Mapping[str, NDArray[np.float64]],
     observation_time: float,
     minimum_frequency: float,
     maximum_frequency: float,
@@ -310,7 +326,8 @@ def shot_noise_table(
     rows
         ``(network name, row label)`` pairs, in row order.
     frequencies, draws
-        Frequency grid ``(F,)`` and the ensemble ``(M, F)``.
+        Frequency grid ``(F,)`` and each network's ensemble ``(M, F)``, by
+        network name.
     observation_time
         Observing time in years.
     minimum_frequency, maximum_frequency
@@ -322,11 +339,11 @@ def shot_noise_table(
         ``rho``, ``rho sd(eps)`` and its error, and the correlation, by row.
     """
     grid = jnp.asarray(frequencies)
-    mean = draws.mean(axis=0)
-    residual = (draws - mean) / np.where(mean > 0, mean, 1.0)
-    count = draws.shape[0]
     records = {}
     for name, label in rows:
+        mean = draws[name].mean(axis=0)
+        residual = (draws[name] - mean) / np.where(mean > 0, mean, 1.0)
+        count = draws[name].shape[0]
         geometry, sensitivities = registry.build_network(name)
         noise = jnp.asarray(effective_psd(grid, geometry, sensitivities))
         keep = np.asarray(
@@ -359,7 +376,7 @@ def snr_per_draw(
     registry: DetectorRegistry,
     rows: Sequence[tuple[str, str]],
     frequencies: NDArray[np.float64],
-    draws: NDArray[np.float64],
+    draws: Mapping[str, NDArray[np.float64]],
     observation_time: float,
     minimum_frequencies: Sequence[float],
     maximum_frequency: float,
@@ -373,7 +390,8 @@ def snr_per_draw(
     rows
         ``(network name, row label)`` pairs, in row order.
     frequencies, draws
-        Frequency grid ``(F,)`` and spectral densities ``(M, F)``.
+        Frequency grid ``(F,)`` and each network's spectral densities
+        ``(M, F)``, by network name.
     observation_time
         Observing time in years.
     minimum_frequencies
@@ -387,10 +405,10 @@ def snr_per_draw(
         Row label to SNRs of shape ``(len(minimum_frequencies), M)``.
     """
     grid = jnp.asarray(frequencies)
-    spectra = jnp.asarray(draws)
     seconds = years_to_seconds(observation_time)
     values: dict[str, NDArray[np.float64]] = {}
     for name, label in rows:
+        spectra = jnp.asarray(draws[name])
         geometry, sensitivities = registry.build_network(name)
         noise = jnp.asarray(effective_psd(grid, geometry, sensitivities))
         values[label] = np.stack(
@@ -468,7 +486,7 @@ def amplitude_curves(
     registry: DetectorRegistry,
     rows: Sequence[tuple[str, str]],
     frequencies: NDArray[np.float64],
-    draws: NDArray[np.float64],
+    draws: Mapping[str, NDArray[np.float64]],
     observation_time: float,
     minimum_frequency: float,
     maximum_frequency: float,
@@ -483,7 +501,9 @@ def amplitude_curves(
     rows
         ``(network name, row label)`` pairs.
     frequencies, draws
-        Frequency grid ``(F,)`` and spectral densities ``(M, F)``.
+        Frequency grid ``(F,)`` and each network's spectral densities
+        ``(M, F)``, by network name. :math:`h_c` is that of the first row's
+        network.
     observation_time
         Observing time in years.
     minimum_frequency, maximum_frequency
@@ -500,16 +520,18 @@ def amplitude_curves(
         of :math:`d\mathrm{SNR}^2/d\ln f` (``"density"``, ``(3, F'')``).
     """
     grid = jnp.asarray(frequencies)
-    spectra = jnp.asarray(draws)
     seconds = years_to_seconds(observation_time)
     band = np.asarray(
         frequency_mask(grid, fmin=minimum_frequency, fmax=maximum_frequency)
     )
     strain = np.percentile(
-        np.asarray(characteristic_strain(spectra, grid)), percentiles, axis=0
+        np.asarray(characteristic_strain(jnp.asarray(draws[rows[0][0]]), grid)),
+        percentiles,
+        axis=0,
     )
     curves = {}
     for name, _ in rows:
+        spectra = jnp.asarray(draws[name])
         geometry, sensitivities = registry.build_network(name)
         noise = jnp.asarray(effective_psd(grid, geometry, sensitivities))
         keep = band & np.isfinite(np.asarray(noise)) & (np.asarray(noise) > 0.0)
@@ -616,19 +638,23 @@ def _():
     mo.md(r"""
     ## 3. Draw the ensemble
 
-    The Poisson ensemble, one cached file per draw.
+    The Poisson ensemble, one cached background per draw.
     """)
     return
 
 
 @app.cell
 def _(chunk_size, ensemble_dir, metadata, num_draws, seed):
-    _ensemble = spectra_ensemble(
+    _ensembles = network_spectra_ensemble(
         metadata, seed, num_draws, ensemble_dir, chunk_size=chunk_size
     )
-    frequencies = np.asarray(_ensemble["frequencies"], dtype=np.float64)
-    draws = _ensemble["spectral_density"]
-    mean = draws.mean(axis=0)
+    frequencies = np.asarray(_ensembles[0]["frequencies"], dtype=np.float64)
+    # Each network's spectra (M, F), by network name.
+    draws = {
+        _name: _ensemble["spectral_density"]
+        for _name, _ensemble in zip(metadata.networks, _ensembles, strict=True)
+    }
+    mean = {_name: _draws.mean(axis=0) for _name, _draws in draws.items()}
     return draws, frequencies, mean
 
 
@@ -703,7 +729,7 @@ def _(
         registry,
         coba_rows,
         frequencies,
-        mean[None, :],
+        {_name: _mean[None, :] for _name, _mean in mean.items()},
         observation_time,
         minimum_frequencies,
         maximum_frequency,
@@ -991,7 +1017,7 @@ def _(SMOKE, ROOT_DIR, approximant, metadata, minimum_frequencies):
         scan_redshifts = np.geomspace(0.05, 3.0, 5)
         scan_chunk_size = 64
 
-    scan_hyperparameters = {**metadata.hyperparameters}
+    scan_hyperparameters = {**metadata.population.hyperparameters}
     reference_redshift = redshift_at_distance(
         reference_distance_mpc,
         scan_hyperparameters["H0"],
@@ -1009,7 +1035,7 @@ def _(SMOKE, ROOT_DIR, approximant, metadata, minimum_frequencies):
             frequency_resolution=0.02,
             turnover_frequency=None,
         ),
-        population=metadata.population,
+        population=metadata.population.population,
         fiducials=scan_hyperparameters,
         num_samples=scan_num_samples,
         sampling="sobol",
@@ -1373,10 +1399,10 @@ def _():
     mo.md(r"""
     ### Check against the ensemble
 
-    At the window edge of the ensemble, the model's sky-averaged $\rho s$ (a
+    At the window edge of the ensemble, the model's response-aware $\rho s$ (a
     property of the expected spectrum) should match the
-    $\rho\,\mathrm{sd}(\epsilon)$ measured on the sky-averaged draws of
-    section 8; the response-aware $\rho s$ of the scan is beside it. The
+    $\rho\,\mathrm{sd}(\epsilon)$ measured on the network draws of
+    section 8; the sky-averaged $\rho s$ of the scan is beside it. The
     optimum shows how much the choice of edge matters for each network.
     """)
     return

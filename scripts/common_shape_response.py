@@ -47,6 +47,7 @@ from astrogwb.detector import (
     sample_network_response,
 )
 from astrogwb.frequency import frequency_mask
+from astrogwb.gwb.catalog import CatalogMetadata
 from astrogwb.gwb.importance import (
     reference_catalog,
     reference_catalog_stem,
@@ -61,8 +62,8 @@ from astrogwb.paper.config import (
 from astrogwb.paper.config.runs import CATALOGS_ROOT
 from astrogwb.paper.plotting import DETECTOR_NETWORKS
 from astrogwb.populations import build_population
-from astrogwb.simulators.core import batch_keys, load, write
-from astrogwb.simulators.polarization_power import CatalogMetadata
+from astrogwb.simulators import batch_keys
+from astrogwb.utils.io import load, write
 
 # The configuration of notebooks/shot_noise_coverage.py.
 APPROXIMANT = "IMRPhenomXAS_NRTidalv3"

@@ -91,6 +91,20 @@ class PolarizationPowerGenerator:
         """
         return _chunked(self._generate_stokes_batch, source_parameters, chunk_size)
 
+    def generate_polarizations_batch(
+        self, source_parameters: Mapping[str, ArrayLike]
+    ) -> tuple[jax.Array, jax.Array]:
+        r"""Generate the complex polarizations of a catalog, each ``(N, F)``.
+
+        :math:`(\tilde h_+, \tilde h_\times)` in each source's radiation frame:
+        they depend on the intrinsic parameters, the inclination and the
+        coalescence phase, never on the sky position or the polarization angle,
+        which enter through the antenna patterns. Their
+        :func:`~astrogwb.waveform.polarization_power.polarization_stokes` is
+        :meth:`generate_stokes_batch`'s output. Trace-safe.
+        """
+        return self._generate_polarizations_batch(source_parameters)
+
     def _generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
         """Every source in one vectorized pass; what a concrete generator implements."""
         del source_parameters
@@ -100,6 +114,13 @@ class PolarizationPowerGenerator:
         self, source_parameters: Mapping[str, ArrayLike]
     ) -> jax.Array:
         """The Stokes parameters of every source in one pass, ``(4, F, N)``."""
+        del source_parameters
+        raise NotImplementedError
+
+    def _generate_polarizations_batch(
+        self, source_parameters: Mapping[str, ArrayLike]
+    ) -> tuple[jax.Array, jax.Array]:
+        """The polarizations of every source in one pass, each ``(N, F)``."""
         del source_parameters
         raise NotImplementedError
 

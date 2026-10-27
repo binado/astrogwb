@@ -44,6 +44,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from astrogwb.detector import sample_network_response
+from astrogwb.gwb.catalog import CatalogMetadata
 from astrogwb.inference import ImportanceGaussianLikelihood, Network, shot_noise_modes
 from astrogwb.paper.cache import default_cache_dir
 from astrogwb.paper.config import (
@@ -54,15 +55,15 @@ from astrogwb.paper.config import (
     waveform_metadata,
 )
 from astrogwb.paper.config.runs import CATALOGS_ROOT
-from astrogwb.paper.plotting import DETECTOR_NETWORKS
-from astrogwb.paper.posteriors import (
-    ensure_reference_catalog,
-    injection_spectrum,
-    network_data,
+from astrogwb.paper.ensemble import (
+    EnsembleRecord,
+    network_configuration,
+    network_spectra_ensemble,
 )
+from astrogwb.paper.plotting import DETECTOR_NETWORKS
+from astrogwb.paper.posteriors import ensure_reference_catalog, network_data
 from astrogwb.populations import build_population
-from astrogwb.simulators.polarization_power import CatalogMetadata
-from astrogwb.simulators.spectra import BackgroundSpectralDensityMetadata
+from astrogwb.simulators import PopulationMetadata as RealizationMetadata
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "notebooks"))
 import cosmology_grid_posteriors as cosmology
@@ -78,8 +79,8 @@ H0_OMEGA_AXES = {"H0": (59.0, 76.5, 351), "Omega_m": (0.2856, 0.3336, 41)}
 GRID_CHUNK_SIZE = 8
 
 
-def _setup() -> tuple[ImportanceGaussianLikelihood, NDArray, NDArray, dict]:
-    """The notebooks' amplitude-mode likelihood, data and grid."""
+def _setup() -> tuple[ImportanceGaussianLikelihood, dict[str, NDArray], NDArray, dict]:
+    """The notebooks' amplitude-mode likelihood, each network's data, and the grid."""
     params = fiducials()
     waveform = waveform_metadata()
     frequencies = np.asarray(waveform.build().frequencies)
@@ -97,21 +98,30 @@ def _setup() -> tuple[ImportanceGaussianLikelihood, NDArray, NDArray, dict]:
         num_samples=NUM_SAMPLES,
         sampling="sobol",
     )
-    injection_metadata = BackgroundSpectralDensityMetadata(
-        count="poisson",
-        num_events=None,
-        observation_time=OBSERVATION_TIME,
-        hyperparameters={**params},
+    registry = detector_registry()
+    injection = EnsembleRecord(
+        population=RealizationMetadata(
+            observation_time=OBSERVATION_TIME,
+            hyperparameters={**params},
+            population=population,
+        ),
         waveform=waveform,
-        population=population,
+        networks={
+            name: network_configuration(registry, name) for name, _ in DETECTOR_NETWORKS
+        },
     )
-    cache_dir = default_cache_dir() / "posteriors"
-    observed, _, _ = injection_spectrum(
-        injection_metadata,
+    # Draw 0 of DATA_SEED: one catalog, as each network records it.
+    drawn = network_spectra_ensemble(
+        injection,
         DATA_SEED,
-        cache_dir / f"injection_{injection_metadata.key()}_{DATA_SEED}.npz",
+        1,
+        default_cache_dir() / "posteriors" / "network_injections",
         chunk_size=16_384,
     )
+    observed = {
+        name: np.asarray(data["spectral_density"][0])
+        for name, data in zip(injection.networks, drawn, strict=True)
+    }
     catalog = ensure_reference_catalog(
         catalog_metadata, CATALOG_SEED, CATALOGS_ROOT, chunk_size=4096
     )
@@ -125,7 +135,7 @@ def _setup() -> tuple[ImportanceGaussianLikelihood, NDArray, NDArray, dict]:
         shot_noise="amplitude",
         observation_time=OBSERVATION_TIME,
     )
-    return likelihood, np.asarray(observed), frequencies, params
+    return likelihood, observed, frequencies, params
 
 
 def _whitened(
@@ -353,7 +363,7 @@ def main() -> None:
         else:
             network = Network(network.scale, network.mask, network.relative_variance)
         bound = dataclasses.replace(
-            variant_likelihood, observed=jnp.asarray(observed), network=network
+            variant_likelihood, observed=jnp.asarray(observed[name]), network=network
         )
         return madau.ridge_grid(
             bound,

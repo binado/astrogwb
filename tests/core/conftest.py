@@ -34,7 +34,7 @@ from astrogwb_mock_population import (
     load_mock_population,
 )
 
-from astrogwb.simulators.polarization_power import (
+from astrogwb.gwb.catalog import (
     CatalogMetadata,
     PolarizationPowerData,
 )

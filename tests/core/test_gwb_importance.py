@@ -17,6 +17,10 @@ from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import luminosity_distance
 from astrogwb.distributions.mass import MaxOfTwoUniformsDistribution
 from astrogwb.distributions.rates import madau_dickinson_rate, total_merger_rate
+from astrogwb.gwb.catalog import (
+    CatalogMetadata,
+    polarization_power_data,
+)
 from astrogwb.gwb.importance import (
     EFFECTIVE_INCLINATION,
     INCLINATION_SECOND_MOMENT,
@@ -29,11 +33,7 @@ from astrogwb.gwb.importance import (
 from astrogwb.inference import ImportanceGaussianLikelihood
 from astrogwb.populations import PopulationMetadata, build_population, joint_model
 from astrogwb.populations.evaluation import evaluate_sources, sample_sources
-from astrogwb.simulators.core import batch_keys
-from astrogwb.simulators.polarization_power import (
-    CatalogMetadata,
-    polarization_power_data,
-)
+from astrogwb.simulators import batch_keys
 from astrogwb.utils import gauss_legendre_nodes_weights
 from astrogwb.waveform import WaveformMetadata
 from astrogwb.waveform.generator.analytical import inclination_factor

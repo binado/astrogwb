@@ -19,16 +19,16 @@ fmt:
 # -- ty resolves imports against the environment, and src/astrogwb/paper,
 # scripts/ and tests/paper all import the `notebook` extra's stack.
 typecheck:
-    uv run --extra notebook --extra blackjax --group dev ty check
+    uv run --extra notebook --extra blackjax --extra cli --group dev ty check
 
 # The core suite installs astrogwb WITHOUT the `paper` extra, so a core test
 # that reaches across the boundary fails here rather than passing by accident
-# on a developer's fully-synced venv. `io` is the one extra core owns.
+# on a developer's fully-synced venv. `io` and `cli` are the extras core owns.
 
 # Core library tests.
 test-core:
     uv run --frozen --isolated --no-default-groups \
-        --extra io --group test \
+        --extra cli --group test \
         pytest tests/core -m "not integration"
 
 # Paper application tests: configuration, CLI, runtime, plotting.
@@ -45,7 +45,7 @@ test-paper:
 # The second line is the paper half: its integration-marked tests.
 test-integration:
     uv run --frozen --isolated --no-default-groups \
-        --extra io --extra simulation --extra blackjax --group test \
+        --extra cli --extra simulation --extra blackjax --group test \
         pytest tests/core -m integration
     uv run --frozen --isolated --no-default-groups \
         --extra notebook --group test \

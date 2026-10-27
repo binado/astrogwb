@@ -47,7 +47,10 @@ from astrogwb.constants import MPC_IN_SECONDS, SOLAR_MASS_IN_SECONDS
 from astrogwb.frequency import frequency_grid
 from astrogwb.utils import require_x64
 from astrogwb.waveform.generator.base import PolarizationPowerGenerator
-from astrogwb.waveform.polarization_power import quadrupolar_stokes
+from astrogwb.waveform.polarization_power import (
+    quadrupolar_polarizations,
+    quadrupolar_stokes,
+)
 
 __all__ = [
     "AnalyticInspiralGenerator",
@@ -326,6 +329,23 @@ class AnalyticInspiralGenerator(PolarizationPowerGenerator):
         gives the amplitude
         :func:`~astrogwb.waveform.polarization_power.quadrupolar_stokes` needs.
         """
+        return quadrupolar_stokes(*self._face_on_amplitude(source_parameters))
+
+    def _generate_polarizations_batch(
+        self, source_parameters: Mapping[str, ArrayLike]
+    ) -> tuple[jax.Array, jax.Array]:
+        """Quadrupolar polarizations ``(N, F)`` of the closed form, at zero phase.
+
+        The stationary-phase phase is not modelled, so the polarizations carry
+        the amplitude and inclination dependence only; a source's phase cancels
+        from its own cross-powers.
+        """
+        return quadrupolar_polarizations(*self._face_on_amplitude(source_parameters))
+
+    def _face_on_amplitude(
+        self, source_parameters: Mapping[str, ArrayLike]
+    ) -> tuple[jax.Array, jax.Array]:
+        """The amplitude ``(N, F)``, :math:`2 A^2` being the face-on power, and the inclination."""
         prepared_parameters = {
             name: jnp.asarray(values) for name, values in source_parameters.items()
         }
@@ -337,7 +357,7 @@ class AnalyticInspiralGenerator(PolarizationPowerGenerator):
             {**prepared_parameters, "inclination": jnp.zeros_like(inclination)},
             alpha=self.metadata.alpha,
         )
-        return quadrupolar_stokes(jnp.sqrt(face_on / 2.0), inclination)
+        return jnp.sqrt(face_on / 2.0), inclination
 
     def __call__(
         self, source_parameters: Mapping[str, ArrayLike]

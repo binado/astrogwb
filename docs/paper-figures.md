@@ -60,9 +60,11 @@ configuration flags for this analysis.
 
 ### Ensembles
 
-Every ensemble is a fixed-count set of independent draws (100 by default) at
-the fiducial hyperparameters, served from the checked spectrum cache or
-generated on a miss. Other defaults are seed 41, batch size 1024, one observing
+Every ensemble is a set of independent draws (100 by default) of the
+catalog-based forward model -- `R <P>` over `N` sources drawn at the fiducial
+hyperparameters (`astrogwb.gwb.catalog.draw_catalog`) -- served from the
+spectrum cache or generated on a miss. The Poisson option is a network
+realization from `astrogwb.paper.ensemble`. Other defaults are seed 41, batch size 1024, one observing
 year, the 2-2048 Hz band, and network `ET-2L-aligned-CE-Hanford`.
 
 - The **count sweep** uses `N = 2^12 ... 2^18` at `z_min = 0.35`.
@@ -143,8 +145,8 @@ uv run --extra notebook --group dev marimo check --strict notebooks/spectrum_snr
 ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/spectrum_snrs.py
 ```
 
-Smoke mode uses three draws, counts `[8, 16, 32]`, a 64-source fixed-count
-stand-in for the Poisson option, and no figure saving. A full run
+Smoke mode uses three draws, counts `[8, 16, 32]`, a short observation for the
+Poisson option, and no figure saving. A full run
 (`N = 2^18`, 100 draws, three cutoffs) is expensive the first time, until the
 spectrum cache is populated.
 

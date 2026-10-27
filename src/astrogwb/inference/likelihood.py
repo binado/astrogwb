@@ -37,6 +37,7 @@ from jax.typing import ArrayLike
 
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import luminosity_distance
+from astrogwb.gwb.catalog import CatalogMetadata, PolarizationPowerData
 from astrogwb.gwb.importance import (
     INCLINATION_SECOND_MOMENT,
     _node_power,
@@ -47,8 +48,6 @@ from astrogwb.gwb.importance import (
 )
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.populations._types import Population
-from astrogwb.simulators.polarization_power.metadata import CatalogMetadata
-from astrogwb.simulators.polarization_power.simulator import PolarizationPowerData
 
 from .compound_poisson import (
     AmplitudeDensityMethod,

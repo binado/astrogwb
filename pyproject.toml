@@ -34,12 +34,19 @@ dependencies = [
     # the dependency is declared rather than borrowed from a transitive edge
     # that gwmock-noise is free to drop.
     "pydantic>=2.11",
+    # Writes the TOML manifests of the simulator stages (astrogwb.simulators).
+    "tomli-w>=1.2",
 ]
+
+[project.scripts]
+astrogwb = "astrogwb.cli:app"
 
 [project.optional-dependencies]
 cuda = ["jax[cuda12]>=0.11.0"]
 # HDF5 catalog serialization is opt-in and the published wheel stays lean.
 io = ["h5py>=3.15"]
+# The `astrogwb` command line: simulator stages written to disk.
+cli = ["astrogwb[io]", "typer>=0.16"]
 # Only the integration cosmology cross-check needs it now: populations are
 # declared as NumPyro models here, so nothing in the library draws through a
 # gwmock graph any more.
@@ -83,8 +90,7 @@ build-backend = "uv_build"
 
 # Groups are tooling: never imported by shipped code, never part of a wheel.
 [dependency-groups]
-# tomli-w: fixtures write scratch config layers, which are TOML.
-test = ["pytest>=9.0.2", "pytest-xdist>=3.8.0", "tomli-w>=1.2"]
+test = ["pytest>=9.0.2", "pytest-xdist>=3.8.0"]
 # Notebook editor/runner (marimo). The `notebook` extra, by contrast, is the
 # library stack notebooks import.
 notebook = [
@@ -158,13 +164,10 @@ extend-select = ["TID"]
 
 [tool.ty.src]
 # Most of `scripts/` stays absent because fixture generators can import
-# heavyweight optional dependencies. The core spectrum simulator is
-# checked explicitly; Ruff continues to cover every
-# script.
+# heavyweight optional dependencies; Ruff continues to cover every script.
 include = [
     "src",
     "tests",
-    "scripts/simulate_spectra.py",
     "notebooks/cosmology_grid_posteriors.py",
     "notebooks/madau_dickinson_grid.py",
 ]

@@ -237,7 +237,7 @@ def population_metadata(
     """The record the default draw, ``[catalog]``, carries for its population.
 
     Keyword arguments override ``model_kwargs``, validated rather than trusted, so this
-    accessor and :class:`~astrogwb.simulators.polarization_power.CatalogMetadata` reach a record down
+    accessor and :class:`~astrogwb.gwb.catalog.CatalogMetadata` reach a record down
     the same path. An already-built record is re-derived with
     :meth:`~astrogwb.populations.PopulationMetadata.with_model_kwargs`.
 

@@ -7,8 +7,8 @@ with app.setup(hide_code=True):
     import os
     from collections.abc import Callable, Mapping, Sequence
     from dataclasses import dataclass
+    from dataclasses import replace as dataclass_replace
     from pathlib import Path
-    from typing import cast
 
     from astrogwb.paper.runtime import configure_runtime
 
@@ -53,15 +53,21 @@ with app.setup(hide_code=True):
     )
     from astrogwb.paper.config.detectors import DetectorRegistry
     from astrogwb.paper.config.runs import FIGURES_DIR
-    from astrogwb.paper.plotting import save_figures, use_paper_style
-    from astrogwb.simulators.core import batch_keys, load, write
-    from astrogwb.simulators.spectra import (
-        BackgroundSpectralDensityData,
-        BackgroundSpectralDensityMetadata,
-        BackgroundSpectralDensitySimulator,
-        stack_spectra,
+    from astrogwb.gwb.catalog import CatalogMetadata, draw_catalog
+    from astrogwb.paper.ensemble import (
+        EnsembleRecord,
+        network_configuration,
+        network_spectra_ensemble,
     )
+    from astrogwb.paper.plotting import save_figures, use_paper_style
+    from astrogwb.simulators import PopulationMetadata as RealizationMetadata
+    from astrogwb.simulators import batch_keys
+    from astrogwb.utils.io import content_key
     from astrogwb.utils import years_to_seconds
+
+    #: One ensemble: ``frequencies`` ``(F,)``, ``spectral_density`` ``(D, F)``
+    #: and ``n_events`` ``(D,)``.
+    type SpectrumData = dict[str, NDArray]
 
     # Statistics of a residual sample; each takes (samples, axis) so that the
     # bootstrap can evaluate every resample in one vectorized call.
@@ -227,25 +233,25 @@ def _():
         write_figures = False
 
     # Read the shared draw's waveform rather than copying its scientific settings.
-    base_metadata = BackgroundSpectralDensityMetadata(
-        count="fixed",
-        num_events=grid_counts[-1],
-        observation_time=observation_time,
-        hyperparameters={**FIDUCIALS},
-        waveform=waveform_metadata(root=ROOT_DIR),
-        population=population_metadata(
-            root=ROOT_DIR,
-            minimum_redshift=baseline_minimum_redshift,
-            maximum_redshift=maximum_redshift,
+    base_metadata = SpectrumMetadata(
+        catalog=CatalogMetadata(
+            waveform=waveform_metadata(root=ROOT_DIR),
+            population=population_metadata(
+                root=ROOT_DIR,
+                minimum_redshift=baseline_minimum_redshift,
+                maximum_redshift=maximum_redshift,
+            ),
+            fiducials={**FIDUCIALS},
+            num_samples=grid_counts[-1],
         ),
+        observation_time=observation_time,
     )
-    # Poisson forward-model ensemble: the count follows rate * observation_time.
-    poisson_metadata = BackgroundSpectralDensityMetadata.model_validate(
-        {
-            **base_metadata.model_dump(),
-            "count": "fixed" if SMOKE else "poisson",
-            "num_events": 64 if SMOKE else None,
-        }
+    # Poisson network realizations: the count follows rate * observation_time.
+    # A smoke run realizes a short observation, a few hundred sources.
+    poisson_metadata = dataclass_replace(
+        base_metadata,
+        count="poisson",
+        realized_observation_time=1e-4 if SMOKE else observation_time,
     )
     # The optional reference is one draw of the Poisson ensemble's metadata at
     # an independent seed (settings.data_seed).
@@ -309,6 +315,58 @@ def _():
 
 @app.class_definition(hide_code=True)
 @dataclass(frozen=True)
+class SpectrumMetadata:
+    """What one spectrum ensemble draws.
+
+    ``count="fixed"`` is the catalog-based forward model: each draw is
+    :math:`\\mathcal{R}\\,\\langle P \rangle` over a fresh catalog of
+    ``catalog.num_samples`` sources at the fiducials, so it estimates the
+    expected spectrum and its scatter is the forward model's shot noise.
+    ``count="poisson"`` is a Poisson network realization over
+    ``realized_observation_time`` (``observation_time`` when ``None``),
+    recorded by the analysis network. ``observation_time`` sets the SNR.
+    """
+
+    catalog: CatalogMetadata
+    observation_time: float
+    count: str = "fixed"
+    realized_observation_time: float | None = None
+
+    @property
+    def fixed(self) -> dict[str, float]:
+        """The hyperparameters every draw shares."""
+        return dict(self.catalog.fiducials)
+
+    @property
+    def sampled(self) -> dict[str, object]:
+        """Hyperparameters drawn per draw: none."""
+        return {}
+
+    def key(self) -> str:
+        """The content hash the ensemble is cached under."""
+        return content_key(
+            {
+                "catalog": self.catalog.key(),
+                "count": self.count,
+                "realized_observation_time": self.realized_observation_time,
+            }
+        )
+
+    def with_case(self, num_events: int, minimum_redshift: float) -> "SpectrumMetadata":
+        """This record at another catalog size and minimum redshift."""
+        population = self.catalog.population.with_model_kwargs(
+            minimum_redshift=minimum_redshift
+        )
+        return dataclass_replace(
+            self,
+            catalog=self.catalog.model_copy(
+                update={"num_samples": num_events, "population": population}
+            ),
+        )
+
+
+@app.class_definition(hide_code=True)
+@dataclass(frozen=True)
 class AnalysisSettings:
     """Detector network, frequency band, and cache policy shared by every case."""
 
@@ -332,11 +390,11 @@ class AnalysisSettings:
 class SNRCase:
     """Compact analysis results; spectra remain in the checked HDF5 cache."""
 
-    metadata: BackgroundSpectralDensityMetadata
+    metadata: SpectrumMetadata
     snrs: NDArray[np.float64]
     sigma_h0: NDArray[np.float64]
     summary: dict[str, int | float]
-    data: BackgroundSpectralDensityData
+    data: SpectrumData
 
 
 @app.class_definition(hide_code=True)
@@ -392,8 +450,8 @@ class Reference:
     """The common spectrum that every template is fitted to."""
 
     kind: str
-    data: BackgroundSpectralDensityData
-    metadata: BackgroundSpectralDensityMetadata
+    data: SpectrumData
+    metadata: SpectrumMetadata
     spectrum: NDArray[np.float64]
     snr: float
     averaged_draws: int
@@ -488,8 +546,8 @@ def network_noise(settings: AnalysisSettings, frequencies: jax.Array) -> jax.Arr
 
 @app.function(hide_code=True)
 def compute_spectrum_snrs(
-    data: BackgroundSpectralDensityData,
-    metadata: BackgroundSpectralDensityMetadata,
+    data: SpectrumData,
+    metadata: SpectrumMetadata,
     settings: AnalysisSettings,
 ) -> tuple[NDArray[np.float64], float]:
     """Return per-realization SNRs and the mean spectrum's SNR for one network.
@@ -566,33 +624,67 @@ def summarize_spectrum_snrs(
 
 @app.function(hide_code=True)
 def draw_spectra(
-    metadata: BackgroundSpectralDensityMetadata,
+    metadata: SpectrumMetadata,
     seed: int,
     num_draws: int,
     settings: AnalysisSettings,
-) -> tuple[BackgroundSpectralDensityData, BackgroundSpectralDensityMetadata]:
+) -> tuple[SpectrumData, SpectrumMetadata]:
     """Serve or generate the spectra ``metadata`` gives at ``batch_keys(seed, num_draws)``."""
-    path = settings.cache_dir / f"spectra-{metadata.key()}-{seed}-{num_draws}.h5"
-    if path.is_file():
-        cached, recorded, _ = load(path, BackgroundSpectralDensityMetadata)
-        if recorded.key() != metadata.key():
-            raise ValueError(f"{path} records {recorded.key()}, not {metadata.key()}")
-        return cast(BackgroundSpectralDensityData, cached), recorded
-    elif settings.cache_only:
-        raise FileNotFoundError(f"no cached spectra at {path}")
-    else:
-        simulator = BackgroundSpectralDensitySimulator(
-            metadata, chunk_size=settings.chunk_size
+    if metadata.count == "poisson":
+        catalog = metadata.catalog
+        record = EnsembleRecord(
+            population=RealizationMetadata(
+                observation_time=metadata.realized_observation_time
+                or metadata.observation_time,
+                hyperparameters=dict(catalog.fiducials),
+                population=catalog.population,
+            ),
+            waveform=catalog.waveform,
+            networks={
+                settings.network: network_configuration(
+                    settings.registry, settings.network
+                )
+            },
         )
-        outputs = stack_spectra([simulator(key) for key in batch_keys(seed, num_draws)])
-        write(path, outputs, metadata, seed=seed)
+        (drawn,) = network_spectra_ensemble(
+            record,
+            seed,
+            num_draws,
+            settings.cache_dir / "ensembles",
+            chunk_size=settings.chunk_size,
+        )
+        return {
+            "frequencies": drawn["frequencies"],
+            "spectral_density": drawn["spectral_density"],
+            "n_events": drawn["n_events"],
+        }, metadata
+    path = (
+        settings.cache_dir / f"catalog-spectra-{metadata.key()}-{seed}-{num_draws}.npz"
+    )
+    if path.is_file():
+        with np.load(path) as cached:
+            return {name: cached[name] for name in cached.files}, metadata
+    if settings.cache_only:
+        raise FileNotFoundError(f"no cached spectra at {path}")
+    catalog = metadata.catalog
+    rate = float(catalog.population.build()(catalog.fiducials)[0].total_merger_rate())
+    spectra, frequencies = [], None
+    for key in batch_keys(seed, num_draws):
+        drawn = draw_catalog(catalog, key, chunk_size=settings.chunk_size)
+        frequencies = drawn["frequencies"]
+        spectra.append(rate * np.mean(drawn["polarization_power"], axis=1))
+    outputs = {
+        "frequencies": np.asarray(frequencies),
+        "spectral_density": np.stack(spectra),
+        "n_events": np.full(num_draws, catalog.num_samples, dtype=np.int64),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(path, **outputs)
     return outputs, metadata
 
 
 @app.function(hide_code=True)
-def analyze_metadata(
-    metadata: BackgroundSpectralDensityMetadata, settings: AnalysisSettings
-) -> SNRCase:
+def analyze_metadata(metadata: SpectrumMetadata, settings: AnalysisSettings) -> SNRCase:
     """Serve or generate one spectrum ensemble and summarize its SNRs."""
     data, metadata = draw_spectra(metadata, settings.seed, settings.num_draws, settings)
     snrs, mean_spectrum_snr = compute_spectrum_snrs(data, metadata, settings)
@@ -612,30 +704,20 @@ def analyze_metadata(
 
 @app.function(hide_code=True)
 def analyze_case(
-    base_metadata: BackgroundSpectralDensityMetadata,
+    base_metadata: SpectrumMetadata,
     num_events: int,
     minimum_redshift: float,
     settings: AnalysisSettings,
 ) -> SNRCase:
     """Analyze one count/cutoff choice using the notebook's common settings."""
-    population = base_metadata.population.with_model_kwargs(
-        minimum_redshift=minimum_redshift
-    )
     return analyze_metadata(
-        BackgroundSpectralDensityMetadata.model_validate(
-            {
-                **base_metadata.model_dump(),
-                "num_events": num_events,
-                "population": population,
-            }
-        ),
-        settings,
+        base_metadata.with_case(num_events, minimum_redshift), settings
     )
 
 
 @app.function(hide_code=True)
 def build_grid(
-    base_metadata: BackgroundSpectralDensityMetadata,
+    base_metadata: SpectrumMetadata,
     counts: Sequence[int],
     redshifts: Sequence[float],
     settings: AnalysisSettings,
@@ -672,7 +754,7 @@ def select_reference(
     kind: str,
     settings: AnalysisSettings,
     *,
-    poisson_metadata: BackgroundSpectralDensityMetadata | None = None,
+    poisson_metadata: SpectrumMetadata | None = None,
 ) -> Reference:
     """Pick the common spectrum that every template is fitted to.
 
@@ -1208,8 +1290,8 @@ def plot_fisher_h0_mixtures(
 
 @app.function(hide_code=True)
 def compute_spectrum_statistics(
-    data: BackgroundSpectralDensityData,
-    metadata: BackgroundSpectralDensityMetadata,
+    data: SpectrumData,
+    metadata: SpectrumMetadata,
 ) -> SpectrumStatistics:
     """Compute unbiased pointwise statistics along the realization axis."""
     spectra = np.asarray(data["spectral_density"], dtype=np.float64)
@@ -1236,8 +1318,8 @@ def compute_spectrum_statistics(
 
 @app.function(hide_code=True)
 def compute_network_sensitivity(
-    data: BackgroundSpectralDensityData,
-    metadata: BackgroundSpectralDensityMetadata,
+    data: SpectrumData,
+    metadata: SpectrumMetadata,
     settings: AnalysisSettings,
 ) -> NetworkSensitivity:
     """Evaluate both scales on the full grid; selection never changes widths."""
@@ -1255,8 +1337,8 @@ def compute_network_sensitivity(
 
 @app.function(hide_code=True)
 def compute_frequency_correlation(
-    data: BackgroundSpectralDensityData,
-    metadata: BackgroundSpectralDensityMetadata,
+    data: SpectrumData,
+    metadata: SpectrumMetadata,
     *,
     minimum_frequency: float,
     maximum_frequency: float,

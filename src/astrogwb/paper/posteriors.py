@@ -1,6 +1,6 @@
 """Setup shared by the posterior notebooks.
 
-The cache digest, the reference catalog, the cached injection, the per-network
+The cache digest, the reference catalog, the per-network
 Gaussian data and the shot-noise variants: everything a grid or a sampler needs
 before it evaluates a likelihood. Only the stdlib, NumPy and :mod:`astrogwb`
 are imported at module scope, and ``jax.numpy`` inside the functions that use
@@ -24,25 +24,19 @@ from astrogwb.detector import (
     pair_terms,
 )
 from astrogwb.frequency import frequency_mask
-from astrogwb.gwb.importance import reference_catalog, reference_catalog_stem
-from astrogwb.inference import ImportanceGaussianLikelihood
-from astrogwb.paper.config.detectors import DetectorRegistry
-from astrogwb.simulators.core import batch_keys, load, write
-from astrogwb.simulators.polarization_power import (
+from astrogwb.gwb.catalog import (
     CatalogMetadata,
     PolarizationPowerData,
 )
-from astrogwb.simulators.spectra import (
-    BackgroundSpectralDensityMetadata,
-    BackgroundSpectralDensitySimulator,
-    NetworkSpectralDensityMetadata,
-)
+from astrogwb.gwb.importance import reference_catalog, reference_catalog_stem
+from astrogwb.inference import ImportanceGaussianLikelihood
+from astrogwb.paper.config.detectors import DetectorRegistry
+from astrogwb.simulators import batch_keys
+from astrogwb.utils.io import load, write
 
 __all__ = [
     "ensure_reference_catalog",
-    "injection_spectrum",
     "network_data",
-    "network_injection_metadata",
     "network_pair_data",
     "noise_digest",
     "pad_pairs",
@@ -114,81 +108,6 @@ def ensure_reference_catalog(
     data = reference_catalog(metadata, batch_keys(seed, 1)[0], chunk_size=chunk_size)
     write(path, data, metadata, seed=seed)
     return data
-
-
-def injection_spectrum(
-    metadata: BackgroundSpectralDensityMetadata,
-    seed: int,
-    path: Path,
-    *,
-    chunk_size: int = 128,
-) -> tuple[NDArray[np.float64], NDArray[np.float64], int]:
-    """The zero-noise injection of ``metadata`` at ``seed``, drawn on a miss.
-
-    The data are the Poisson spectrum itself, with no Gaussian noise added. The
-    file records none of the settings behind it, so the caller puts the
-    metadata key and the seed in ``path``.
-
-    Parameters
-    ----------
-    metadata
-        The injection's record.
-    seed
-        The draw's seed.
-    path
-        ``.npz`` cache file.
-    chunk_size
-        Waveforms per reduced chunk on a miss; cost only.
-
-    Returns
-    -------
-    tuple
-        The spectral density ``(F,)``, its frequencies ``(F,)`` and the number
-        of injected events.
-    """
-    if path.is_file():
-        with np.load(path) as cached:
-            return (
-                cached["spectral_density"],
-                cached["frequencies"],
-                int(cached["n_events"]),
-            )
-    drawn = BackgroundSpectralDensitySimulator(metadata, chunk_size=chunk_size)(
-        batch_keys(seed, 1)[0]
-    )
-    # The draw axis is leading even for one draw.
-    observed = np.asarray(drawn["spectral_density"][0], dtype=np.float64)
-    frequencies = np.asarray(drawn["frequencies"], dtype=np.float64)
-    num_injected = int(drawn["n_events"][0])
-    path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez(
-        path, spectral_density=observed, frequencies=frequencies, n_events=num_injected
-    )
-    return observed, frequencies, num_injected
-
-
-def network_injection_metadata(
-    metadata: BackgroundSpectralDensityMetadata,
-    registry: DetectorRegistry,
-    name: str,
-) -> NetworkSpectralDensityMetadata:
-    """The injection ``metadata`` as the network ``name`` records it.
-
-    The registry's detectors of the network, in declared order, with their
-    ``psd_reference``. Its key differs from the sky-averaged record's, so the
-    two caches never mix. The record names detectors by site code, which
-    resolves to the packaged geometry: a registry geometry override is not
-    carried into it.
-    """
-    detectors = list(registry.networks[name])
-    return NetworkSpectralDensityMetadata(
-        **metadata.model_dump(),
-        detectors=detectors,
-        psd_references={
-            detector: registry.detectors[detector].psd_reference
-            for detector in detectors
-        },
-    )
 
 
 def network_data(

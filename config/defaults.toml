@@ -19,7 +19,7 @@ observation_time = 1.0
 minimum_frequency = 2.0
 maximum_frequency = 2048.0
 
-# The default draw, shaped like astrogwb.simulators.polarization_power.CatalogMetadata: a 32768-source
+# The default draw, shaped like astrogwb.gwb.catalog.CatalogMetadata: a 32768-source
 # draw from the cosmological population with the default waveform. It is
 # drawn at the shared [fiducials], so editing [fiducials] re-keys every
 # catalog. The record's version is the installed astrogwb's, never the config's.
