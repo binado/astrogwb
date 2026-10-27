@@ -149,7 +149,7 @@ def scientific_payload(
     """
     used = used_detectors(registry, names)
     return {
-        "networks": {name: list(registry.networks[name]) for name in sorted(names)},
+        "networks": {name: sorted(registry.networks[name]) for name in sorted(names)},
         "detectors": {
             name: {
                 "geometry": registry.detectors[name].geometry.model_dump(mode="json"),

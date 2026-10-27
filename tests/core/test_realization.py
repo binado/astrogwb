@@ -201,7 +201,7 @@ def test_a_background_without_waveform_settings_raises(tmp_path: Path) -> None:
 
 def test_the_manifest_records_the_networks_sorted(fused: Realization) -> None:
     assert fused.networks == ("pair", "triangle")
-    assert NETWORKS.networks["pair"] == ("C1", "S1")
+    assert NETWORKS.pairs("pair") == [("C1", "S1")]
     assert fused.manifest["background"]["metadata"] == {
         "pairs": {
             "pair": [["C1", "S1"]],

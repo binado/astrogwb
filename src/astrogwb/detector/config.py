@@ -11,6 +11,7 @@ import logging
 import math
 from collections.abc import Sequence
 from functools import cache
+from itertools import combinations
 from pathlib import Path
 from typing import Annotated
 
@@ -54,10 +55,7 @@ def _sensitivity(psd_reference: str) -> Sensitivity:
 
 
 class DetectorConfig(BaseModel):
-    """Geometry, PSD reference, and an optional presentation label.
-
-    A :class:`DetectorRegistry` labels an unlabelled detector with its name.
-    """
+    """Geometry, PSD reference, and an optional presentation label."""
 
     model_config = _STRICT
 
@@ -96,11 +94,11 @@ class DetectorConfig(BaseModel):
 class DetectorRegistry(BaseModel):
     """A complete resolved registry, trusted and fixed for a dataset's lifetime.
 
-    Each network's members are stored sorted, the canonical order of
-    :meth:`pairs`, so pair axes built from the registry line up with a
-    simulated background's. The order they were declared in is not kept, and
-    the ``detectors`` and ``networks`` mappings are not to be edited after
-    construction.
+    Network members are kept in the order they were declared in.
+    :meth:`pairs` and :meth:`build_network` use their sorted order instead, the
+    canonical one, so pair axes built from the registry line up with a
+    simulated background's. The ``detectors`` and ``networks`` mappings are not
+    to be edited after construction.
     """
 
     model_config = _STRICT
@@ -108,28 +106,15 @@ class DetectorRegistry(BaseModel):
     detectors: dict[str, DetectorConfig]
     networks: dict[str, tuple[str, ...]] = Field(default_factory=dict)
 
-    @field_validator("networks")
-    @classmethod
-    def _canonical_order(
-        cls, networks: dict[str, tuple[str, ...]]
-    ) -> dict[str, tuple[str, ...]]:
-        return {name: tuple(sorted(members)) for name, members in networks.items()}
-
     @field_validator("detectors")
     @classmethod
-    def _label_detectors(
+    def _validate_names(
         cls, detectors: dict[str, DetectorConfig]
     ) -> dict[str, DetectorConfig]:
-        """Label each unlabelled detector with its name, on a copy."""
         for name in detectors:
             if not name.strip():
                 raise ValueError("detector names must be non-empty")
-        return {
-            name: detector
-            if detector.label is not None
-            else detector.model_copy(update={"label": name})
-            for name, detector in detectors.items()
-        }
+        return detectors
 
     @model_validator(mode="after")
     def _validate_networks(self) -> DetectorRegistry:
@@ -185,7 +170,7 @@ class DetectorRegistry(BaseModel):
         tuple
             The detectors and their sensitivities keyed by name.
         """
-        return self.build_detectors(self.networks[name])
+        return self.build_detectors(sorted(self.networks[name]))
 
     def pairs(self, network_name: str) -> list[tuple[str, str]]:
         """Return the canonical sorted detector pairs of a named network.
@@ -200,8 +185,7 @@ class DetectorRegistry(BaseModel):
         list of tuple of str
             Each pair of members, ``(a, b)`` with ``a`` before ``b``.
         """
-        detectors = self.networks[network_name]
-        return [(a, b) for i, a in enumerate(detectors) for b in detectors[i + 1 :]]
+        return list(combinations(sorted(self.networks[network_name]), 2))
 
 
 def load_detector_config(paths: Sequence[Path]) -> DetectorRegistry:
