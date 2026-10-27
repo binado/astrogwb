@@ -58,9 +58,6 @@ ETD_NETWORKS = {
     "ET-triangular-CE-Hanford": "ET-triangular-D-PSD-CE-Hanford",
 }
 
-#: Observation time of a smoke ensemble, in years: a few hundred sources.
-SMOKE_OBSERVATION_TIME = 1e-4
-
 #: The waveform overrides of each ensemble, over the shared ``[catalog]`` one.
 #: ``fiducial`` is the injection of the grid notebooks and the Poisson draws of
 #: ``spectrum_snrs``; ``coverage`` the draws of ``shot_noise_coverage`` and
@@ -75,8 +72,8 @@ _WAVEFORMS: dict[str, dict[str, object]] = {
     },
 }
 
-#: Every ensemble name; ``<name>-smoke`` observes for :data:`SMOKE_OBSERVATION_TIME`.
-ENSEMBLES = tuple(name for base in _WAVEFORMS for name in (base, f"{base}-smoke"))
+#: Every ensemble name.
+ENSEMBLES = tuple(_WAVEFORMS)
 
 
 class NetworkSpectra(TypedDict):
@@ -200,17 +197,16 @@ def ensemble_metadata(
     """The population and waveform settings of the ensemble ``name``.
 
     The population is the shared ``[catalog]`` one at the fiducials, observed
-    for a year, or :data:`SMOKE_OBSERVATION_TIME` for a ``-smoke`` ensemble.
+    for a year.
 
     Raises
     ------
     KeyError
         If ``name`` is not one of :data:`ENSEMBLES`.
     """
-    base = name.removesuffix("-smoke")
-    waveform = waveform_metadata(root, **_WAVEFORMS[base])
+    waveform = waveform_metadata(root, **_WAVEFORMS[name])
     population = PopulationMetadata(
-        observation_time=SMOKE_OBSERVATION_TIME if name.endswith("-smoke") else 1.0,
+        observation_time=1.0,
         hyperparameters={**fiducials(root)},
         population=population_metadata(root),
     )

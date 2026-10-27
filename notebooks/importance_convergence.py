@@ -4,7 +4,6 @@ __generated_with = "0.25.0"
 app = marimo.App()
 
 with app.setup(hide_code=True):
-    import os
     from collections.abc import Mapping
     from pathlib import Path
 
@@ -97,8 +96,7 @@ def _():
 
     The ladder's reference catalog is read from a file
     (`scripts/draw_reference_catalog.py`, run by `workflow/coverage_draws.smk`);
-    the Monte Carlo and Sobol catalogs are drawn in memory. Setting
-    `ASTROGWB_NOTEBOOK_SMOKE=1` swaps in tiny catalogs.
+    the Monte Carlo and Sobol catalogs are drawn in memory.
     """)
 
 
@@ -114,9 +112,8 @@ def _():
     ROOT_DIR = Path(__file__).resolve().parents[1]
     FIGURES = ROOT_DIR / FIGURES_DIR / "importance_convergence"
 
-    # Redshift ladder: one fixed set of 256 i.i.d. draws at seed 100 (16 in a
-    # smoke run), read from the file the workflow writes; the top rung is the
-    # reference.
+    # Redshift ladder: one fixed set of 256 i.i.d. draws at seed 100, read from
+    # the file the workflow writes; the top rung is the reference.
     ladder_exponents = range(2, 11)  # Z = 4 ... 1024
 
     # Monte Carlo: M catalogs at N_max; each N = 2**k <= N_max is a prefix.
@@ -149,21 +146,7 @@ def _():
         "xi_n": (0.3, 3.0),
     }
 
-    SMOKE = os.environ.get("ASTROGWB_NOTEBOOK_SMOKE") == "1"
-    write_figures_default = True
-    if SMOKE:
-        ladder_exponents = range(2, 6)  # Z = 4 ... 32
-        mc_catalogs = 3
-        mc_max_samples = 64
-        mc_min_exponent = 3
-        qmc_catalogs = 3
-        qmc_max_samples = 64
-        catalog_chunk_size = 512
-        edges = {}
-        write_figures_default = False
-    ladder_path = (
-        ROOT_DIR / CATALOGS_ROOT / (f"reference-ladder{'-smoke' if SMOKE else ''}.h5")
-    )
+    ladder_path = ROOT_DIR / CATALOGS_ROOT / "reference-ladder.h5"
 
     evaluation_points: dict[str, dict[str, float]] = {"fiducial": dict(FIDUCIALS)}
     for _name, _values in edges.items():
@@ -186,7 +169,7 @@ def _():
     target = build_population(population.model_name, **population.model_kwargs)
     registry = detector_registry(root=ROOT_DIR)
 
-    write_figures = mo.ui.switch(value=write_figures_default, label="Write figures")
+    write_figures = mo.ui.switch(value=True, label="Write figures")
     write_figures
     use_paper_style(root=ROOT_DIR)
     # gwpy registers replacement default axes; keep matplotlib's.

@@ -49,8 +49,6 @@ CATALOGS_ROOT = f"{OUTPUTS}/catalogs"
 DRAWS = {
     "fiducial": {41: 200, 42: 1},
     "coverage": {41: 1000},
-    "fiducial-smoke": {41: 3, 42: 1},
-    "coverage-smoke": {41: 4},
 }
 
 # The reference catalogs each ensemble's notebooks read, and their options.
@@ -67,16 +65,6 @@ CATALOGS = {
         # ensemble_spectrum's minimum-redshift scan
         "reference-scan": (
             f"{_XAS} --num-samples 16384 --reference-distance-mpc 1 --chunk-size 4096"
-        ),
-    },
-    "fiducial-smoke": {
-        "reference-fiducial-smoke": "--num-samples 64 --chunk-size 512",
-        "reference-ladder-smoke": "--num-samples 16 --sampling random --seed 100",
-    },
-    "coverage-smoke": {
-        "reference-coverage-smoke": f"{_XAS} --num-samples 64 --chunk-size 512",
-        "reference-scan-smoke": (
-            f"{_XAS} --num-samples 64 --reference-distance-mpc 1 --chunk-size 64"
         ),
     },
 }

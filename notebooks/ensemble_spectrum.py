@@ -4,7 +4,6 @@ __generated_with = "0.25.1"
 app = marimo.App()
 
 with app.setup(hide_code=True):
-    import os
     from collections.abc import Mapping, Sequence
     from pathlib import Path
 
@@ -153,9 +152,6 @@ def _():
 def _():
     mo.md(r"""
     ## 2. Configuration
-
-    Setting `ASTROGWB_NOTEBOOK_SMOKE=1` swaps in a tiny ensemble of short
-    observations so the whole notebook runs in seconds.
     """)
     return
 
@@ -176,17 +172,11 @@ def _():
     # Percentiles of the plotted bands (16-84%).
     percentiles = (16.0, 50.0, 84.0)
 
-    # Execution smoke tests exercise the same code with tiny draws.
-    SMOKE = os.environ.get("ASTROGWB_NOTEBOOK_SMOKE") == "1"
-    if SMOKE:
-        num_draws = 3
-
     # The coverage ensemble of workflow/coverage_draws.smk, shared with
     # shot_noise_coverage.py: IMRPhenomXAS_NRTidalv3 with fine spacing through
-    # the SNR peak, then a log tail, for a 1024-point grid. A smoke ensemble
-    # injects a short observation. Its population is draw 0's record.
-    _suffix = "-smoke" if SMOKE else ""
-    ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / f"coverage{_suffix}"
+    # the SNR peak, then a log tail, for a 1024-point grid. Its population is
+    # draw 0's record.
+    ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / "coverage"
     ensemble_population = Realization.open(
         ensemble_root / f"{seed}-0"
     ).population_metadata
@@ -217,7 +207,6 @@ def _():
     return (
         BASE_DIR,
         ROOT_DIR,
-        SMOKE,
         coba_rows,
         ensemble_population,
         ensemble_root,
@@ -235,9 +224,8 @@ def _():
 
 
 @app.cell
-def _(SMOKE):
-    # A smoke run draws three spectra: never let it overwrite the paper files.
-    write_figures_switch = mo.ui.switch(value=not SMOKE, label="Write figures")
+def _():
+    write_figures_switch = mo.ui.switch(value=True, label="Write figures")
     write_figures_switch
     return (write_figures_switch,)
 
@@ -950,16 +938,14 @@ def _():
 
 
 @app.cell
-def _(ROOT_DIR, SMOKE):
+def _(ROOT_DIR):
     # The scan's reference catalog, written by workflow/coverage_draws.smk:
     # 2^14 draws on a Sobol net at the coverage approximant, as in
     # cosmology_grid_posteriors.py, each generated at the redshift where the
     # fiducial luminosity distance is 1 Mpc, below every window of the scan,
     # on a reference grid from the lowest observed frequency to past the
     # detector-frame merger there.
-    scan_catalog_path = (
-        ROOT_DIR / CATALOGS_ROOT / f"reference-scan{'-smoke' if SMOKE else ''}.h5"
-    )
+    scan_catalog_path = ROOT_DIR / CATALOGS_ROOT / "reference-scan.h5"
     scan_redshift_nodes = 32  # converged to 1e-4 down to z_min = 0.01
     # Geometric where the curves are steep, uniform where the plot is linear.
     scan_redshifts = np.concatenate(
@@ -968,10 +954,6 @@ def _(ROOT_DIR, SMOKE):
     # The shot noise carries each network's per-source response, from these
     # isotropic draws, as in the grid and coverage notebooks.
     scan_response_draws, scan_response_seed = 32_768, 0
-    if SMOKE:
-        scan_response_draws = 64
-        scan_redshift_nodes = 8
-        scan_redshifts = np.geomspace(0.05, 3.0, 5)
 
     scan_data, scan_catalog_metadata, _ = read_reference_catalog(scan_catalog_path)
     scan_hyperparameters = dict(scan_catalog_metadata.fiducials)

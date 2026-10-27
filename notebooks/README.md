@@ -18,11 +18,8 @@ cell names its inputs, all under `outputs/`:
 | `catalogs/reference-scan.h5` | `ensemble_spectrum` |
 | `catalogs/reference-ladder.h5` | `importance_convergence` |
 
-`workflow/coverage_draws.smk` writes them (`docs/coverage-draws-on-slurm.md`);
-under `ASTROGWB_NOTEBOOK_SMOKE=1` the notebooks read the `-smoke` variants,
-which the workflow writes in under a minute with
-`--config ensembles="fiducial-smoke coverage-smoke"`. A missing input is a
-`FileNotFoundError`, never a simulation.
+`workflow/coverage_draws.smk` writes them (`docs/coverage-draws-on-slurm.md`).
+A missing input is a `FileNotFoundError`, never a simulation.
 
 ## Notebooks
 
@@ -155,14 +152,6 @@ accessor returns fresh settings from one cached merge of the shared layers. To
 see file edits in a long-lived kernel, call
 `astrogwb.paper.config._shared.cache_clear()`.
 
-## Smoke runs
-
-`ASTROGWB_NOTEBOOK_SMOKE=1` shrinks the catalogs and the convergence sweeps. It
-changes only how long a notebook runs, never which cells execute — there is one
-code path in both modes. Run any notebook as a script to check it end to end:
-
-```bash
-ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/fiducial_spectrum.py
-```
+## Checking notebooks
 
 `marimo check --strict notebooks/<name>.py` lints a notebook's cell graph without running it.

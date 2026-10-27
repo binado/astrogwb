@@ -4,7 +4,6 @@ __generated_with = "0.25.0"
 app = marimo.App()
 
 with app.setup(hide_code=True):
-    import os
     from collections.abc import Mapping, Sequence
     from pathlib import Path
 
@@ -90,10 +89,6 @@ def _():
     2. $H_0$ and $\Omega_m$ (*Inferring cosmological parameters*, H0 and Omega_m).
     3. $\Xi_0$ and $n$ (*Inferring modified propagation parameters*), with
        $H_0$ fixed.
-
-    Setting `ASTROGWB_NOTEBOOK_SMOKE=1` reads the smoke inputs, a tiny
-    catalog and a short injection, on coarse grids, so the whole notebook runs
-    in a minute or two.
     """)
     return
 
@@ -210,20 +205,6 @@ def _():
     modes_tolerance, max_modes = 1e-3, 32  # dropped eigenvalue sum, noise units
     ab_tolerance = 0.05
 
-    SMOKE = os.environ.get("ASTROGWB_NOTEBOOK_SMOKE") == "1"
-    write_figures_default = True
-    if SMOKE:
-        redshift_nodes = 8
-        grid_chunk_size = 4
-        num_marginal_samples = 2000
-        response_draws, max_modes = 64, 4
-        write_figures_default = False
-        h0_window, h0_size = (40.0, 100.0), 7
-        h0_omega_window, h0_omega_size = (55.0, 80.0), 4
-        omega_m_window, omega_m_size = (0.30, 0.32), 3
-        xi_0_window, xi_0_size = (0.8, 1.4), 3
-        xi_n_window, xi_n_size = (1.5, 2.5), 3
-
     # (low, high, size) per swept parameter, per problem.
     grid_specs = {
         "H0": {"H0": (*h0_window, h0_size)},
@@ -247,19 +228,14 @@ def _():
     # and the reference catalog, 2^14 intrinsic draws on a scrambled Sobol
     # net at seed 42 on geometric bins 1% wide past the BNS merger
     # (importance_convergence.py sizes it). Both are drawn from the shared
-    # population and approximant. Smoke inputs inject a short observation, a
-    # few hundred sources, and hold 64 draws; the spectrum's mean does not
-    # depend on either.
-    _suffix = "-smoke" if SMOKE else ""
-    ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / f"fiducial{_suffix}"
-    reference_catalog_path = (
-        ROOT_DIR / CATALOGS_ROOT / f"reference-fiducial{_suffix}.h5"
-    )
+    # population and approximant.
+    ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / "fiducial"
+    reference_catalog_path = ROOT_DIR / CATALOGS_ROOT / "reference-fiducial.h5"
     injection = Realization.open(ensemble_root / f"{data_seed}-0")
     noise = DetectorNoise.open(ensemble_root / "detector_noise.h5")
     frequencies = noise.frequencies
 
-    write_figures = mo.ui.switch(value=write_figures_default, label="Write figures")
+    write_figures = mo.ui.switch(value=True, label="Write figures")
     write_figures
     use_paper_style(root=ROOT_DIR)
     # gwpy registers replacement default axes; keep matplotlib's.

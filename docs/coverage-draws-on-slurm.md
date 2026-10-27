@@ -14,8 +14,7 @@ input, per ensemble:
 The ensembles are `fiducial` (the default waveform: the grid notebooks'
 injection and `spectrum_snrs`'s Poisson draws) and `coverage`
 (`IMRPhenomXAS_NRTidalv3`: `shot_noise_coverage`'s injections and
-`ensemble_spectrum`'s draws). Each also has a `-smoke` variant observed for
-`1e-4` yr, read under `ASTROGWB_NOTEBOOK_SMOKE=1`. Their settings are the
+`ensemble_spectrum`'s draws). Their settings are the
 committed `config/ensembles/<name>/{population,waveform}.toml` and
 `config/networks.toml`, which
 [`scripts/write_ensemble_configs.py`](../scripts/write_ensemble_configs.py)

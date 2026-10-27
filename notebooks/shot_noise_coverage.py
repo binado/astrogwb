@@ -4,7 +4,6 @@ __generated_with = "0.25.1"
 app = marimo.App()
 
 with app.setup(hide_code=True):
-    import os
     from pathlib import Path
 
     from astrogwb.paper.runtime import configure_runtime
@@ -298,8 +297,7 @@ def _():
 
     The injections, their detector noise and the reference catalog are read,
     never drawn: `workflow/coverage_draws.smk` writes them (see the
-    configuration cell for the paths). Setting `ASTROGWB_NOTEBOOK_SMOKE=1`
-    reads the smoke inputs instead, a tiny catalog and a few short injections.
+    configuration cell for the paths).
     """)
 
 
@@ -339,17 +337,6 @@ def _():
     network_names = [name for name, _ in DETECTOR_NETWORKS]
     h0_window, h0_size = (60.0, 76.0), 321
 
-    SMOKE = os.environ.get("ASTROGWB_NOTEBOOK_SMOKE") == "1"
-    write_figures_default = True
-    if SMOKE:
-        num_injections = 4
-        redshift_nodes = 8
-        grid_chunk_size = 4
-        response_draws = 64
-        max_modes = 4
-        h0_window, h0_size = (40.0, 100.0), 31
-        write_figures_default = False
-
     FIDUCIALS = fiducials(root=ROOT_DIR)
     PRIORS = priors(root=ROOT_DIR)
     registry = detector_registry(root=ROOT_DIR)
@@ -359,20 +346,15 @@ def _():
     # ensemble_spectrum.py), its detector noise, and the reference catalog of
     # the same approximant, 2^14 draws on a scrambled Sobol net at seed 42,
     # independent of the injections (importance_convergence.py sizes it).
-    # Smoke inputs inject a short observation, a few hundred sources, and hold
-    # 64 catalog draws; the spectrum's mean does not depend on either.
-    _suffix = "-smoke" if SMOKE else ""
-    ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / f"coverage{_suffix}"
-    reference_catalog_path = (
-        ROOT_DIR / CATALOGS_ROOT / f"reference-coverage{_suffix}.h5"
-    )
+    ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / "coverage"
+    reference_catalog_path = ROOT_DIR / CATALOGS_ROOT / "reference-coverage.h5"
     noise = DetectorNoise.open(ensemble_root / "detector_noise.h5")
     frequencies = noise.frequencies
     injected_metadata = Realization.open(
         ensemble_root / f"{ensemble_seed}-0"
     ).population_metadata
 
-    write_figures = mo.ui.switch(value=write_figures_default, label="Write figures")
+    write_figures = mo.ui.switch(value=True, label="Write figures")
     write_figures
     use_paper_style(root=ROOT_DIR)
     # gwpy registers replacement default axes; keep matplotlib's.

@@ -137,18 +137,15 @@ Figure styling uses the shared paper style, including its LaTeX requirement.
 No CSV or provenance JSON is exported.
 
 Draws contain source fluctuations only, with the population's inclination
-convention retained, and no detector-noise realizations. Execute the smoke
-test, which checks that the whole notebook runs, with:
+convention retained, and no detector-noise realizations. Lint the cell graph
+with:
 
 ```bash
 uv run --extra notebook --group dev marimo check --strict notebooks/spectrum_snrs.py
-ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/spectrum_snrs.py
 ```
 
-Smoke mode uses three draws, counts `[8, 16, 32]`, a short observation for the
-Poisson option, and no figure saving. A full run
-(`N = 2^18`, 100 draws, three cutoffs) is expensive the first time, until the
-spectrum cache is populated.
+A full run (`N = 2^18`, 100 draws, three cutoffs) is expensive the first time,
+until the spectrum cache is populated.
 
 ## Grid posteriors
 
@@ -170,7 +167,6 @@ Figures go to `outputs/figures/cosmology_grid_posteriors/` when the
 
 ```bash
 uv run --extra notebook --group dev marimo check --strict notebooks/cosmology_grid_posteriors.py
-ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/cosmology_grid_posteriors.py
 ```
 
 ## Importance convergence
@@ -194,5 +190,4 @@ catalogs are drawn in memory. Figures go to
 
 ```bash
 uv run --extra notebook --group dev marimo check --strict notebooks/importance_convergence.py
-ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/importance_convergence.py
 ```

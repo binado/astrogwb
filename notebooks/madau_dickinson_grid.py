@@ -5,7 +5,6 @@ app = marimo.App()
 
 with app.setup(hide_code=True):
     import dataclasses
-    import os
     import time
     from collections.abc import Mapping, Sequence
     from pathlib import Path
@@ -143,8 +142,7 @@ def _():
     The data and the model spectrum are those of `cosmology_grid_posteriors.py`:
     the zero-noise Poisson injection as each network records it, through the
     per-source antenna patterns, and the rescaled reference-redshift catalog
-    drawn at a different seed. Setting `ASTROGWB_NOTEBOOK_SMOKE=1` swaps in a
-    tiny catalog and a coarse grid so the whole notebook runs quickly.
+    drawn at a different seed.
     """)
 
 
@@ -218,16 +216,6 @@ def _():
     num_draws = 20_000  # draws of the posterior, for the plots and summaries
     draw_seed = 44
 
-    SMOKE = os.environ.get("ASTROGWB_NOTEBOOK_SMOKE") == "1"
-    write_figures_default = True
-    if SMOKE:
-        redshift_nodes = 8
-        num_gamma, num_kappa = 24, 16
-        num_draws = 2_000
-        network_names = [fiducial_network]
-        response_draws, max_modes = 64, 4
-        write_figures_default = False
-
     FIDUCIALS = fiducials(root=ROOT_DIR)
     # The shared U(-10, 10) priors on gamma and kappa are restricted to positive
     # values; every other prior is the shared one.
@@ -237,17 +225,13 @@ def _():
 
     # The same inputs as cosmology_grid_posteriors.py, written by
     # workflow/coverage_draws.smk and only read here: the injection ensemble,
-    # its detector noise and the reference catalog. Smoke inputs inject a
-    # short observation, a few hundred sources, and hold 64 catalog draws.
-    _suffix = "-smoke" if SMOKE else ""
-    ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / f"fiducial{_suffix}"
-    reference_catalog_path = (
-        ROOT_DIR / CATALOGS_ROOT / f"reference-fiducial{_suffix}.h5"
-    )
+    # its detector noise and the reference catalog.
+    ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / "fiducial"
+    reference_catalog_path = ROOT_DIR / CATALOGS_ROOT / "reference-fiducial.h5"
     noise = DetectorNoise.open(ensemble_root / "detector_noise.h5")
     frequencies = noise.frequencies
 
-    write_figures = mo.ui.switch(value=write_figures_default, label="Write figures")
+    write_figures = mo.ui.switch(value=True, label="Write figures")
     write_figures
     use_paper_style(root=ROOT_DIR)
     # gwpy registers replacement default axes; keep matplotlib's.

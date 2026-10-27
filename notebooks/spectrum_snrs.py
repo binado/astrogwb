@@ -4,7 +4,6 @@ __generated_with = "0.25.0"
 app = marimo.App()
 
 with app.setup(hide_code=True):
-    import os
     from collections.abc import Callable, Mapping, Sequence
     from dataclasses import dataclass
     from dataclasses import replace as dataclass_replace
@@ -174,8 +173,7 @@ def _():
 
     The count sweep runs at the baseline $z_{\min}$ across seven powers of two.
     The $N \times z_{\min}$ grid reuses the cached count-sweep ensembles at the
-    baseline cutoff. Setting `ASTROGWB_NOTEBOOK_SMOKE=1` swaps in tiny counts
-    and three draws, so the whole notebook can be executed in seconds.
+    baseline cutoff.
     """)
     return
 
@@ -215,25 +213,10 @@ def _():
     cache_only = False
     write_figures = True
 
-    # Execution smoke tests exercise the same loops and waveform with tiny draws.
-    SMOKE = os.environ.get("ASTROGWB_NOTEBOOK_SMOKE") == "1"
-    if SMOKE:
-        num_events = [8, 16, 32]
-        grid_counts = [8, 16, 32]
-        paper_counts = [8, 16, 32]
-        recommended_num_events = 32
-        num_draws = 3
-        chunk_size = 8
-        n_bootstrap = 20
-        write_figures = False
-
     # The Poisson realizations are read, never drawn: the fiducial ensemble of
     # workflow/coverage_draws.smk, the default population and waveform, at
-    # `seed` (the ensemble) and `data_seed` (the independent reference). A
-    # smoke ensemble realizes a short observation, a few hundred sources.
-    ensemble_root = (
-        ROOT_DIR / ENSEMBLES_ROOT / ("fiducial-smoke" if SMOKE else "fiducial")
-    )
+    # `seed` (the ensemble) and `data_seed` (the independent reference).
+    ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / "fiducial"
     realized = Realization.open(ensemble_root / f"{seed}-0").population_metadata
 
     # Read the shared draw's waveform rather than copying its scientific settings.
@@ -2023,8 +2006,7 @@ def _():
     template is fitted to one common spectrum. By default that is the mean of
     all draws at the largest $N$, a mean spectrum rather than a mean SNR. Set
     `data_reference = "poisson"` to use one independently seeded Poisson draw
-    instead, which includes count fluctuations as well; smoke runs substitute
-    one small fixed-count draw. The reference SNR $\rho_{\mathrm{ref}}$ fixes
+    instead, which includes count fluctuations as well. The reference SNR $\rho_{\mathrm{ref}}$ fixes
     $\sigma_{\mathrm{ref}} = H_{0,\mathrm{fid}}/\rho_{\mathrm{ref}}$, the
     expected $\sigma(H_0)$ of the real analysis.
 

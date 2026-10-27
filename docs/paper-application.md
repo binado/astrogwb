@@ -11,14 +11,7 @@ simulate: [`workflow/coverage_draws.smk`](../workflow/coverage_draws.smk)
 writes the ensembles, their detector noise and the reference catalogs under
 `outputs/` (see [simulation inputs on SLURM](coverage-draws-on-slurm.md)), and
 each notebook's configuration cell names the paths it reads. A missing input
-is a `FileNotFoundError`. To produce the smoke inputs locally, in under a
-minute:
-
-```bash
-uv run snakemake -s workflow/coverage_draws.smk --cores 8 \
-    --config ensembles="fiducial-smoke coverage-smoke"
-ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook python notebooks/cosmology_grid_posteriors.py
-```
+is a `FileNotFoundError`.
 
 The code ships inside the `astrogwb` wheel as `astrogwb.paper`, behind the
 `paper` extra. Its *assets* -- `config/`, `scripts/` and `notebooks/` -- are not
