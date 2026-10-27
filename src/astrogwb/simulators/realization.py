@@ -22,7 +22,7 @@ the population stage is the only one that draws random numbers.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self, TypedDict
@@ -287,7 +287,9 @@ class RealizationSimulator:
     ``source_chunk_size`` (sources drawn per piece) change cost, never a
     realization.
 
-    The stage simulators are built for each realization that needs them.
+    The stage simulators are built when first needed and reused while their
+    settings are unchanged, so an ensemble compiles each stage once and a fully
+    cached one builds none.
     """
 
     def __init__(
@@ -314,6 +316,15 @@ class RealizationSimulator:
         self._keep_polarizations = keep_polarizations
         self._chunk_size = chunk_size
         self._source_chunk_size = source_chunk_size
+        self._simulators: dict[Callable[..., Any], tuple[Any, Any]] = {}
+
+    def _simulator[S](self, cls: Callable[..., S], settings: Any, chunk_size: int) -> S:
+        """The ``cls`` simulator of ``settings``, reused while they stay equal."""
+        cached = self._simulators.get(cls)
+        if cached is None or cached[0] != settings:
+            cached = (settings, cls(settings, chunk_size=chunk_size))
+            self._simulators[cls] = cached
+        return cached[1]
 
     def __call__(
         self, directory: str | Path, *, seed: int | None = None, index: int = 0
@@ -424,8 +435,8 @@ class RealizationSimulator:
         drawn: PopulationArtifact | None = None
         if recorded["population"] is None:
             assert self._population is not None and rng_key is not None
-            drawn = PopulationSimulator(
-                self._population, chunk_size=self._source_chunk_size
+            drawn = self._simulator(
+                PopulationSimulator, self._population, self._source_chunk_size
             )(rng_key)
             drawn_tables = drawn.tables()
             drawn_tables["realization"] |= {"seed": seed, "index": index}
@@ -448,9 +459,10 @@ class RealizationSimulator:
             drawn = realization.population(
                 None
                 if sources_path.is_file()
-                else PopulationSimulator(
+                else self._simulator(
+                    PopulationSimulator,
                     realization.population_metadata,
-                    chunk_size=self._source_chunk_size,
+                    self._source_chunk_size,
                 )
             )
         if want_sources:
@@ -466,13 +478,15 @@ class RealizationSimulator:
                 polarization_path, metadata=metadata, population=drawn
             )
         else:
-            chunks = WaveformSimulator(metadata, chunk_size=self._chunk_size)(drawn)
+            chunks = self._simulator(WaveformSimulator, metadata, self._chunk_size)(
+                drawn
+            )
             if want_polarizations:
                 assert isinstance(chunks, Waveforms)
                 chunks = chunks.write(polarization_path)
         if want_background:
             assert self._background is not None
-            BackgroundSimulator(self._background, chunk_size=self._chunk_size)(
+            self._simulator(BackgroundSimulator, self._background, self._chunk_size)(
                 chunks
             ).write(background_path)
         return realization

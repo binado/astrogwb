@@ -203,8 +203,9 @@ simulator = RealizationSimulator(
 realizations = simulate_ensemble(simulator, "root/", 41, 100)
 ```
 
-`RealizationSimulator` builds the stage simulators of each realization it
-runs, so a stage that is already recorded builds none. `Realization.population()`, `.waveforms()` and
+`RealizationSimulator` builds each stage simulator the first time it is
+needed and reuses it while its settings are unchanged, so an ensemble compiles
+each stage once and a fully cached ensemble builds none. `Realization.population()`, `.waveforms()` and
 `.background()` read a stage's product. When the product is missing, pass the
 stage simulators to regenerate it.
 
