@@ -5,8 +5,7 @@
 #
 # Notebooks never simulate: they read what this writes and fail with a
 # FileNotFoundError when it is missing. Per ensemble <name> (the committed
-# config/ensembles/<name>/{population,waveform}.toml and config/networks.toml,
-# written by scripts/write_ensemble_configs.py):
+# config/ensembles/<name>/{population,waveform}.toml and config/networks.toml):
 #
 #   outputs/ensembles/<name>/<seed>-<index>/   one realization per
 #       `astrogwb simulate` job, its manifest and background.h5: every paper

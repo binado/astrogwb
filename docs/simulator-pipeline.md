@@ -200,7 +200,7 @@ cached ensemble builds none. `Realization.population()`, `.waveforms()` and
 `.background()` read a stage's product. When the product is missing, pass the
 stage simulators to regenerate it.
 
-`astrogwb.paper.ensemble.network_spectra_ensemble(root, seed, n, names)` reads
+`astrogwb.simulators.network_spectra_ensemble(root, seed, n, names)` reads
 an ensemble's draws and stacks each network's spectra. It never simulates;
 `workflow/coverage_draws.smk` writes the paper's ensembles (see
 `docs/coverage-draws-on-slurm.md`).
@@ -255,6 +255,8 @@ initializes.
 | `BackgroundArtifact.upstream`, `.manifest_path` | `BackgroundArtifact.waveform_key`; the manifest belongs to the `Realization` |
 | `astrogwb simulate population` / `waveforms` / `background` | `astrogwb simulate DIRECTORY` with `--population-metadata`, `--waveform-metadata`, `--background-metadata` |
 | `astrogwb.paper.ensemble.union_configuration` | `astrogwb.simulators.union_configuration` |
+| `astrogwb.paper.ensemble.network_spectra_ensemble`, `NetworkSpectra` | `astrogwb.simulators.network_spectra_ensemble`, `NetworkSpectra` |
+| `scripts/write_ensemble_configs.py`, `paper_networks`, `ensemble_metadata` | `config/networks.toml` and `config/ensembles/<name>/`, edited by hand |
 | ensemble caches of #389 and #390 (`<cache>/ensembles/<key>/<seed>-<i>/`) | not read; regenerate them with the workflow |
 | one background over the detector union; `BackgroundArtifact.pair_spectra(network)`, `.detectors`, `.pairs` | per-network spectra; `BackgroundArtifact.network(name)`, `.networks` |
 | `Realization.detectors` | `Realization.networks` |

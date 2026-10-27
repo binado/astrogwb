@@ -33,7 +33,7 @@ uv run --extra notebook --group notebook marimo edit notebooks/ensemble_spectrum
 Every path is relative to the repository root -- library code names no absolute
 path and does not go looking for a checkout. Committed configuration lives
 under `config/`, including the simulation inputs `config/networks.toml` and
-`config/ensembles/<name>/` that `scripts/write_ensemble_configs.py` writes;
+`config/ensembles/<name>/`;
 generated ensembles, catalogs and figures under `outputs/`.
 
 The MCMC pipeline (Snakemake workflow, `run_mcmc`, SLURM profiles and the

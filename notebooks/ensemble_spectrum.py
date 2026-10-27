@@ -49,11 +49,6 @@ with app.setup(hide_code=True):
     from astrogwb.paper.config import detector_registry
     from astrogwb.paper.config.detectors import DetectorRegistry
     from astrogwb.paper.config.runs import CATALOGS_ROOT, ENSEMBLES_ROOT, FIGURES_DIR
-    from astrogwb.paper.ensemble import (
-        ETD_NETWORKS,
-        ETD_PSD,
-        network_spectra_ensemble,
-    )
     from astrogwb.paper.plotting import (
         DETECTOR_COMPARISON_LEGEND,
         DETECTOR_NETWORKS,
@@ -65,7 +60,7 @@ with app.setup(hide_code=True):
     )
     from astrogwb.populations import build_population
     from astrogwb.populations.metadata import PopulationMetadata
-    from astrogwb.simulators import Realization
+    from astrogwb.simulators import Realization, network_spectra_ensemble
     from astrogwb.utils import years_to_seconds
 
     # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes.
@@ -91,7 +86,7 @@ def _():
 
     The ensemble is read, never drawn: the fiducial ensemble of
     `workflow/coverage_draws.smk`, one background per draw holding every
-    network's spectra (`astrogwb.paper.ensemble.network_spectra_ensemble`),
+    network's spectra (`astrogwb.simulators.network_spectra_ensemble`),
     shared with `notebooks/shot_noise_coverage.py`, which uses its draws as
     injections. So is the reference catalog of the minimum-redshift scan. A
     single interactive draw lives in `notebooks/fiducial_spectrum.py`.
@@ -181,35 +176,24 @@ def _():
     ).population_metadata
     registry = detector_registry(root=ROOT_DIR)
 
-    # ET-triangular with the ET-D PSD instead of the shared one. The geometry
-    # is copied from E1-E3; the overrides deep-merge, so ``registry`` is intact.
-    etd_registry = detector_registry(
-        root=ROOT_DIR,
-        detectors={
-            f"E{i}D": {
-                "geometry": registry.detectors[f"E{i}"].geometry.model_dump(),
-                "psd_reference": ETD_PSD,
-            }
-            for i in (1, 2, 3)
-        },
-        networks={
-            "ET-triangular-D-PSD": ["E1D", "E2D", "E3D"],
-            "ET-triangular-D-PSD-CE-Hanford": ["E1D", "E2D", "E3D", "C1"],
-        },
-    )
+    # Each ET-triangle network and its counterpart in config/detectors.toml
+    # with the ET-D noise curve instead of ET-COBA: same pairs, other weights.
+    etd_networks = {
+        "ET-triangular": "ET-triangular-D-PSD",
+        "ET-triangular-CE-Hanford": "ET-triangular-D-PSD-CE-Hanford",
+    }
     coba_rows = DETECTOR_NETWORKS
-    etd_rows = tuple((ETD_NETWORKS.get(name, name), label) for name, label in coba_rows)
+    etd_rows = tuple((etd_networks.get(name, name), label) for name, label in coba_rows)
     # Every row's network records the same draws, each in the ensemble's
     # backgrounds. An ET-D row is its ET-COBA network's pairs, weighted with
     # the ET-D noise curve.
-    network_names = [name for name, _ in coba_rows] + list(ETD_NETWORKS.values())
+    network_names = [name for name, _ in coba_rows] + list(etd_networks.values())
     return (
         BASE_DIR,
         ROOT_DIR,
         coba_rows,
         ensemble_population,
         ensemble_root,
-        etd_registry,
         etd_rows,
         maximum_frequency,
         minimum_frequencies,
@@ -615,7 +599,6 @@ def _():
 def _(
     coba_rows,
     draws,
-    etd_registry,
     etd_rows,
     frequencies,
     maximum_frequency,
@@ -633,7 +616,7 @@ def _(
         maximum_frequency,
     )
     snrs_etd = snr_per_draw(
-        etd_registry,
+        registry,
         etd_rows,
         frequencies,
         draws,

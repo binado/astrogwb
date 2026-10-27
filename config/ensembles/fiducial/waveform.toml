@@ -1,4 +1,6 @@
-# Written by scripts/write_ensemble_configs.py; do not edit.
+# The fiducial ensemble's waveform, `astrogwb simulate --waveform-metadata`:
+# [waveforms.default] of config/waveforms.toml, 400 frequency bins.
+# Regenerate outputs/ensembles/fiducial after an edit.
 approximant = "IMRPhenomXAS_NRTidalv3"
 minimum_frequency = 2.0
 maximum_frequency = 2048.0

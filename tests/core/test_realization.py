@@ -21,6 +21,7 @@ from astrogwb.simulators import (
     Realization,
     RealizationSimulator,
     batch_keys,
+    network_spectra_ensemble,
     population_key,
     simulate_ensemble,
 )
@@ -214,3 +215,51 @@ def test_an_ensemble_is_a_prefix_of_a_larger_one(tmp_path: Path) -> None:
     ]
     keys = np.asarray(jax.random.key_data(batch_keys(SEED, 3)))
     assert [list(r.rng_key) for r in larger] == keys.tolist()
+
+
+@pytest.fixture(scope="module")
+def ensemble(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Two draws of ``SEED``, each recorded by every tiny network."""
+    root = tmp_path_factory.mktemp("ensemble")
+    simulator = _simulator(
+        population=POPULATION, waveform=WAVEFORM, background=NETWORKS
+    )
+    simulate_ensemble(simulator, root, SEED, 2)
+    return root
+
+
+def test_network_spectra_ensemble_stacks_every_draws_pairs(ensemble: Path) -> None:
+    triangle, pair = network_spectra_ensemble(ensemble, SEED, 2, ["triangle", "pair"])
+
+    assert triangle["pair_spectral_density"].shape[:2] == (2, 3)
+    # Sorted pairs: the triangle's (C1, S1) is its second, the pair's only one.
+    np.testing.assert_array_equal(
+        pair["pair_spectral_density"][:, 0], triangle["pair_spectral_density"][:, 1]
+    )
+
+
+@pytest.mark.parametrize("index", [0, 1])
+def test_network_spectra_ensemble_reads_each_stored_network_spectrum(
+    ensemble: Path, index: int
+) -> None:
+    (triangle,) = network_spectra_ensemble(ensemble, SEED, 2, ["triangle"])
+
+    stored = Realization.open(ensemble / f"{SEED}-{index}").background()
+    np.testing.assert_array_equal(
+        triangle["spectral_density"][index],
+        stored.network("triangle").spectral_density,
+    )
+
+
+def test_network_spectra_ensemble_from_start_is_a_suffix(ensemble: Path) -> None:
+    (full,) = network_spectra_ensemble(ensemble, SEED, 2, ["triangle"])
+    (second,) = network_spectra_ensemble(ensemble, SEED, 2, ["triangle"], start=1)
+
+    np.testing.assert_array_equal(
+        second["spectral_density"], full["spectral_density"][1:]
+    )
+
+
+def test_network_spectra_ensemble_of_a_missing_draw_raises(ensemble: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        network_spectra_ensemble(ensemble, SEED, 3, ["triangle"])

@@ -64,7 +64,7 @@ Every ensemble is a set of independent draws (100 by default) of the
 catalog-based forward model -- `R <P>` over `N` sources drawn at the fiducial
 hyperparameters (`astrogwb.gwb.catalog.draw_catalog`) -- served from the
 spectrum cache or generated on a miss. The Poisson option is a network
-realization from `astrogwb.paper.ensemble`. Other defaults are seed 41, batch size 1024, one observing
+realization from the fiducial ensemble (`astrogwb.simulators.network_spectra_ensemble`). Other defaults are seed 41, batch size 1024, one observing
 year, the 2-2048 Hz band, and network `ET-2L-aligned-CE-Hanford`.
 
 - The **count sweep** uses `N = 2^12 ... 2^18` at `z_min = 0.35`.

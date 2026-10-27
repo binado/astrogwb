@@ -35,7 +35,6 @@ with app.setup(hide_code=True):
     from astrogwb.paper.catalogs import read_reference_catalog
     from astrogwb.paper.config import detector_registry, fiducials, priors
     from astrogwb.paper.config.runs import CATALOGS_ROOT, ENSEMBLES_ROOT, FIGURES_DIR
-    from astrogwb.paper.ensemble import network_spectra_ensemble
     from astrogwb.paper.plotting import (
         DETECTOR_COMPARISON_LEGEND,
         DETECTOR_NETWORKS,
@@ -50,7 +49,11 @@ with app.setup(hide_code=True):
         pad_pairs,
     )
     from astrogwb.populations import build_population
-    from astrogwb.simulators import DetectorNoise, Realization
+    from astrogwb.simulators import (
+        DetectorNoise,
+        Realization,
+        network_spectra_ensemble,
+    )
 
     # Log-likelihood of every injection at every grid point, (M, G): data is
     # (M, F), prediction and direction (G, F). One injection at a time, so

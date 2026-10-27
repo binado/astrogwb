@@ -52,9 +52,8 @@ with app.setup(hide_code=True):
     from astrogwb.paper.config.detectors import DetectorRegistry
     from astrogwb.paper.config.runs import ENSEMBLES_ROOT, FIGURES_DIR, SPECTRA_ROOT
     from astrogwb.gwb.catalog import CatalogMetadata, draw_catalog
-    from astrogwb.paper.ensemble import network_spectra_ensemble
     from astrogwb.paper.plotting import save_figures, use_paper_style
-    from astrogwb.simulators import Realization, batch_keys
+    from astrogwb.simulators import Realization, batch_keys, network_spectra_ensemble
     from astrogwb.utils.io import content_key
     from astrogwb.utils import years_to_seconds
 

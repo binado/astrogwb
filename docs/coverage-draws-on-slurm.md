@@ -13,12 +13,12 @@ input, per ensemble:
 
 The one ensemble is `fiducial`, the default waveform and grid: the grid
 notebooks' injection, `shot_noise_coverage`'s injections and the draws of
-`ensemble_spectrum` and `spectrum_snrs`. Its settings are the
-committed `config/ensembles/<name>/{population,waveform}.toml` and
-`config/networks.toml`, which
-[`scripts/write_ensemble_configs.py`](../scripts/write_ensemble_configs.py)
-writes from the shared config layers. `tests/paper/test_ensemble.py` fails
-while they are stale.
+`ensemble_spectrum` and `spectrum_snrs`. Its settings are the committed
+`config/ensembles/fiducial/{population,waveform}.toml` and
+`config/networks.toml`, edited by hand. They copy the shared layers
+(`config/defaults.toml`, `config/waveforms.toml`, `config/detectors.toml`) but
+are not derived from them: editing a shared layer does not change an
+ensemble.
 
 Every realization's background holds every paper network's pair spectra and
 combined spectrum. The pairs of all networks are projected once per draw, so
@@ -29,11 +29,10 @@ machines gives the same directories, and they merge by copying.
 ## Regenerating after a change
 
 Nothing is migrated. If you change a detector, a noise curve, the fiducials,
-the population or the waveform, rewrite the configs and regenerate the
-ensemble:
+the population or the waveform, edit the committed simulation inputs to match
+and regenerate the ensemble:
 
 ```bash
-uv run python scripts/write_ensemble_configs.py
 rm -r outputs/ensembles/fiducial
 uv run --no-sync snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm
 ```

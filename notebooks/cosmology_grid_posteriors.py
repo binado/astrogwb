@@ -35,7 +35,6 @@ with app.setup(hide_code=True):
     )
     from astrogwb.paper.config import detector_registry, fiducials, priors
     from astrogwb.paper.config.runs import CATALOGS_ROOT, ENSEMBLES_ROOT, FIGURES_DIR
-    from astrogwb.paper.ensemble import network_spectra_ensemble
     from astrogwb.paper.plotting import (
         DETECTOR_NETWORKS,
         TRUTH,
@@ -52,7 +51,11 @@ with app.setup(hide_code=True):
         shot_noise_variant,
     )
     from astrogwb.populations import build_population
-    from astrogwb.simulators import DetectorNoise, Realization
+    from astrogwb.simulators import (
+        DetectorNoise,
+        Realization,
+        network_spectra_ensemble,
+    )
 
 
 @app.cell(hide_code=True)

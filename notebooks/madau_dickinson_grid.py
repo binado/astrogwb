@@ -37,7 +37,6 @@ with app.setup(hide_code=True):
     )
     from astrogwb.paper.config import detector_registry, fiducials, priors
     from astrogwb.paper.config.runs import CATALOGS_ROOT, ENSEMBLES_ROOT, FIGURES_DIR
-    from astrogwb.paper.ensemble import network_spectra_ensemble
     from astrogwb.paper.plotting import (
         DETECTOR_NETWORKS,
         plot_corner,
@@ -51,7 +50,7 @@ with app.setup(hide_code=True):
         shot_noise_variant,
     )
     from astrogwb.populations import build_population
-    from astrogwb.simulators import DetectorNoise
+    from astrogwb.simulators import DetectorNoise, network_spectra_ensemble
 
     # Points of the coarse scan that locates the ridge, Newton iterations that
     # polish it, points of the integration window, and its half width in

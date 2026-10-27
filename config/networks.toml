@@ -1,4 +1,8 @@
-# Written by scripts/write_ensemble_configs.py; do not edit.
+# Every network a simulated background records: `astrogwb simulate
+# --background-metadata`. Detectors are packaged site codes. The ET-D networks
+# are the ET triangle's detectors with the ET-D noise curve; the paper registry
+# (config/detectors.toml) names those detectors E1D-E3D. Keep both in step, and
+# regenerate the ensembles after an edit.
 [networks.ET-triangular]
 detectors = [
     "E1",

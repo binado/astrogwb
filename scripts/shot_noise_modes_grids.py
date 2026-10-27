@@ -54,11 +54,10 @@ from astrogwb.inference import ImportanceGaussianLikelihood, Network, shot_noise
 from astrogwb.paper.catalogs import read_reference_catalog
 from astrogwb.paper.config import detector_registry, fiducials, priors
 from astrogwb.paper.config.runs import CATALOGS_ROOT, ENSEMBLES_ROOT
-from astrogwb.paper.ensemble import network_spectra_ensemble
 from astrogwb.paper.plotting import DETECTOR_NETWORKS
 from astrogwb.paper.posteriors import network_data
 from astrogwb.populations import build_population
-from astrogwb.simulators import DetectorNoise
+from astrogwb.simulators import DetectorNoise, network_spectra_ensemble
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "notebooks"))
 import cosmology_grid_posteriors as cosmology

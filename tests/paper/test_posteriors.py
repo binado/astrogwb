@@ -3,21 +3,20 @@
 from __future__ import annotations
 
 import dataclasses
+import tomllib
 
 import jax.numpy as jnp
 import numpy as np
 import pytest
 from repo import REPO_ROOT
 
-from astrogwb.paper.config import detector_registry
-from astrogwb.paper.ensemble import network_configuration
 from astrogwb.paper.posteriors import (
     MAX_PAIRS,
     network_data,
     network_pair_data,
     shot_noise_variant,
 )
-from astrogwb.simulators import DetectorNoise, detector_noise
+from astrogwb.simulators import DetectorConfiguration, DetectorNoise, detector_noise
 
 NETWORK = "ET-2L-aligned-CE-Hanford"
 
@@ -32,11 +31,12 @@ class _Likelihood:
 @pytest.fixture(scope="module")
 def noise() -> DetectorNoise:
     """The fiducial network's noise on a grid straddling the band's edges."""
-    registry = detector_registry(root=REPO_ROOT)
+    with (REPO_ROOT / "config/networks.toml").open("rb") as file:
+        network = DetectorConfiguration.model_validate(
+            tomllib.load(file)["networks"][NETWORK]
+        )
     frequencies = np.array([0.5, 1.0, 10.0, 50.0, 100.0, 5000.0])
-    return detector_noise(
-        frequencies, {NETWORK: network_configuration(registry, NETWORK)}, 1.0
-    )
+    return detector_noise(frequencies, {NETWORK: network}, 1.0)
 
 
 def test_network_data_masks_out_of_band_bins(noise: DetectorNoise) -> None:

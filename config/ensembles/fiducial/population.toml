@@ -1,4 +1,6 @@
-# Written by scripts/write_ensemble_configs.py; do not edit.
+# The fiducial ensemble's population, `astrogwb simulate --population-metadata`:
+# the shared population at the fiducials (config/defaults.toml), observed for a
+# year. Regenerate outputs/ensembles/fiducial after an edit.
 observation_time = 1.0
 
 [population]
