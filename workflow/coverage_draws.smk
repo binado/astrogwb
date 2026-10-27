@@ -1,58 +1,109 @@
-# Coverage-notebook injection draws, one job per batch of draw indices.
+# The simulation inputs the paper notebooks read, generated explicitly.
 #
 #   uv run --no-sync snakemake -s workflow/coverage_draws.smk \
-#       --profile workflow/profiles/slurm --config start=500 stop=1000 --dry-run
+#       --profile workflow/profiles/slurm --config ensembles=coverage --dry-run
 #
-# Each job runs scripts/draw_coverage_injections.py --start i --stop j, which
-# writes draw k, a realization directory holding its manifest and one
-# background over every network's detectors, to
-# <cache_dir>/ensembles/<key>/41-<k>/. The background is written last and
-# atomically, so its file is the job's output: it exists only once the draw is
-# complete. Draw k is fixed by (seed, k) alone, so the batches are independent,
-# finished directories merge by copying, and a batch whose files all exist is
-# skipped: a rerun resumes, and draws copied in from another machine are not
-# redrawn.
+# Notebooks never simulate: they read what this writes and fail with a
+# FileNotFoundError when it is missing. Per ensemble <name> (the committed
+# config/ensembles/<name>/{population,waveform}.toml and config/networks.toml,
+# written by scripts/write_ensemble_configs.py):
 #
-# Snakemake comes from the project venv (the `cluster` dependency group), so
-# the controller and its jobs share the interpreter the script runs in. The
-# key below is what the script prints with --keys; it names the outputs. A
-# script that drew under another key would leave these paths missing, and
-# Snakemake fails that job on a MissingOutputException rather than reporting
-# it done.
+#   outputs/ensembles/<name>/<seed>-<index>/   one realization per
+#       `astrogwb simulate` job, its manifest and background.h5: every paper
+#       network's pair spectra and combined spectrum;
+#   outputs/ensembles/<name>/detector_noise.h5 `astrogwb noise` of draw 0,
+#       the networks' noise on the same grid and observation time;
+#
+# and the reference catalogs the notebooks name, by
+# scripts/draw_reference_catalog.py, under outputs/catalogs/.
+#
+# A realization is fixed by (seed, index) alone, so jobs are independent,
+# finished directories merge by copying, and a background that exists is not
+# redrawn. The background is written last and atomically, so its file is the
+# job's output. Editing a committed config does not migrate anything: a rerun
+# against a realization recorded with other settings fails on the conflict, so
+# delete the ensemble and regenerate it.
+#
+# Draw jobs share the `draws` group; the profile's group-components packs
+# several into one SLURM job. Snakemake comes from the project venv, synced
+# with `uv sync --extra notebook --extra cli --group cluster`, so the
+# controller and its jobs share one interpreter.
 #
 # Config (override with --config key=value):
-#   start, stop  draw indices [start, stop)               default 500, 1000
-#   batch        draws per job                            default 5
-#   cache_dir    cache root, the script's --cache-dir     default $XDG_CACHE_HOME/astrogwb
-#   threads      CPUs per job                             default 8
+#   ensembles  space-separated names           default "fiducial coverage"
+#   stop       draws of the ensembles' first   default per ensemble (DRAWS)
+#              seed, overriding DRAWS
+#   threads    CPUs per draw job               default 8
+#   outputs    output root; an absolute path   default "outputs", where the
+#              on a shared filesystem if jobs   notebooks read
+#              run in node-local copies
 
-import os
-from pathlib import Path
+OUTPUTS = str(config.get("outputs", "outputs")).rstrip("/")
+ENSEMBLES_ROOT = f"{OUTPUTS}/ensembles"
+CATALOGS_ROOT = f"{OUTPUTS}/catalogs"
 
-SEED = 41
-KEY = "0295b914397ec3c8"  # the six DETECTOR_NETWORKS, one background per draw
+# Draws per seed of each ensemble: what the notebooks read.
+#   fiducial: the grid notebooks' injection (41-0), spectrum_snrs' Poisson
+#             ensemble (41, 200 draws) and its independent reference (42-0).
+#   coverage: shot_noise_coverage's injections and ensemble_spectrum's draws.
+DRAWS = {
+    "fiducial": {41: 200, 42: 1},
+    "coverage": {41: 1000},
+    "fiducial-smoke": {41: 3, 42: 1},
+    "coverage-smoke": {41: 4},
+}
 
-# platformdirs' user cache on Linux; on macOS pass cache_dir explicitly.
-_XDG_CACHE = os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache"
-CACHE_DIR = Path(config.get("cache_dir", Path(_XDG_CACHE) / "astrogwb"))
-START = int(config.get("start", 500))
-STOP = int(config.get("stop", 1000))
-BATCH = int(config.get("batch", 5))
+# The reference catalogs each ensemble's notebooks read, and their options.
+_XAS = "--approximant IMRPhenomXAS_NRTidalv3"
+CATALOGS = {
+    "fiducial": {
+        # cosmology_grid_posteriors, madau_dickinson_grid, shot_noise_* scripts
+        "reference-fiducial": "--num-samples 16384 --chunk-size 4096",
+        # importance_convergence's redshift ladder
+        "reference-ladder": "--num-samples 256 --sampling random --seed 100",
+    },
+    "coverage": {
+        "reference-coverage": f"{_XAS} --num-samples 16384 --chunk-size 4096",
+        # ensemble_spectrum's minimum-redshift scan
+        "reference-scan": (
+            f"{_XAS} --num-samples 16384 --reference-distance-mpc 1 --chunk-size 4096"
+        ),
+    },
+    "fiducial-smoke": {
+        "reference-fiducial-smoke": "--num-samples 64 --chunk-size 512",
+        "reference-ladder-smoke": "--num-samples 16 --sampling random --seed 100",
+    },
+    "coverage-smoke": {
+        "reference-coverage-smoke": f"{_XAS} --num-samples 64 --chunk-size 512",
+        "reference-scan-smoke": (
+            f"{_XAS} --num-samples 64 --reference-distance-mpc 1 --chunk-size 64"
+        ),
+    },
+}
+CATALOG_OPTIONS = {
+    name: options for catalogs in CATALOGS.values() for name, options in catalogs.items()
+}
+
+SELECTED = str(config.get("ensembles", "fiducial coverage")).split()
 THREADS = int(config.get("threads", 8))
-
-if not 0 <= START < STOP or BATCH < 1:
-    raise ValueError(f"need 0 <= start < stop and batch >= 1, got {START}, {STOP}, {BATCH}")
-
-
-def draw_files(start, stop):
-    """The background of every draw in [start, stop)."""
-    return [
-        str(CACHE_DIR / "ensembles" / KEY / f"{SEED}-{index}" / "background.h5")
-        for index in range(start, stop)
-    ]
+unknown = set(SELECTED) - set(DRAWS)
+if unknown:
+    raise ValueError(f"unknown ensembles {sorted(unknown)}; known: {sorted(DRAWS)}")
 
 
-BATCHES = [(start, min(start + BATCH, STOP)) for start in range(START, STOP, BATCH)]
+def draws(name):
+    """Every draw of the ensemble `name`, overridden by --config stop."""
+    seeds = dict(DRAWS[name])
+    if "stop" in config:
+        seeds[next(iter(seeds))] = int(config["stop"])
+    return [(seed, index) for seed, count in seeds.items() for index in range(count)]
+
+
+wildcard_constraints:
+    ensemble=r"[A-Za-z0-9_-]+",
+    seed=r"\d+",
+    index=r"\d+",
+    catalog=r"[A-Za-z0-9_-]+",
 
 
 localrules:
@@ -61,43 +112,85 @@ localrules:
 
 rule all:
     input:
-        draw_files(START, STOP),
+        [
+            f"{ENSEMBLES_ROOT}/{name}/{seed}-{index}/background.h5"
+            for name in SELECTED
+            for seed, index in draws(name)
+        ],
+        [f"{ENSEMBLES_ROOT}/{name}/detector_noise.h5" for name in SELECTED],
+        [f"{CATALOGS_ROOT}/{catalog}.h5" for name in SELECTED for catalog in CATALOGS[name]],
 
 
-# One rule per batch: its outputs are a range of indices, which a wildcard
-# rule cannot name file by file.
-for _start, _stop in BATCHES:
+# INPUT, OUTPUT and job-nanny are the cluster's job requirements; job-nanny is
+# used wherever it is on PATH. It runs the command in a node-local copy of the
+# working directory without .venv, so `uv run` alone would create an empty venv
+# there. --active uses VIRTUAL_ENV instead, the shared venv the controller was
+# started from with `uv run`. --no-sync: that venv is synced once on the login
+# node; a hundred jobs each syncing it at once would race on the filesystem.
+_RUN = """
+    export INPUT="*"
+    export OUTPUT="*"
+    NANNY=
+    if command -v job-nanny >/dev/null 2>&1; then
+        NANNY=job-nanny
+    fi
+    $NANNY uv run --active --frozen --no-sync"""
 
-    rule:
-        name:
-            f"draws_{_start:04d}_{_stop:04d}"
-        output:
-            draw_files(_start, _stop),
-        log:
-            f"logs/coverage_draws/{_start:04d}-{_stop:04d}.log",
-        params:
-            start=_start,
-            stop=_stop,
-            cache_dir=str(CACHE_DIR),
-        threads: THREADS
-        # INPUT, OUTPUT and job-nanny are the cluster's job requirements, as in
-        # the retired run_mcmc rule; job-nanny is used wherever it is on PATH.
-        # job-nanny runs the command in a node-local copy of the working
-        # directory without .venv, so `uv run` alone would create an empty
-        # venv there. --active uses VIRTUAL_ENV instead, the shared venv the
-        # controller was started from with `uv run`. --no-sync: that venv is
-        # synced once on the login node; a hundred jobs each syncing it at
-        # once would race on the filesystem.
-        shell:
-            """
-            export INPUT="*"
-            export OUTPUT="*"
-            NANNY=
-            if command -v job-nanny >/dev/null 2>&1; then
-                NANNY=job-nanny
-            fi
-            $NANNY uv run --active --frozen --no-sync \
-                python scripts/draw_coverage_injections.py \
-                --cache-dir {params.cache_dir:q} \
-                --start {params.start} --stop {params.stop} > {log:q} 2>&1
-            """
+
+rule simulate:
+    input:
+        population="config/ensembles/{ensemble}/population.toml",
+        waveform="config/ensembles/{ensemble}/waveform.toml",
+        networks="config/networks.toml",
+    output:
+        f"{ENSEMBLES_ROOT}/{{ensemble}}/{{seed}}-{{index}}/background.h5",
+    log:
+        "logs/ensembles/{ensemble}/{seed}-{index}.log",
+    params:
+        directory=f"{ENSEMBLES_ROOT}/{{ensemble}}/{{seed}}-{{index}}",
+    group:
+        "draws"
+    threads: THREADS
+    shell:
+        _RUN
+        + """ astrogwb simulate {params.directory:q} \
+            --population-metadata {input.population:q} \
+            --seed {wildcards.seed} --index {wildcards.index} \
+            --waveform-metadata {input.waveform:q} \
+            --background-metadata {input.networks:q} \
+            --no-keep-sources --chunk-size 8192 --source-chunk-size 65536 \
+            --cpu-threads {threads} > {log:q} 2>&1
+        """
+
+
+def first_draw(wildcards):
+    seed, index = draws(wildcards.ensemble)[0]
+    return f"{ENSEMBLES_ROOT}/{wildcards.ensemble}/{seed}-{index}/background.h5"
+
+
+rule noise:
+    input:
+        first_draw,
+    output:
+        f"{ENSEMBLES_ROOT}/{{ensemble}}/detector_noise.h5",
+    log:
+        "logs/ensembles/{ensemble}/detector_noise.log",
+    shell:
+        _RUN
+        + """ astrogwb noise $(dirname {input:q}) {output:q} > {log:q} 2>&1
+        """
+
+
+rule reference_catalog:
+    output:
+        f"{CATALOGS_ROOT}/{{catalog}}.h5",
+    log:
+        "logs/catalogs/{catalog}.log",
+    params:
+        options=lambda wildcards: CATALOG_OPTIONS[wildcards.catalog],
+    threads: THREADS
+    shell:
+        _RUN
+        + """ python scripts/draw_reference_catalog.py {params.options} \
+            --output {output:q} > {log:q} 2>&1
+        """

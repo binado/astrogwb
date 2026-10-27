@@ -1,18 +1,21 @@
 # Coverage draws on SLURM, CPU only:
 #   uv run --no-sync snakemake -s workflow/coverage_draws.smk \
-#       --profile workflow/profiles/slurm --config start=500 stop=1000 --dry-run
+#       --profile workflow/profiles/slurm --config ensembles=coverage --dry-run
 # Needs the project venv synced with the `cluster` group; see
 # docs/coverage-draws-on-slurm.md.
-# Job logs land under .snakemake/slurm_logs/, the script's own under logs/.
+# Job logs land under .snakemake/slurm_logs/, each command's own under logs/.
 executor: slurm
-# Concurrent jobs in the queue; 500 draws at 5 per job is 100 jobs.
+# Concurrent jobs in the queue; 1000 draws at 5 per job is 200 jobs.
 jobs: 100
-# Batches are separate rules, so job arrays would bundle nothing.
+# Draw jobs share the `draws` group; pack five into each SLURM job, run one
+# after another, so a job's ~5 min startup and queue wait are amortized.
+group-components:
+  - draws=5
 keep-going: true
 rerun-incomplete: true
-# Re-run a batch only when a file is missing. Changing `batch` renames every
-# rule; with the default triggers, files Snakemake already wrote would then be
-# redrawn for a changed rule body.
+# Re-run a draw only when its file is missing or a config it reads is newer.
+# A changed config then fails on the realization's recorded settings rather
+# than silently redrawing: delete the ensemble to regenerate it.
 rerun-triggers: mtime
 # Outputs land on a shared filesystem the controller polls.
 latency-wait: 120

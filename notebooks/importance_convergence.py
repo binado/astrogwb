@@ -5,7 +5,7 @@ app = marimo.App()
 
 with app.setup(hide_code=True):
     import os
-    from collections.abc import Callable, Mapping
+    from collections.abc import Mapping
     from pathlib import Path
 
     from astrogwb.paper.runtime import configure_runtime
@@ -29,12 +29,10 @@ with app.setup(hide_code=True):
         CatalogMetadata,
         PolarizationPowerData,
     )
-    from astrogwb.gwb.importance import (
-        reference_catalog,
-        reference_catalog_stem,
-    )
+    from astrogwb.gwb.importance import reference_catalog
     from astrogwb.inference import ImportanceGaussianLikelihood
     from astrogwb.inference.fisher import spectral_density_jacobian
+    from astrogwb.paper.catalogs import read_reference_catalog
     from astrogwb.paper.config import (
         detector_registry,
         fiducials,
@@ -46,7 +44,6 @@ with app.setup(hide_code=True):
     from astrogwb.paper.plotting import parameter_label, save_figures, use_paper_style
     from astrogwb.populations import Population, build_population
     from astrogwb.simulators import batch_keys
-    from astrogwb.utils.io import load, write
 
     # One compiled spectrum for every catalog: the likelihood is a pytree
     # argument, so its catalog is a traced input, not a constant, and catalogs
@@ -98,7 +95,10 @@ def _():
     coherent shift of the posterior: $b_a$ is that shift. $\xi_n$ has no
     $b$: at $\Xi_0 = 1$ the spectrum does not depend on it.
 
-    Setting `ASTROGWB_NOTEBOOK_SMOKE=1` swaps in tiny catalogs.
+    The ladder's reference catalog is read from a file
+    (`scripts/draw_reference_catalog.py`, run by `workflow/coverage_draws.smk`);
+    the Monte Carlo and Sobol catalogs are drawn in memory. Setting
+    `ASTROGWB_NOTEBOOK_SMOKE=1` swaps in tiny catalogs.
     """)
 
 
@@ -113,11 +113,10 @@ def _():
 def _():
     ROOT_DIR = Path(__file__).resolve().parents[1]
     FIGURES = ROOT_DIR / FIGURES_DIR / "importance_convergence"
-    catalog_dir = ROOT_DIR / CATALOGS_ROOT
 
-    # Redshift ladder: one fixed set of draws; the top rung is the reference.
-    ladder_seed = 100
-    ladder_samples = 256
+    # Redshift ladder: one fixed set of 256 i.i.d. draws at seed 100 (16 in a
+    # smoke run), read from the file the workflow writes; the top rung is the
+    # reference.
     ladder_exponents = range(2, 11)  # Z = 4 ... 1024
 
     # Monte Carlo: M catalogs at N_max; each N = 2**k <= N_max is a prefix.
@@ -153,7 +152,6 @@ def _():
     SMOKE = os.environ.get("ASTROGWB_NOTEBOOK_SMOKE") == "1"
     write_figures_default = True
     if SMOKE:
-        ladder_samples = 16
         ladder_exponents = range(2, 6)  # Z = 4 ... 32
         mc_catalogs = 3
         mc_max_samples = 64
@@ -163,6 +161,9 @@ def _():
         catalog_chunk_size = 512
         edges = {}
         write_figures_default = False
+    ladder_path = (
+        ROOT_DIR / CATALOGS_ROOT / (f"reference-ladder{'-smoke' if SMOKE else ''}.h5")
+    )
 
     evaluation_points: dict[str, dict[str, float]] = {"fiducial": dict(FIDUCIALS)}
     for _name, _values in edges.items():
@@ -194,12 +195,10 @@ def _():
         FIDUCIALS,
         FIGURES,
         catalog_chunk_size,
-        catalog_dir,
         evaluation_points,
         frequencies,
         ladder_exponents,
-        ladder_samples,
-        ladder_seed,
+        ladder_path,
         maximum_frequency,
         mc_base_seed,
         mc_catalogs,
@@ -227,53 +226,6 @@ def _():
     mo.md(r"""
     ## Toolbox
     """)
-
-
-@app.function(hide_code=True)
-def cached_catalog(
-    path: Path,
-    metadata: CatalogMetadata,
-    seed: int,
-    draw: Callable[[jax.Array], PolarizationPowerData],
-) -> PolarizationPowerData:
-    """The catalog at ``path``, drawn with ``draw(batch_keys(seed, 1)[0])`` on a miss.
-
-    A hit is checked against ``metadata`` and ``seed``, against the
-    request it records.
-
-    Raises
-    ------
-    ValueError
-        If the cached file records another metadata or seed.
-    """
-    if path.is_file():
-        data, recorded, attrs = load(path, type(metadata))
-        if recorded.key() != metadata.key() or attrs.get("seed") != seed:
-            raise ValueError(
-                f"{path} records {recorded.key()} at seed {attrs.get('seed')}, "
-                f"not the requested {metadata.key()} at seed {seed}"
-            )
-        return data  # ty: ignore[invalid-return-type]
-    data = draw(batch_keys(seed, 1)[0])
-    write(path, data, metadata, seed=seed)
-    return data
-
-
-@app.function(hide_code=True)
-def ensure_reference_catalog(
-    metadata: CatalogMetadata,
-    seed: int,
-    directory: Path,
-    *,
-    chunk_size: int | None = None,
-) -> PolarizationPowerData:
-    """The reference catalog of ``metadata`` at ``seed``: power ``(F_ref, N)``."""
-    return cached_catalog(
-        directory / f"{reference_catalog_stem(metadata, seed)}.h5",
-        metadata,
-        seed,
-        lambda key: reference_catalog(metadata, key, chunk_size=chunk_size),
-    )
 
 
 @app.function(hide_code=True)
@@ -462,29 +414,13 @@ def _(
 
 
 @app.cell
-def _(
-    FIDUCIALS,
-    catalog_chunk_size,
-    catalog_dir,
-    ladder_samples,
-    ladder_seed,
-    population,
-    reference_waveform,
-):
-    ladder_reference_metadata = CatalogMetadata(
-        waveform=reference_waveform,
-        population=population,
-        fiducials=FIDUCIALS,
-        num_samples=ladder_samples,
-    )
-    ladder_reference = ensure_reference_catalog(
-        ladder_reference_metadata,
-        ladder_seed,
-        catalog_dir,
-        chunk_size=catalog_chunk_size,
+def _(ladder_path):
+    ladder_reference, ladder_reference_metadata, _seed = read_reference_catalog(
+        ladder_path
     )
     print(
-        f"ladder: N = {ladder_samples}, reference grid "
+        f"ladder: N = {ladder_reference_metadata.num_samples} at seed "
+        f"{_seed}, reference grid "
         f"{np.asarray(ladder_reference['frequencies']).size} bins"
     )
     return ladder_reference, ladder_reference_metadata
@@ -821,7 +757,6 @@ def _():
 def _(
     FIDUCIALS,
     catalog_chunk_size,
-    catalog_dir,
     chosen_nodes,
     evaluation_points,
     frequencies,

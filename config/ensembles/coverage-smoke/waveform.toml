@@ -1,0 +1,11 @@
+# Written by scripts/write_ensemble_configs.py; do not edit.
+approximant = "IMRPhenomXAS_NRTidalv3"
+minimum_frequency = 2.0
+maximum_frequency = 2048.0
+reference_frequency = 20.0
+sampling_frequency = 8192.0
+frequency_spacing = "loglinear"
+frequency_resolution = 0.125
+turnover_frequency = 100.0
+dlogf = 0.01266
+use_taper_in_tidal_corrections = true

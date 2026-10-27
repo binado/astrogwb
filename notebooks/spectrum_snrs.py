@@ -43,7 +43,6 @@ with app.setup(hide_code=True):
         amplitude_H0_transform,
         gwb_amplitude_marginalized_model,
     )
-    from astrogwb.paper.cache import default_cache_dir
     from astrogwb.paper.config import (
         detector_registry,
         fiducials,
@@ -52,16 +51,11 @@ with app.setup(hide_code=True):
         waveform_metadata,
     )
     from astrogwb.paper.config.detectors import DetectorRegistry
-    from astrogwb.paper.config.runs import FIGURES_DIR
+    from astrogwb.paper.config.runs import ENSEMBLES_ROOT, FIGURES_DIR, SPECTRA_ROOT
     from astrogwb.gwb.catalog import CatalogMetadata, draw_catalog
-    from astrogwb.paper.ensemble import (
-        EnsembleRecord,
-        network_configuration,
-        network_spectra_ensemble,
-    )
+    from astrogwb.paper.ensemble import network_spectra_ensemble
     from astrogwb.paper.plotting import save_figures, use_paper_style
-    from astrogwb.simulators import PopulationMetadata as RealizationMetadata
-    from astrogwb.simulators import batch_keys
+    from astrogwb.simulators import Realization, batch_keys
     from astrogwb.utils.io import content_key
     from astrogwb.utils import years_to_seconds
 
@@ -216,7 +210,8 @@ def _():
     maximum_frequency = 2048.0
     network = "ET-2L-aligned-CE-Hanford"
 
-    cache_dir = default_cache_dir() / "spectra"
+    # The fixed-count spectra this notebook draws from catalogs, cached here.
+    cache_dir = ROOT_DIR / SPECTRA_ROOT / "spectrum_snrs"
     cache_only = False
     write_figures = True
 
@@ -231,6 +226,15 @@ def _():
         chunk_size = 8
         n_bootstrap = 20
         write_figures = False
+
+    # The Poisson realizations are read, never drawn: the fiducial ensemble of
+    # workflow/coverage_draws.smk, the default population and waveform, at
+    # `seed` (the ensemble) and `data_seed` (the independent reference). A
+    # smoke ensemble realizes a short observation, a few hundred sources.
+    ensemble_root = (
+        ROOT_DIR / ENSEMBLES_ROOT / ("fiducial-smoke" if SMOKE else "fiducial")
+    )
+    realized = Realization.open(ensemble_root / f"{seed}-0").population_metadata
 
     # Read the shared draw's waveform rather than copying its scientific settings.
     base_metadata = SpectrumMetadata(
@@ -247,11 +251,10 @@ def _():
         observation_time=observation_time,
     )
     # Poisson network realizations: the count follows rate * observation_time.
-    # A smoke run realizes a short observation, a few hundred sources.
     poisson_metadata = dataclass_replace(
         base_metadata,
         count="poisson",
-        realized_observation_time=1e-4 if SMOKE else observation_time,
+        realized_observation_time=realized.observation_time,
     )
     # The optional reference is one draw of the Poisson ensemble's metadata at
     # an independent seed (settings.data_seed).
@@ -271,6 +274,7 @@ def _():
         data_seed=data_seed,
         cache_dir=cache_dir,
         cache_only=cache_only,
+        ensemble_root=ensemble_root,
         h0_prior=h0_prior,
     )
     use_paper_style(root=ROOT_DIR)
@@ -368,7 +372,7 @@ class SpectrumMetadata:
 @app.class_definition(hide_code=True)
 @dataclass(frozen=True)
 class AnalysisSettings:
-    """Detector network, frequency band, and cache policy shared by every case."""
+    """Detector network, frequency band, inputs and cache policy shared by every case."""
 
     registry: DetectorRegistry
     network: str
@@ -382,6 +386,8 @@ class AnalysisSettings:
     data_seed: int
     cache_dir: Path
     cache_only: bool
+    #: The Poisson ensemble's root; its backgrounds record ``network``.
+    ensemble_root: Path
     h0_prior: dist.Uniform
 
 
@@ -629,29 +635,14 @@ def draw_spectra(
     num_draws: int,
     settings: AnalysisSettings,
 ) -> tuple[SpectrumData, SpectrumMetadata]:
-    """Serve or generate the spectra ``metadata`` gives at ``batch_keys(seed, num_draws)``."""
+    """The spectra ``metadata`` gives at ``batch_keys(seed, num_draws)``.
+
+    Poisson realizations are read from ``settings.ensemble_root``; fixed-count
+    spectra are served from ``settings.cache_dir`` or drawn there.
+    """
     if metadata.count == "poisson":
-        catalog = metadata.catalog
-        record = EnsembleRecord(
-            population=RealizationMetadata(
-                observation_time=metadata.realized_observation_time
-                or metadata.observation_time,
-                hyperparameters=dict(catalog.fiducials),
-                population=catalog.population,
-            ),
-            waveform=catalog.waveform,
-            networks={
-                settings.network: network_configuration(
-                    settings.registry, settings.network
-                )
-            },
-        )
         (drawn,) = network_spectra_ensemble(
-            record,
-            seed,
-            num_draws,
-            settings.cache_dir / "ensembles",
-            chunk_size=settings.chunk_size,
+            settings.ensemble_root, seed, num_draws, [settings.network]
         )
         return {
             "frequencies": drawn["frequencies"],

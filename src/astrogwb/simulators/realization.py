@@ -22,6 +22,7 @@ the population stage is the only one that draws random numbers.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,6 +43,8 @@ from astrogwb.simulators.background import (
     BackgroundArtifact,
     BackgroundSimulator,
     DetectorConfiguration,
+    NetworkConfiguration,
+    _read_networks,
     background_table,
 )
 from astrogwb.simulators.population import (
@@ -151,14 +154,10 @@ class Realization:
         )
 
     @property
-    def detectors(self) -> DetectorConfiguration | None:
-        """The recorded background network, ``None`` if none is."""
+    def networks(self) -> dict[str, DetectorConfiguration] | None:
+        """The recorded background networks, by name; ``None`` if none are."""
         table = self.manifest.get("background")
-        return (
-            None
-            if table is None
-            else DetectorConfiguration.model_validate(table["metadata"]["detectors"])
-        )
+        return None if table is None else _read_networks(table)
 
     def population(
         self, simulator: PopulationSimulator | None = None
@@ -239,7 +238,7 @@ class Realization:
         waveforms: WaveformSimulator | None = None,
         population: PopulationSimulator | None = None,
     ) -> BackgroundArtifact:
-        """The pair spectra, read from ``background.h5`` or projected by ``simulator``.
+        """The network spectra, read from ``background.h5`` or projected by ``simulator``.
 
         ``waveforms`` and ``population`` regenerate the upstream data that is
         not on disk.
@@ -295,7 +294,7 @@ class RealizationSimulator:
         self,
         population: PopulationMetadata | None = None,
         waveform: WaveformMetadata | None = None,
-        background: DetectorConfiguration | None = None,
+        background: NetworkConfiguration | None = None,
         *,
         keep_sources: bool = True,
         keep_polarizations: bool = False,
@@ -310,33 +309,52 @@ class RealizationSimulator:
             raise ValueError("chunk sizes must be positive")
         self._population = population
         self._waveform = waveform
-        self._background = background
+        self._background = None if background is None else dict(background)
         self._keep_sources = keep_sources
         self._keep_polarizations = keep_polarizations
         self._chunk_size = chunk_size
         self._source_chunk_size = source_chunk_size
         self._simulators: dict[tuple[object, str], Any] = {}
 
-    def _simulator[S](self, cls: Callable[..., S], settings: Any, chunk_size: int) -> S:
-        """The ``cls`` simulator of ``settings``, built on first use."""
-        key = (cls, settings.model_dump_json())
+    def _simulator[S](
+        self, cls: Callable[..., S], settings: Any, chunk_size: int, identity: str
+    ) -> S:
+        """The ``cls`` simulator of ``settings``, serialized as ``identity``, built once."""
+        key = (cls, identity)
         if key not in self._simulators:
             self._simulators[key] = cls(settings, chunk_size=chunk_size)
         return self._simulators[key]
 
     def population_simulator(self, metadata: PopulationMetadata) -> PopulationSimulator:
         """The cached population simulator of ``metadata``."""
-        return self._simulator(PopulationSimulator, metadata, self._source_chunk_size)
+        return self._simulator(
+            PopulationSimulator,
+            metadata,
+            self._source_chunk_size,
+            metadata.model_dump_json(),
+        )
 
     def waveform_simulator(self, metadata: WaveformMetadata) -> WaveformSimulator:
         """The cached waveform simulator of ``metadata``."""
-        return self._simulator(WaveformSimulator, metadata, self._chunk_size)
+        return self._simulator(
+            WaveformSimulator, metadata, self._chunk_size, metadata.model_dump_json()
+        )
 
     def background_simulator(
-        self, detectors: DetectorConfiguration
+        self, networks: NetworkConfiguration
     ) -> BackgroundSimulator:
-        """The cached background simulator of ``detectors``."""
-        return self._simulator(BackgroundSimulator, detectors, self._chunk_size)
+        """The cached background simulator of ``networks``."""
+        return self._simulator(
+            BackgroundSimulator,
+            networks,
+            self._chunk_size,
+            json.dumps(
+                {
+                    name: network.model_dump(mode="json")
+                    for name, network in networks.items()
+                }
+            ),
+        )
 
     def __call__(
         self, directory: str | Path, *, seed: int | None = None, index: int = 0
@@ -499,7 +517,7 @@ def simulate_realization(
     *,
     population: PopulationMetadata | None = None,
     waveform: WaveformMetadata | None = None,
-    background: DetectorConfiguration | None = None,
+    background: NetworkConfiguration | None = None,
     seed: int | None = None,
     index: int = 0,
     keep_sources: bool = True,

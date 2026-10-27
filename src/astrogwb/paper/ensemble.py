@@ -1,52 +1,82 @@
-"""Ensembles of network realizations, cached one realization directory per draw.
+"""Ensembles of network realizations, read from an explicit ensemble root.
 
-Several analyses draw the same record many times -- a mean spectrum, its
-sample variance, coverage injections -- and a Poisson draw at the paper's rate
-projects several hundred thousand waveforms. :func:`network_spectra_ensemble`
-draws each one once, through the fused stages of :mod:`astrogwb.simulators`:
-the population and its polarizations stay in memory, chunk by chunk, and only
-the manifest and the per-pair background of each realization are written. Draw ``i`` of ``seed`` is the realization
-at ``batch_keys(seed, n)[i]``, and those keys are prefix-stable, so it does
-not depend on ``n``: every caller asking for the same record and seed shares
-the same files, whatever ensemble size each asks for, an interrupted run
-resumes where it stopped, and machines sharing a cache can each draw a
-disjoint range of indices and merge the files by copying.
+An ensemble is a directory of realizations ``<root>/<seed>-<index>``, each
+written by ``astrogwb simulate`` with every paper network in its background,
+and ``<root>/detector_noise.h5`` written by ``astrogwb noise``. Generating them
+is a separate, explicit step (see ``workflow/coverage_draws.smk``);
+:func:`network_spectra_ensemble` only reads, and a missing draw is a
+:class:`FileNotFoundError`, never a simulation.
 
-All networks share one background over the union of their detectors, so the
-waveforms -- the expensive half -- are generated once per draw, every network
-sees the same sources, and a pair two networks share is projected once.
+The simulations' inputs are committed TOML files written by
+``scripts/write_ensemble_configs.py`` from :func:`paper_networks` and
+:func:`ensemble_metadata`: ``config/networks.toml`` and
+``config/ensembles/<name>/{population,waveform}.toml``.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TypedDict
 
 import numpy as np
 from numpy.typing import NDArray
 
+from astrogwb.paper.config import (
+    detector_registry,
+    fiducials,
+    population_metadata,
+    waveform_metadata,
+)
 from astrogwb.paper.config.detectors import DetectorRegistry
 from astrogwb.simulators import (
     BackgroundArtifact,
     DetectorConfiguration,
     PopulationMetadata,
-    RealizationSimulator,
-    combine_pair_spectra,
-    simulate_ensemble,
-    union_configuration,
+    Realization,
 )
-from astrogwb.utils.io import content_key
 from astrogwb.waveform import WaveformMetadata
 
 __all__ = [
-    "EnsembleRecord",
+    "ENSEMBLES",
+    "ETD_NETWORKS",
+    "ETD_PSD",
     "NetworkSpectra",
-    "ensemble_path",
+    "ensemble_config_tables",
+    "ensemble_metadata",
     "network_configuration",
     "network_spectra_ensemble",
+    "paper_networks",
 ]
+
+#: The ET-D noise curve, weighting the ET triangle's pairs in the ET-D networks.
+ETD_PSD = "ET-000A-18_ETD_hlf_psd.txt"
+
+#: Each ET-triangle network and its ET-D counterpart: same pairs, other weights.
+ETD_NETWORKS = {
+    "ET-triangular": "ET-triangular-D-PSD",
+    "ET-triangular-CE-Hanford": "ET-triangular-D-PSD-CE-Hanford",
+}
+
+#: Observation time of a smoke ensemble, in years: a few hundred sources.
+SMOKE_OBSERVATION_TIME = 1e-4
+
+#: The waveform overrides of each ensemble, over the shared ``[catalog]`` one.
+#: ``fiducial`` is the injection of the grid notebooks and the Poisson draws of
+#: ``spectrum_snrs``; ``coverage`` the draws of ``shot_noise_coverage`` and
+#: ``ensemble_spectrum``, fine through the SNR peak with a log tail.
+_WAVEFORMS: dict[str, dict[str, object]] = {
+    "fiducial": {},
+    "coverage": {
+        "approximant": "IMRPhenomXAS_NRTidalv3",
+        "frequency_resolution": 0.125,
+        "turnover_frequency": 100.0,
+        "dlogf": 0.01266,
+    },
+}
+
+#: Every ensemble name; ``<name>-smoke`` observes for :data:`SMOKE_OBSERVATION_TIME`.
+ENSEMBLES = tuple(name for base in _WAVEFORMS for name in (base, f"{base}-smoke"))
 
 
 class NetworkSpectra(TypedDict):
@@ -69,7 +99,7 @@ class NetworkSpectra(TypedDict):
 def network_configuration(
     registry: DetectorRegistry, name: str
 ) -> DetectorConfiguration:
-    """The network ``name`` of ``registry``, in declared order, with its noise curves.
+    """The network ``name`` of ``registry``, with its noise curves.
 
     Detectors are named by site code, which resolves to the packaged geometry:
     a registry geometry override is not carried into it.
@@ -84,114 +114,133 @@ def network_configuration(
     )
 
 
-@dataclass(frozen=True)
-class EnsembleRecord:
-    """What an ensemble draws: a population, a waveform and the networks recording it.
-
-    ``networks`` maps a name to its configuration, in output order. The draws
-    are cached under :meth:`key`, which names the population, the waveform
-    and the union of the networks' detectors -- not the noise curves, which
-    only the network spectra depend on.
-    """
-
-    population: PopulationMetadata
-    waveform: WaveformMetadata
-    networks: Mapping[str, DetectorConfiguration]
-
-    def key(self) -> str:
-        """The content hash the draws are cached under; seeds aside."""
-        return content_key(
-            {
-                "population": self.population.payload(),
-                "waveform": self.waveform.model_dump(mode="json"),
-                "detectors": union_configuration(
-                    list(self.networks.values())
-                ).detectors,
-            }
-        )
-
-
-def ensemble_path(directory: str | Path, key: str, seed: int, index: int) -> Path:
-    """Where draw ``index`` of ``seed`` lives: ``<directory>/<key>/<seed>-<index>``."""
-    return Path(directory) / key / f"{int(seed)}-{int(index)}"
-
-
 def network_spectra_ensemble(
-    record: EnsembleRecord,
+    root: str | Path,
     seed: int,
     num_draws: int,
-    directory: str | Path,
+    names: Sequence[str],
     *,
     start: int = 0,
-    chunk_size: int = 1024,
-    source_chunk_size: int = 65_536,
 ) -> list[NetworkSpectra]:
-    """Draws ``start .. num_draws - 1`` of every network, stacked per network.
+    """Draws ``start .. num_draws - 1`` of the networks ``names``, stacked per network.
 
-    Each draw is a realization directory of
-    :func:`~astrogwb.simulators.simulate_ensemble`: a missing one is simulated
-    and written with its background only, a cached one is read after its
-    population key is checked against the record and seed. The simulators are
-    built only if a draw is missing. ``chunk_size`` (waveforms per chunk) and
-    ``source_chunk_size`` (sources drawn per piece) are cost settings: they
-    change no draw.
+    Draw ``i`` is the background of the realization at ``<root>/<seed>-<i>``.
 
     Parameters
     ----------
-    record:
-        The realizations to draw and the networks recording them.
-    seed:
-        Draw ``i`` uses ``batch_keys(seed, num_draws)[i]``.
-    num_draws:
-        Ensemble size, one past the last index; a smaller one reads a prefix
-        of a larger one's files.
-    directory:
-        Cache root; see :func:`ensemble_path`.
-    start:
-        The first index, ``0 <= start < num_draws``.
+    root
+        The ensemble root.
+    seed
+        The seed the ensemble was simulated with.
+    num_draws
+        One past the last index read.
+    names
+        Networks, each recorded in every draw's background.
+    start
+        The first index read.
 
     Returns
     -------
     list of NetworkSpectra
-        Each network's draws, in ``record.networks`` order.
+        Each network's draws, in ``names`` order.
 
     Raises
     ------
-    ValueError
-        If a cached draw records another population or realization.
+    FileNotFoundError
+        If a draw, or its background, is missing.
+    KeyError
+        If a draw's background does not record one of ``names``.
     """
-    networks = list(record.networks.values())
-    simulator = RealizationSimulator(
-        record.population,
-        record.waveform,
-        union_configuration(networks),
-        keep_sources=False,
-        chunk_size=chunk_size,
-        source_chunk_size=source_chunk_size,
-    )
-    realizations = simulate_ensemble(
-        simulator, Path(directory) / record.key(), seed, num_draws, start=start
-    )
-    draws = [realization.background() for realization in realizations]
-    return [_stack(draws, network) for network in networks]
+    root = Path(root)
+    draws = [
+        Realization.open(root / f"{int(seed)}-{index}").background()
+        for index in range(start, num_draws)
+    ]
+    return [_stack(draws, name) for name in names]
 
 
-def _stack(
-    draws: Sequence[BackgroundArtifact], network: DetectorConfiguration
-) -> NetworkSpectra:
-    """One network's rows of every draw, stacked, and their network spectrum."""
-    frequencies = draws[0].frequencies
-    pairs = np.stack([draw.pair_spectra(network) for draw in draws])
+def _stack(draws: Sequence[BackgroundArtifact], name: str) -> NetworkSpectra:
+    """One network's spectra of every draw, stacked."""
+    spectra = [draw.network(name) for draw in draws]
     return {
-        "frequencies": frequencies,
-        "spectral_density": combine_pair_spectra(pairs, frequencies, network),
-        "pair_spectral_density": pairs,
+        "frequencies": draws[0].frequencies,
+        "spectral_density": np.stack([s.spectral_density for s in spectra]),
+        "pair_spectral_density": np.stack([s.pair_spectral_density for s in spectra]),
         "n_events": np.asarray([draw.count for draw in draws], dtype=np.int64),
         "total_merger_rate": np.asarray(
             [draw.total_merger_rate for draw in draws], dtype=np.float64
         ),
         "hyperparameters": {
-            name: np.asarray([draw.hyperparameters[name] for draw in draws])
-            for name in draws[0].hyperparameters
+            key: np.asarray([draw.hyperparameters[key] for draw in draws])
+            for key in draws[0].hyperparameters
         },
     }
+
+
+def paper_networks(registry: DetectorRegistry) -> dict[str, DetectorConfiguration]:
+    """Every network of ``registry``, and the :data:`ETD_NETWORKS` variants."""
+    networks = {
+        name: network_configuration(registry, name) for name in registry.networks
+    }
+    for base, swapped in ETD_NETWORKS.items():
+        references = networks[base].psd_references
+        networks[swapped] = DetectorConfiguration(
+            detectors=networks[base].detectors,
+            psd_references={
+                detector: ETD_PSD if detector.startswith("E") else reference
+                for detector, reference in references.items()
+            },
+        )
+    return networks
+
+
+def ensemble_metadata(
+    name: str, root: Path | None = None
+) -> tuple[PopulationMetadata, WaveformMetadata]:
+    """The population and waveform settings of the ensemble ``name``.
+
+    The population is the shared ``[catalog]`` one at the fiducials, observed
+    for a year, or :data:`SMOKE_OBSERVATION_TIME` for a ``-smoke`` ensemble.
+
+    Raises
+    ------
+    KeyError
+        If ``name`` is not one of :data:`ENSEMBLES`.
+    """
+    base = name.removesuffix("-smoke")
+    waveform = waveform_metadata(root, **_WAVEFORMS[base])
+    population = PopulationMetadata(
+        observation_time=SMOKE_OBSERVATION_TIME if name.endswith("-smoke") else 1.0,
+        hyperparameters={**fiducials(root)},
+        population=population_metadata(root),
+    )
+    return population, waveform
+
+
+def ensemble_config_tables(root: Path | None = None) -> dict[Path, dict[str, object]]:
+    """The committed simulation inputs, by path relative to ``root``, as TOML tables.
+
+    ``config/networks.toml`` holds :func:`paper_networks` as
+    ``[networks.<name>]`` tables; ``config/ensembles/<name>/population.toml``
+    and ``waveform.toml`` hold :func:`ensemble_metadata` of every
+    :data:`ENSEMBLES` name.
+    """
+    networks = paper_networks(detector_registry(root=root))
+    tables: dict[Path, dict[str, object]] = {
+        Path("config/networks.toml"): {
+            "networks": {
+                name: network.model_dump(mode="json")
+                for name, network in networks.items()
+            }
+        }
+    }
+    for name in ENSEMBLES:
+        population, waveform = ensemble_metadata(name, root)
+        directory = Path("config/ensembles") / name
+        tables[directory / "population.toml"] = population.model_dump(
+            mode="json", exclude={"version"}, exclude_none=True
+        )
+        tables[directory / "waveform.toml"] = waveform.model_dump(
+            mode="json", exclude_none=True
+        )
+    return tables

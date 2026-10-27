@@ -25,42 +25,18 @@ with app.setup(hide_code=True):
     from numpy.typing import NDArray
     from scipy import stats
 
-    from astrogwb.detector import (
-        effective_psd,
-        gaussian_bin_scale,
-        sample_pair_response,
-    )
-    from astrogwb.frequency import frequency_mask
-    from astrogwb.gwb.catalog import (
-        CatalogMetadata,
-        PolarizationPowerData,
-    )
-    from astrogwb.gwb.importance import (
-        INCLINATION_SECOND_MOMENT,
-        reference_catalog,
-        reference_catalog_stem,
-    )
+    from astrogwb.detector import sample_pair_response
+    from astrogwb.gwb.importance import INCLINATION_SECOND_MOMENT
     from astrogwb.inference import (
         ImportanceGaussianLikelihood,
         amplitude_direction,
         rank_one_gaussian_log_likelihood,
     )
     from astrogwb.inference import Network as LikelihoodNetwork
-    from astrogwb.paper.cache import default_cache_dir
-    from astrogwb.paper.config import (
-        detector_registry,
-        fiducials,
-        population_metadata,
-        priors,
-        waveform_metadata,
-    )
-    from astrogwb.paper.config.detectors import DetectorRegistry
-    from astrogwb.paper.config.runs import CATALOGS_ROOT, FIGURES_DIR
-    from astrogwb.paper.ensemble import (
-        EnsembleRecord,
-        network_configuration,
-        network_spectra_ensemble,
-    )
+    from astrogwb.paper.catalogs import read_reference_catalog
+    from astrogwb.paper.config import detector_registry, fiducials, priors
+    from astrogwb.paper.config.runs import CATALOGS_ROOT, ENSEMBLES_ROOT, FIGURES_DIR
+    from astrogwb.paper.ensemble import network_spectra_ensemble
     from astrogwb.paper.plotting import (
         DETECTOR_COMPARISON_LEGEND,
         DETECTOR_NETWORKS,
@@ -75,9 +51,7 @@ with app.setup(hide_code=True):
         pad_pairs,
     )
     from astrogwb.populations import build_population
-    from astrogwb.simulators import PopulationMetadata as RealizationMetadata
-    from astrogwb.simulators import batch_keys
-    from astrogwb.utils.io import load, write
+    from astrogwb.simulators import DetectorNoise, Realization
 
     # Log-likelihood of every injection at every grid point, (M, G): data is
     # (M, F), prediction and direction (G, F). One injection at a time, so
@@ -322,8 +296,10 @@ def _():
       so they are computed once.
     - Every error is a bootstrap over injections.
 
-    Setting `ASTROGWB_NOTEBOOK_SMOKE=1` swaps in a tiny catalog, few injections and
-    fixed-count spectra.
+    The injections, their detector noise and the reference catalog are read,
+    never drawn: `workflow/coverage_draws.smk` writes them (see the
+    configuration cell for the paths). Setting `ASTROGWB_NOTEBOOK_SMOKE=1`
+    reads the smoke inputs instead, a tiny catalog and a few short injections.
     """)
 
 
@@ -339,25 +315,15 @@ def _():
     ROOT_DIR = Path(__file__).resolve().parents[1]
     FIGURES = ROOT_DIR / FIGURES_DIR / "shot_noise_coverage"
 
-    # The injections are the catalogs of the Poisson ensemble of
-    # ensemble_spectrum.py, as each network records them: the same record and
-    # keys, with the network added, so each network's draws have their own key.
+    # The injections are the draws of the coverage ensemble, which
+    # ensemble_spectrum.py reads too, as each network records them.
     num_injections = 1000
     ensemble_seed = 41
     noise_seed = 2000  # detector noise, one stream per network
     # Detector-noise draws per injection. One, as the data are generated:
     # each posterior is then an independent simulated observation.
     noise_draws = 1
-    # The approximant of the ensemble draws, which this notebook reads.
-    approximant = "IMRPhenomXAS_NRTidalv3"
-    minimum_redshift, maximum_redshift = 0.35, 20.0
-    catalog_seed = 42  # independent of the injections' seed
-    num_samples = 2**14  # on a scrambled Sobol net; see importance_convergence.py
     redshift_nodes = 32
-    catalog_chunk_size = 4096
-    # Injection waveforms per reduced chunk: peak memory is (pairs, F, chunk)
-    # for the 12 detector pairs of the six networks.
-    chunk_size = 8192
     grid_chunk_size = 8
     # Isotropic draws of each network's response, which its shot noise carries.
     response_draws, response_seed = 32_768, 0
@@ -377,10 +343,7 @@ def _():
     write_figures_default = True
     if SMOKE:
         num_injections = 4
-        num_samples = 64
         redshift_nodes = 8
-        catalog_chunk_size = 512
-        chunk_size = 512
         grid_chunk_size = 4
         response_draws = 64
         max_modes = 4
@@ -390,51 +353,24 @@ def _():
     FIDUCIALS = fiducials(root=ROOT_DIR)
     PRIORS = priors(root=ROOT_DIR)
     registry = detector_registry(root=ROOT_DIR)
-    # Same 1024-point grid as ensemble_spectrum.py, whose draws these injections
-    # read. Keep this waveform record in sync with that notebook.
-    waveform = waveform_metadata(
-        root=ROOT_DIR,
-        approximant=approximant,
-        frequency_resolution=0.125,
-        turnover_frequency=100.0,
-        dlogf=0.01266,
+
+    # The inputs, written by workflow/coverage_draws.smk and only read here:
+    # the coverage ensemble (IMRPhenomXAS_NRTidalv3 on the 1024-point grid of
+    # ensemble_spectrum.py), its detector noise, and the reference catalog of
+    # the same approximant, 2^14 draws on a scrambled Sobol net at seed 42,
+    # independent of the injections (importance_convergence.py sizes it).
+    # Smoke inputs inject a short observation, a few hundred sources, and hold
+    # 64 catalog draws; the spectrum's mean does not depend on either.
+    _suffix = "-smoke" if SMOKE else ""
+    ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / f"coverage{_suffix}"
+    reference_catalog_path = (
+        ROOT_DIR / CATALOGS_ROOT / f"reference-coverage{_suffix}.h5"
     )
-    frequencies = np.asarray(waveform.build().frequencies)
-    population = population_metadata(
-        root=ROOT_DIR,
-        minimum_redshift=minimum_redshift,
-        maximum_redshift=maximum_redshift,
-    )
-    catalog_metadata = CatalogMetadata(
-        waveform=waveform_metadata(
-            root=ROOT_DIR,
-            approximant=approximant,
-            frequency_spacing="log",
-            minimum_frequency=minimum_frequency,
-            maximum_frequency=4000.0,
-            frequency_resolution=0.02,
-            turnover_frequency=None,
-        ),
-        population=population,
-        fiducials=FIDUCIALS,
-        num_samples=num_samples,
-        sampling="sobol",
-    )
-    # The one catalog as each network records it. Smoke runs inject a short
-    # observation, a few hundred sources; the spectrum's mean does not depend
-    # on it.
-    network_injections = EnsembleRecord(
-        population=RealizationMetadata(
-            observation_time=1e-4 if SMOKE else observation_time,
-            hyperparameters={**FIDUCIALS},
-            population=population,
-        ),
-        waveform=waveform,
-        networks={
-            name: network_configuration(registry, name) for name in network_names
-        },
-    )
-    ensemble_dir = default_cache_dir() / "ensembles"
+    noise = DetectorNoise.open(ensemble_root / "detector_noise.h5")
+    frequencies = noise.frequencies
+    injected_metadata = Realization.open(
+        ensemble_root / f"{ensemble_seed}-0"
+    ).population_metadata
 
     write_figures = mo.ui.switch(value=write_figures_default, label="Write figures")
     write_figures
@@ -445,29 +381,26 @@ def _():
         FIDUCIALS,
         FIGURES,
         PRIORS,
-        catalog_chunk_size,
-        catalog_metadata,
-        catalog_seed,
-        chunk_size,
-        ensemble_dir,
+        ensemble_root,
         ensemble_seed,
         fiducial_network,
         frequencies,
         grid_chunk_size,
         h0_size,
         h0_window,
+        injected_metadata,
         max_modes,
         maximum_frequency,
         minimum_frequency,
         modes_tolerance,
-        network_injections,
         network_names,
+        noise,
         noise_draws,
         noise_seed,
         num_injections,
         observation_time,
-        population,
         redshift_nodes,
+        reference_catalog_path,
         registry,
         response_draws,
         response_seed,
@@ -480,64 +413,6 @@ def _():
     mo.md(r"""
     ## Toolbox
     """)
-
-
-@app.function(hide_code=True)
-def ensure_reference_catalog(
-    metadata: CatalogMetadata,
-    seed: int,
-    directory: Path,
-    *,
-    chunk_size: int | None = None,
-) -> PolarizationPowerData:
-    """The reference catalog of ``metadata`` at ``seed``, drawn on a miss.
-
-    The same file the grid notebook reads and writes,
-    ``<directory>/reference_catalog-<key>-<seed>.h5``.
-
-    Raises
-    ------
-    ValueError
-        If the cached file records another metadata or seed.
-    """
-    path = directory / f"{reference_catalog_stem(metadata, seed)}.h5"
-    if path.is_file():
-        data, recorded, attrs = load(path, CatalogMetadata)
-        if recorded.key() != metadata.key() or attrs.get("seed") != seed:
-            raise ValueError(
-                f"{path} records {recorded.key()} at seed {attrs.get('seed')}, "
-                f"not the requested {metadata.key()} at seed {seed}"
-            )
-        return data  # ty: ignore[invalid-return-type]
-    data = reference_catalog(metadata, batch_keys(seed, 1)[0], chunk_size=chunk_size)
-    write(path, data, metadata, seed=seed)
-    return data
-
-
-@app.function(hide_code=True)
-def network_data(
-    registry: DetectorRegistry,
-    name: str,
-    frequencies: NDArray[np.float64],
-    *,
-    observation_time: float,
-    minimum_frequency: float,
-    maximum_frequency: float,
-) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
-    """The per-bin Gaussian scale and usable-bin mask of one network.
-
-    Unusable bins get a finite scale of one; the mask drops them.
-    """
-    grid = jnp.asarray(frequencies)
-    geometry, sensitivities = registry.build_network(name)
-    psd = jnp.asarray(effective_psd(grid, geometry, sensitivities))
-    mask = (
-        frequency_mask(grid, fmin=minimum_frequency, fmax=maximum_frequency)
-        & jnp.isfinite(psd)
-        & (psd > 0.0)
-    )
-    scale = gaussian_bin_scale(psd, observation_time, grid)
-    return np.asarray(jnp.where(mask, scale, 1.0)), np.asarray(mask)
 
 
 @app.function(hide_code=True)
@@ -885,9 +760,6 @@ def _():
 @app.cell
 def _(
     FIDUCIALS,
-    catalog_chunk_size,
-    catalog_metadata,
-    catalog_seed,
     frequencies,
     grid_chunk_size,
     h0_size,
@@ -897,13 +769,12 @@ def _(
     observation_time,
     overlaps,
     per_network,
-    population,
     redshift_nodes,
+    reference_catalog_path,
     sample_response,
 ):
-    catalog_data = ensure_reference_catalog(
-        catalog_metadata, catalog_seed, CATALOGS_ROOT, chunk_size=catalog_chunk_size
-    )
+    catalog_data, catalog_metadata, _ = read_reference_catalog(reference_catalog_path)
+    population = catalog_metadata.population
     target = build_population(population.model_name, **population.model_kwargs)
     likelihood = ImportanceGaussianLikelihood.from_catalog(
         catalog_data,
@@ -1034,8 +905,7 @@ def _(
     maximum_frequency,
     minimum_frequency,
     network_names,
-    observation_time,
-    registry,
+    noise,
 ):
     # Each network's stacked per-pair data on one flat axis, pair-major:
     # (scale, mask), (D,) with D = 6 F (pairs padded), and its ORFs (P, F).
@@ -1043,10 +913,8 @@ def _(
     overlaps = {}
     for _name in network_names:
         _data = network_pair_data(
-            registry,
+            noise,
             _name,
-            frequencies,
-            observation_time=observation_time,
             minimum_frequency=minimum_frequency,
             maximum_frequency=maximum_frequency,
         )
@@ -1093,28 +961,23 @@ def _():
     mo.md(r"""
     ## Injections
 
-    $M$ Poisson catalogs at the fiducials, each recorded by every network, from
-    one waveform pass per catalog (`network_spectra_ensemble`), cached one file
-    per network and draw.
+    $M$ Poisson catalogs at the fiducials, each recorded by every network, read
+    from the coverage ensemble (`network_spectra_ensemble`): each draw's
+    networks were projected in one waveform pass.
     """)
 
 
 @app.cell
 def _(
-    chunk_size,
-    ensemble_dir,
+    ensemble_root,
     ensemble_seed,
     frequencies,
-    network_injections,
+    injected_metadata,
+    network_names,
     num_injections,
 ):
     _ensembles = network_spectra_ensemble(
-        network_injections,
-        ensemble_seed,
-        num_injections,
-        ensemble_dir,
-        chunk_size=chunk_size,
-        source_chunk_size=65_536,
+        ensemble_root, ensemble_seed, num_injections, network_names
     )
     # Each network's per-pair spectra, padded and flattened onto its data
     # axis: (M, D).
@@ -1122,13 +985,14 @@ def _(
         _name: pad_pairs(_ensemble["pair_spectral_density"]).reshape(
             _ensemble["pair_spectral_density"].shape[0], -1
         )
-        for _name, _ensemble in zip(
-            network_injections.networks, _ensembles, strict=True
-        )
+        for _name, _ensemble in zip(network_names, _ensembles, strict=True)
     }
     injected_events = np.asarray(_ensembles[0]["n_events"])
-    print(f"injection record {network_injections.key()}, seed {ensemble_seed}")
-    for _name in network_injections.networks:
+    print(
+        f"injections: {ensemble_root}, seed {ensemble_seed}, "
+        f"{injected_metadata.observation_time:g} yr each"
+    )
+    for _name in network_names:
         assert injections[_name].shape[1] % frequencies.size == 0
     print(
         f"{num_injections} injections, events {injected_events.min():,} to "

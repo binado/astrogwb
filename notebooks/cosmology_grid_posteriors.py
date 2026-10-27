@@ -5,8 +5,7 @@ app = marimo.App()
 
 with app.setup(hide_code=True):
     import os
-    from collections.abc import Callable, Mapping, Sequence
-    from functools import partial
+    from collections.abc import Mapping, Sequence
     from pathlib import Path
 
     from astrogwb.paper.runtime import configure_runtime
@@ -25,31 +24,19 @@ with app.setup(hide_code=True):
     from matplotlib.projections import register_projection
     from numpy.typing import NDArray
 
-    from astrogwb import __version__
     from astrogwb.detector import sample_pair_response
-    from astrogwb.gwb.catalog import (
-        CatalogMetadata,
-    )
     from astrogwb.inference import (
         ImportanceGaussianLikelihood,
         grid_log_posterior,
     )
     from astrogwb.inference import Network as LikelihoodNetwork
-    from astrogwb.paper.cache import default_cache_dir
-    from astrogwb.paper.catalogs import validate_matching_frequency_grids
-    from astrogwb.paper.config import (
-        detector_registry,
-        fiducials,
-        population_metadata,
-        priors,
-        waveform_metadata,
+    from astrogwb.paper.catalogs import (
+        read_reference_catalog,
+        validate_matching_frequency_grids,
     )
-    from astrogwb.paper.config.runs import CATALOGS_ROOT, FIGURES_DIR
-    from astrogwb.paper.ensemble import (
-        EnsembleRecord,
-        network_configuration,
-        network_spectra_ensemble,
-    )
+    from astrogwb.paper.config import detector_registry, fiducials, priors
+    from astrogwb.paper.config.runs import CATALOGS_ROOT, ENSEMBLES_ROOT, FIGURES_DIR
+    from astrogwb.paper.ensemble import network_spectra_ensemble
     from astrogwb.paper.plotting import (
         DETECTOR_NETWORKS,
         TRUTH,
@@ -61,15 +48,12 @@ with app.setup(hide_code=True):
         use_paper_style,
     )
     from astrogwb.paper.posteriors import (
-        ensure_reference_catalog,
         network_pair_data,
-        noise_digest,
         pad_pairs,
-        settings_digest,
         shot_noise_variant,
     )
     from astrogwb.populations import build_population
-    from astrogwb.simulators import PopulationMetadata as RealizationMetadata
+    from astrogwb.simulators import DetectorNoise, Realization
 
 
 @app.cell(hide_code=True)
@@ -78,8 +62,12 @@ def _():
     # Grid posteriors for cosmology and modified propagation
 
     Posteriors on a **grid**, with no sampler: the log density of the
-    Gaussian spectrum likelihood is evaluated at every grid point and cached,
-    so the figures can be iterated on without recomputing anything.
+    Gaussian spectrum likelihood is evaluated at every grid point.
+
+    The notebook reads its inputs and never simulates them:
+    `workflow/coverage_draws.smk` writes the injection ensemble, its detector
+    noise and the reference catalog (see the configuration cell for the
+    paths). A missing input is a `FileNotFoundError`.
 
     The data are a **zero-noise Poisson injection**: one Poisson catalog drawn
     at the fiducials, with no Gaussian noise added on top, as each network
@@ -103,8 +91,9 @@ def _():
     3. $\Xi_0$ and $n$ (*Inferring modified propagation parameters*), with
        $H_0$ fixed.
 
-    Setting `ASTROGWB_NOTEBOOK_SMOKE=1` swaps in a tiny catalog and coarse
-    grids so the whole notebook runs in a minute or two.
+    Setting `ASTROGWB_NOTEBOOK_SMOKE=1` reads the smoke inputs, a tiny
+    catalog and a short injection, on coarse grids, so the whole notebook runs
+    in a minute or two.
     """)
     return
 
@@ -176,20 +165,12 @@ def _():
     ROOT_DIR = Path(__file__).resolve().parents[1]
     FIGURES = ROOT_DIR / FIGURES_DIR / "cosmology_grid_posteriors"
 
-    # Different seeds: the injection must not be a subset of the catalog.
+    # The injection's seed; the reference catalog is drawn at another, 42, so
+    # the injection is not a subset of the catalog.
     data_seed = 41
-    catalog_seed = 42
-    # Intrinsic draws on a scrambled Sobol net, one waveform each: at 2^14 the
-    # template error is ~5e-5 sigma (importance_convergence.py), where i.i.d.
-    # draws would need ~3e5 for 0.1 sigma.
-    num_samples = 2**14
     marginal_seed = 43  # cell and jitter draws behind the plots
     num_marginal_samples = 2**18  # grid draws per plot, for the marginals and corners
     redshift_nodes = 32  # Gauss-Legendre nodes in 1/(1 + z); costs no waveforms
-    catalog_chunk_size = 4096  # reference waveforms per lax.map batch
-    # Injection waveforms per reduced chunk: peak memory is (pairs, F, chunk)
-    # for the 12 detector pairs of the six networks.
-    chunk_size = 4096
     grid_chunk_size = 8  # grid points per lax.map batch; bounds peak memory
 
     observation_time = 1.0  # years
@@ -231,17 +212,12 @@ def _():
 
     SMOKE = os.environ.get("ASTROGWB_NOTEBOOK_SMOKE") == "1"
     write_figures_default = True
-    cache_name_prefix = ""
     if SMOKE:
-        num_samples = 64
         redshift_nodes = 8
-        catalog_chunk_size = 512
-        chunk_size = 512
         grid_chunk_size = 4
         num_marginal_samples = 2000
         response_draws, max_modes = 64, 4
         write_figures_default = False
-        cache_name_prefix = "smoke_"
         h0_window, h0_size = (40.0, 100.0), 7
         h0_omega_window, h0_omega_size = (55.0, 80.0), 4
         omega_m_window, omega_m_size = (0.30, 0.32), 3
@@ -261,46 +237,27 @@ def _():
         },
     }
 
-    cache_dir = default_cache_dir() / "posteriors"
     FIDUCIALS = fiducials(root=ROOT_DIR)
     PRIORS = priors(root=ROOT_DIR)
     registry = detector_registry(root=ROOT_DIR)
 
-    # The injection and the reference catalog share the approximant and the
-    # cosmological population. The injection is on the observed grid; the
-    # reference catalog on geometric bins 1% wide, from the observed f_min to
-    # past the detector-frame BNS merger at the window's lower edge.
-    waveform = waveform_metadata(root=ROOT_DIR)
-    frequencies = np.asarray(waveform.build().frequencies)
-    population = population_metadata(root=ROOT_DIR)
-    catalog_metadata = CatalogMetadata(
-        waveform=waveform_metadata(
-            root=ROOT_DIR,
-            frequency_spacing="log",
-            minimum_frequency=minimum_frequency,
-            maximum_frequency=4000.0,
-            frequency_resolution=0.02,
-            turnover_frequency=None,
-        ),
-        population=population,
-        fiducials=FIDUCIALS,
-        num_samples=num_samples,
-        sampling="sobol",
+    # The inputs, written by workflow/coverage_draws.smk and only read here:
+    # the injection ensemble (draw 0 of `data_seed` is the injection, the
+    # one Poisson catalog as each network records it), its detector noise,
+    # and the reference catalog, 2^14 intrinsic draws on a scrambled Sobol
+    # net at seed 42 on geometric bins 1% wide past the BNS merger
+    # (importance_convergence.py sizes it). Both are drawn from the shared
+    # population and approximant. Smoke inputs inject a short observation, a
+    # few hundred sources, and hold 64 draws; the spectrum's mean does not
+    # depend on either.
+    _suffix = "-smoke" if SMOKE else ""
+    ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / f"fiducial{_suffix}"
+    reference_catalog_path = (
+        ROOT_DIR / CATALOGS_ROOT / f"reference-fiducial{_suffix}.h5"
     )
-    # The one catalog as each network records it. Smoke runs inject a short
-    # observation, a few hundred sources; the spectrum's mean does not depend
-    # on it.
-    network_injections = EnsembleRecord(
-        population=RealizationMetadata(
-            observation_time=1e-4 if SMOKE else observation_time,
-            hyperparameters={**FIDUCIALS},
-            population=population,
-        ),
-        waveform=waveform,
-        networks={
-            name: network_configuration(registry, name) for name in network_names
-        },
-    )
+    injection = Realization.open(ensemble_root / f"{data_seed}-0")
+    noise = DetectorNoise.open(ensemble_root / "detector_noise.h5")
+    frequencies = noise.frequencies
 
     write_figures = mo.ui.switch(value=write_figures_default, label="Write figures")
     write_figures
@@ -312,12 +269,6 @@ def _():
         FIGURES,
         PRIORS,
         ab_tolerance,
-        cache_dir,
-        cache_name_prefix,
-        catalog_chunk_size,
-        catalog_metadata,
-        catalog_seed,
-        chunk_size,
         data_seed,
         fiducial_network,
         frequencies,
@@ -328,13 +279,15 @@ def _():
         max_modes,
         maximum_frequency,
         minimum_frequency,
+        ensemble_root,
+        injection,
         modes_tolerance,
-        network_injections,
         network_names,
+        noise,
         num_marginal_samples,
         observation_time,
-        population,
         problem_variants,
+        reference_catalog_path,
         redshift_nodes,
         registry,
         response_draws,
@@ -349,51 +302,6 @@ def _():
     ## Toolbox
     """)
     return
-
-
-@app.function(hide_code=True)
-def cached_log_densities(
-    compute: Callable[[], tuple[dict[str, NDArray], dict[str, NDArray]]],
-    outfile: Path,
-) -> tuple[dict[str, NDArray], dict[str, NDArray]]:
-    """Return ``(grids, log_densities)``, computed once and cached in ``outfile``.
-
-    The file stores ``grid__<parameter>`` and ``log_density__<network>``. It
-    records none of the settings behind it, so the caller puts a
-    :func:`settings_digest` in the file name.
-
-    Parameters
-    ----------
-    compute
-        Called on a miss; returns the grids by parameter and the log density
-        by network.
-    outfile
-        ``.npz`` path.
-
-    Returns
-    -------
-    tuple
-        Grids by parameter name, and log densities by network name.
-    """
-    if not outfile.is_file():
-        grids, log_densities = compute()
-        outfile.parent.mkdir(parents=True, exist_ok=True)
-        arrays = {f"grid__{name}": grid for name, grid in grids.items()}
-        arrays |= {f"log_density__{name}": ld for name, ld in log_densities.items()}
-        np.savez(outfile, **arrays)  # ty: ignore[invalid-argument-type]
-        return grids, log_densities
-    with np.load(outfile) as cached:
-        grids = {
-            k.removeprefix("grid__"): cached[k]
-            for k in cached.files
-            if k.startswith("grid__")
-        }
-        log_densities = {
-            k.removeprefix("log_density__"): cached[k]
-            for k in cached.files
-            if k.startswith("log_density__")
-        }
-    return grids, log_densities
 
 
 @app.function(hide_code=True)
@@ -472,33 +380,31 @@ def evaluate_grid(
 
 
 @app.function(hide_code=True)
-def grid_posterior(
-    run: str,
+def problem_posteriors(
     axes: Mapping[str, tuple[float, float, int]],
+    variants: Sequence[str],
     likelihood: ImportanceGaussianLikelihood,
-    relative_variance: NDArray[np.float64] | None,
+    fiducial_relative_variance: NDArray[np.float64],
     *,
     priors: Mapping[str, dist.Distribution],
     chunk_size: int | None,
     fiducials: Mapping[str, float],
     per_network: Mapping[str, dict[str, object]],
-    settings: Mapping[str, object],
-    cache_dir: Path,
-    prefix: str,
-) -> tuple[dict[str, NDArray], dict[str, NDArray]]:
-    """One problem's grid log densities, cached under a settings digest.
+) -> dict[str, tuple[dict[str, NDArray], dict[str, NDArray]]]:
+    """:func:`evaluate_grid` of one problem for every likelihood variant.
 
     Parameters
     ----------
-    run
-        Problem name, also in the cache file name.
     axes
         ``(low, high, size)`` of each swept parameter.
+    variants
+        :func:`~astrogwb.paper.posteriors.shot_noise_variant` names.
     likelihood
-        The problem's :class:`ImportanceGaussianLikelihood`. Its catalog stays
-        a traced input of the compiled evaluator, not a constant baked into it.
-    relative_variance
-        :math:`s^2` per network for the ``"fixed"`` mode, else ``None``.
+        The problem's :class:`ImportanceGaussianLikelihood`, amplitude mode. Its
+        catalog stays a traced input of the compiled evaluator, not a constant
+        baked into it. One catalog serves every variant; each compiles once.
+    fiducial_relative_variance
+        :math:`s^2` per network at the fiducials, for the ``"fixed"`` variant.
     priors
         Prior of every parameter.
     chunk_size
@@ -506,68 +412,27 @@ def grid_posterior(
     fiducials
         Every parameter; those not in ``axes`` are pinned at their value.
     per_network
-        :func:`network_data` by network name, with each network's
-        ``observed`` spectrum and ``response``.
-    settings
-        Everything else the cached values depend on, for the digest.
-    cache_dir
-        Directory of the ``.npz`` file.
-    prefix
-        File name prefix, to keep smoke-run caches apart.
+        See :func:`evaluate_grid`.
 
     Returns
     -------
-    tuple
-        See :func:`cached_log_densities`.
+    dict
+        Per variant, grids by parameter and log densities by network.
     """
-    digest = settings_digest(run=run, axes=axes, **settings)
     fixed = {k: v for k, v in fiducials.items() if k not in axes}
-    return cached_log_densities(
-        partial(
-            evaluate_grid,
-            likelihood,
+    posteriors = {}
+    for variant in variants:
+        variant_likelihood, relative_variance = shot_noise_variant(
+            variant, likelihood, fiducial_relative_variance
+        )
+        posteriors[variant] = evaluate_grid(
+            variant_likelihood,
             priors,
             chunk_size,
             axes,
             fixed,
             per_network,
             relative_variance,
-        ),
-        cache_dir / f"{prefix}{run}_{digest}.npz",
-    )
-
-
-@app.function(hide_code=True)
-def problem_posteriors(
-    run: str,
-    axes: Mapping[str, tuple[float, float, int]],
-    variants: Sequence[str],
-    likelihood: ImportanceGaussianLikelihood,
-    fiducial_relative_variance: NDArray[np.float64],
-    settings: Mapping[str, object],
-    **kwargs: object,
-) -> dict[str, tuple[dict[str, NDArray], dict[str, NDArray]]]:
-    """:func:`grid_posterior` of one problem for every likelihood variant.
-
-    ``kwargs`` are :func:`grid_posterior`'s remaining arguments. One catalog
-    serves every variant; each variant compiles once.
-    """
-    posteriors = {}
-    for variant in variants:
-        variant_likelihood, relative_variance, variant_settings = shot_noise_variant(
-            variant, likelihood, fiducial_relative_variance
-        )
-        # The basis settings key only the "modes" caches, so the others stay valid.
-        shared = {
-            k: v for k, v in settings.items() if k != "modes" or variant == "modes"
-        }
-        posteriors[variant] = grid_posterior(
-            run,
-            axes,
-            variant_likelihood,
-            relative_variance,
-            settings={**shared, **variant_settings},
-            **kwargs,  # ty: ignore[invalid-argument-type]
         )
     return posteriors
 
@@ -738,11 +603,11 @@ def _():
     ## Reference catalog and injection
 
     The reference catalog generates every intrinsic draw once, at the
-    window's lower edge, so its power is `(F_ref, N)`. It is generated in
-    `lax.map` batches on a miss and read from `outputs/catalogs/` afterwards.
-    The injection is one Poisson catalog recorded by every network, drawn in
-    one waveform pass shared by the networks (`network_spectra_ensemble`) and
-    cached beside the posteriors, one file per network.
+    window's lower edge, so its power is `(F_ref, N)`; it is read from
+    `reference_catalog_path` (`scripts/draw_reference_catalog.py`). The
+    injection is one Poisson catalog recorded by every network, read from the
+    ensemble's draw 0 (`network_spectra_ensemble`): each network's pair
+    spectra were projected in one waveform pass shared by the networks.
 
     The rescaled spectrum is built in the same cell as the catalog, once.
     The population is built a single time because it hashes by identity. Each
@@ -756,23 +621,17 @@ def _():
 
 
 @app.cell
-def _(
-    catalog_chunk_size,
-    catalog_metadata,
-    catalog_seed,
-    frequencies,
-    observation_time,
-    population,
-    redshift_nodes,
-):
+def _(frequencies, observation_time, redshift_nodes, reference_catalog_path):
     # The NumPy catalog is local to this cell, so it is freed once the device
     # copy made by the likelihood exists: the power and its square.
-    catalog_data = ensure_reference_catalog(
-        catalog_metadata, catalog_seed, CATALOGS_ROOT, chunk_size=catalog_chunk_size
+    catalog_data, catalog_metadata, _seed = read_reference_catalog(
+        reference_catalog_path
     )
+    population = catalog_metadata.population
     power = catalog_data["polarization_power"]
     print(
-        f"reference catalog: {catalog_metadata.num_samples:,} draws, "
+        f"reference catalog: {catalog_metadata.num_samples:,} draws at seed "
+        f"{_seed}, "
         f"{power.shape[0]} reference bins, {power.nbytes / 1e9:.2f} GB of power; "
         f"{redshift_nodes} redshift nodes"
     )
@@ -794,30 +653,18 @@ def _(
 
 
 @app.cell
-def _(
-    cache_dir,
-    cache_name_prefix,
-    chunk_size,
-    data_seed,
-    frequencies,
-    network_injections,
-):
+def _(data_seed, ensemble_root, frequencies, injection, network_names):
     # Draw 0 of `data_seed`: the key of the sky-averaged injection, so the
     # networks record the same sources it summed.
-    _drawn = network_spectra_ensemble(
-        network_injections,
-        data_seed,
-        1,
-        cache_dir / f"{cache_name_prefix}network_injections",
-        chunk_size=chunk_size,
-    )
+    _drawn = network_spectra_ensemble(ensemble_root, data_seed, 1, network_names)
     observed = {}
-    for _name, _data in zip(network_injections.networks, _drawn, strict=True):
+    for _name, _data in zip(network_names, _drawn, strict=True):
         validate_matching_frequency_grids(_data["frequencies"], frequencies)
         observed[_name] = pad_pairs(_data["pair_spectral_density"][0])
     print(
         f"injection: {int(_drawn[0]['n_events'][0]):,} Poisson events, "
-        f"recorded by {len(observed)} networks"
+        f"recorded by {len(observed)} networks over "
+        f"{injection.population_metadata.observation_time:g} yr"
     )
     return (observed,)
 
@@ -825,31 +672,24 @@ def _(
 @app.cell
 def _(
     FIDUCIALS,
-    catalog_metadata,
-    catalog_seed,
-    data_seed,
     frequencies,
     likelihood,
     max_modes,
     maximum_frequency,
     minimum_frequency,
     modes_tolerance,
-    network_injections,
     network_names,
-    observation_time,
+    noise,
     observed,
     problem_variants,
-    redshift_nodes,
     registry,
     response_draws,
     response_seed,
 ):
     per_network = {
         name: network_pair_data(
-            registry,
+            noise,
             name,
-            frequencies,
-            observation_time=observation_time,
             minimum_frequency=minimum_frequency,
             maximum_frequency=maximum_frequency,
         )
@@ -894,26 +734,8 @@ def _(
         )
         _data.update(modes=_network.modes, mode_blocks=_network.mode_blocks)
     del _network
-    # Everything a cached log density depends on besides its own axes.
-    cache_settings = {
-        "version": __version__,
-        "networks": network_names,
-        "noise": noise_digest(per_network),
-        "seeds": (data_seed, catalog_seed),
-        "band": (minimum_frequency, maximum_frequency),
-        "observation_time": observation_time,
-        "density_sites": (),
-        "injection": network_injections.key(),
-        "reference_catalog": catalog_metadata.key(),
-        "redshift_nodes": redshift_nodes,
-        # The amplitude mode's s^2: the catalog projected on each template.
-        "relative_variance": "projected",
-        "response": (response_draws, response_seed),
-        "data": "stacked_pairs",
-        "modes": (modes_tolerance, max_modes),
-    }
     labelled_networks = [(n, l) for n, l in DETECTOR_NETWORKS if n in network_names]
-    return cache_settings, labelled_networks, per_network
+    return labelled_networks, per_network
 
 
 @app.cell(hide_code=True)
@@ -993,9 +815,6 @@ def _():
 def _(
     FIDUCIALS,
     PRIORS,
-    cache_dir,
-    cache_name_prefix,
-    cache_settings,
     fiducial_relative_variance,
     grid_chunk_size,
     grid_specs,
@@ -1005,18 +824,14 @@ def _(
     likelihood,
 ):
     h0_posteriors = problem_posteriors(
-        "H0",
         grid_specs["H0"],
         problem_variants["H0"],
         likelihood,
         fiducial_relative_variance,
-        cache_settings,
         priors=PRIORS,
         chunk_size=grid_chunk_size,
         fiducials=FIDUCIALS,
         per_network=per_network,
-        cache_dir=cache_dir,
-        prefix=cache_name_prefix,
     )
     h0_posterior = h0_posteriors[likelihood_variant]
     return h0_posterior, h0_posteriors
@@ -1062,9 +877,6 @@ def _():
 def _(
     FIDUCIALS,
     PRIORS,
-    cache_dir,
-    cache_name_prefix,
-    cache_settings,
     fiducial_relative_variance,
     grid_chunk_size,
     grid_specs,
@@ -1074,18 +886,14 @@ def _(
     likelihood,
 ):
     h0_omega_m_posteriors = problem_posteriors(
-        "H0_Omega_m",
         grid_specs["H0_Omega_m"],
         problem_variants["H0_Omega_m"],
         likelihood,
         fiducial_relative_variance,
-        cache_settings,
         priors=PRIORS,
         chunk_size=grid_chunk_size,
         fiducials=FIDUCIALS,
         per_network=per_network,
-        cache_dir=cache_dir,
-        prefix=cache_name_prefix,
     )
     h0_omega_m_posterior = h0_omega_m_posteriors[likelihood_variant]
     return h0_omega_m_posterior, h0_omega_m_posteriors
@@ -1170,9 +978,6 @@ def _():
 def _(
     FIDUCIALS,
     PRIORS,
-    cache_dir,
-    cache_name_prefix,
-    cache_settings,
     fiducial_relative_variance,
     grid_chunk_size,
     grid_specs,
@@ -1182,18 +987,14 @@ def _(
     likelihood,
 ):
     xi_posteriors = problem_posteriors(
-        "xi_0_xi_n",
         grid_specs["xi_0_xi_n"],
         problem_variants["xi_0_xi_n"],
         likelihood,
         fiducial_relative_variance,
-        cache_settings,
         priors=PRIORS,
         chunk_size=grid_chunk_size,
         fiducials=FIDUCIALS,
         per_network=per_network,
-        cache_dir=cache_dir,
-        prefix=cache_name_prefix,
     )
     xi_posterior = xi_posteriors[likelihood_variant]
     return xi_posterior, xi_posteriors

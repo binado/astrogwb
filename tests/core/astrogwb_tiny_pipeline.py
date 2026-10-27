@@ -1,14 +1,20 @@
 """The tiny closed-form setup the simulator tests share.
 
 A BNS population of a few tens of sources at ``observation_time=1e-4`` years,
-the closed-form inspiral on a four-bin grid and a three-detector network: every
-stage runs for real in well under a second.
+the closed-form inspiral on a four-bin grid and two networks, a three-detector
+one and a pair it contains: every stage runs for real in well under a second.
 """
 
 from __future__ import annotations
 
+import numpy as np
+
 from astrogwb.populations import PopulationMetadata as PopulationSpec
-from astrogwb.simulators import DetectorConfiguration, PopulationMetadata
+from astrogwb.simulators import (
+    BackgroundArtifact,
+    DetectorConfiguration,
+    PopulationMetadata,
+)
 from astrogwb.waveform import WaveformMetadata
 
 WAVEFORM = WaveformMetadata(
@@ -27,6 +33,23 @@ DETECTORS = DetectorConfiguration(
         "C1": "cosmic_explorer_strain_psd.txt",
     },
 )
+NETWORKS = {
+    "triangle": DETECTORS,
+    "pair": DetectorConfiguration(
+        detectors=["S1", "C1"],
+        psd_references={name: DETECTORS.psd_references[name] for name in ("C1", "S1")},
+    ),
+}
+
+
+def assert_same_spectra(
+    actual: BackgroundArtifact, expected: BackgroundArtifact
+) -> None:
+    """Every network's pair and network spectra are equal, bit for bit."""
+    assert actual.spectra.keys() == expected.spectra.keys()
+    for name, spectrum in expected.spectra.items():
+        for field, values in spectrum._asdict().items():
+            np.testing.assert_array_equal(getattr(actual.network(name), field), values)
 
 
 def population_metadata(observation_time: float = 1e-4) -> PopulationMetadata:

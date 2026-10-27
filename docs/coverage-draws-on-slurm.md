@@ -1,33 +1,65 @@
-# Coverage draws on SLURM
+# Simulation inputs on SLURM
 
-[`notebooks/shot_noise_coverage.py`](../notebooks/shot_noise_coverage.py) reads
-1000 Poisson BNS catalogs, each recorded by the six detector networks.
-[`scripts/draw_coverage_injections.py`](../scripts/draw_coverage_injections.py)
-draws a range of them into `<cache>/ensembles/<key>/41-<i>/`, one realization
-directory per draw, holding its manifest and one background over every
-network's detectors. Draw `i` is fixed by the seed
-(41) and `i` alone, so any split of the indices across machines gives the same
-directories, and they merge by copying.
+The paper notebooks read their simulation inputs and never generate them. A
+missing input is a `FileNotFoundError`, not a simulation.
+[`workflow/coverage_draws.smk`](../workflow/coverage_draws.smk) writes every
+input, per ensemble:
 
-[`workflow/coverage_draws.smk`](../workflow/coverage_draws.smk) runs that
-script as SLURM jobs, one per batch of draws, through
-[`workflow/profiles/slurm`](../workflow/profiles/slurm/config.yaml). Its
-outputs are the per-draw `background.h5` files, written last and atomically, so
-a rerun skips every batch whose files exist and only resubmits what is missing.
-Caches drawn before the realization layout are converted in place, without
-redrawing, by `scripts/migrate_ensemble_cache.py`.
+| Output | Command | Read by |
+| --- | --- | --- |
+| `outputs/ensembles/<name>/<seed>-<i>/` | `astrogwb simulate`, one realization per job | every notebook with Poisson draws |
+| `outputs/ensembles/<name>/detector_noise.h5` | `astrogwb noise` of draw 0 | the grid and coverage notebooks, `scripts/shot_noise_*.py` |
+| `outputs/catalogs/reference-*.h5` | `scripts/draw_reference_catalog.py` | the posterior notebooks, `importance_convergence`, `ensemble_spectrum` |
+
+The ensembles are `fiducial` (the default waveform: the grid notebooks'
+injection and `spectrum_snrs`'s Poisson draws) and `coverage`
+(`IMRPhenomXAS_NRTidalv3`: `shot_noise_coverage`'s injections and
+`ensemble_spectrum`'s draws). Each also has a `-smoke` variant observed for
+`1e-4` yr, read under `ASTROGWB_NOTEBOOK_SMOKE=1`. Their settings are the
+committed `config/ensembles/<name>/{population,waveform}.toml` and
+`config/networks.toml`, which
+[`scripts/write_ensemble_configs.py`](../scripts/write_ensemble_configs.py)
+writes from the shared config layers. `tests/paper/test_ensemble.py` fails
+while they are stale.
+
+Every realization's background holds every paper network's pair spectra and
+combined spectrum. The pairs of all networks are projected once per draw, so
+adding a network that shares their detectors costs no waveforms. Draw `i` of a
+seed is fixed by `(seed, i)` alone, so any split of the indices across
+machines gives the same directories, and they merge by copying.
+
+## Regenerating after a change
+
+Nothing is migrated. If you change a detector, a noise curve, the fiducials,
+the population or the waveform, rewrite the configs and regenerate the
+ensemble:
+
+```bash
+uv run python scripts/write_ensemble_configs.py
+rm -r outputs/ensembles/coverage
+uv run --no-sync snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm --config ensembles=coverage
+```
+
+Rerunning against a realization recorded with other settings fails on the
+conflict (`ValueError: ... holds background ...`) rather than mixing
+settings. Ensembles drawn before per-network backgrounds (one union background,
+under `<cache>/ensembles/<key>/`) are not read by anything any more; regenerate
+them on the cluster.
 
 ## Job sizing
 
+Draw jobs share the Snakemake group `draws`. The profile's `group-components:
+draws=5` packs five draws into one SLURM job, run one after another.
+
 | Setting | Value | Why |
 | --- | --- | --- |
-| draws per job (`batch`) | 5 | short jobs that schedule easily and lose little on failure, while the ~1 min of import and JIT per job stays a small share |
-| CPUs per job (`threads`) | 8 | XLA spreads each waveform chunk over the job's CPUs |
+| draws per SLURM job (`group-components`) | 5 | short jobs that schedule easily and lose little on failure; JIT is a negligible share of a ~80 s draw |
+| CPUs per draw (`threads`) | 8 | XLA spreads each waveform chunk over the job's CPUs |
 | `mem_mb` | 8000 | two draws on an M4 peaked at 2.1 GB RSS (`/usr/bin/time -l`), with `chunk_size=8192` and `source_chunk_size=65_536`; headroom for per-thread buffers |
 | `runtime` | 60 min | the first cluster batch, 10 draws on 4 cores, took 50-90 min; 8 cores should bring 5 draws to ~15-30 min |
-| `jobs` | 100 | all of 500 draws in flight at once |
+| `jobs` | 100 | 500 draws in flight at once |
 
-After a batch finishes, `sacct` gives its time and CPU use:
+After a job finishes, `sacct` gives its time and CPU use:
 
 ```bash
 sacct -u $USER -S today --format=JobID,JobName%40,AllocCPUS,Elapsed,TotalCPU,MaxRSS,State
@@ -35,14 +67,8 @@ sacct -u $USER -S today --format=JobID,JobName%40,AllocCPUS,Elapsed,TotalCPU,Max
 
 `TotalCPU / (Elapsed x AllocCPUS)` is how busy the cores were: near 1, more
 `threads` would still help; well below, prefer more jobs with fewer threads.
-The draw directories' timestamps give the time per draw:
-
-```bash
-ls -l --time-style=+%H:%M ~/.cache/astrogwb/ensembles/0295b914397ec3c8/
-```
-
-Change `batch` and `threads` with `--config`, and `runtime` and `mem_mb` in
-the profile.
+Change `threads` with `--config`, and `group-components`, `runtime` and
+`mem_mb` in the profile.
 
 ## One-time setup on the cluster
 
@@ -51,69 +77,53 @@ Same commit as the Macs, CPU-only JAX (the default wheel):
 ```bash
 git clone git@github.com:binado/astrogwb.git && cd astrogwb
 git checkout <commit>
-uv sync --extra notebook --group dev --group cluster
+uv sync --extra notebook --extra cli --group dev --group cluster
 ```
 
 The `cluster` group puts Snakemake and its SLURM executor plugin in the
-project venv, so the controller and every job run the interpreter the script
-does. Every command below uses `uv run --no-sync`, and so do the jobs: a plain
+project venv, so the controller and every job run one interpreter; `cli`
+installs the `astrogwb` command and `notebook` the catalog script's stack.
+Every command below uses `uv run --no-sync`, and so do the jobs: a plain
 `uv run` would sync the venv back to the default groups and remove Snakemake,
-and the hundred concurrent jobs must never race to sync it.
-
-Check the key. It names the output directory, so it must match the Macs'
-exactly:
-
-```bash
-uv run --no-sync python scripts/draw_coverage_injections.py --keys
-```
-
-```text
-0295b914397ec3c8
-```
-
-The same key is written into the workflow; if the script ever drew under
-another key, each job would fail on a `MissingOutputException` rather than
-pass.
+and a hundred concurrent jobs must never race to sync it.
 
 Jobs go to the `short` partition, whose time limit must cover the profile's
-90-minute `runtime`. If the cluster needs an account, uncomment
-`slurm_account` in the profile. Change either one in the profile rather than
-with `--default-resources` on the command line, which would replace the
-profile's whole list, `mem_mb` and `runtime` included.
+`runtime`. If the cluster needs an account, uncomment `slurm_account` in the
+profile. Change either one in the profile rather than with
+`--default-resources` on the command line, which would replace the profile's
+whole list, `mem_mb` and `runtime` included.
 
 ## Submit
 
 The Snakemake controller stays on the login node for the whole run, so start
-it in `tmux` (or `screen`). Calibrate on one batch first, and check it with
-`sacct` as in [Job sizing](#job-sizing):
+it in `tmux` (or `screen`). Calibrate on a few draws first (`stop` caps the
+draws of the ensemble's first seed), and check them with `sacct`:
 
 ```bash
-uv run --no-sync snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm --config start=510 stop=515
+uv run --no-sync snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm --config ensembles=coverage stop=10
 ```
 
 Then dry-run and submit the rest:
 
 ```bash
-uv run --no-sync snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm --config start=500 stop=1000 --dry-run
+uv run --no-sync snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm --config ensembles=coverage --dry-run
 ```
 
 ```bash
-uv run --no-sync snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm --config start=500 stop=1000
+uv run --no-sync snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm --config ensembles=coverage
 ```
 
-For the whole ensemble, use `start=0 stop=1000`. `batch=<n>`, `threads=<n>`
-and `cache_dir=<path>` go in the same `--config` group (the default cache is
-`$XDG_CACHE_HOME/astrogwb`, else `~/.cache/astrogwb`, where
-`default_cache_dir()` puts it on Linux).
+The default, `ensembles="fiducial coverage"`, writes both. `threads=<n>` and
+`outputs=<path>` go in the same `--config` group.
 
-Each job exports `INPUT="*"` and `OUTPUT="*"` and runs the script under
+Each job exports `INPUT="*"` and `OUTPUT="*"` and runs its command under
 `job-nanny` whenever it is on `PATH`, as the cluster requires. `job-nanny`
 runs the job in a node-local copy of the working directory, which has no
 `.venv`, so jobs run `uv run --active --no-sync`: `--active` takes the shared
 venv from `VIRTUAL_ENV`, which `uv run` sets when it starts the controller.
 Start the controller with `uv run` as above, never with a bare `snakemake`.
-The draws themselves go straight to `cache_dir`, an absolute path on the
-shared filesystem, so only the log comes back through `OUTPUT`.
+If outputs written in the node-local copy do not come back, pass
+`outputs=<absolute path on the shared filesystem>` and link it to `outputs/`.
 
 ## Monitor and resume
 
@@ -122,30 +132,31 @@ squeue -u $USER
 ```
 
 ```bash
-tail -f logs/coverage_draws/0500-0510.log
+tail -f logs/ensembles/coverage/41-510.log
 ```
 
 SLURM's own logs land under `.snakemake/slurm_logs/`. Rerunning the same
 command after an interruption, a failure or a killed controller resubmits only
-the batches with a missing file; Snakemake deletes a failed job's outputs, so
-no half-written draw survives. The profile sets `rerun-triggers: mtime`, so
-changing `batch` between runs does not redraw files that already exist.
+the draws with a missing `background.h5`; it is written last and atomically,
+and Snakemake deletes a failed job's outputs, so no half-written draw
+survives.
 
 ## Bring the draws back
 
-From the Mac, merge the cluster's per-key directories into the local cache:
+From the Mac, merge the cluster's ensembles into the local outputs:
 
 ```bash
-rsync -av --ignore-existing <cluster>:.cache/astrogwb/ensembles/ ~/Library/Caches/astrogwb/ensembles/
+rsync -av --ignore-existing <cluster>:astrogwb/outputs/ensembles/ outputs/ensembles/
+rsync -av --ignore-existing <cluster>:astrogwb/outputs/catalogs/ outputs/catalogs/
 ```
 
 The trailing slashes merge directory by directory; `--ignore-existing` leaves
-the Macs' own draws untouched. The notebook then finds all 1000 draws cached.
+the Macs' own draws untouched.
 
 ## Linux versus macOS
 
 Draws on Linux x86 and macOS arm64 take the same random keys and the same
 sources, but XLA's CPU kernels differ between the two, so spectra can differ
-in their last floating-point digits. That is acceptable: the loader checks only
-the key and seed a file records, and a coverage test does not resolve
-differences at that level.
+in their last floating-point digits. That is acceptable: a realization's key
+names its settings, not its floating-point output, and a coverage test does not
+resolve differences at that level.

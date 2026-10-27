@@ -15,7 +15,7 @@ from typing import Annotated
 
 import knf
 from gwmock_signal.detector import CustomDetector
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from astrogwb.detector import Sensitivity, resolve_psd_path
 from astrogwb.paper.config.runs import DETECTOR_DEFAULT_PATHS, MERGE_KEY
@@ -72,12 +72,24 @@ class DetectorConfig(BaseModel):
 
 
 class DetectorRegistry(BaseModel):
-    """A complete resolved registry; serialized records need no default merge."""
+    """A complete resolved registry; serialized records need no default merge.
+
+    Each network's members are stored sorted, the canonical order of
+    :class:`~astrogwb.simulators.DetectorConfiguration`, so pair axes built
+    from the registry line up with a simulated background's.
+    """
 
     model_config = _STRICT
 
     detectors: dict[str, DetectorConfig]
     networks: dict[str, tuple[str, ...]] = Field(default_factory=dict)
+
+    @field_validator("networks")
+    @classmethod
+    def _canonical_order(
+        cls, networks: dict[str, tuple[str, ...]]
+    ) -> dict[str, tuple[str, ...]]:
+        return {name: tuple(sorted(members)) for name, members in networks.items()}
 
     @model_validator(mode="after")
     def _validate_networks(self) -> DetectorRegistry:
@@ -115,7 +127,7 @@ class DetectorRegistry(BaseModel):
     def build_network(
         self, name: str
     ) -> tuple[tuple[CustomDetector, ...], dict[str, Sensitivity]]:
-        """Build a named network in its declared detector order."""
+        """Build a named network, its detectors sorted."""
         return self.build_detectors(self.networks[name])
 
 
