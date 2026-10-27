@@ -11,11 +11,10 @@ from pathlib import Path
 
 import numpy as np
 
-from astrogwb.detector.config import load_detector_config
+from astrogwb.detector.config import DetectorRegistry, load_detector_config
 from astrogwb.populations import PopulationMetadata as PopulationSpec
 from astrogwb.simulators import (
     BackgroundArtifact,
-    DetectorRegistry,
     PopulationMetadata,
 )
 from astrogwb.waveform import WaveformMetadata

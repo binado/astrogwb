@@ -15,11 +15,10 @@ import pytest
 from astrogwb_tiny_pipeline import NETWORKS, WAVEFORM, assert_same_spectra
 from astrogwb_tiny_pipeline import population_metadata as _population
 
-from astrogwb.detector import isotropic_overlap_reduction_function
+from astrogwb.detector import DetectorRegistry, isotropic_overlap_reduction_function
 from astrogwb.simulators import (
     BackgroundArtifact,
     BackgroundSimulator,
-    DetectorRegistry,
     PopulationArtifact,
     PopulationSimulator,
     WaveformSimulator,

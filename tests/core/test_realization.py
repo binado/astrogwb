@@ -15,9 +15,9 @@ from astrogwb_tiny_pipeline import (
     population_metadata,
 )
 
+from astrogwb.detector import DetectorRegistry
 from astrogwb.simulators import (
     BackgroundSimulator,
-    DetectorRegistry,
     Realization,
     RealizationSimulator,
     batch_keys,

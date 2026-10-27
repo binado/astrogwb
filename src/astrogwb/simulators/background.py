@@ -66,7 +66,6 @@ __all__ = [
     "NORMALIZATION_VERSION",
     "BackgroundArtifact",
     "BackgroundSimulator",
-    "DetectorRegistry",
     "NetworkSpectrum",
     "background_key",
     "background_pairs",

@@ -7,7 +7,7 @@
    polarizations, :class:`Waveforms`, generated chunk by chunk; written, they
    are a :class:`WaveformArtifact`.
 3. :class:`BackgroundSimulator` projects them onto the named networks of a
-   :class:`DetectorRegistry`, and sums
+   :class:`~astrogwb.detector.DetectorRegistry`, and sums
    the per-pair cross-powers into a :class:`BackgroundArtifact` holding each
    network's pair spectra and their :func:`combine_pair_spectra`.
 
@@ -27,7 +27,6 @@ from astrogwb.simulators._io import batch_keys, realization_key
 from astrogwb.simulators.background import (
     BackgroundArtifact,
     BackgroundSimulator,
-    DetectorRegistry,
     NetworkSpectrum,
     combine_pair_spectra,
 )
@@ -62,7 +61,6 @@ __all__ = [
     "BackgroundSimulator",
     "DetectorNoise",
     "DetectorNoiseMetadata",
-    "DetectorRegistry",
     "NetworkNoise",
     "NetworkSpectra",
     "NetworkSpectrum",
