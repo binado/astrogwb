@@ -3,16 +3,19 @@
 [`notebooks/shot_noise_coverage.py`](../notebooks/shot_noise_coverage.py) reads
 1000 Poisson BNS catalogs, each recorded by the six detector networks.
 [`scripts/draw_coverage_injections.py`](../scripts/draw_coverage_injections.py)
-draws a range of them into `<cache>/ensembles/<key>/41-<i>/`, one background
-artifact per draw over every network's detectors. Draw `i` is fixed by the seed
+draws a range of them into `<cache>/ensembles/<key>/41-<i>/`, one realization
+directory per draw, holding its manifest and one background over every
+network's detectors. Draw `i` is fixed by the seed
 (41) and `i` alone, so any split of the indices across machines gives the same
 directories, and they merge by copying.
 
 [`workflow/coverage_draws.smk`](../workflow/coverage_draws.smk) runs that
 script as SLURM jobs, one per batch of draws, through
 [`workflow/profiles/slurm`](../workflow/profiles/slurm/config.yaml). Its
-outputs are the per-draw manifests themselves, so a rerun skips every batch whose
-files exist and only resubmits what is missing.
+outputs are the per-draw `background.h5` files, written last and atomically, so
+a rerun skips every batch whose files exist and only resubmits what is missing.
+Caches drawn before the realization layout are converted in place, without
+redrawing, by `scripts/migrate_ensemble_cache.py`.
 
 ## Job sizing
 

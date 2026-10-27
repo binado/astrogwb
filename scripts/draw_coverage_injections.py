@@ -3,11 +3,12 @@
 ``notebooks/shot_noise_coverage.py`` reads ``num_injections`` Poisson catalogs,
 each recorded by the six networks, from
 :func:`~astrogwb.paper.ensemble.network_spectra_ensemble`. Draw ``i`` is the
-same whatever range it is drawn in, and each draw is one background artifact
-over the union of the networks' detectors, under
-``<cache>/ensembles/<key>/<seed>-<i>/``, so several machines can each draw a
-disjoint range and the directories merge by copying. The notebook then finds
-every draw cached.
+same whatever range it is drawn in, and each draw is one realization
+directory, its manifest and one background over the union of the networks'
+detectors, under ``<cache>/ensembles/<key>/<seed>-<i>/``, so several machines
+can each draw a disjoint range and the directories merge by copying. The
+notebook then finds every draw cached. Caches drawn before the realization
+layout are converted in place by ``scripts/migrate_ensemble_cache.py``.
 
 The injection record below mirrors the notebook's configuration cell. A record
 that differs gives another key, and the notebook would redraw rather than read

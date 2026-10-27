@@ -1,16 +1,20 @@
-"""Stage manifests, parent references and batched keys.
+"""The realization manifest, atomic product files and batched keys.
 
-Every stage artifact is a directory holding ``metadata.toml``, its manifest,
-and ``data.h5``, its arrays. A manifest is an input, not a sidecar: the next
-stage reads it to find its parent and to check it is the parent it was made
-from. It has four tables:
+A realization is one directory holding ``metadata.toml``, its manifest, and at
+most one product file per stage: ``source_parameters.h5``,
+``polarization.h5`` and ``background.h5``. The manifest has a table per
+configured stage; a product file is written beside its final name and renamed
+into place, so an existing product is a complete one. Its tables:
 
-- ``[artifact]`` -- ``kind``, ``schema_version``, the ``astrogwb_version`` that
-  wrote it, the scientific ``key`` and the ``data`` file name.
-- ``[metadata]`` -- the stage's scientific settings, the record ``key`` hashes.
-- ``[parent]`` -- for a downstream stage: the parent's ``key`` and, when it was
-  read from or written to disk, its ``manifest`` path relative to this file.
-- ``[execution]`` -- cost-only settings such as ``chunk_size``, recorded for
+- ``[layout]`` -- the directory ``version`` and the ``astrogwb_version`` that
+  last wrote it.
+- ``[realization]`` -- its ``id`` (the population key), ``seed``, ``index``,
+  ``rng_key`` and the realized count, rate, observation time and
+  hyperparameters.
+- ``[population]``, ``[waveforms]``, ``[background]`` -- each stage's
+  scientific ``metadata`` and ``key``, with the waveform conventions and the
+  pair-spectrum normalization.
+- ``[execution]`` -- cost-only settings such as chunk sizes, recorded for
   provenance and never hashed.
 
 TOML has no null, so ``None`` values are left out on write and come back as
@@ -22,26 +26,48 @@ from __future__ import annotations
 import os
 import tempfile
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
 from astrogwb import __version__
+from astrogwb.utils.io import h5py_module
 
 __all__ = [
-    "DATA_FILE",
+    "BACKGROUND_FILE",
+    "LAYOUT_VERSION",
     "MANIFEST_FILE",
+    "POLARIZATION_FILE",
+    "SOURCES_FILE",
+    "atomic_h5",
     "batch_keys",
-    "read_manifest",
-    "relative_reference",
-    "resolve_reference",
-    "write_manifest",
+    "read_realization_manifest",
+    "realization_key",
+    "write_realization_manifest",
 ]
 
 MANIFEST_FILE = "metadata.toml"
-DATA_FILE = "data.h5"
+SOURCES_FILE = "source_parameters.h5"
+POLARIZATION_FILE = "polarization.h5"
+BACKGROUND_FILE = "background.h5"
+
+#: The version of the realization directory layout and its manifest.
+LAYOUT_VERSION = 1
+
+#: The order manifest tables are written in; any others follow.
+_TABLE_ORDER = ("realization", "population", "waveforms", "background", "execution")
+
+
+def _require_x64() -> None:
+    import jax
+
+    if not jax.config.jax_enable_x64:
+        raise RuntimeError(
+            "realization keys need jax_enable_x64; JAX would truncate a 64-bit seed"
+        )
 
 
 def batch_keys(seed: int | np.integer, n: int) -> Any:
@@ -59,14 +85,21 @@ def batch_keys(seed: int | np.integer, n: int) -> Any:
 
     if n < 0:
         raise ValueError("n must be non-negative")
-    if not jax.config.jax_enable_x64:
-        raise RuntimeError(
-            "batch_keys needs jax_enable_x64; JAX would truncate a 64-bit seed"
-        )
+    _require_x64()
     base = jax.random.key(np.uint64(seed))
     return jax.vmap(lambda i: jax.random.fold_in(base, i))(
         jax.numpy.arange(n, dtype=jax.numpy.uint32)
     )
+
+
+def realization_key(seed: int | np.integer, index: int) -> Any:
+    """Key ``index`` of :func:`batch_keys` of ``seed``, without the batch."""
+    import jax
+
+    if index < 0:
+        raise ValueError("index must be non-negative")
+    _require_x64()
+    return jax.random.fold_in(jax.random.key(np.uint64(seed)), np.uint32(index))
 
 
 def _without_none(value: Any) -> Any:
@@ -78,31 +111,24 @@ def _without_none(value: Any) -> Any:
     return value
 
 
-def write_manifest(
-    directory: Path,
-    *,
-    kind: str,
-    schema_version: int,
-    key: str,
-    tables: Mapping[str, Any],
+def write_realization_manifest(
+    directory: str | Path, manifest: Mapping[str, Any]
 ) -> Path:
     """Write ``directory/metadata.toml`` atomically and return its path.
 
-    ``tables`` are the manifest's tables after ``[artifact]``, which this
-    writes from the other arguments.
+    ``manifest`` holds the tables after ``[layout]``, which this writes; a
+    ``[layout]`` table in ``manifest`` is replaced.
     """
     import tomli_w
 
-    manifest = {
-        "artifact": {
-            "kind": kind,
-            "schema_version": schema_version,
-            "astrogwb_version": __version__,
-            "key": key,
-            "data": DATA_FILE,
-        },
-        **_without_none(dict(tables)),
+    names = [name for name in _TABLE_ORDER if name in manifest]
+    names += [name for name in manifest if name not in {*names, "layout"}]
+    tables = {name: manifest[name] for name in names}
+    document = {
+        "layout": {"version": LAYOUT_VERSION, "astrogwb_version": __version__},
+        **_without_none(tables),
     }
+    directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     target = directory / MANIFEST_FILE
     handle, temporary = tempfile.mkstemp(
@@ -110,7 +136,7 @@ def write_manifest(
     )
     try:
         with os.fdopen(handle, "wb") as file:
-            tomli_w.dump(manifest, file)
+            tomli_w.dump(document, file)
         os.replace(temporary, target)
     except BaseException:
         Path(temporary).unlink(missing_ok=True)
@@ -118,44 +144,54 @@ def write_manifest(
     return target
 
 
-def read_manifest(
-    path: str | Path, *, kind: str, schema_version: int
-) -> dict[str, Any]:
-    """Read a manifest, checking it is a ``kind`` artifact of ``schema_version``.
-
-    ``path`` is the manifest itself or the artifact directory holding it.
+def read_realization_manifest(directory: str | Path) -> dict[str, Any]:
+    """Read the manifest of the realization at ``directory``.
 
     Raises
     ------
     FileNotFoundError
-        If there is no manifest at ``path``.
+        If ``directory`` holds no manifest.
     ValueError
-        If the manifest is of another kind or schema version.
+        If the manifest is of another layout version, or has none.
     """
-    path = Path(path)
-    if path.is_dir():
-        path = path / MANIFEST_FILE
+    path = Path(directory) / MANIFEST_FILE
     if not path.is_file():
-        raise FileNotFoundError(f"no {kind} manifest at {path}")
+        raise FileNotFoundError(f"no realization manifest at {path}")
     with path.open("rb") as file:
         manifest = tomllib.load(file)
-    artifact = manifest.get("artifact", {})
-    if artifact.get("kind") != kind:
-        raise ValueError(f"{path} is a {artifact.get('kind')!r} manifest, not {kind!r}")
-    if artifact.get("schema_version") != schema_version:
+    version = manifest.get("layout", {}).get("version")
+    if version != LAYOUT_VERSION:
         raise ValueError(
-            f"{path} has {kind} schema version {artifact.get('schema_version')}, "
-            f"but this astrogwb reads version {schema_version}"
+            f"{path} has realization layout version {version}, but this astrogwb "
+            f"reads version {LAYOUT_VERSION}"
+            + (
+                "; it is a per-stage artifact of an earlier astrogwb, see "
+                "scripts/migrate_ensemble_cache.py"
+                if "artifact" in manifest
+                else ""
+            )
         )
-    manifest["artifact"]["path"] = path.resolve()
     return manifest
 
 
-def relative_reference(target: Path, start: Path) -> str:
-    """``target`` relative to the directory ``start``, as a manifest records it."""
-    return Path(os.path.relpath(target.resolve(), start.resolve())).as_posix()
+@contextmanager
+def atomic_h5(path: str | Path) -> Generator[Any]:
+    """An ``h5py.File`` open for writing beside ``path``, renamed onto it on success.
 
-
-def resolve_reference(manifest: Mapping[str, Any], reference: str) -> Path:
-    """A path a manifest records, resolved against the manifest's own directory."""
-    return (Path(manifest["artifact"]["path"]).parent / reference).resolve()
+    A reader sees no file at ``path`` or a complete one: if the body raises,
+    the temporary file is removed and ``path`` is left as it was.
+    """
+    h5py = h5py_module()
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    handle, temporary = tempfile.mkstemp(
+        dir=target.parent, prefix=f".{target.stem}.", suffix=".h5.tmp"
+    )
+    os.close(handle)
+    try:
+        with h5py.File(temporary, "w") as file:
+            yield file
+        os.replace(temporary, target)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise

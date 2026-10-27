@@ -5,12 +5,19 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import h5py
 import jax
 import numpy as np
 import pytest
 from pydantic import BaseModel
 
-from astrogwb.simulators import batch_keys
+from astrogwb.simulators import batch_keys, realization_key
+from astrogwb.simulators._io import (
+    MANIFEST_FILE,
+    atomic_h5,
+    read_realization_manifest,
+    write_realization_manifest,
+)
 from astrogwb.utils.io import content_key, load, write
 
 
@@ -36,6 +43,13 @@ def test_batch_keys_are_distinct_and_prefix_stable() -> None:
     assert len({tuple(row) for row in keys.tolist()}) == 4
     np.testing.assert_array_equal(
         np.asarray(jax.random.key_data(batch_keys(41, 2))), keys[:2]
+    )
+
+
+def test_realization_key_is_the_batch_key_at_its_index() -> None:
+    keys = np.asarray(jax.random.key_data(batch_keys(41, 4)))
+    np.testing.assert_array_equal(
+        np.asarray(jax.random.key_data(realization_key(41, 3))), keys[3]
     )
 
 
@@ -70,3 +84,42 @@ def test_a_failed_write_leaves_no_file_behind(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="without '/'"):
         write(tmp_path / "file.h5", {"a/b": np.zeros(1)}, Record(name="a", size=2))
     assert list(tmp_path.iterdir()) == []
+
+
+def test_a_realization_manifest_round_trips_without_nones(tmp_path: Path) -> None:
+    manifest = {
+        "realization": {"id": "abc", "seed": 41, "index": None},
+        "population": {"key": "abc", "metadata": {"hyperparameters": {"H0": 67.0}}},
+    }
+
+    write_realization_manifest(tmp_path, manifest)
+    read = read_realization_manifest(tmp_path)
+
+    assert read["layout"]["version"] == 1
+    assert read["realization"] == {"id": "abc", "seed": 41}
+    assert read["population"] == manifest["population"]
+    assert [path.name for path in tmp_path.iterdir()] == [MANIFEST_FILE]
+
+
+@pytest.mark.parametrize(
+    "document", ["[layout]\nversion = 99\n", '[artifact]\nkind = "background"\n']
+)
+def test_a_manifest_of_another_layout_is_refused(tmp_path: Path, document: str) -> None:
+    (tmp_path / MANIFEST_FILE).write_text(document)
+
+    with pytest.raises(ValueError, match="layout version"):
+        read_realization_manifest(tmp_path)
+
+
+def test_a_failed_atomic_h5_leaves_the_previous_file(tmp_path: Path) -> None:
+    target = tmp_path / "product.h5"
+    with atomic_h5(target) as file:
+        file.create_dataset("values", data=np.arange(3))
+
+    with pytest.raises(RuntimeError, match="interrupted"), atomic_h5(target) as file:
+        file.create_dataset("values", data=np.zeros(5))
+        raise RuntimeError("interrupted")
+
+    assert [path.name for path in tmp_path.iterdir()] == ["product.h5"]
+    with h5py.File(target, "r") as file:
+        np.testing.assert_array_equal(file["values"][()], np.arange(3))

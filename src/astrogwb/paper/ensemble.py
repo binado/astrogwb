@@ -1,11 +1,11 @@
-"""Ensembles of network realizations, cached one background artifact per draw.
+"""Ensembles of network realizations, cached one realization directory per draw.
 
 Several analyses draw the same record many times -- a mean spectrum, its
 sample variance, coverage injections -- and a Poisson draw at the paper's rate
 projects several hundred thousand waveforms. :func:`network_spectra_ensemble`
 draws each one once, through the fused stages of :mod:`astrogwb.simulators`:
 the population and its polarizations stay in memory, chunk by chunk, and only
-the per-pair background is written. Draw ``i`` of ``seed`` is the realization
+the manifest and the per-pair background of each realization are written. Draw ``i`` of ``seed`` is the realization
 at ``batch_keys(seed, n)[i]``, and those keys are prefix-stable, so it does
 not depend on ``n``: every caller asking for the same record and seed shares
 the same files, whatever ensemble size each asks for, an interrupted run
@@ -24,20 +24,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict
 
-import jax
 import numpy as np
 from numpy.typing import NDArray
 
 from astrogwb.paper.config.detectors import DetectorRegistry
 from astrogwb.simulators import (
     BackgroundArtifact,
-    BackgroundSimulator,
     DetectorConfiguration,
     PopulationMetadata,
-    PopulationSimulator,
-    WaveformSimulator,
-    batch_keys,
+    RealizationSimulator,
     combine_pair_spectra,
+    simulate_ensemble,
+    union_configuration,
 )
 from astrogwb.utils.io import content_key
 from astrogwb.waveform import WaveformMetadata
@@ -48,7 +46,6 @@ __all__ = [
     "ensemble_path",
     "network_configuration",
     "network_spectra_ensemble",
-    "union_configuration",
 ]
 
 
@@ -84,24 +81,6 @@ def network_configuration(
             detector: registry.detectors[detector].psd_reference
             for detector in detectors
         },
-    )
-
-
-def union_configuration(
-    networks: Sequence[DetectorConfiguration],
-) -> DetectorConfiguration:
-    """Every detector of ``networks`` once, in first-seen order.
-
-    A site code shared by two networks must name the same detector and noise
-    curve; this is trusted, not checked.
-    """
-    references: dict[str, str] = {}
-    for network in networks:
-        for name in network.detectors:
-            references.setdefault(name, network.psd_references.get(name, ""))
-    return DetectorConfiguration(
-        detectors=list(references),
-        psd_references={name: ref for name, ref in references.items() if ref},
     )
 
 
@@ -149,9 +128,10 @@ def network_spectra_ensemble(
 ) -> list[NetworkSpectra]:
     """Draws ``start .. num_draws - 1`` of every network, stacked per network.
 
-    A missing draw is simulated and written as a
-    :class:`~astrogwb.simulators.BackgroundArtifact`; a cached one is opened
-    and checked against the population record and seed. The simulators are
+    Each draw is a realization directory of
+    :func:`~astrogwb.simulators.simulate_ensemble`: a missing one is simulated
+    and written with its background only, a cached one is read after its
+    population key is checked against the record and seed. The simulators are
     built only if a draw is missing. ``chunk_size`` (waveforms per chunk) and
     ``source_chunk_size`` (sources drawn per piece) are cost settings: they
     change no draw.
@@ -180,41 +160,19 @@ def network_spectra_ensemble(
     ValueError
         If a cached draw records another population or realization.
     """
-    population, networks = record.population, list(record.networks.values())
-    union = union_configuration(networks)
-    key = record.key()
-    keys = batch_keys(seed, num_draws)
-    simulators: (
-        tuple[PopulationSimulator, WaveformSimulator, BackgroundSimulator] | None
-    ) = None
-    draws: list[BackgroundArtifact] = []
-    for index in range(start, num_draws):
-        path = ensemble_path(directory, key, seed, index)
-        expected_key = tuple(
-            int(v) for v in np.asarray(jax.random.key_data(keys[index]))
-        )
-        if (path / "metadata.toml").is_file():
-            draw = BackgroundArtifact.open(path)
-            recorded = draw.upstream["population"]
-            if (
-                tuple(recorded["rng_key"]) != expected_key
-                or PopulationMetadata.model_validate(recorded["metadata"]).key()
-                != population.key()
-            ):
-                raise ValueError(
-                    f"{path} records another population or seed than draw {index} "
-                    f"of seed {seed}"
-                )
-            draws.append(draw)
-            continue
-        if simulators is None:
-            simulators = (
-                PopulationSimulator(population, chunk_size=source_chunk_size),
-                WaveformSimulator(record.waveform, chunk_size=chunk_size),
-                BackgroundSimulator(union, chunk_size=chunk_size),
-            )
-        sources, polarizations, background = simulators
-        draws.append(background(polarizations(sources(keys[index]))).write(path))
+    networks = list(record.networks.values())
+    simulator = RealizationSimulator(
+        record.population,
+        record.waveform,
+        union_configuration(networks),
+        keep_sources=False,
+        chunk_size=chunk_size,
+        source_chunk_size=source_chunk_size,
+    )
+    realizations = simulate_ensemble(
+        simulator, Path(directory) / record.key(), seed, num_draws, start=start
+    )
+    draws = [realization.background() for realization in realizations]
     return [_stack(draws, network) for network in networks]
 
 

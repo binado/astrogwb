@@ -12,19 +12,17 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from astrogwb_tiny_pipeline import DETECTORS, WAVEFORM
+from astrogwb_tiny_pipeline import population_metadata as _population
 
 from astrogwb.detector import isotropic_overlap_reduction_function
-from astrogwb.populations import PopulationMetadata as PopulationSpec
 from astrogwb.simulators import (
-    BackgroundArtifact,
     BackgroundSimulator,
-    DetectorConfiguration,
     PopulationArtifact,
-    PopulationMetadata,
     PopulationSimulator,
-    WaveformArtifact,
     WaveformSimulator,
     batch_keys,
+    simulate_realization,
 )
 from astrogwb.simulators.population import EXTRINSIC_COLUMNS
 from astrogwb.waveform import WaveformMetadata
@@ -32,48 +30,6 @@ from astrogwb.waveform.polarization_power import polarization_stokes
 
 #: Standard errors a Monte Carlo mean may sit from its expectation.
 MAX_STANDARD_ERRORS = 5.0
-
-WAVEFORM = WaveformMetadata(
-    approximant="AnalyticInspiral",
-    minimum_frequency=20.0,
-    maximum_frequency=50.0,
-    reference_frequency=20.0,
-    sampling_frequency=128.0,
-    frequency_resolution=10.0,
-)
-DETECTORS = DetectorConfiguration(
-    detectors=["S1", "R1", "C1"],
-    psd_references={
-        "S1": "ET_COBA_15km_psd.txt",
-        "R1": "ET_COBA_15km_psd.txt",
-        "C1": "cosmic_explorer_strain_psd.txt",
-    },
-)
-
-
-def _population(observation_time: float) -> PopulationMetadata:
-    return PopulationMetadata(
-        population=PopulationSpec(
-            model_name="bns_coba",
-            model_kwargs={
-                "mass_model": "uniform",
-                "minimum_redshift": 0.0,
-                "maximum_redshift": 5.0,
-                "n_grid": 64,
-            },
-        ),
-        hyperparameters={
-            "H0": 67.66,
-            "Omega_m": 0.3096,
-            "gamma": 1.42,
-            "kappa": 4.62,
-            "z_peak": 1.84,
-            "minimum_mass": 1.0,
-            "mass_width": 1.5,
-            "local_merger_rate": 750.0,
-        },
-        observation_time=observation_time,
-    )
 
 
 @pytest.fixture(scope="module")
@@ -168,27 +124,27 @@ def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum(
     assert np.all(np.abs(ratios.mean(axis=0) - expected) < MAX_STANDARD_ERRORS * errors)
 
 
-def test_standalone_stages_read_back_the_fused_background(
+def test_a_staged_realization_reads_back_the_fused_background(
     tmp_path: Path, population: PopulationArtifact, waveforms: WaveformSimulator
 ) -> None:
-    background = BackgroundSimulator(DETECTORS, chunk_size=8)
-    fused = background(waveforms(population))
+    fused = BackgroundSimulator(DETECTORS, chunk_size=8)(waveforms(population))
 
-    population.write(tmp_path / "population")
-    waveforms(PopulationArtifact.open(tmp_path / "population")).write(
-        tmp_path / "waveforms"
+    simulate_realization(
+        tmp_path, population=_population(1e-4), seed=41, source_chunk_size=16
     )
-    background(WaveformArtifact.open(tmp_path / "waveforms")).write(
-        tmp_path / "background"
+    simulate_realization(
+        tmp_path, waveform=WAVEFORM, keep_polarizations=True, chunk_size=8
     )
-    standalone = BackgroundArtifact.open(tmp_path / "background" / "metadata.toml")
+    staged = simulate_realization(
+        tmp_path, background=DETECTORS, chunk_size=8
+    ).background()
 
     np.testing.assert_array_equal(
-        standalone.pair_spectral_density, fused.pair_spectral_density
+        staged.pair_spectral_density, fused.pair_spectral_density
     )
-    assert standalone.key() == fused.key()
-    assert standalone.count == population.count
-    assert standalone.detectors == DETECTORS
+    assert staged.key() == fused.key()
+    assert staged.count == population.count
+    assert staged.detectors == DETECTORS
 
 
 def test_an_empty_realization_has_zero_spectra(
@@ -196,7 +152,7 @@ def test_an_empty_realization_has_zero_spectra(
 ) -> None:
     empty = PopulationSimulator(_population(1e-12))(batch_keys(41, 1)[0])
 
-    written = waveforms(empty).write(tmp_path / "waveforms")
+    written = waveforms(empty).write(tmp_path / "polarization.h5")
     background = BackgroundSimulator(DETECTORS)(written)
 
     assert empty.count == 0

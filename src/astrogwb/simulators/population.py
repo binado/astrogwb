@@ -19,8 +19,8 @@ of the merger rate.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass, replace
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Self
@@ -33,11 +33,7 @@ from astrogwb import __version__
 from astrogwb.distributions.config import DistributionConfig
 from astrogwb.populations.metadata import PopulationMetadata as PopulationSpec
 from astrogwb.populations.metadata import widen_model_kwargs
-from astrogwb.simulators._io import (
-    DATA_FILE,
-    read_manifest,
-    write_manifest,
-)
+from astrogwb.simulators._io import atomic_h5
 from astrogwb.utils import years_to_seconds
 from astrogwb.utils.io import content_key, h5py_module, read_tree, write_tree
 
@@ -50,12 +46,12 @@ __all__ = [
     "PopulationArtifact",
     "PopulationMetadata",
     "PopulationSimulator",
+    "population_key",
 ]
 
-#: The manifest kind and schema of a population artifact. The schema is part
-#: of :meth:`PopulationArtifact.key`: version 2 moved the extrinsic draws into
-#: this stage, so no realization of version 1 is served under the same key.
-KIND = "population"
+#: The schema of a population realization. It is part of
+#: :func:`population_key`: version 2 moved the extrinsic draws into this
+#: stage, so no realization of version 1 is served under the same key.
 SCHEMA_VERSION = 2
 
 #: The source columns this stage draws on top of the population model's.
@@ -173,17 +169,26 @@ class PopulationMetadata(BaseModel):
         return payload
 
 
+def population_key(metadata: PopulationMetadata, rng_key: Sequence[int]) -> str:
+    """The content hash of the realization of ``metadata`` at the key data ``rng_key``.
+
+    It is the realization's ID, known before anything is drawn.
+    """
+    return content_key(
+        {"metadata": metadata.payload(), "rng_key": [int(v) for v in rng_key]}
+    )
+
+
 @dataclass(frozen=True)
 class PopulationArtifact:
-    """One population realization, in memory or opened from disk.
+    """One population realization, in memory or read from a realization directory.
 
     ``source_parameters`` holds one ``(count,)`` column per source parameter,
     the extrinsic columns :data:`EXTRINSIC_COLUMNS` included; source ``i`` has
     the stable ID ``i``. ``total_merger_rate`` is the realized
     :math:`\\mathcal{R}` in events per second and ``hyperparameters`` the
     realized values. ``rng_key`` is the key's data, the realization's
-    provenance and part of its :meth:`key`. ``manifest_path`` is where it was
-    written or read, ``None`` while it is only in memory.
+    provenance and part of its :meth:`key`.
     """
 
     metadata: PopulationMetadata
@@ -192,7 +197,6 @@ class PopulationArtifact:
     hyperparameters: dict[str, float]
     source_parameters: dict[str, NDArray[Any]]
     chunk_size: int | None = None
-    manifest_path: Path | None = None
 
     @property
     def count(self) -> int:
@@ -211,61 +215,54 @@ class PopulationArtifact:
 
     def key(self) -> str:
         """The content hash of this realization: its record and its key."""
-        return content_key(
-            {"metadata": self.metadata.payload(), "rng_key": list(self.rng_key)}
-        )
+        return population_key(self.metadata, self.rng_key)
 
-    def write(self, directory: str | Path) -> Self:
-        """Write ``metadata.toml`` and ``data.h5`` to ``directory``; returns the opened artifact."""
-        directory = Path(directory)
-        directory.mkdir(parents=True, exist_ok=True)
-        h5py = h5py_module()
-        with h5py.File(directory / DATA_FILE, "w") as file:
+    def tables(self) -> dict[str, dict[str, Any]]:
+        """The ``[population]`` and ``[realization]`` manifest tables.
+
+        ``[realization]`` holds what this realization knows of itself; the
+        seed and index it was keyed by are the caller's to add.
+        """
+        return {
+            "population": {
+                "metadata": self.metadata.model_dump(mode="json"),
+                "key": self.key(),
+            },
+            "realization": {
+                "id": self.key(),
+                "rng_key": list(self.rng_key),
+                "count": self.count,
+                "total_merger_rate": self.total_merger_rate,
+                "total_merger_rate_unit": "1 / s",
+                "observation_seconds": self.observation_seconds,
+                "hyperparameters": self.hyperparameters,
+            },
+        }
+
+    def write_sources(self, path: str | Path) -> Path:
+        """Write the source IDs and parameters to the HDF5 file ``path``, atomically."""
+        with atomic_h5(path) as file:
             file.create_dataset("source_id", data=self.source_ids)
             write_tree(file.create_group("source_parameters"), self.source_parameters)
-        path = write_manifest(
-            directory,
-            kind=KIND,
-            schema_version=SCHEMA_VERSION,
-            key=self.key(),
-            tables={
-                "metadata": self.metadata.model_dump(mode="json"),
-                "realization": {
-                    "rng_key": list(self.rng_key),
-                    "count": self.count,
-                    "total_merger_rate": self.total_merger_rate,
-                    "total_merger_rate_unit": "1 / s",
-                    "observation_seconds": self.observation_seconds,
-                    "hyperparameters": self.hyperparameters,
-                },
-                "execution": {"chunk_size": self.chunk_size},
-            },
-        )
-        return replace(self, manifest_path=path.resolve())
+        return Path(path)
 
     @classmethod
-    def open(cls, path: str | Path) -> Self:
-        """Read a population artifact from its manifest or directory.
+    def from_tables(cls, tables: Mapping[str, Any], sources_path: str | Path) -> Self:
+        """A realization from its manifest ``tables`` and the sources file it wrote.
 
         Raises
         ------
-        FileNotFoundError
-            If there is no population manifest at ``path``.
         ValueError
-            If the manifest is not a population manifest of this schema, or its
-            data do not match it.
+            If the recorded key is not the hash of the recorded metadata and
+            rng key, or the sources do not match the recorded count.
         """
-        manifest = read_manifest(path, kind=KIND, schema_version=SCHEMA_VERSION)
-        manifest_path = manifest["artifact"]["path"]
-        realization = manifest["realization"]
+        population, realization = tables["population"], tables["realization"]
         h5py = h5py_module()
-        with h5py.File(
-            manifest_path.parent / manifest["artifact"]["data"], "r"
-        ) as file:
+        with h5py.File(sources_path, "r") as file:
             source_parameters = read_tree(file["source_parameters"])
             source_ids = np.asarray(file["source_id"][()])
         artifact = cls(
-            metadata=PopulationMetadata.model_validate(manifest["metadata"]),
+            metadata=PopulationMetadata.model_validate(population["metadata"]),
             rng_key=tuple(int(value) for value in realization["rng_key"]),
             total_merger_rate=float(realization["total_merger_rate"]),
             hyperparameters={
@@ -273,18 +270,17 @@ class PopulationArtifact:
                 for name, value in realization["hyperparameters"].items()
             },
             source_parameters=source_parameters,  # ty: ignore[invalid-argument-type]
-            chunk_size=manifest.get("execution", {}).get("chunk_size"),
-            manifest_path=manifest_path,
+            chunk_size=tables.get("execution", {}).get("source_chunk_size"),
         )
-        if artifact.key() != manifest["artifact"]["key"]:
+        if artifact.key() != population["key"]:
             raise ValueError(
-                f"{manifest_path} records key {manifest['artifact']['key']}, but "
-                f"its metadata and rng key hash to {artifact.key()}"
+                f"the manifest records population {population['key']}, but its "
+                f"metadata and rng key hash to {artifact.key()}"
             )
         if artifact.count != int(realization["count"]) or not np.array_equal(
             source_ids, artifact.source_ids
         ):
-            raise ValueError(f"{manifest_path}: source data do not match the manifest")
+            raise ValueError(f"{sources_path}: sources do not match the manifest")
         return artifact
 
 

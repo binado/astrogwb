@@ -7,11 +7,15 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 import tomli_w
+from astrogwb_tiny_pipeline import WAVEFORM, population_metadata
 from typer.testing import CliRunner
 
 from astrogwb.cli import app
-from astrogwb.simulators import BackgroundArtifact
+from astrogwb.simulators import Realization
+
+POPULATION = population_metadata()
 
 
 def test_importing_the_cli_leaves_the_xla_backend_uninitialized() -> None:
@@ -35,39 +39,13 @@ assert jax.device_count() == 2, f"backend initialized early: {jax.devices()}"
     assert result.returncode == 0, result.stderr
 
 
-def test_a_fused_background_run_writes_only_the_background(tmp_path: Path) -> None:
-    metadata = {
-        "population.toml": {
-            "observation_time": 1e-4,
-            "population": {
-                "model_name": "bns_coba",
-                "model_kwargs": {
-                    "mass_model": "uniform",
-                    "minimum_redshift": 0.0,
-                    "maximum_redshift": 5.0,
-                    "n_grid": 64,
-                },
-            },
-            "hyperparameters": {
-                "H0": 67.66,
-                "Omega_m": 0.3096,
-                "gamma": 1.42,
-                "kappa": 4.62,
-                "z_peak": 1.84,
-                "minimum_mass": 1.0,
-                "mass_width": 1.5,
-                "local_merger_rate": 750.0,
-            },
-        },
-        "waveform.toml": {
-            "approximant": "AnalyticInspiral",
-            "minimum_frequency": 20.0,
-            "maximum_frequency": 50.0,
-            "reference_frequency": 20.0,
-            "sampling_frequency": 128.0,
-            "frequency_resolution": 10.0,
-        },
-        "network.toml": {
+@pytest.fixture
+def metadata_files(tmp_path: Path) -> dict[str, Path]:
+    """The tiny population, waveform and two-detector network, as TOML files."""
+    tables = {
+        "population": POPULATION.model_dump(mode="json", exclude={"version"}),
+        "waveform": WAVEFORM.model_dump(mode="json", exclude_none=True),
+        "network": {
             "detectors": ["S1", "R1"],
             "psd_references": {
                 "S1": "ET_COBA_15km_psd.txt",
@@ -75,34 +53,60 @@ def test_a_fused_background_run_writes_only_the_background(tmp_path: Path) -> No
             },
         },
     }
-    for name, table in metadata.items():
-        (tmp_path / name).write_bytes(tomli_w.dumps(table).encode())
+    paths = {name: tmp_path / f"{name}.toml" for name in tables}
+    for name, table in tables.items():
+        paths[name].write_bytes(tomli_w.dumps(table).encode())
+    return paths
 
+
+def _simulate(directory: Path, *options: str) -> None:
     result = CliRunner().invoke(
-        app,
-        [
-            "simulate",
-            "background",
-            "--population-metadata",
-            str(tmp_path / "population.toml"),
-            "--seed",
-            "41",
-            "--waveform-metadata",
-            str(tmp_path / "waveform.toml"),
-            "--detectors",
-            str(tmp_path / "network.toml"),
-            "--output",
-            str(tmp_path / "background"),
-            "--chunk-size",
-            "8",
-        ],
+        app, ["simulate", str(directory), "--chunk-size", "8", *options]
+    )
+    assert result.exit_code == 0, result.output
+
+
+def test_a_fused_simulate_run_writes_the_manifest_sources_and_background(
+    tmp_path: Path, metadata_files: dict[str, Path]
+) -> None:
+    _simulate(
+        tmp_path / "realization",
+        *("--population-metadata", str(metadata_files["population"])),
+        *("--seed", "41"),
+        *("--waveform-metadata", str(metadata_files["waveform"])),
+        *("--background-metadata", str(metadata_files["network"])),
     )
 
-    assert result.exit_code == 0, result.output
-    background = BackgroundArtifact.open(tmp_path / "background")
+    realization = Realization.open(tmp_path / "realization")
+    background = realization.background()
     assert background.pairs == [("S1", "R1")]
     assert background.count > 0 and np.any(background.pair_spectral_density)
-    assert sorted(path.name for path in (tmp_path / "background").iterdir()) == [
-        "data.h5",
+    assert sorted(path.name for path in realization.directory.iterdir()) == [
+        "background.h5",
         "metadata.toml",
+        "source_parameters.h5",
     ]
+
+
+def test_a_background_run_adds_to_an_existing_realization(
+    tmp_path: Path, metadata_files: dict[str, Path]
+) -> None:
+    directory = tmp_path / "realization"
+    _simulate(
+        directory,
+        *("--population-metadata", str(metadata_files["population"])),
+        *("--seed", "41"),
+        *("--waveform-metadata", str(metadata_files["waveform"])),
+    )
+    assert not (directory / "background.h5").exists()
+
+    _simulate(directory, "--background-metadata", str(metadata_files["network"]))
+
+    assert Realization.open(directory).background().pairs == [("S1", "R1")]
+
+
+def test_a_seed_without_population_metadata_is_refused(tmp_path: Path) -> None:
+    result = CliRunner().invoke(app, ["simulate", str(tmp_path), "--seed", "41"])
+
+    assert result.exit_code != 0
+    assert "go together" in result.output
