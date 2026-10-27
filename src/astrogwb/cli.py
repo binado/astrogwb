@@ -3,7 +3,12 @@
 astrogwb simulate DIRECTORY reads population and waveform metadata, then
 runs every configured stage. Repeat --detector-config PATH to merge detector
 registry layers in argument order. Supplying detector config enables background
-simulation. For example::
+simulation. Each run adds the stages it is given to the directory, with the
+settings the directory already records: a later run may give only
+--waveform-metadata or --detector-config, and a stage with no settings given is
+left as recorded. --seed goes with --population-metadata, and the
+sources are written unless --no-keep-sources, and the polarizations only
+with --keep-polarizations. For example::
 
     astrogwb simulate ensemble/41-0 --population-metadata population.toml \\
         --seed 41 --index 0 --waveform-metadata waveform.toml \\
@@ -149,6 +154,8 @@ def simulate(
         f"realization {realization.id}: {realization.count} sources, "
         f"{', '.join(products) or 'no products'} -> {directory}"
     )
+    if not detector_config:
+        typer.echo("no --detector-config: background left as recorded")
 
 
 @app.command()
@@ -173,7 +180,11 @@ def noise(
         str, typer.Option(help="JAX platform: auto, cpu, cuda or tpu.")
     ] = "auto",
 ) -> None:
-    """Write the detector noise of a realization's background networks."""
+    """Write the detector noise of a realization's background networks.
+
+    The networks are those recorded in the realization's background, and the
+    registry is trusted to be the one it was simulated with.
+    """
     _apply_runtime(platform, None)
     from astrogwb.detector.config import load_detector_config
     from astrogwb.simulators import Realization, detector_noise

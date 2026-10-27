@@ -38,7 +38,8 @@ and sliders, is
 
 > **Deprecated.** `notebooks/spectrum_snrs.py` depends on the removed
 > amplitude-marginalized model and no longer imports; it will be resolved in a
-> follow-up.
+> follow-up. The spectrum cache it describes below was removed with
+> `astrogwb.paper.cache`, so the cache and `cache_only` wording is historical.
 
 `notebooks/spectrum_snrs.py` is a marimo notebook that justifies two choices of
 the appendix, the number of injections `N` (128k-256k recommended) and the
@@ -153,7 +154,7 @@ until the spectrum cache is populated.
 the posteriors of `H0`, `(H0, Omega_m)` and `(xi_0, xi_n)` on a grid for all six
 networks, with no sampler. The data are a zero-noise Poisson injection
 (`data_seed = 41`); the model spectrum is the rescaled reference-redshift
-spectrum of `astrogwb.gwb.importance` (`catalog_seed = 42`): `2^19` intrinsic
+spectrum of `astrogwb.gwb.importance` (`catalog_seed = 42`): `2^14` intrinsic
 draws, each generated once at the window's lower edge by `reference_catalog`,
 and `ImportanceGaussianLikelihood` rescaling their mean power to 32 Gauss-Legendre
 nodes in the scale factor `1/(1 + z)` at each grid point, with no intrinsic

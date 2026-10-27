@@ -11,7 +11,7 @@ cell names its inputs, all under `outputs/`:
 
 | Input | Read by |
 | --- | --- |
-| `ensembles/fiducial/` (+ `detector_noise.h5`) | `cosmology_grid_posteriors`, `madau_dickinson_grid`, `shot_noise_coverage`, `ensemble_spectrum`, `spectrum_snrs` |
+| `ensembles/fiducial/` (+ `detector_noise.h5`) | `cosmology_grid_posteriors`, `madau_dickinson_grid`, `shot_noise_coverage`, `ensemble_spectrum`, `spectrum_snrs` (deprecated) |
 | `catalogs/reference-fiducial.h5` | `cosmology_grid_posteriors`, `madau_dickinson_grid`, `shot_noise_coverage` |
 | `catalogs/reference-scan.h5` | `ensemble_spectrum` |
 | `catalogs/reference-ladder.h5` | `importance_convergence` |
@@ -35,9 +35,8 @@ A missing input is a `FileNotFoundError`, never a simulation.
   against the expected $\sigma(H_0)$. It fits every template to a common
   reference spectrum, measures the MAP offset in units of a fixed
   $\sigma_{\mathrm{ref}}$ with bootstrap errors, and ends with a pass/fail
-  verdict against a tolerance on $\mathrm{sd}(r)$. Uses the checked spectrum
-  cache and writes three paper figures (A1-A3) and eleven supporting
-  figures.
+  verdict against a tolerance on $\mathrm{sd}(r)$. Writes three paper figures
+  (A1-A3) and eleven supporting figures.
 - **`cosmology_grid_posteriors.py`** — marimo notebook. Grid posteriors for
   $H_0$, $(H_0, \Omega_m)$ and $(\Xi_0, n)$ across the six detector networks,
   from a zero-noise Poisson injection as each network records it
@@ -45,7 +44,7 @@ A missing input is a `FileNotFoundError`, never a simulation.
   spectra through the per-source antenna patterns), modeled with the rescaled
   reference-redshift spectrum (`astrogwb.gwb.importance`: $2^{14}$ intrinsic
   draws on a scrambled Sobol net, one waveform each at the window's lower edge, rescaled to 32 redshift
-  nodes; a different seed). The log densities are computed on every run. Each
+  nodes; catalog seed 42, the injection being seed 41). The log densities are computed on every run. Each
   grid point is predicted once and shared by all six networks
   (`grid_log_posterior`); the numbers equal the per-network evaluation. The
   injection is one catalog realization, so its physical shot noise is modeled

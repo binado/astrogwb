@@ -176,7 +176,8 @@ def detector_noise(
     Raises
     ------
     ValueError
-        If a selected network has fewer than two detectors.
+        If the registry defines no networks, or a selected network has fewer
+        than two detectors.
     """
     import jax.numpy as jnp
 

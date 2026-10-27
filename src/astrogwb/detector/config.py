@@ -47,7 +47,10 @@ class DetectorGeometry(BaseModel):
 
 
 class DetectorConfig(BaseModel):
-    """Geometry, PSD reference, and an optional presentation label."""
+    """Geometry, PSD reference, and an optional presentation label.
+
+    A :class:`DetectorRegistry` labels an unlabelled detector with its name.
+    """
 
     model_config = _STRICT
 
@@ -100,13 +103,24 @@ class DetectorRegistry(BaseModel):
     ) -> dict[str, tuple[str, ...]]:
         return {name: tuple(sorted(members)) for name, members in networks.items()}
 
-    @model_validator(mode="after")
-    def _validate_networks(self) -> DetectorRegistry:
-        for name, detector in self.detectors.items():
+    @field_validator("detectors")
+    @classmethod
+    def _label_detectors(
+        cls, detectors: dict[str, DetectorConfig]
+    ) -> dict[str, DetectorConfig]:
+        """Label each unlabelled detector with its name, on a copy."""
+        for name in detectors:
             if not name.strip():
                 raise ValueError("detector names must be non-empty")
-            if detector.label is None:
-                object.__setattr__(detector, "label", name)
+        return {
+            name: detector
+            if detector.label is not None
+            else detector.model_copy(update={"label": name})
+            for name, detector in detectors.items()
+        }
+
+    @model_validator(mode="after")
+    def _validate_networks(self) -> DetectorRegistry:
         for name, members in self.networks.items():
             self.validate_members(members, label=f"network {name!r}")
         return self

@@ -573,6 +573,8 @@ class NetworkSpectra(TypedDict):
     :func:`~astrogwb.simulators.combine_pair_spectra` of
     ``pair_spectral_density`` ``(D, P, F)``; ``n_events`` and
     ``total_merger_rate`` ``(D,)``; each ``hyperparameters`` value ``(D,)``.
+    ``n_events`` is each draw's ``count``, named as the Poisson-count model's
+    site is.
     """
 
     frequencies: NDArray[np.float64]

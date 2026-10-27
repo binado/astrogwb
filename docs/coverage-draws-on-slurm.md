@@ -13,7 +13,7 @@ input, per ensemble:
 
 The one ensemble is `fiducial`, the default waveform and grid: the grid
 notebooks' injection, `shot_noise_coverage`'s injections and the draws of
-`ensemble_spectrum` and `spectrum_snrs`. Its settings are the committed
+`ensemble_spectrum` (and the deprecated `spectrum_snrs`). Its settings are the committed
 `config/ensembles/fiducial/{population,waveform}.toml` and
 `config/detectors.toml`, which supplies the shared frozen detector registry.
 
@@ -37,9 +37,7 @@ uv run --no-sync snakemake -s workflow/coverage_draws.smk --profile workflow/pro
 
 Rerunning against a realization recorded with other settings fails on the
 conflict (`ValueError: ... holds background ...`) rather than mixing
-settings. Ensembles drawn before per-network backgrounds (one union background,
-under `<cache>/ensembles/<key>/`) are not read by anything any more; regenerate
-them on the cluster.
+settings. Ensembles of earlier layouts are not read; regenerate them as above.
 
 ## Job sizing
 

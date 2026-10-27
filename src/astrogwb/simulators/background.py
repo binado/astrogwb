@@ -114,9 +114,14 @@ def select_networks(
     Raises
     ------
     ValueError
-        If a selected network has fewer than two detectors.
+        If the registry defines no networks, or a selected network has fewer
+        than two detectors.
     """
     selected = tuple(sorted(registry.networks if names is None else names))
+    if not selected:
+        raise ValueError(
+            "a background needs at least one network; the registry has none"
+        )
     for name in selected:
         members = registry.networks[name]
         if len(members) < 2:
@@ -218,14 +223,13 @@ def _read_networks(table: Mapping[str, Any]) -> tuple[str, ...]:
 class BackgroundArtifact:
     """The per-network spectra of one realization, in memory or read from disk.
 
-    ``spectra`` holds each network's :class:`NetworkSpectrum`, keyed and
-    ordered as ``network_names``. ``count``, ``total_merger_rate`` (per second) and
+    ``spectra`` holds each network's :class:`NetworkSpectrum`, keyed by
+    network name in sorted order. ``count``, ``total_merger_rate`` (per second) and
     ``hyperparameters`` are the realization's, carried over from its
     population. ``waveform_key`` names the polarizations the spectra were
     projected from.
     """
 
-    network_names: tuple[str, ...]
     frequencies: NDArray[np.float64]
     spectra: dict[str, NetworkSpectrum]
     observation_seconds: float
@@ -235,6 +239,11 @@ class BackgroundArtifact:
     waveform_key: str
     identity: str | None = None
     chunk_size: int | None = None
+
+    @property
+    def network_names(self) -> tuple[str, ...]:
+        """The names of the networks, sorted."""
+        return tuple(self.spectra)
 
     def network(self, name: str) -> NetworkSpectrum:
         """The pair spectra ``(P_n, F)`` and network spectrum ``(F,)`` of ``name``."""
@@ -325,7 +334,6 @@ class BackgroundArtifact:
                     f"{path}: the spectra of {name!r} do not match the manifest"
                 )
         return cls(
-            network_names=network_names,
             frequencies=frequencies,
             spectra=spectra,
             observation_seconds=float(realization["observation_seconds"]),
@@ -471,7 +479,6 @@ class BackgroundSimulator:
             numerator = np.sum(weights * pairs, axis=-2)
             spectra[name] = NetworkSpectrum(pairs, _combine(numerator, denominator))
         return BackgroundArtifact(
-            network_names=self._network_names,
             frequencies=frequencies,
             spectra=spectra,
             observation_seconds=population.observation_seconds,
