@@ -15,14 +15,14 @@ from itertools import combinations
 from pathlib import Path
 from typing import Annotated
 
-import knf
 from gwmock_signal.detector import CustomDetector
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from astrogwb.config import merge_layers
 
 from .psd import resolve_psd_path
 from .sensitivity import Sensitivity
 
-_MERGE_KEY = "extends"
 #: The packaged detector geometry and sensitivity tables, the first layers of
 #: every merge; they use the same tables as the layers that override them.
 DETECTOR_DEFAULT_PATHS = tuple(
@@ -211,19 +211,12 @@ def load_detector_config(paths: Sequence[Path]) -> DetectorRegistry:
     Raises
     ------
     ValueError
-        If a path is not an existing TOML file, or the merged config is not a
-        valid registry.
+        If a path is not a TOML file, or the merged config is not a valid
+        registry.
     """
-    for path in paths:
-        if path.suffix.lower() != ".toml" or not path.is_file():
-            raise ValueError(f"detector config must be an existing TOML file: {path}")
     logger.info(
         "Detector config layers (merge order): %s",
         " -> ".join(str(path) for path in (*DETECTOR_DEFAULT_PATHS, *paths)),
     )
-    merged = knf.load(
-        [*DETECTOR_DEFAULT_PATHS, *paths],
-        interpolate=True,
-        merge_key=_MERGE_KEY,
-    )
+    merged = merge_layers([*DETECTOR_DEFAULT_PATHS, *paths])
     return DetectorRegistry.model_validate(merged)
