@@ -20,7 +20,7 @@ from pathlib import Path
 import astrogwb.paper.catalogs
 import astrogwb.paper.posteriors
 from astrogwb.paper.config import priors
-from astrogwb.paper.config.detectors import load_detector_config
+from astrogwb.detector.config import load_detector_config
 load_detector_config([Path('config/detectors.toml')])
 assert len(priors()) == 10
 

@@ -149,6 +149,7 @@ dependencies = [
     { name = "numpy" },
     { name = "numpyro" },
     { name = "pydantic" },
+    { name = "pyknf" },
     { name = "ripplegw" },
     { name = "tomli-w" },
 ]
@@ -178,7 +179,6 @@ notebook = [
     { name = "matplotlib" },
     { name = "pandas", extra = ["output-formatting"] },
     { name = "platformdirs" },
-    { name = "pyknf" },
     { name = "scipy" },
 ]
 paper = [
@@ -186,7 +186,6 @@ paper = [
     { name = "gwmock-pop" },
     { name = "h5py" },
     { name = "platformdirs" },
-    { name = "pyknf" },
 ]
 simulation = [
     { name = "gwmock-pop" },
@@ -240,7 +239,7 @@ requires-dist = [
     { name = "pandas", extras = ["output-formatting"], marker = "extra == 'notebook'", specifier = ">=2.0" },
     { name = "platformdirs", marker = "extra == 'paper'", specifier = ">=4.11.12" },
     { name = "pydantic", specifier = ">=2.11" },
-    { name = "pyknf", marker = "extra == 'paper'", specifier = ">=0.6,<0.8" },
+    { name = "pyknf", specifier = ">=0.6,<0.8" },
     { name = "ripplegw", specifier = ">=0.3.1" },
     { name = "scipy", marker = "extra == 'notebook'", specifier = ">=1.10" },
     { name = "tomli-w", specifier = ">=1.2" },

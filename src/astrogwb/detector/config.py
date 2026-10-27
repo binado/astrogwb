@@ -17,9 +17,14 @@ import knf
 from gwmock_signal.detector import CustomDetector
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from astrogwb.detector import Sensitivity, resolve_psd_path
-from astrogwb.paper.config.runs import DETECTOR_DEFAULT_PATHS, MERGE_KEY
-from astrogwb.paper.utils import require_toml
+from .psd import resolve_psd_path
+from .sensitivity import Sensitivity
+
+_MERGE_KEY = "extends"
+DETECTOR_DEFAULT_PATHS = tuple(
+    Path(__file__).parent / filename
+    for filename in ("geometry.toml", "sensitivity.toml")
+)
 
 _STRICT = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 logger = logging.getLogger(__name__)
@@ -72,10 +77,10 @@ class DetectorConfig(BaseModel):
 
 
 class DetectorRegistry(BaseModel):
-    """A complete resolved registry; serialized records need no default merge.
+    """A complete resolved registry, trusted and fixed for a dataset's lifetime.
 
     Each network's members are stored sorted, the canonical order of
-    :class:`~astrogwb.simulators.DetectorConfiguration`, so pair axes built
+    :meth:`pairs`, so pair axes built
     from the registry line up with a simulated background's.
     """
 
@@ -130,6 +135,11 @@ class DetectorRegistry(BaseModel):
         """Build a named network, its detectors sorted."""
         return self.build_detectors(self.networks[name])
 
+    def pairs(self, network_name: str) -> list[tuple[str, str]]:
+        """Return the canonical sorted detector pairs of a named network."""
+        detectors = self.networks[network_name]
+        return [(a, b) for i, a in enumerate(detectors) for b in detectors[i + 1 :]]
+
 
 def load_detector_config(paths: Sequence[Path]) -> DetectorRegistry:
     """Merge packaged detector definitions and ordered TOML registry layers.
@@ -141,7 +151,8 @@ def load_detector_config(paths: Sequence[Path]) -> DetectorRegistry:
     no runtime detector objects are built during loading or validation.
     """
     for path in paths:
-        require_toml(path)
+        if path.suffix.lower() != ".toml" or not path.is_file():
+            raise ValueError(f"detector config must be an existing TOML file: {path}")
     logger.info(
         "Detector config layers (merge order): %s",
         " -> ".join(str(path) for path in (*DETECTOR_DEFAULT_PATHS, *paths)),
@@ -149,6 +160,6 @@ def load_detector_config(paths: Sequence[Path]) -> DetectorRegistry:
     merged = knf.load(
         [*DETECTOR_DEFAULT_PATHS, *paths],
         interpolate=True,
-        merge_key=MERGE_KEY,
+        merge_key=_MERGE_KEY,
     )
     return DetectorRegistry.model_validate(merged)

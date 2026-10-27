@@ -7,11 +7,17 @@ realization directory that each later stage adds to.
 ```text
 PopulationMetadata --PopulationSimulator(key)--> PopulationArtifact
 WaveformMetadata   --WaveformSimulator(pop)----> Waveforms / WaveformArtifact
-NetworkConfiguration --BackgroundSimulator(w)--> BackgroundArtifact
+DetectorRegistry    --BackgroundSimulator(w)--> BackgroundArtifact
 ```
 
-A `NetworkConfiguration` is a mapping of named networks, each a
-`DetectorConfiguration` of site codes and noise curves.
+`DetectorRegistry` resolves detector geometry and PSD references once for
+simulation. The same registry is supplied to readers and noise generation;
+background and noise metadata store network names only.
+
+The registry is frozen for the lifetime of an output dataset. Readers trust
+the registry they receive and preserve the recorded artifact identity without
+checking registry compatibility. Changing geometry, PSD references, or
+membership requires regenerating affected realizations and noise files.
 
 Only the population stage draws random numbers. The waveform and background
 stages are deterministic, given their inputs.
@@ -214,21 +220,30 @@ runs every stage whose metadata is given:
 # Fused: manifest, sources and background
 astrogwb simulate root/41-0 --population-metadata population.toml --seed 41 \
     --index 0 --waveform-metadata waveform.toml \
-    --background-metadata config/networks.toml
+    --detector-config config/detectors.toml
 
 # Stage by stage into the same directory
 astrogwb simulate draw/ --population-metadata population.toml --seed 41
 astrogwb simulate draw/ --waveform-metadata waveform.toml --keep-polarizations
-astrogwb simulate draw/ --background-metadata config/networks.toml
+astrogwb simulate draw/ --detector-config config/detectors.toml
 
 # The ensemble's detector noise, from one of its realizations
-astrogwb noise root/41-0 root/detector_noise.h5
+astrogwb noise root/41-0 root/detector_noise.h5 \
+    --detector-config config/detectors.toml
 ```
 
 The population and waveform files hold the fields of `PopulationMetadata` and
-`WaveformMetadata` at their top level. The background file holds one
-`[networks.<name>]` table per network, each with `detectors` and
-`psd_references`. `--seed` goes with
+`WaveformMetadata` at their top level. Repeat `--detector-config PATH` to merge
+registry layers in argument order. Supplying it to `simulate` enables
+background simulation; the background manifest records network names only.
+Noise uses the same option and selects the network names recorded in the
+realization. The supplied registry is treated as frozen and trusted when
+reading artifacts: readers use its membership, geometry and PSDs to interpret
+the stored arrays, and preserve the recorded artifact identity without
+comparing registry compatibility. Changing a registry does not migrate old
+outputs; regenerate affected realizations and noise files.
+
+`--seed` goes with
 `--population-metadata` and is refused without it. Realization `i` of a seed
 is `--index i`, the key `batch_keys(seed, i + 1)[i]` that ensembles use.
 `--no-keep-sources` skips `source_parameters.h5`. The runtime options
@@ -241,7 +256,7 @@ initializes.
 | --- | --- |
 | `BackgroundSpectralDensitySimulator` (sky-averaged) | removed; the expected spectrum is the likelihood's prediction |
 | `NetworkSpectralDensitySimulator`, `JointNetworkSpectralDensitySimulator` | `BackgroundSimulator` over the detector union, then `combine_pair_spectra` |
-| `BackgroundSpectralDensityMetadata`, `NetworkSpectralDensityMetadata` | `PopulationMetadata` + `WaveformMetadata` + `DetectorConfiguration` |
+| `BackgroundSpectralDensityMetadata`, `NetworkSpectralDensityMetadata` | `PopulationMetadata` + `WaveformMetadata` + `DetectorRegistry` |
 | `PopulationDrawMetadata` (`count`, `num_events`) | `astrogwb.simulators.PopulationMetadata`, Poisson only |
 | `astrogwb.simulators.polarization_power` | `astrogwb.gwb.catalog` |
 | `astrogwb.simulators.spectra.poisson_counts_forward_model` | `astrogwb.inference.poisson_counts` |
@@ -253,13 +268,13 @@ initializes.
 | `PopulationArtifact.write(dir)` / `.open(path)` | `RealizationSimulator`, `Realization.population()`; `write_sources`, `from_tables` |
 | `Waveforms.write(dir)` / `WaveformArtifact.open(path)` | `Waveforms.write(path)` / `WaveformArtifact.open(path, metadata=, population=)` |
 | `BackgroundArtifact.upstream`, `.manifest_path` | `BackgroundArtifact.waveform_key`; the manifest belongs to the `Realization` |
-| `astrogwb simulate population` / `waveforms` / `background` | `astrogwb simulate DIRECTORY` with `--population-metadata`, `--waveform-metadata`, `--background-metadata` |
-| `astrogwb.paper.ensemble.union_configuration` | `astrogwb.simulators.union_configuration` |
+| `astrogwb simulate population` / `waveforms` / `background` | `astrogwb simulate DIRECTORY` with `--population-metadata`, `--waveform-metadata`, `--detector-config` |
+| per-run network metadata snapshots | core `DetectorRegistry`, supplied to simulation and readers |
 | `astrogwb.paper.ensemble.network_spectra_ensemble`, `NetworkSpectra` | `astrogwb.simulators.network_spectra_ensemble`, `NetworkSpectra` |
-| `scripts/write_ensemble_configs.py`, `paper_networks`, `ensemble_metadata` | `config/networks.toml` and `config/ensembles/<name>/`, edited by hand |
+| `scripts/write_ensemble_configs.py`, `paper_networks`, `ensemble_metadata` | `config/detectors.toml` and `config/ensembles/<name>/`, edited by hand |
 | ensemble caches of #389 and #390 (`<cache>/ensembles/<key>/<seed>-<i>/`) | not read; regenerate them with the workflow |
 | one background over the detector union; `BackgroundArtifact.pair_spectra(network)`, `.detectors`, `.pairs` | per-network spectra; `BackgroundArtifact.network(name)`, `.networks` |
 | `Realization.detectors` | `Realization.networks` |
-| `--background-metadata` with `detectors` at the top level | `[networks.<name>]` tables |
+| `--detector-config` with network and detector layers | repeated `--detector-config PATH` options |
 | `ensure_reference_catalog`, `settings_digest`, `noise_digest`, posterior grid caches | `scripts/draw_reference_catalog.py`; grids are computed on every run |
 | `astrogwb.paper.cache.default_cache_dir` | explicit paths under `outputs/` |

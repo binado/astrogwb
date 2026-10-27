@@ -36,6 +36,7 @@ from typing import Any
 
 import knf
 
+from astrogwb.detector.config import DETECTOR_DEFAULT_PATHS
 from astrogwb.paper.utils import require_toml
 
 logger = logging.getLogger(__name__)
@@ -56,10 +57,6 @@ DETECTORS_PATH = CONFIG_DIR / "detectors.toml"
 SHARED_LAYER_PATHS = (DEFAULTS_PATH, WAVEFORMS_PATH, POPULATIONS_PATH, DETECTORS_PATH)
 
 #: Packaged geometry and sensitivity use the same registry tables as overrides.
-DETECTOR_DEFAULT_PATHS = tuple(
-    Path(__file__).parents[2] / "detector" / filename
-    for filename in ("geometry.toml", "sensitivity.toml")
-)
 
 #: Presentation settings, read by `astrogwb.paper.plotting`. Deliberately *not*
 #: a config layer: nothing a simulation depends on reads it.

@@ -227,7 +227,7 @@ def _():
     # its detector noise and the reference catalog.
     ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / "fiducial"
     reference_catalog_path = ROOT_DIR / CATALOGS_ROOT / "reference-fiducial.h5"
-    noise = DetectorNoise.open(ensemble_root / "detector_noise.h5")
+    noise = DetectorNoise.open(ensemble_root / "detector_noise.h5", registry=registry)
     frequencies = noise.frequencies
 
     write_figures = mo.ui.switch(value=True, label="Write figures")
@@ -523,9 +523,11 @@ def _(frequencies, observation_time, redshift_nodes, reference_catalog_path):
 
 
 @app.cell
-def _(data_seed, ensemble_root, frequencies, network_names):
+def _(data_seed, ensemble_root, frequencies, network_names, registry):
     # Draw 0 of `data_seed`, shared with cosmology_grid_posteriors.py.
-    _drawn = network_spectra_ensemble(ensemble_root, data_seed, 1, network_names)
+    _drawn = network_spectra_ensemble(
+        ensemble_root, data_seed, 1, network_names, registry=registry
+    )
     observed = {}
     for _name, _data in zip(network_names, _drawn, strict=True):
         validate_matching_frequency_grids(_data["frequencies"], frequencies)

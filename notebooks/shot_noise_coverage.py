@@ -350,7 +350,7 @@ def _():
     # independent of the injections (importance_convergence.py sizes it).
     ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / "fiducial"
     reference_catalog_path = ROOT_DIR / CATALOGS_ROOT / "reference-fiducial.h5"
-    noise = DetectorNoise.open(ensemble_root / "detector_noise.h5")
+    noise = DetectorNoise.open(ensemble_root / "detector_noise.h5", registry=registry)
     frequencies = noise.frequencies
     injected_metadata = Realization.open(
         ensemble_root / f"{ensemble_seed}-0"
@@ -959,9 +959,10 @@ def _(
     injected_metadata,
     network_names,
     num_injections,
+    registry,
 ):
     _ensembles = network_spectra_ensemble(
-        ensemble_root, ensemble_seed, num_injections, network_names
+        ensemble_root, ensemble_seed, num_injections, network_names, registry=registry
     )
     # Each network's per-pair spectra, padded and flattened onto its data
     # axis: (M, D).

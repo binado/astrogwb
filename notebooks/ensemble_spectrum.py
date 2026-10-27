@@ -32,6 +32,7 @@ with app.setup(hide_code=True):
         pair_terms,
         sample_pair_response,
     )
+    from astrogwb.detector.config import DetectorRegistry
     from astrogwb.frequency import frequency_mask
     from astrogwb.gwb import (
         characteristic_noise,
@@ -47,7 +48,6 @@ with app.setup(hide_code=True):
     from astrogwb.inference import Network as LikelihoodNetwork
     from astrogwb.paper.catalogs import read_reference_catalog
     from astrogwb.paper.config import detector_registry
-    from astrogwb.paper.config.detectors import DetectorRegistry
     from astrogwb.paper.config.runs import CATALOGS_ROOT, ENSEMBLES_ROOT, FIGURES_DIR
     from astrogwb.paper.plotting import (
         DETECTOR_COMPARISON_LEGEND,
@@ -560,8 +560,10 @@ def _():
 
 
 @app.cell
-def _(ensemble_root, network_names, num_draws, seed):
-    _ensembles = network_spectra_ensemble(ensemble_root, seed, num_draws, network_names)
+def _(ensemble_root, network_names, num_draws, seed, registry):
+    _ensembles = network_spectra_ensemble(
+        ensemble_root, seed, num_draws, network_names, registry=registry
+    )
     frequencies = np.asarray(_ensembles[0]["frequencies"], dtype=np.float64)
     # Each network's spectra (M, F), by network name.
     draws = {

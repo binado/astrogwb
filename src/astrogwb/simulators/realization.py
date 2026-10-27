@@ -22,7 +22,6 @@ the population stage is the only one that draws random numbers.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,6 +30,7 @@ from typing import TYPE_CHECKING, Any, Self, TypedDict
 import numpy as np
 from numpy.typing import NDArray
 
+from astrogwb.detector.config import DetectorRegistry
 from astrogwb.simulators._io import (
     BACKGROUND_FILE,
     MANIFEST_FILE,
@@ -43,9 +43,8 @@ from astrogwb.simulators._io import (
 from astrogwb.simulators.background import (
     BackgroundArtifact,
     BackgroundSimulator,
-    DetectorConfiguration,
-    NetworkConfiguration,
     _read_networks,
+    _scientific_payload,
     background_table,
 )
 from astrogwb.simulators.population import (
@@ -60,6 +59,7 @@ from astrogwb.simulators.waveforms import (
     WaveformSimulator,
     waveform_table,
 )
+from astrogwb.utils.io import content_key
 from astrogwb.waveform.metadata import WaveformMetadata
 
 if TYPE_CHECKING:
@@ -157,7 +157,7 @@ class Realization:
         )
 
     @property
-    def networks(self) -> dict[str, DetectorConfiguration] | None:
+    def networks(self) -> tuple[str, ...] | None:
         """The recorded background networks, by name; ``None`` if none are."""
         table = self.manifest.get("background")
         return None if table is None else _read_networks(table)
@@ -236,8 +236,9 @@ class Realization:
 
     def background(
         self,
-        simulator: BackgroundSimulator | None = None,
         *,
+        registry: DetectorRegistry,
+        simulator: BackgroundSimulator | None = None,
         waveforms: WaveformSimulator | None = None,
         population: PopulationSimulator | None = None,
     ) -> BackgroundArtifact:
@@ -265,6 +266,7 @@ class Realization:
                 table=table,
                 realization=self.manifest["realization"],
                 waveform_key=self.manifest["waveforms"]["key"],
+                registry=registry,
             )
         if simulator is None:
             raise FileNotFoundError(
@@ -297,7 +299,7 @@ class RealizationSimulator:
         self,
         population: PopulationMetadata | None = None,
         waveform: WaveformMetadata | None = None,
-        background: NetworkConfiguration | None = None,
+        background: DetectorRegistry | None = None,
         *,
         keep_sources: bool = True,
         keep_polarizations: bool = False,
@@ -312,7 +314,7 @@ class RealizationSimulator:
             raise ValueError("chunk sizes must be positive")
         self._population = population
         self._waveform = waveform
-        self._background = None if background is None else dict(background)
+        self._background = background
         self._keep_sources = keep_sources
         self._keep_polarizations = keep_polarizations
         self._chunk_size = chunk_size
@@ -343,20 +345,13 @@ class RealizationSimulator:
             WaveformSimulator, metadata, self._chunk_size, metadata.model_dump_json()
         )
 
-    def background_simulator(
-        self, networks: NetworkConfiguration
-    ) -> BackgroundSimulator:
+    def background_simulator(self, registry: DetectorRegistry) -> BackgroundSimulator:
         """The cached background simulator of ``networks``."""
         return self._simulator(
             BackgroundSimulator,
-            networks,
+            registry,
             self._chunk_size,
-            json.dumps(
-                {
-                    name: network.model_dump(mode="json")
-                    for name, network in networks.items()
-                }
-            ),
+            content_key(_scientific_payload(registry, tuple(registry.networks))),
         )
 
     def __call__(
@@ -520,7 +515,7 @@ def simulate_realization(
     *,
     population: PopulationMetadata | None = None,
     waveform: WaveformMetadata | None = None,
-    background: NetworkConfiguration | None = None,
+    background: DetectorRegistry | None = None,
     seed: int | None = None,
     index: int = 0,
     keep_sources: bool = True,
@@ -594,6 +589,7 @@ def network_spectra_ensemble(
     num_draws: int,
     names: Sequence[str],
     *,
+    registry: DetectorRegistry,
     start: int = 0,
 ) -> list[NetworkSpectra]:
     """Draws ``start .. num_draws - 1`` of the networks ``names``, stacked per network.
@@ -628,7 +624,7 @@ def network_spectra_ensemble(
     """
     root = Path(root)
     draws = [
-        Realization.open(root / f"{int(seed)}-{index}").background()
+        Realization.open(root / f"{int(seed)}-{index}").background(registry=registry)
         for index in range(start, num_draws)
     ]
     return [_stack(draws, name) for name in names]

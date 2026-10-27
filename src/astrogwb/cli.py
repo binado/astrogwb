@@ -1,39 +1,25 @@
-"""The ``astrogwb`` command line: realization directories written stage by stage.
+"""The astrogwb command line writes realization directories stage by stage.
 
-``astrogwb simulate DIRECTORY`` reads TOML stage metadata and runs every stage
-whose metadata is given into the realization directory ``DIRECTORY`` (see
-:class:`~astrogwb.simulators.RealizationSimulator`). A directory is started
-with ``--population-metadata`` and ``--seed``; later runs add stages to it,
-using the settings it records for the stages they leave out::
+astrogwb simulate DIRECTORY reads population and waveform metadata, then
+runs every configured stage. Repeat --detector-config PATH to merge detector
+registry layers in argument order. Supplying detector config enables background
+simulation. For example::
 
     astrogwb simulate ensemble/41-0 --population-metadata population.toml \\
         --seed 41 --index 0 --waveform-metadata waveform.toml \\
-        --background-metadata networks.toml
-    astrogwb simulate realization/ --population-metadata population.toml --seed 41
-    astrogwb simulate realization/ --waveform-metadata waveform.toml \\
-        --background-metadata networks.toml
+        --detector-config config/detectors.toml
 
-The sources are written unless ``--no-keep-sources``, the polarizations only
-with ``--keep-polarizations``, and a configured background always. The
-population and waveform files hold the fields of
-:class:`~astrogwb.simulators.PopulationMetadata` and
-:class:`~astrogwb.waveform.WaveformMetadata` at their top level; the
-background file holds one ``[networks.<name>]`` table per network, each the
-fields of :class:`~astrogwb.simulators.DetectorConfiguration`::
+The registry contains [detectors.<name>] definitions and [networks]
+memberships. Background manifests record network names only. Noise generation
+also requires the registry::
 
-    [networks.ET-2L]
-    detectors = ["S1", "R1"]
-    psd_references = { S1 = "ET_COBA_15km_psd.txt", R1 = "ET_COBA_15km_psd.txt" }
+    astrogwb noise ensemble/41-0 ensemble/detector_noise.h5 \\
+        --detector-config config/detectors.toml
 
-``astrogwb noise REALIZATION OUTPUT`` writes the
-:class:`~astrogwb.simulators.DetectorNoise` of the networks, frequencies and
-observation time a realization's background was simulated with, once per
-ensemble::
-
-    astrogwb noise ensemble/41-0 ensemble/detector_noise.h5
-
-Runtime settings (``--platform``, ``--cpu-threads``) are applied before the JAX
-backend initializes, so this module imports nothing that touches JAX.
+Readers trust the supplied frozen registry and preserve the recorded artifact
+identity without checking registry compatibility. Changing the registry
+requires regenerating affected outputs. Runtime settings (--platform,
+--cpu-threads) are applied before the JAX backend initializes.
 """
 
 from __future__ import annotations
@@ -100,9 +86,14 @@ def simulate(
         Path | None,
         typer.Option(exists=True, dir_okay=False, help="Waveform metadata TOML."),
     ] = None,
-    background_metadata: Annotated[
-        Path | None,
-        typer.Option(exists=True, dir_okay=False, help="Network configuration TOML."),
+    detector_config: Annotated[
+        list[Path] | None,
+        typer.Option(
+            "--detector-config",
+            exists=True,
+            dir_okay=False,
+            help="Detector registry TOML layer; repeat to merge.",
+        ),
     ] = None,
     keep_sources: Annotated[
         bool, typer.Option(help="Write source_parameters.h5.")
@@ -127,11 +118,8 @@ def simulate(
         raise typer.BadParameter(
             "--seed and --population-metadata go together", param_hint="--seed"
         )
-    from astrogwb.simulators import (
-        DetectorConfiguration,
-        PopulationMetadata,
-        simulate_realization,
-    )
+    from astrogwb.detector.config import load_detector_config
+    from astrogwb.simulators import PopulationMetadata, simulate_realization
     from astrogwb.waveform import WaveformMetadata
 
     realization = simulate_realization(
@@ -146,14 +134,9 @@ def simulate(
             if waveform_metadata is None
             else WaveformMetadata.model_validate(_read_toml(waveform_metadata))
         ),
-        background=(
-            None
-            if background_metadata is None
-            else {
-                name: DetectorConfiguration.model_validate(network)
-                for name, network in _read_toml(background_metadata)["networks"].items()
-            }
-        ),
+        background=None
+        if not detector_config
+        else load_detector_config(detector_config),
         seed=seed,
         index=index,
         keep_sources=keep_sources,
@@ -177,19 +160,31 @@ def noise(
         ),
     ],
     output: Annotated[Path, typer.Argument(dir_okay=False, help="HDF5 file to write.")],
+    detector_config: Annotated[
+        list[Path],
+        typer.Option(
+            "--detector-config",
+            exists=True,
+            dir_okay=False,
+            help="Detector registry TOML layer; repeat to merge.",
+        ),
+    ],
     platform: Annotated[
         str, typer.Option(help="JAX platform: auto, cpu, cuda or tpu.")
     ] = "auto",
 ) -> None:
     """Write the detector noise of a realization's background networks."""
     _apply_runtime(platform, None)
+    from astrogwb.detector.config import load_detector_config
     from astrogwb.simulators import Realization, detector_noise
 
+    registry = load_detector_config(detector_config)
     recorded = Realization.open(realization)
-    background = recorded.background()
+    background = recorded.background(registry=registry)
     detector_noise(
         background.frequencies,
-        background.networks,
+        registry,
         recorded.population_metadata.observation_time,
+        network_names=background.network_names,
     ).write(output)
-    typer.echo(f"noise of {', '.join(background.networks)} -> {output}")
+    typer.echo(f"noise of {', '.join(background.network_names)} -> {output}")

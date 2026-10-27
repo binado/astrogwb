@@ -1,7 +1,7 @@
 """Configuration support modules, and the shared scientific values themselves.
 
 The leaf modules (:mod:`~astrogwb.paper.config.runs`,
-:mod:`~astrogwb.paper.config.detectors`) are not re-exported; import them explicitly.
+:mod:`~astrogwb.detector.config`) are not re-exported; import them explicitly.
 
 What this package *does* expose is the tables the shared layers declare --
 ``[fiducials]``, ``[priors]`` and ``[networks]`` -- plus the accessors that build something from the
@@ -57,8 +57,8 @@ from typing import Any
 
 import numpyro.distributions as dist
 
+from astrogwb.detector.config import DetectorRegistry
 from astrogwb.distributions.config import DistributionConfig
-from astrogwb.paper.config.detectors import DetectorRegistry
 from astrogwb.paper.config.runs import load_base
 from astrogwb.paper.utils import deep_merge
 from astrogwb.populations import PopulationMetadata

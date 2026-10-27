@@ -6,8 +6,8 @@
 2. :class:`WaveformSimulator` turns it into complex radiation-frame
    polarizations, :class:`Waveforms`, generated chunk by chunk; written, they
    are a :class:`WaveformArtifact`.
-3. :class:`BackgroundSimulator` projects them onto named networks, a
-   :data:`NetworkConfiguration` of :class:`DetectorConfiguration`, and sums
+3. :class:`BackgroundSimulator` projects them onto the named networks of a
+   :class:`DetectorRegistry`, and sums
    the per-pair cross-powers into a :class:`BackgroundArtifact` holding each
    network's pair spectra and their :func:`combine_pair_spectra`.
 
@@ -27,11 +27,9 @@ from astrogwb.simulators._io import batch_keys, realization_key
 from astrogwb.simulators.background import (
     BackgroundArtifact,
     BackgroundSimulator,
-    DetectorConfiguration,
-    NetworkConfiguration,
+    DetectorRegistry,
     NetworkSpectrum,
     combine_pair_spectra,
-    union_configuration,
 )
 from astrogwb.simulators.noise import (
     DetectorNoise,
@@ -62,10 +60,9 @@ from astrogwb.simulators.waveforms import (
 __all__ = [
     "BackgroundArtifact",
     "BackgroundSimulator",
-    "DetectorConfiguration",
     "DetectorNoise",
     "DetectorNoiseMetadata",
-    "NetworkConfiguration",
+    "DetectorRegistry",
     "NetworkNoise",
     "NetworkSpectra",
     "NetworkSpectrum",
@@ -85,5 +82,4 @@ __all__ = [
     "realization_key",
     "simulate_ensemble",
     "simulate_realization",
-    "union_configuration",
 ]

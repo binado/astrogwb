@@ -13,6 +13,7 @@ from astrogwb_tiny_pipeline import WAVEFORM, population_metadata
 from typer.testing import CliRunner
 
 from astrogwb.cli import app
+from astrogwb.detector.config import load_detector_config
 from astrogwb.simulators import DetectorNoise, Realization
 
 POPULATION = population_metadata()
@@ -46,17 +47,7 @@ def metadata_files(tmp_path: Path) -> dict[str, Path]:
     tables = {
         "population": POPULATION.model_dump(mode="json", exclude={"version"}),
         "waveform": WAVEFORM.model_dump(mode="json", exclude_none=True),
-        "network": {
-            "networks": {
-                "ET": {
-                    "detectors": ["S1", "R1"],
-                    "psd_references": {
-                        "S1": "ET_COBA_15km_psd.txt",
-                        "R1": "ET_COBA_15km_psd.txt",
-                    },
-                }
-            }
-        },
+        "detector": {"networks": {"ET": ["S1", "R1"]}},
     }
     paths = {name: tmp_path / f"{name}.toml" for name in tables}
     for name, table in tables.items():
@@ -79,12 +70,13 @@ def test_a_fused_simulate_run_writes_the_manifest_sources_and_background(
         *("--population-metadata", str(metadata_files["population"])),
         *("--seed", "41"),
         *("--waveform-metadata", str(metadata_files["waveform"])),
-        *("--background-metadata", str(metadata_files["network"])),
+        *("--detector-config", str(metadata_files["detector"])),
     )
 
     realization = Realization.open(tmp_path / "realization")
-    background = realization.background()
-    assert background.networks["ET"].pairs() == [("R1", "S1")]
+    registry = load_detector_config([metadata_files["detector"]])
+    background = realization.background(registry=registry)
+    assert registry.pairs("ET") == [("R1", "S1")]
     assert background.count > 0
     assert np.any(background.network("ET").pair_spectral_density)
     assert sorted(path.name for path in realization.directory.iterdir()) == [
@@ -106,9 +98,12 @@ def test_a_background_run_adds_to_an_existing_realization(
     )
     assert not (directory / "background.h5").exists()
 
-    _simulate(directory, "--background-metadata", str(metadata_files["network"]))
+    _simulate(directory, "--detector-config", str(metadata_files["detector"]))
 
-    assert list(Realization.open(directory).background().networks) == ["ET"]
+    registry = load_detector_config([metadata_files["detector"]])
+    assert Realization.open(directory).background(registry=registry).network_names == (
+        "ET",
+    )
 
 
 def test_a_seed_without_population_metadata_is_refused(tmp_path: Path) -> None:
@@ -127,19 +122,27 @@ def test_noise_writes_the_backgrounds_networks_on_its_grid(
         *("--population-metadata", str(metadata_files["population"])),
         *("--seed", "41"),
         *("--waveform-metadata", str(metadata_files["waveform"])),
-        *("--background-metadata", str(metadata_files["network"])),
+        *("--detector-config", str(metadata_files["detector"])),
     )
 
     result = CliRunner().invoke(
-        app, ["noise", str(directory), str(tmp_path / "detector_noise.h5")]
+        app,
+        [
+            "noise",
+            str(directory),
+            str(tmp_path / "detector_noise.h5"),
+            "--detector-config",
+            str(metadata_files["detector"]),
+        ],
     )
 
     assert result.exit_code == 0, result.output
-    noise = DetectorNoise.open(tmp_path / "detector_noise.h5")
+    registry = load_detector_config([metadata_files["detector"]])
+    noise = DetectorNoise.open(tmp_path / "detector_noise.h5", registry=registry)
     realization = Realization.open(directory)
-    background = realization.background()
+    background = realization.background(registry=registry)
     np.testing.assert_array_equal(noise.frequencies, background.frequencies)
-    assert noise.metadata.networks == background.networks
+    assert noise.metadata.networks == background.network_names
     assert noise.metadata.observation_time == POPULATION.observation_time
     shape = (1, background.frequencies.size)
     assert noise.network("ET").pair_overlap.shape == shape

@@ -11,9 +11,9 @@ from pydantic import ValidationError
 from repo import REPO_ROOT
 
 from astrogwb.constants import ISCO_ALPHA
+from astrogwb.detector.config import load_detector_config
 from astrogwb.distributions.config import DistributionConfig
 from astrogwb.paper.config import fiducials, networks, priors, waveform_generator
-from astrogwb.paper.config.detectors import load_detector_config
 from astrogwb.paper.config.runs import load_base
 from astrogwb.paper.utils import deep_merge, load_mapping
 from astrogwb.waveform import (
