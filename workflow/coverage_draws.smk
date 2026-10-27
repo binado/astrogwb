@@ -56,9 +56,10 @@ CATALOGS = {
         "reference-fiducial": "--num-samples 16384 --chunk-size 4096",
         # importance_convergence's redshift ladder
         "reference-ladder": "--num-samples 256 --sampling random --seed 100",
-        # ensemble_spectrum's minimum-redshift scan
+        # ensemble_spectrum's minimum-redshift scan, at 1 Mpc: the redshift of
+        # that luminosity distance at the fiducial H0 = 67.66, Omega_m = 0.3096
         "reference-scan": (
-            "--num-samples 16384 --reference-distance-mpc 1 --chunk-size 4096"
+            "--num-samples 16384 --reference-redshift 2.2565039557e-4 --chunk-size 4096"
         ),
     },
 }
