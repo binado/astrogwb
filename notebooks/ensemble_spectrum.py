@@ -71,14 +71,13 @@ with app.setup(hide_code=True):
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    # Ensemble spectra, SNR table and characteristic amplitudes
+    # Ensemble spectra, SNR summary and characteristic amplitudes
 
     The paper's spectrum figure and SNR tables, from one Poisson ensemble of
     network realizations drawn with `IMRPhenomXAS_NRTidalv3`: every network
     records the same catalogs, each through its own pairs and weights. For each paper network and
     several values of the lower band edge $f_{\min}$ it reports the SNR of every
-    draw, summarized as the mean over draws, as LaTeX
-    tables (one with the ET-COBA PSD for ET-$\Delta$, one with the ET-D PSD). The
+    draw, summarized as the mean over draws, as a LaTeX table. The
     spectrum is plotted as the dimensionless characteristic amplitudes of
     Belgacem et al. (arXiv:2411.04029, Eqs. 47-49), with percentile bands from
     the draws. The same draws give the shot noise of a single realization about
@@ -176,25 +175,14 @@ def _():
     ).population_metadata
     registry = detector_registry(root=ROOT_DIR)
 
-    # Each ET-triangle network and its counterpart in config/detectors.toml
-    # with the ET-D noise curve instead of ET-COBA: same pairs, other weights.
-    etd_networks = {
-        "ET-triangular": "ET-triangular-D-PSD",
-        "ET-triangular-CE-Hanford": "ET-triangular-D-PSD-CE-Hanford",
-    }
-    coba_rows = DETECTOR_NETWORKS
-    etd_rows = tuple((etd_networks.get(name, name), label) for name, label in coba_rows)
-    # Every row's network records the same draws, each in the ensemble's
-    # backgrounds. An ET-D row is its ET-COBA network's pairs, weighted with
-    # the ET-D noise curve.
-    network_names = [name for name, _ in coba_rows] + list(etd_networks.values())
+    network_rows = DETECTOR_NETWORKS
+    network_names = [name for name, _ in network_rows]
     return (
         BASE_DIR,
         ROOT_DIR,
-        coba_rows,
+        network_rows,
         ensemble_population,
         ensemble_root,
-        etd_rows,
         maximum_frequency,
         minimum_frequencies,
         network_names,
@@ -597,62 +585,44 @@ def _():
 
 @app.cell
 def _(
-    coba_rows,
+    network_rows,
     draws,
-    etd_rows,
     frequencies,
     maximum_frequency,
     minimum_frequencies,
     observation_time,
     registry,
 ):
-    snrs_coba = snr_per_draw(
+    snrs = snr_per_draw(
         registry,
-        coba_rows,
+        network_rows,
         frequencies,
         draws,
         observation_time,
         minimum_frequencies,
         maximum_frequency,
     )
-    snrs_etd = snr_per_draw(
-        registry,
-        etd_rows,
-        frequencies,
-        draws,
-        observation_time,
-        minimum_frequencies,
-        maximum_frequency,
-    )
-    table_coba = snr_table(snrs_coba, minimum_frequencies)
-    table_etd = snr_table(snrs_etd, minimum_frequencies)
-    mo.vstack(
-        [
-            mo.md("**ET-$\\Delta$ with the ET-COBA PSD**"),
-            table_coba.style.format("{:.2f}"),
-            mo.md("**ET-$\\Delta$ with the ET-D PSD**"),
-            table_etd.style.format("{:.2f}"),
-        ]
-    )
-    return snrs_coba, table_coba, table_etd
+    table = snr_table(snrs, minimum_frequencies)
+    table.style.format("{:.2f}")
+    return snrs, table
 
 
 @app.cell
 def _(
-    coba_rows,
+    network_rows,
     frequencies,
     maximum_frequency,
     mean,
     minimum_frequencies,
     observation_time,
     registry,
-    snrs_coba,
+    snrs,
 ):
     # Cross-check only: the SNR of the mean spectrum, which Jensen's
     # inequality keeps at or below the mean of the SNRs.
     _of_mean = snr_per_draw(
         registry,
-        coba_rows,
+        network_rows,
         frequencies,
         {_name: _mean[None, :] for _name, _mean in mean.items()},
         observation_time,
@@ -661,7 +631,7 @@ def _(
     )
     mo.vstack(
         [
-            mo.md("**Cross-check (ET-COBA PSD): SNR of the mean spectrum**"),
+            mo.md("**SNR of the mean spectrum**"),
             pd.DataFrame(
                 {label: _of_mean[label][:, 0] for label in _of_mean},
                 index=[f"fmin = {f:g} Hz" for f in minimum_frequencies],
@@ -669,7 +639,7 @@ def _(
             mo.md("**Mean of the SNRs minus the SNR of the mean**"),
             pd.DataFrame(
                 {
-                    label: snrs_coba[label].mean(axis=-1) - _of_mean[label][:, 0]
+                    label: snrs[label].mean(axis=-1) - _of_mean[label][:, 0]
                     for label in _of_mean
                 },
                 index=[f"fmin = {f:g} Hz" for f in minimum_frequencies],
@@ -688,26 +658,17 @@ def _():
 
 
 @app.cell
-def _(BASE_DIR, table_coba, table_etd, write_figures):
-    _blocks = {
-        tag: latex_table(
-            table,
-            "Mean over the draws of each draw's SNR "
-            "for each detector network as the lower edge of the analysis band is "
-            f"raised, with {psd} PSD for ET-$\\Delta$.",
-            f"tab:mean-spectrum-snr-{tag}",
-        )
-        for table, psd, tag in (
-            (table_coba, "the ET-COBA", "coba"),
-            (table_etd, "the ET-D", "etd"),
-        )
-    }
+def _(BASE_DIR, table, write_figures):
+    block = latex_table(
+        table,
+        "Mean over the draws of each draw's SNR for each detector network "
+        "as the lower edge of the analysis band is raised.",
+        "tab:mean-spectrum-snr",
+    )
     if write_figures:
         BASE_DIR.mkdir(parents=True, exist_ok=True)
-        for _tag, _block in _blocks.items():
-            _path = BASE_DIR / f"ensemble_spectrum_snr_{_tag}.tex"
-            _path.write_text(_block, encoding="utf-8")
-    mo.md("\n\n".join(f"```latex\n{block}\n```" for block in _blocks.values()))
+        (BASE_DIR / "ensemble_spectrum_snr.tex").write_text(block, encoding="utf-8")
+    mo.md(f"```latex\n{block}\n```")
     return
 
 
@@ -719,9 +680,7 @@ def _():
     Along each row the mean SNR is non-increasing in $f_{\min}$ (each draw's
     is). The rows differ in how fast they fall: networks whose sensitivity
     extends to a few Hz lose the most when the cut rises. The range is the
-    scatter a single observed realization has about the mean. The two tables
-    differ only in the ET-$\Delta$ rows (ET-COBA vs. ET-D noise curve); the
-    2L rows are identical.
+    scatter a single observed realization has about the mean.
     """)
     return
 
@@ -744,7 +703,7 @@ def _():
 
 @app.cell
 def _(
-    coba_rows,
+    network_rows,
     draws,
     frequencies,
     maximum_frequency,
@@ -756,12 +715,12 @@ def _(
     # Order is load-bearing: detector_network_styles colors by first appearance.
     plotted_networks = tuple(
         Network(name, label, registry.networks[name], registry)
-        for name, label in coba_rows
+        for name, label in network_rows
     )
     plotted_colors, plotted_linestyles = detector_network_styles(plotted_networks)
     band_frequency, band_strain, amplitude_curves_by_network = amplitude_curves(
         registry,
-        coba_rows,
+        network_rows,
         frequencies,
         draws,
         observation_time,
@@ -877,7 +836,7 @@ def _():
 
 @app.cell
 def _(
-    coba_rows,
+    network_rows,
     draws,
     frequencies,
     maximum_frequency,
@@ -887,7 +846,7 @@ def _(
 ):
     shot_noise = shot_noise_table(
         registry,
-        coba_rows,
+        network_rows,
         frequencies,
         draws,
         observation_time,
@@ -1155,14 +1114,14 @@ def _(
     scan_redshifts,
     scan_response_draws,
     scan_response_seed,
-    coba_rows,
+    network_rows,
 ):
     scan = minimum_redshift_scan(
         scan_data,
         scan_catalog_metadata,
         ensemble_population.population,
         registry,
-        coba_rows,
+        network_rows,
         frequencies,
         scan_redshifts,
         scan_hyperparameters,
@@ -1224,7 +1183,7 @@ def _(
     minimum_frequencies,
     observation_time,
     registry,
-    coba_rows,
+    network_rows,
     scan,
     scan_catalog_metadata,
     scan_data,
@@ -1240,7 +1199,7 @@ def _(
         scan_catalog_metadata,
         ensemble_population.population,
         registry,
-        coba_rows,
+        network_rows,
         frequencies,
         np.asarray([_edge]),
         scan_hyperparameters,

@@ -10,22 +10,6 @@ ET-2L-aligned = ["S1", "R1"]
 ET-2L-aligned-CE-Hanford = ["S1", "R1", "C1"]
 ET-2L-misaligned = ["S2", "R2"]
 ET-2L-misaligned-CE-Hanford = ["S2", "R2", "C1"]
-# The ET triangle and ET + CE with the ET-D noise curve instead of ET-COBA.
-ET-triangular-D-PSD = ["E1D", "E2D", "E3D"]
-ET-triangular-D-PSD-CE-Hanford = ["E1D", "E2D", "E3D", "C1"]
 
 # Packaged geometry and sensitivity tables supply the default definitions.
 [detectors]
-
-# E1-E3 with the ET-D noise curve.
-[detectors.E1D]
-extends = "${detectors.E1}"
-psd_reference = "ET-000A-18_ETD_hlf_psd.txt"
-
-[detectors.E2D]
-extends = "${detectors.E2}"
-psd_reference = "ET-000A-18_ETD_hlf_psd.txt"
-
-[detectors.E3D]
-extends = "${detectors.E3}"
-psd_reference = "ET-000A-18_ETD_hlf_psd.txt"

@@ -86,7 +86,7 @@ A missing input is a `FileNotFoundError`, never a simulation.
 - **`ensemble_spectrum.py`** — marimo notebook. The paper's spectrum
   figure and SNR tables, from a 1000-draw Poisson ensemble (`IMRPhenomXAS_NRTidalv3`,
   seed 41): per-network SNR and low-frequency cut as the mean over draws of
-  each draw's SNR with its 16-84% range (LaTeX tables, ET-COBA and ET-D PSDs),
+  each draw's SNR with its 16-84% range (LaTeX table),
   the characteristic amplitudes $h_c$ (median) against $h_n$ and
   the $d\mathrm{SNR}^2/d\ln f$ curves, as two figures (`characteristic_amplitudes.pdf`,
   `snr_density.pdf`),

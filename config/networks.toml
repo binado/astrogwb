@@ -1,8 +1,4 @@
-# Every network a simulated background records: `astrogwb simulate
-# --background-metadata`. Detectors are packaged site codes. The ET-D networks
-# are the ET triangle's detectors with the ET-D noise curve; the paper registry
-# (config/detectors.toml) names those detectors E1D-E3D. Keep both in step, and
-# regenerate the ensembles after an edit.
+# Network definitions for background simulation. Regenerate ensembles after an edit.
 [networks.ET-triangular]
 detectors = [
     "E1",
@@ -72,29 +68,3 @@ detectors = [
 C1 = "cosmic_explorer_strain_psd.txt"
 R2 = "ET_COBA_15km_psd.txt"
 S2 = "ET_COBA_15km_psd.txt"
-
-[networks.ET-triangular-D-PSD]
-detectors = [
-    "E1",
-    "E2",
-    "E3",
-]
-
-[networks.ET-triangular-D-PSD.psd_references]
-E1 = "ET-000A-18_ETD_hlf_psd.txt"
-E2 = "ET-000A-18_ETD_hlf_psd.txt"
-E3 = "ET-000A-18_ETD_hlf_psd.txt"
-
-[networks.ET-triangular-D-PSD-CE-Hanford]
-detectors = [
-    "C1",
-    "E1",
-    "E2",
-    "E3",
-]
-
-[networks.ET-triangular-D-PSD-CE-Hanford.psd_references]
-C1 = "cosmic_explorer_strain_psd.txt"
-E1 = "ET-000A-18_ETD_hlf_psd.txt"
-E2 = "ET-000A-18_ETD_hlf_psd.txt"
-E3 = "ET-000A-18_ETD_hlf_psd.txt"
