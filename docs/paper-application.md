@@ -2,9 +2,10 @@
 
 The reproducibility application for the `astrogwb` research project. It owns
 the shared configuration and the notebooks that produce the paper's figures and
-tables. Spectrum realizations come from the package's `astrogwb simulate`
-command and `astrogwb.paper.ensemble` (see [the simulator
-pipeline](simulator-pipeline.md)).
+tables. Spectrum realizations are realization directories, written by the
+package's `astrogwb simulate` command or by
+`astrogwb.simulators.simulate_ensemble`, which `astrogwb.paper.ensemble` wraps
+(see [the simulator pipeline](simulator-pipeline.md)).
 
 The code ships inside the `astrogwb` wheel as `astrogwb.paper`, behind the
 `paper` extra. Its *assets* -- `config/`, `scripts/` and `notebooks/` -- are not

@@ -25,7 +25,7 @@ Over an isotropic sky and uniform polarization angle
 polarization power and :math:`\gamma_{ab}` the normalized isotropic overlap
 reduction function, so for an isotropic, unpolarized population
 :math:`E[Y_{ab}] = \gamma_{ab} S_h`. This is convention version
-:data:`NORMALIZATION_VERSION`, recorded in every background manifest. The sum
+:data:`NORMALIZATION_VERSION`, recorded in every ``[background]`` table. The sum
 is never divided by the realized count.
 
 The background is deterministic given its inputs and carries no detector
@@ -37,8 +37,8 @@ the weights needs no new projection.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Self
 
@@ -46,12 +46,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from pydantic import BaseModel, ConfigDict, Field
 
-from astrogwb.simulators._io import (
-    DATA_FILE,
-    read_manifest,
-    relative_reference,
-    write_manifest,
-)
+from astrogwb.simulators._io import atomic_h5
 from astrogwb.utils.io import content_key, h5py_module
 
 if TYPE_CHECKING:
@@ -65,10 +60,12 @@ __all__ = [
     "BackgroundArtifact",
     "BackgroundSimulator",
     "DetectorConfiguration",
+    "background_key",
+    "background_table",
     "combine_pair_spectra",
+    "union_configuration",
 ]
 
-KIND = "background"
 SCHEMA_VERSION = 1
 
 #: :math:`\langle K_{ab} \rangle = I \gamma_{ab}` over this, the factor in
@@ -126,16 +123,60 @@ class DetectorConfiguration(BaseModel):
         return {name: Sensitivity(self.psd_references[name]) for name in self.detectors}
 
 
+def union_configuration(
+    networks: Sequence[DetectorConfiguration],
+) -> DetectorConfiguration:
+    """Every detector of ``networks`` once, in first-seen order.
+
+    A site code shared by two networks must name the same detector and noise
+    curve; this is trusted, not checked.
+    """
+    references: dict[str, str] = {}
+    for network in networks:
+        for name in network.detectors:
+            references.setdefault(name, network.psd_references.get(name, ""))
+    return DetectorConfiguration(
+        detectors=list(references),
+        psd_references={name: ref for name, ref in references.items() if ref},
+    )
+
+
+def background_key(waveform_key: str, detectors: DetectorConfiguration) -> str:
+    """The content hash of the spectra of the waveforms ``waveform_key`` on ``detectors``.
+
+    The noise curves are not part of it: the pair spectra do not depend on them.
+    """
+    return content_key(
+        {
+            "waveforms": waveform_key,
+            "detectors": detectors.detectors,
+            "normalization_version": NORMALIZATION_VERSION,
+            "schema_version": SCHEMA_VERSION,
+        }
+    )
+
+
+def background_table(
+    waveform_key: str, detectors: DetectorConfiguration
+) -> dict[str, Any]:
+    """The ``[background]`` manifest table of the spectra :func:`background_key` names."""
+    return {
+        "metadata": {"detectors": detectors.model_dump(mode="json")},
+        "key": background_key(waveform_key, detectors),
+        "normalization": _NORMALIZATION,
+        "units": {"frequency": "Hz", "pair_spectral_density": "1 / Hz"},
+    }
+
+
 @dataclass(frozen=True)
 class BackgroundArtifact:
-    """The per-pair spectra of one realization, in memory or opened from disk.
+    """The per-pair spectra of one realization, in memory or read from disk.
 
     ``pair_spectral_density`` is :math:`Y_{ab}` in :math:`\\mathrm{Hz}^{-1}`,
     ``(P, F)``, the pairs in the order of ``detectors.pairs()``. ``count``,
     ``total_merger_rate`` (per second) and ``hyperparameters`` are the
-    realization's, carried over from its population. ``upstream`` records
-    what the spectra were made from: the population and waveform metadata and
-    keys and, when the waveforms were read from disk, their manifest.
+    realization's, carried over from its population. ``waveform_key`` names
+    the polarizations the spectra were projected from.
     """
 
     detectors: DetectorConfiguration
@@ -145,9 +186,8 @@ class BackgroundArtifact:
     count: int
     total_merger_rate: float
     hyperparameters: dict[str, float]
-    upstream: dict[str, Any]
+    waveform_key: str
     chunk_size: int | None = None
-    manifest_path: Path | None = None
 
     @property
     def pairs(self) -> list[tuple[str, str]]:
@@ -156,14 +196,7 @@ class BackgroundArtifact:
 
     def key(self) -> str:
         """The content hash of these spectra: their waveforms and detectors."""
-        return content_key(
-            {
-                "waveforms": self.upstream["waveforms"]["key"],
-                "detectors": self.detectors.detectors,
-                "normalization_version": NORMALIZATION_VERSION,
-                "schema_version": SCHEMA_VERSION,
-            }
-        )
+        return background_key(self.waveform_key, self.detectors)
 
     def pair_spectra(self, network: DetectorConfiguration) -> NDArray[np.float64]:
         """The rows of ``network``'s pairs, ``(P_network, F)``, in its own order.
@@ -183,12 +216,14 @@ class BackgroundArtifact:
             [rows[frozenset(pair)] for pair in network.pairs()]
         ]
 
-    def write(self, directory: str | Path) -> Self:
-        """Write ``metadata.toml`` and ``data.h5`` to ``directory``; returns the opened artifact."""
-        directory = Path(directory)
-        directory.mkdir(parents=True, exist_ok=True)
+    def table(self) -> dict[str, Any]:
+        """The ``[background]`` manifest table."""
+        return background_table(self.waveform_key, self.detectors)
+
+    def write(self, path: str | Path) -> Path:
+        """Write the spectra to the HDF5 file ``path``, atomically."""
         h5py = h5py_module()
-        with h5py.File(directory / DATA_FILE, "w") as file:
+        with atomic_h5(path) as file:
             file.create_dataset("frequencies", data=self.frequencies)
             file.create_dataset(
                 "pairs", data=np.asarray(self.pairs, dtype=h5py.string_dtype())
@@ -196,63 +231,37 @@ class BackgroundArtifact:
             file.create_dataset(
                 "pair_spectral_density", data=self.pair_spectral_density
             )
-        upstream = dict(self.upstream)
-        waveforms = dict(upstream["waveforms"])
-        if "manifest_path" in waveforms:
-            waveforms["manifest"] = relative_reference(
-                Path(waveforms.pop("manifest_path")), directory
-            )
-        upstream["waveforms"] = waveforms
-        path = write_manifest(
-            directory,
-            kind=KIND,
-            schema_version=SCHEMA_VERSION,
-            key=self.key(),
-            tables={
-                "metadata": {"detectors": self.detectors.model_dump(mode="json")},
-                "parent": upstream,
-                "realization": {
-                    "observation_seconds": self.observation_seconds,
-                    "count": self.count,
-                    "total_merger_rate": self.total_merger_rate,
-                    "total_merger_rate_unit": "1 / s",
-                    "hyperparameters": self.hyperparameters,
-                },
-                "normalization": _NORMALIZATION,
-                "units": {"frequency": "Hz", "pair_spectral_density": "1 / Hz"},
-                "execution": {"chunk_size": self.chunk_size},
-            },
-        )
-        return replace(self, upstream=upstream, manifest_path=path.resolve())
+        return Path(path)
 
     @classmethod
-    def open(cls, path: str | Path) -> Self:
-        """Read a background artifact from its manifest or directory.
+    def open(
+        cls,
+        path: str | Path,
+        *,
+        table: Mapping[str, Any],
+        realization: Mapping[str, Any],
+        waveform_key: str,
+    ) -> Self:
+        """Read the spectra at ``path`` with their manifest tables.
+
+        ``table`` is the ``[background]`` table, ``realization`` the
+        ``[realization]`` table and ``waveform_key`` the ``[waveforms]`` key.
 
         Raises
         ------
-        FileNotFoundError
-            If there is no background manifest at ``path``.
         ValueError
-            If the manifest is not a background manifest of this schema, uses
-            another normalization convention, or its data do not match it.
+            If the table uses another normalization convention, records
+            another key, or the spectra do not match it.
         """
-        manifest = read_manifest(path, kind=KIND, schema_version=SCHEMA_VERSION)
-        manifest_path = manifest["artifact"]["path"]
-        if manifest["normalization"].get("version") != NORMALIZATION_VERSION:
+        version = table["normalization"].get("version")
+        if version != NORMALIZATION_VERSION:
             raise ValueError(
-                f"{manifest_path} uses pair-spectrum normalization version "
-                f"{manifest['normalization'].get('version')}, not "
-                f"{NORMALIZATION_VERSION}"
+                f"{path} uses pair-spectrum normalization version {version}, "
+                f"not {NORMALIZATION_VERSION}"
             )
-        realization = manifest["realization"]
-        detectors = DetectorConfiguration.model_validate(
-            manifest["metadata"]["detectors"]
-        )
+        detectors = DetectorConfiguration.model_validate(table["metadata"]["detectors"])
         h5py = h5py_module()
-        with h5py.File(
-            manifest_path.parent / manifest["artifact"]["data"], "r"
-        ) as file:
+        with h5py.File(path, "r") as file:
             frequencies = np.asarray(file["frequencies"][()], dtype=np.float64)
             pairs = [tuple(row) for row in file["pairs"].asstr()[()].tolist()]
             spectra = np.asarray(file["pair_spectral_density"][()], dtype=np.float64)
@@ -260,7 +269,7 @@ class BackgroundArtifact:
             len(pairs),
             frequencies.shape[0],
         ):
-            raise ValueError(f"{manifest_path}: spectra do not match the manifest")
+            raise ValueError(f"{path}: spectra do not match the manifest")
         artifact = cls(
             detectors=detectors,
             frequencies=frequencies,
@@ -272,14 +281,12 @@ class BackgroundArtifact:
                 name: float(value)
                 for name, value in realization["hyperparameters"].items()
             },
-            upstream=manifest["parent"],
-            chunk_size=manifest.get("execution", {}).get("chunk_size"),
-            manifest_path=manifest_path,
+            waveform_key=waveform_key,
         )
-        if artifact.key() != manifest["artifact"]["key"]:
+        if artifact.key() != table["key"]:
             raise ValueError(
-                f"{manifest_path} records key {manifest['artifact']['key']}, but "
-                f"its waveforms and detectors hash to {artifact.key()}"
+                f"the manifest records background {table['key']}, but its "
+                f"waveforms and detectors hash to {artifact.key()}"
             )
         return artifact
 
@@ -373,13 +380,6 @@ class BackgroundSimulator:
             * np.asarray(total, dtype=np.float64)
             / population.observation_seconds
         )
-        waveform_record: dict[str, Any] = {
-            "key": waveforms.key(),
-            "metadata": waveforms.metadata.model_dump(mode="json"),
-        }
-        manifest_path = getattr(waveforms, "manifest_path", None)
-        if manifest_path is not None:
-            waveform_record["manifest_path"] = str(manifest_path)
         return BackgroundArtifact(
             detectors=self._detectors,
             frequencies=frequencies,
@@ -388,15 +388,7 @@ class BackgroundSimulator:
             count=population.count,
             total_merger_rate=population.total_merger_rate,
             hyperparameters=dict(population.hyperparameters),
-            upstream={
-                "kind": "waveforms",
-                "waveforms": waveform_record,
-                "population": {
-                    "key": population.key(),
-                    "rng_key": list(population.rng_key),
-                    "metadata": population.metadata.model_dump(mode="json"),
-                },
-            },
+            waveform_key=waveforms.key(),
             chunk_size=self._chunk_size,
         )
 

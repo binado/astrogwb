@@ -4,11 +4,14 @@
 #       --profile workflow/profiles/slurm --config start=500 stop=1000 --dry-run
 #
 # Each job runs scripts/draw_coverage_injections.py --start i --stop j, which
-# writes draw k, one background over every network's detectors, to
-# <cache_dir>/ensembles/<key>/41-<k>/.
-# Draw k is fixed by (seed, k) alone, so the batches are independent, finished
-# files merge by copying, and a batch whose files all exist is skipped: a
-# rerun resumes, and files copied in from another machine are not redrawn.
+# writes draw k, a realization directory holding its manifest and one
+# background over every network's detectors, to
+# <cache_dir>/ensembles/<key>/41-<k>/. The background is written last and
+# atomically, so its file is the job's output: it exists only once the draw is
+# complete. Draw k is fixed by (seed, k) alone, so the batches are independent,
+# finished directories merge by copying, and a batch whose files all exist is
+# skipped: a rerun resumes, and draws copied in from another machine are not
+# redrawn.
 #
 # Snakemake comes from the project venv (the `cluster` dependency group), so
 # the controller and its jobs share the interpreter the script runs in. The
@@ -42,9 +45,9 @@ if not 0 <= START < STOP or BATCH < 1:
 
 
 def draw_files(start, stop):
-    """The manifest of every draw in [start, stop)."""
+    """The background of every draw in [start, stop)."""
     return [
-        str(CACHE_DIR / "ensembles" / KEY / f"{SEED}-{index}" / "metadata.toml")
+        str(CACHE_DIR / "ensembles" / KEY / f"{SEED}-{index}" / "background.h5")
         for index in range(start, stop)
     ]
 

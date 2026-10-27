@@ -11,23 +11,33 @@
    :class:`BackgroundArtifact`; :func:`combine_pair_spectra` weights the pairs
    into one network spectrum.
 
-Each stage runs alone, writing ``metadata.toml`` and ``data.h5`` that the
-next stage opens, or fused in memory: ``BackgroundSimulator(...)(
-WaveformSimulator(...)(population))`` never holds more than one chunk of
-polarizations. Only the population stage draws random numbers.
+Fused in memory, ``BackgroundSimulator(...)(WaveformSimulator(...)(
+population))`` never holds more than one chunk of polarizations. On disk, a
+realization is one directory, a :class:`Realization`: one ``metadata.toml``
+and at most one product per stage, which :class:`RealizationSimulator` adds to
+stage by stage, and :func:`simulate_ensemble` lays out by seed and index. Only
+the population stage draws random numbers.
 """
 
-from astrogwb.simulators._io import batch_keys
+from astrogwb.simulators._io import batch_keys, realization_key
 from astrogwb.simulators.background import (
     BackgroundArtifact,
     BackgroundSimulator,
     DetectorConfiguration,
     combine_pair_spectra,
+    union_configuration,
 )
 from astrogwb.simulators.population import (
     PopulationArtifact,
     PopulationMetadata,
     PopulationSimulator,
+    population_key,
+)
+from astrogwb.simulators.realization import (
+    Realization,
+    RealizationSimulator,
+    simulate_ensemble,
+    simulate_realization,
 )
 from astrogwb.simulators.waveforms import (
     WaveformArtifact,
@@ -42,9 +52,16 @@ __all__ = [
     "PopulationArtifact",
     "PopulationMetadata",
     "PopulationSimulator",
+    "Realization",
+    "RealizationSimulator",
     "WaveformArtifact",
     "WaveformSimulator",
     "Waveforms",
     "batch_keys",
     "combine_pair_spectra",
+    "population_key",
+    "realization_key",
+    "simulate_ensemble",
+    "simulate_realization",
+    "union_configuration",
 ]

@@ -27,13 +27,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from astrogwb.simulators._chunks import iter_rows, pad_rows
-from astrogwb.simulators._io import (
-    DATA_FILE,
-    read_manifest,
-    relative_reference,
-    resolve_reference,
-    write_manifest,
-)
+from astrogwb.simulators._io import atomic_h5
 from astrogwb.simulators.population import PopulationArtifact
 from astrogwb.utils.io import content_key, h5py_module
 from astrogwb.waveform.metadata import WaveformMetadata
@@ -48,9 +42,10 @@ __all__ = [
     "WaveformChunks",
     "WaveformSimulator",
     "Waveforms",
+    "waveform_key",
+    "waveform_table",
 ]
 
-KIND = "waveforms"
 SCHEMA_VERSION = 1
 
 #: The conventions a waveform manifest records, so a reader can check them.
@@ -61,9 +56,6 @@ CONVENTIONS = {
     "strain_unit": "1 / Hz",
     "frequency_unit": "Hz",
 }
-
-#: Where a population that was never written goes when its waveforms are.
-_POPULATION_DIRECTORY = "population"
 
 #: One chunk: padded source columns ``(C,)`` and polarizations ``(C, F)``.
 type Chunk = tuple[dict[str, NDArray[Any]], jax.Array, jax.Array]
@@ -92,15 +84,24 @@ class WaveformChunks(Protocol):
         ...
 
 
-def _waveform_key(metadata: WaveformMetadata, population: PopulationArtifact) -> str:
-    """The content hash of a population's waveforms."""
+def waveform_key(metadata: WaveformMetadata, population_key: str) -> str:
+    """The content hash of the waveforms of the population ``population_key``."""
     return content_key(
         {
-            "population": population.key(),
+            "population": population_key,
             "waveform": metadata.model_dump(mode="json"),
             "schema_version": SCHEMA_VERSION,
         }
     )
+
+
+def waveform_table(metadata: WaveformMetadata, population_key: str) -> dict[str, Any]:
+    """The ``[waveforms]`` manifest table of a population's waveforms."""
+    return {
+        "metadata": metadata.model_dump(mode="json"),
+        "key": waveform_key(metadata, population_key),
+        "conventions": {**CONVENTIONS, "source_ordering": "source_id"},
+    }
 
 
 class WaveformSimulator:
@@ -212,28 +213,22 @@ class Waveforms:
 
     def key(self) -> str:
         """The content hash of these polarizations."""
-        return _waveform_key(self.metadata, self.population)
+        return waveform_key(self.metadata, self.population.key())
 
     def iter_chunks(self, chunk_size: int) -> Iterator[Chunk]:
         """Yield ``(source_parameters, hplus, hcross)`` for consecutive source chunks."""
         return self.simulator.generate(self.population, chunk_size)
 
-    def write(self, directory: str | Path) -> WaveformArtifact:
-        """Write the polarizations chunk by chunk to ``directory`` and open them.
+    def write(self, path: str | Path) -> WaveformArtifact:
+        """Write the polarizations chunk by chunk to the HDF5 file ``path`` and open them.
 
-        The manifest references the population's manifest. A population that
-        was never written is written first, to ``directory/population``.
+        The file is complete or absent: it is written beside ``path`` and
+        renamed into place.
         """
-        directory = Path(directory)
         population = self.population
-        if population.manifest_path is None:
-            population = population.write(directory / _POPULATION_DIRECTORY)
-        assert population.manifest_path is not None
         count, size = population.count, self.frequencies.shape[0]
         chunk_size = self.simulator.chunk_size
-        directory.mkdir(parents=True, exist_ok=True)
-        h5py = h5py_module()
-        with h5py.File(directory / DATA_FILE, "w") as file:
+        with atomic_h5(path) as file:
             file.create_dataset("frequencies", data=self.frequencies)
             file.create_dataset("source_id", data=population.source_ids)
             planes = {
@@ -252,80 +247,50 @@ class Waveforms:
             ):
                 planes["plus"][start:stop] = np.asarray(plus)[: stop - start]
                 planes["cross"][start:stop] = np.asarray(cross)[: stop - start]
-        path = write_manifest(
-            directory,
-            kind=KIND,
-            schema_version=SCHEMA_VERSION,
-            key=_waveform_key(self.metadata, population),
-            tables={
-                "metadata": self.metadata.model_dump(mode="json"),
-                "parent": {
-                    "kind": "population",
-                    "key": population.key(),
-                    "manifest": relative_reference(population.manifest_path, directory),
-                },
-                "conventions": {**CONVENTIONS, "source_ordering": "source_id"},
-                "execution": {"chunk_size": chunk_size},
-            },
+        return WaveformArtifact.open(
+            path, metadata=self.metadata, population=population
         )
-        return WaveformArtifact.open(path)
 
 
 @dataclass(frozen=True)
 class WaveformArtifact:
     """A population's polarizations read from disk; see :class:`WaveformChunks`.
 
-    Opening resolves and checks the parent population but reads no
-    polarization: chunks are read from ``data.h5`` as they are iterated.
+    Opening checks the file against its population but reads no polarization:
+    chunks are read from ``path`` as they are iterated.
     """
 
     metadata: WaveformMetadata
     population: PopulationArtifact
     frequencies: NDArray[np.float64]
-    manifest_path: Path
+    path: Path
 
     def key(self) -> str:
         """The content hash of these polarizations."""
-        return _waveform_key(self.metadata, self.population)
-
-    @property
-    def data_path(self) -> Path:
-        """The HDF5 file holding the polarizations."""
-        return self.manifest_path.parent / DATA_FILE
+        return waveform_key(self.metadata, self.population.key())
 
     @classmethod
-    def open(cls, path: str | Path) -> Self:
-        """Read a waveform artifact from its manifest or directory.
+    def open(
+        cls,
+        path: str | Path,
+        *,
+        metadata: WaveformMetadata,
+        population: PopulationArtifact,
+    ) -> Self:
+        """Open the polarizations of ``population`` through ``metadata`` at ``path``.
 
         Raises
         ------
         FileNotFoundError
-            If there is no waveform manifest at ``path``, or the population it
-            references is missing.
+            If there is no file at ``path``.
         ValueError
-            If the referenced population is not the one the waveforms were
-            generated from, or the sources are not aligned with it.
+            If the sources are not aligned with ``population``.
         """
-        manifest = read_manifest(path, kind=KIND, schema_version=SCHEMA_VERSION)
-        manifest_path = manifest["artifact"]["path"]
-        parent = manifest["parent"]
-        population_path = resolve_reference(manifest, parent["manifest"])
-        try:
-            population = PopulationArtifact.open(population_path)
-        except FileNotFoundError as error:
-            raise FileNotFoundError(
-                f"{manifest_path} references a population at {population_path}, "
-                "which is missing"
-            ) from error
-        if population.key() != parent["key"]:
-            raise ValueError(
-                f"{manifest_path} was generated from population {parent['key']}, "
-                f"but {population_path} is population {population.key()}"
-            )
+        path = Path(path)
+        if not path.is_file():
+            raise FileNotFoundError(f"no polarizations at {path}")
         h5py = h5py_module()
-        with h5py.File(
-            manifest_path.parent / manifest["artifact"]["data"], "r"
-        ) as file:
+        with h5py.File(path, "r") as file:
             frequencies = np.asarray(file["frequencies"][()], dtype=np.float64)
             source_ids = np.asarray(file["source_id"][()])
             shape = file["plus"].shape
@@ -334,28 +299,22 @@ class WaveformArtifact:
             frequencies.shape[0],
         ):
             raise ValueError(
-                f"{manifest_path}: polarizations {shape} are not aligned with the "
-                f"{population.count} sources of {population_path}"
+                f"{path}: polarizations {shape} are not aligned with the "
+                f"{population.count} sources of population {population.key()}"
             )
-        artifact = cls(
-            metadata=WaveformMetadata.model_validate(manifest["metadata"]),
+        return cls(
+            metadata=metadata,
             population=population,
             frequencies=frequencies,
-            manifest_path=manifest_path,
+            path=path.resolve(),
         )
-        if artifact.key() != manifest["artifact"]["key"]:
-            raise ValueError(
-                f"{manifest_path} records key {manifest['artifact']['key']}, but "
-                f"its metadata and population hash to {artifact.key()}"
-            )
-        return artifact
 
     def iter_chunks(self, chunk_size: int) -> Iterator[Chunk]:
         """Yield ``(source_parameters, hplus, hcross)`` for consecutive source chunks."""
         import jax.numpy as jnp
 
         h5py = h5py_module()
-        with h5py.File(self.data_path, "r") as file:
+        with h5py.File(self.path, "r") as file:
             for start, stop in iter_rows(self.population.count, chunk_size):
                 rows, valid = pad_rows(
                     self.population.source_parameters, start, chunk_size
