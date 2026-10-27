@@ -11,10 +11,9 @@ input, per ensemble:
 | `outputs/ensembles/<name>/detector_noise.h5` | `astrogwb noise` of draw 0 | the grid and coverage notebooks, `scripts/shot_noise_*.py` |
 | `outputs/catalogs/reference-*.h5` | `scripts/draw_reference_catalog.py` | the posterior notebooks, `importance_convergence`, `ensemble_spectrum` |
 
-The ensembles are `fiducial` (the default waveform: the grid notebooks'
-injection and `spectrum_snrs`'s Poisson draws) and `coverage`
-(`IMRPhenomXAS_NRTidalv3`: `shot_noise_coverage`'s injections and
-`ensemble_spectrum`'s draws). Their settings are the
+The one ensemble is `fiducial`, the default waveform and grid: the grid
+notebooks' injection, `shot_noise_coverage`'s injections and the draws of
+`ensemble_spectrum` and `spectrum_snrs`. Its settings are the
 committed `config/ensembles/<name>/{population,waveform}.toml` and
 `config/networks.toml`, which
 [`scripts/write_ensemble_configs.py`](../scripts/write_ensemble_configs.py)
@@ -35,8 +34,8 @@ ensemble:
 
 ```bash
 uv run python scripts/write_ensemble_configs.py
-rm -r outputs/ensembles/coverage
-uv run --no-sync snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm --config ensembles=coverage
+rm -r outputs/ensembles/fiducial
+uv run --no-sync snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm
 ```
 
 Rerunning against a realization recorded with other settings fails on the
@@ -99,20 +98,20 @@ it in `tmux` (or `screen`). Calibrate on a few draws first (`stop` caps the
 draws of the ensemble's first seed), and check them with `sacct`:
 
 ```bash
-uv run --no-sync snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm --config ensembles=coverage stop=10
+uv run --no-sync snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm --config stop=10
 ```
 
 Then dry-run and submit the rest:
 
 ```bash
-uv run --no-sync snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm --config ensembles=coverage --dry-run
+uv run --no-sync snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm --dry-run
 ```
 
 ```bash
-uv run --no-sync snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm --config ensembles=coverage
+uv run --no-sync snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm
 ```
 
-The default, `ensembles="fiducial coverage"`, writes both. `threads=<n>` and
+The default is `ensembles=fiducial`. `threads=<n>` and
 `outputs=<path>` go in the same `--config` group.
 
 Each job exports `INPUT="*"` and `OUTPUT="*"` and runs its command under
@@ -131,7 +130,7 @@ squeue -u $USER
 ```
 
 ```bash
-tail -f logs/ensembles/coverage/41-510.log
+tail -f logs/ensembles/fiducial/41-510.log
 ```
 
 SLURM's own logs land under `.snakemake/slurm_logs/`. Rerunning the same

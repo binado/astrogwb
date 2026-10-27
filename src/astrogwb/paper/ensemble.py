@@ -59,17 +59,9 @@ ETD_NETWORKS = {
 }
 
 #: The waveform overrides of each ensemble, over the shared ``[catalog]`` one.
-#: ``fiducial`` is the injection of the grid notebooks and the Poisson draws of
-#: ``spectrum_snrs``; ``coverage`` the draws of ``shot_noise_coverage`` and
-#: ``ensemble_spectrum``, fine through the SNR peak with a log tail.
+#: ``fiducial`` holds the injections and Poisson draws of every notebook.
 _WAVEFORMS: dict[str, dict[str, object]] = {
     "fiducial": {},
-    "coverage": {
-        "approximant": "IMRPhenomXAS_NRTidalv3",
-        "frequency_resolution": 0.125,
-        "turnover_frequency": 100.0,
-        "dlogf": 0.01266,
-    },
 }
 
 #: Every ensemble name.

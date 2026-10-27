@@ -7,4 +7,5 @@ sampling_frequency = 8192.0
 frequency_spacing = "loglinear"
 frequency_resolution = 1.0
 turnover_frequency = 100.0
+dlogf = 0.01005
 use_taper_in_tidal_corrections = true

@@ -9,8 +9,8 @@ the file with ``astrogwb.utils.io.load(path, CatalogMetadata)`` and never draw.
 
     uv run python scripts/draw_reference_catalog.py \\
         --output outputs/catalogs/reference-fiducial.h5
-    uv run python scripts/draw_reference_catalog.py --approximant \\
-        IMRPhenomXAS_NRTidalv3 --output outputs/catalogs/reference-coverage.h5
+    uv run python scripts/draw_reference_catalog.py --reference-distance-mpc 1 \\
+        --output outputs/catalogs/reference-scan.h5
 
 ``workflow/coverage_draws.smk`` runs it for every catalog the notebooks read.
 """

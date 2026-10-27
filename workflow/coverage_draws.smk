@@ -1,7 +1,7 @@
 # The simulation inputs the paper notebooks read, generated explicitly.
 #
 #   uv run --no-sync snakemake -s workflow/coverage_draws.smk \
-#       --profile workflow/profiles/slurm --config ensembles=coverage --dry-run
+#       --profile workflow/profiles/slurm --dry-run
 #
 # Notebooks never simulate: they read what this writes and fail with a
 # FileNotFoundError when it is missing. Per ensemble <name> (the committed
@@ -30,7 +30,7 @@
 # controller and its jobs share one interpreter.
 #
 # Config (override with --config key=value):
-#   ensembles  space-separated names           default "fiducial coverage"
+#   ensembles  space-separated names           default "fiducial"
 #   stop       draws of the ensembles' first   default per ensemble (DRAWS)
 #              seed, overriding DRAWS
 #   threads    CPUs per draw job               default 8
@@ -43,28 +43,23 @@ ENSEMBLES_ROOT = f"{OUTPUTS}/ensembles"
 CATALOGS_ROOT = f"{OUTPUTS}/catalogs"
 
 # Draws per seed of each ensemble: what the notebooks read.
-#   fiducial: the grid notebooks' injection (41-0), spectrum_snrs' Poisson
-#             ensemble (41, 200 draws) and its independent reference (42-0).
-#   coverage: shot_noise_coverage's injections and ensemble_spectrum's draws.
+#   fiducial: the grid notebooks' injection (41-0), shot_noise_coverage's
+#             injections and the draws of ensemble_spectrum and spectrum_snrs
+#             (41), and spectrum_snrs' independent reference (42-0).
 DRAWS = {
-    "fiducial": {41: 200, 42: 1},
-    "coverage": {41: 1000},
+    "fiducial": {41: 1000, 42: 1},
 }
 
 # The reference catalogs each ensemble's notebooks read, and their options.
-_XAS = "--approximant IMRPhenomXAS_NRTidalv3"
 CATALOGS = {
     "fiducial": {
-        # cosmology_grid_posteriors, madau_dickinson_grid, shot_noise_* scripts
+        # the grid and coverage notebooks, shot_noise_* scripts
         "reference-fiducial": "--num-samples 16384 --chunk-size 4096",
         # importance_convergence's redshift ladder
         "reference-ladder": "--num-samples 256 --sampling random --seed 100",
-    },
-    "coverage": {
-        "reference-coverage": f"{_XAS} --num-samples 16384 --chunk-size 4096",
         # ensemble_spectrum's minimum-redshift scan
         "reference-scan": (
-            f"{_XAS} --num-samples 16384 --reference-distance-mpc 1 --chunk-size 4096"
+            "--num-samples 16384 --reference-distance-mpc 1 --chunk-size 4096"
         ),
     },
 }
@@ -72,7 +67,7 @@ CATALOG_OPTIONS = {
     name: options for catalogs in CATALOGS.values() for name, options in catalogs.items()
 }
 
-SELECTED = str(config.get("ensembles", "fiducial coverage")).split()
+SELECTED = str(config.get("ensembles", "fiducial")).split()
 THREADS = int(config.get("threads", 8))
 unknown = set(SELECTED) - set(DRAWS)
 if unknown:

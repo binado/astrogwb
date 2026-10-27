@@ -89,7 +89,7 @@ def _():
     the draws. The same draws give the shot noise of a single realization about
     the mean.
 
-    The ensemble is read, never drawn: the coverage ensemble of
+    The ensemble is read, never drawn: the fiducial ensemble of
     `workflow/coverage_draws.smk`, one background per draw holding every
     network's spectra (`astrogwb.paper.ensemble.network_spectra_ensemble`),
     shared with `notebooks/shot_noise_coverage.py`, which uses its draws as
@@ -172,11 +172,10 @@ def _():
     # Percentiles of the plotted bands (16-84%).
     percentiles = (16.0, 50.0, 84.0)
 
-    # The coverage ensemble of workflow/coverage_draws.smk, shared with
-    # shot_noise_coverage.py: IMRPhenomXAS_NRTidalv3 with fine spacing through
-    # the SNR peak, then a log tail, for a 1024-point grid. Its population is
+    # The fiducial ensemble of workflow/coverage_draws.smk, shared with
+    # shot_noise_coverage.py: the default waveform and grid. Its population is
     # draw 0's record.
-    ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / "coverage"
+    ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / "fiducial"
     ensemble_population = Realization.open(
         ensemble_root / f"{seed}-0"
     ).population_metadata
@@ -940,7 +939,7 @@ def _():
 @app.cell
 def _(ROOT_DIR):
     # The scan's reference catalog, written by workflow/coverage_draws.smk:
-    # 2^14 draws on a Sobol net at the coverage approximant, as in
+    # 2^14 draws on a Sobol net at the default waveform, as in
     # cosmology_grid_posteriors.py, each generated at the redshift where the
     # fiducial luminosity distance is 1 Mpc, below every window of the scan,
     # on a reference grid from the lowest observed frequency to past the

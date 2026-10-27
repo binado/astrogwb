@@ -1,6 +1,6 @@
 # Coverage draws on SLURM, CPU only:
 #   uv run --no-sync snakemake -s workflow/coverage_draws.smk \
-#       --profile workflow/profiles/slurm --config ensembles=coverage --dry-run
+#       --profile workflow/profiles/slurm --dry-run
 # Needs the project venv synced with the `cluster` group; see
 # docs/coverage-draws-on-slurm.md.
 # Job logs land under .snakemake/slurm_logs/, each command's own under logs/.

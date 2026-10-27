@@ -11,10 +11,8 @@ cell names its inputs, all under `outputs/`:
 
 | Input | Read by |
 | --- | --- |
-| `ensembles/fiducial/` (+ `detector_noise.h5`) | `cosmology_grid_posteriors`, `madau_dickinson_grid`, `spectrum_snrs` |
-| `ensembles/coverage/` (+ `detector_noise.h5`) | `shot_noise_coverage`, `ensemble_spectrum` |
-| `catalogs/reference-fiducial.h5` | `cosmology_grid_posteriors`, `madau_dickinson_grid` |
-| `catalogs/reference-coverage.h5` | `shot_noise_coverage` |
+| `ensembles/fiducial/` (+ `detector_noise.h5`) | `cosmology_grid_posteriors`, `madau_dickinson_grid`, `shot_noise_coverage`, `ensemble_spectrum`, `spectrum_snrs` |
+| `catalogs/reference-fiducial.h5` | `cosmology_grid_posteriors`, `madau_dickinson_grid`, `shot_noise_coverage` |
 | `catalogs/reference-scan.h5` | `ensemble_spectrum` |
 | `catalogs/reference-ladder.h5` | `importance_convergence` |
 
@@ -98,7 +96,7 @@ A missing input is a `FileNotFoundError`, never a simulation.
   $\sigma_{\mathrm{tot}}/A = (\rho^{-2} + s^2)^{1/2}$ per network
   (`minimum_redshift_scan.pdf`), from one reference catalog generated at the
   redshift where $d_L = 1$ Mpc and rescaled to each window, checked against the
-  draws' $\rho\,\mathrm{sd}(\epsilon)$. The ensemble is the coverage ensemble,
+  draws' $\rho\,\mathrm{sd}(\epsilon)$. The ensemble is the fiducial ensemble,
   shared with `shot_noise_coverage.py`.
 - **`shot_noise_coverage.py`** — marimo notebook. Calibration of the
   shot-noise likelihood for $H_0$: the catalogs of the Poisson ensemble of

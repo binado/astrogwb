@@ -313,7 +313,7 @@ def _():
     ROOT_DIR = Path(__file__).resolve().parents[1]
     FIGURES = ROOT_DIR / FIGURES_DIR / "shot_noise_coverage"
 
-    # The injections are the draws of the coverage ensemble, which
+    # The injections are the draws of the fiducial ensemble, which
     # ensemble_spectrum.py reads too, as each network records them.
     num_injections = 1000
     ensemble_seed = 41
@@ -342,12 +342,11 @@ def _():
     registry = detector_registry(root=ROOT_DIR)
 
     # The inputs, written by workflow/coverage_draws.smk and only read here:
-    # the coverage ensemble (IMRPhenomXAS_NRTidalv3 on the 1024-point grid of
-    # ensemble_spectrum.py), its detector noise, and the reference catalog of
-    # the same approximant, 2^14 draws on a scrambled Sobol net at seed 42,
+    # the fiducial ensemble, its detector noise, and the reference catalog of
+    # the same waveform, 2^14 draws on a scrambled Sobol net at seed 42,
     # independent of the injections (importance_convergence.py sizes it).
-    ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / "coverage"
-    reference_catalog_path = ROOT_DIR / CATALOGS_ROOT / "reference-coverage.h5"
+    ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / "fiducial"
+    reference_catalog_path = ROOT_DIR / CATALOGS_ROOT / "reference-fiducial.h5"
     noise = DetectorNoise.open(ensemble_root / "detector_noise.h5")
     frequencies = noise.frequencies
     injected_metadata = Realization.open(
@@ -944,7 +943,7 @@ def _():
     ## Injections
 
     $M$ Poisson catalogs at the fiducials, each recorded by every network, read
-    from the coverage ensemble (`network_spectra_ensemble`): each draw's
+    from the fiducial ensemble (`network_spectra_ensemble`): each draw's
     networks were projected in one waveform pass.
     """)
 
