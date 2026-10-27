@@ -21,6 +21,8 @@ from .psd import resolve_psd_path
 from .sensitivity import Sensitivity
 
 _MERGE_KEY = "extends"
+#: The packaged detector geometry and sensitivity tables, the first layers of
+#: every merge; they use the same tables as the layers that override them.
 DETECTOR_DEFAULT_PATHS = tuple(
     Path(__file__).parent / filename
     for filename in ("geometry.toml", "sensitivity.toml")
@@ -80,8 +82,10 @@ class DetectorRegistry(BaseModel):
     """A complete resolved registry, trusted and fixed for a dataset's lifetime.
 
     Each network's members are stored sorted, the canonical order of
-    :meth:`pairs`, so pair axes built
-    from the registry line up with a simulated background's.
+    :meth:`pairs`, so pair axes built from the registry line up with a
+    simulated background's. The order they were declared in is not kept, and
+    the ``detectors`` and ``networks`` mappings are not to be edited after
+    construction.
     """
 
     model_config = _STRICT
@@ -110,7 +114,21 @@ class DetectorRegistry(BaseModel):
     def validate_members(
         self, names: Sequence[str], *, label: str = "detectors"
     ) -> None:
-        """Require a non-empty, distinct list of complete detector definitions."""
+        """Require a non-empty, distinct list of complete detector definitions.
+
+        Parameters
+        ----------
+        names
+            The detector names to check.
+        label
+            What ``names`` is, for the error message.
+
+        Raises
+        ------
+        ValueError
+            If ``names`` is empty, repeats a detector, or names one the
+            registry does not define.
+        """
         if not names or len(set(names)) != len(names):
             raise ValueError(
                 f"{label} must contain distinct detectors and be non-empty"
@@ -122,7 +140,19 @@ class DetectorRegistry(BaseModel):
     def build_detectors(
         self, names: Sequence[str]
     ) -> tuple[tuple[CustomDetector, ...], dict[str, Sensitivity]]:
-        """Build selected geometry and sensitivities in the supplied order."""
+        """Build selected geometry and sensitivities in the supplied order.
+
+        Parameters
+        ----------
+        names
+            The detectors to build; see :meth:`validate_members`.
+
+        Returns
+        -------
+        tuple
+            The detectors, in the order of ``names``, and their sensitivities
+            keyed by name.
+        """
         self.validate_members(names)
         return (
             tuple(self.detectors[name].to_detector(name) for name in names),
@@ -132,11 +162,36 @@ class DetectorRegistry(BaseModel):
     def build_network(
         self, name: str
     ) -> tuple[tuple[CustomDetector, ...], dict[str, Sensitivity]]:
-        """Build a named network, its detectors sorted."""
+        """Build a named network, its detectors sorted.
+
+        Unlike :meth:`build_detectors`, the order is the canonical one of the
+        network, not the order it was declared in.
+
+        Parameters
+        ----------
+        name
+            A network of the registry.
+
+        Returns
+        -------
+        tuple
+            The detectors and their sensitivities keyed by name.
+        """
         return self.build_detectors(self.networks[name])
 
     def pairs(self, network_name: str) -> list[tuple[str, str]]:
-        """Return the canonical sorted detector pairs of a named network."""
+        """Return the canonical sorted detector pairs of a named network.
+
+        Parameters
+        ----------
+        network_name
+            A network of the registry.
+
+        Returns
+        -------
+        list of tuple of str
+            Each pair of members, ``(a, b)`` with ``a`` before ``b``.
+        """
         detectors = self.networks[network_name]
         return [(a, b) for i, a in enumerate(detectors) for b in detectors[i + 1 :]]
 
@@ -149,6 +204,22 @@ def load_detector_config(paths: Sequence[Path]) -> DetectorRegistry:
     An empty layer list loads packaged detectors without named networks.
     Only ``[detectors]`` and ``[networks]`` are accepted in the resolved config;
     no runtime detector objects are built during loading or validation.
+
+    Parameters
+    ----------
+    paths
+        Existing TOML files, merged in order after the packaged defaults.
+
+    Returns
+    -------
+    DetectorRegistry
+        The validated registry.
+
+    Raises
+    ------
+    ValueError
+        If a path is not an existing TOML file, or the merged config is not a
+        valid registry.
     """
     for path in paths:
         if path.suffix.lower() != ".toml" or not path.is_file():

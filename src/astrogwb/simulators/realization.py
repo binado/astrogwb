@@ -44,8 +44,8 @@ from astrogwb.simulators.background import (
     BackgroundArtifact,
     BackgroundSimulator,
     _read_networks,
-    _scientific_payload,
     background_table,
+    scientific_payload,
 )
 from astrogwb.simulators.population import (
     PopulationArtifact,
@@ -346,12 +346,12 @@ class RealizationSimulator:
         )
 
     def background_simulator(self, registry: DetectorRegistry) -> BackgroundSimulator:
-        """The cached background simulator of ``networks``."""
+        """The cached background simulator of all the networks of ``registry``."""
         return self._simulator(
             BackgroundSimulator,
             registry,
             self._chunk_size,
-            content_key(_scientific_payload(registry, tuple(registry.networks))),
+            content_key(scientific_payload(registry, tuple(registry.networks))),
         )
 
     def __call__(
@@ -608,7 +608,8 @@ def network_spectra_ensemble(
     names
         Networks, each recorded in every draw's background.
     start
-        The first index read.
+        The first index read; must be below ``num_draws``. Every draw is
+        taken to share one frequency grid and one set of hyperparameters.
 
     Returns
     -------

@@ -90,16 +90,17 @@ unpolarized population, `E[Y_ab] = gamma_ab S_h`.
 
 Every `[background]` table records this convention as its `normalization`,
 version 1, and `BackgroundArtifact.open` refuses any other version.
-`combine_pair_spectra(Y, frequencies, detectors)` weights a network's pairs
-optimally into one spectrum, using the noise curves in `psd_references`. The
-background stage stores it per network, so every detector needs a noise curve,
-and the noise curves are part of the background's key. The mean of the
+`combine_pair_spectra(Y, frequencies, registry, network_name)` weights a
+network's pairs optimally into one spectrum, using the `psd_reference` of each
+detector in the registry. The background stage stores it per network, so every
+detector needs a noise curve, and the noise curves are part of the
+background's key. The mean of the
 combined spectrum is `S_h`.
 
 ## Detector noise
 
-The background carries no noise. `detector_noise(frequencies, networks,
-observation_time)` evaluates, per network, the pair ORFs and per-pair Gaussian
+The background carries no noise. `detector_noise(frequencies, registry,
+observation_time, network_names=None)` evaluates, per network, the pair ORFs and per-pair Gaussian
 scales `(P_n, F)` and the effective PSD and its Gaussian scale `(F,)`, as a
 `DetectorNoise`. `astrogwb noise REALIZATION OUTPUT` writes it for the
 networks, frequencies and observation time a realization's background was
@@ -166,11 +167,12 @@ needs population settings, or raises `FileNotFoundError`.
 Keys are content hashes. The population key hashes its metadata, including the
 schema version, together with its RNG key. The waveform key hashes the
 population key and the waveform metadata. The background key hashes the
-waveform key, every network (name, detectors and noise curves), the
-normalization version and the schema version (2: per-network spectra). Population
-schema version 2 moved the extrinsic draws into the population stage, so no
-earlier spectrum cache is reused. The realization layout did not change any
-key.
+waveform key, the networks it covers (their members, and the geometry and
+`psd_reference` of the detectors they use, not the labels), the normalization
+version and the schema version (3: per-network spectra, keyed by the registry).
+Population schema version 2 moved the extrinsic draws into the population
+stage, so no earlier spectrum cache is reused. Directories of realization
+layout version 1 are refused and are regenerated.
 
 ## Python
 
@@ -184,18 +186,18 @@ from astrogwb.simulators import (
 key = batch_keys(41, 1)[0]
 population = PopulationSimulator(population_metadata)(key)
 waveforms = WaveformSimulator(waveform_metadata, chunk_size=1024)
-spectra = BackgroundSimulator(detectors, chunk_size=1024)(waveforms(population))
+spectra = BackgroundSimulator(registry, chunk_size=1024)(waveforms(population))
 
 # One realization directory, stage by stage
 RealizationSimulator(population_metadata)("draw/", seed=41)
-realization = RealizationSimulator(waveform=waveform_metadata, background=detectors)(
+realization = RealizationSimulator(waveform=waveform_metadata, background=registry)(
     "draw/"
 )
-spectra = realization.background()
+spectra = realization.background(registry=registry)
 
 # An ensemble: draw i at root/41-i, keyed by batch_keys(41, n)[i]
 simulator = RealizationSimulator(
-    population_metadata, waveform_metadata, detectors, keep_sources=False
+    population_metadata, waveform_metadata, registry, keep_sources=False
 )
 realizations = simulate_ensemble(simulator, "root/", 41, 100)
 ```
@@ -203,10 +205,11 @@ realizations = simulate_ensemble(simulator, "root/", 41, 100)
 `RealizationSimulator` builds each stage simulator the first time it is
 needed and reuses it, so an ensemble compiles each stage once and a fully
 cached ensemble builds none. `Realization.population()`, `.waveforms()` and
-`.background()` read a stage's product. When the product is missing, pass the
+`.background(registry=registry)` read a stage's product. The registry is
+trusted to be the one the stage was simulated with. When the product is missing, pass the
 stage simulators to regenerate it.
 
-`astrogwb.simulators.network_spectra_ensemble(root, seed, n, names)` reads
+`astrogwb.simulators.network_spectra_ensemble(root, seed, n, names, registry=registry)` reads
 an ensemble's draws and stacks each network's spectra. It never simulates;
 `workflow/coverage_draws.smk` writes the paper's ensembles (see
 `docs/coverage-draws-on-slurm.md`).
@@ -273,7 +276,7 @@ initializes.
 | `astrogwb.paper.ensemble.network_spectra_ensemble`, `NetworkSpectra` | `astrogwb.simulators.network_spectra_ensemble`, `NetworkSpectra` |
 | `scripts/write_ensemble_configs.py`, `paper_networks`, `ensemble_metadata` | `config/detectors.toml` and `config/ensembles/<name>/`, edited by hand |
 | ensemble caches of #389 and #390 (`<cache>/ensembles/<key>/<seed>-<i>/`) | not read; regenerate them with the workflow |
-| one background over the detector union; `BackgroundArtifact.pair_spectra(network)`, `.detectors`, `.pairs` | per-network spectra; `BackgroundArtifact.network(name)`, `.networks` |
+| one background over the detector union; `BackgroundArtifact.pair_spectra(network)`, `.detectors`, `.pairs` | per-network spectra; `BackgroundArtifact.network(name)`, `.network_names` |
 | `Realization.detectors` | `Realization.networks` |
 | `--detector-config` with network and detector layers | repeated `--detector-config PATH` options |
 | `ensure_reference_catalog`, `settings_digest`, `noise_digest`, posterior grid caches | `scripts/draw_reference_catalog.py`; grids are computed on every run |

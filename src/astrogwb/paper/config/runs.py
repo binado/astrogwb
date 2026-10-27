@@ -56,8 +56,6 @@ DETECTORS_PATH = CONFIG_DIR / "detectors.toml"
 #: Every shared layer, in merge order.
 SHARED_LAYER_PATHS = (DEFAULTS_PATH, WAVEFORMS_PATH, POPULATIONS_PATH, DETECTORS_PATH)
 
-#: Packaged geometry and sensitivity use the same registry tables as overrides.
-
 #: Presentation settings, read by `astrogwb.paper.plotting`. Deliberately *not*
 #: a config layer: nothing a simulation depends on reads it.
 PLOTTING_PATH = CONFIG_DIR / "plotting.toml"

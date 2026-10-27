@@ -21,17 +21,17 @@ Frequency bands and padding are analysis choices and are left to the reader.
 
 from __future__ import annotations
 
-import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple, Self
+from typing import Annotated, NamedTuple, Self
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field
 
 from astrogwb.detector.config import DetectorRegistry
-from astrogwb.simulators.background import _network_names, _scientific_payload
+from astrogwb.simulators.background import scientific_payload, select_networks
 from astrogwb.utils.io import content_key, load, write
 
 __all__ = [
@@ -40,6 +40,9 @@ __all__ = [
     "NetworkNoise",
     "detector_noise",
 ]
+
+#: The layout version of the metadata; a file of another version is regenerated.
+FORMAT_VERSION = 2
 
 
 class DetectorNoiseMetadata(BaseModel):
@@ -54,7 +57,7 @@ class DetectorNoiseMetadata(BaseModel):
     format_version: int = Field(strict=True)
     networks: tuple[str, ...]
     scientific_identity: str
-    observation_time: float
+    observation_time: Annotated[float, Field(gt=0.0)]
 
     def key(self) -> str:
         """The content hash of the record."""
@@ -72,7 +75,10 @@ class NetworkNoise(NamedTuple):
 
 @dataclass(frozen=True)
 class DetectorNoise:
-    """Every network's :class:`NetworkNoise` on ``frequencies``, keyed as ``metadata.networks``."""
+    """Every network's :class:`NetworkNoise` on ``frequencies``.
+
+    ``noise`` is keyed as ``metadata.networks``.
+    """
 
     metadata: DetectorNoiseMetadata
     frequencies: NDArray[np.float64]
@@ -98,33 +104,22 @@ class DetectorNoise:
     def open(cls, path: str | Path, *, registry: DetectorRegistry) -> Self:
         """Read the noise :meth:`write` wrote to ``path``.
 
+        ``registry`` is trusted to be the one the noise was evaluated with,
+        and only gives the pair order and shapes; the recorded identity is not
+        compared with it.
+
         Raises
         ------
         FileNotFoundError
             If ``path`` does not exist.
+        ValueError
+            If the file uses another format version, or its arrays do not
+            match the recorded networks.
         """
-        if not Path(path).is_file():
-            raise FileNotFoundError(f"no detector noise at {path}")
-        try:
-            data, metadata, _ = load(path, DetectorNoiseMetadata)
-        except ValidationError as error:
-            from astrogwb.utils.io import h5py_module
-
-            h5py = h5py_module()
-            with h5py.File(path, "r") as file:
-                recorded = json.loads(str(file.attrs["metadata"]))
-            if recorded.get("format_version") != 2:
-                raise ValueError(
-                    f"{path} uses old detector noise metadata; regenerate it"
-                ) from error
-            raise
-        if metadata.format_version != 2:
+        data, metadata, _ = load(path, DetectorNoiseMetadata)
+        if metadata.format_version != FORMAT_VERSION:
             raise ValueError(f"{path} uses old detector noise metadata; regenerate it")
-        for name in metadata.networks:
-            if name not in registry.networks:
-                raise ValueError(f"registry has no recorded network {name!r}")
         networks = data["networks"]
-        assert isinstance(networks, dict)
         frequencies = np.asarray(data["frequencies"], dtype=np.float64)
         noise = {
             name: NetworkNoise(
@@ -136,10 +131,6 @@ class DetectorNoise:
             for name in metadata.networks
         }
         for name, values in noise.items():
-            if len(registry.networks[name]) < 2:
-                raise ValueError(
-                    f"network {name!r} must contain at least two detectors"
-                )
             shape = (len(registry.pairs(name)), frequencies.size)
             if (
                 values.pair_overlap.shape != shape
@@ -162,7 +153,7 @@ def detector_noise(
     registry: DetectorRegistry,
     observation_time: float,
     *,
-    network_names: tuple[str, ...] | list[str] | None = None,
+    network_names: Sequence[str] | None = None,
 ) -> DetectorNoise:
     """The noise of selected registry networks on ``frequencies``.
 
@@ -184,8 +175,8 @@ def detector_noise(
 
     Raises
     ------
-    KeyError
-        If a detector has no ``psd_references`` entry.
+    ValueError
+        If a selected network has fewer than two detectors.
     """
     import jax.numpy as jnp
 
@@ -197,12 +188,9 @@ def detector_noise(
     )
 
     grid = np.asarray(frequencies, dtype=np.float64)
-    names = _network_names(registry, network_names)
+    names = select_networks(registry, network_names)
     noise = {}
     for name in names:
-        detector_names = registry.networks[name]
-        if len(detector_names) < 2:
-            raise ValueError(f"network {name!r} must contain at least two detectors")
         detectors, sensitivities = registry.build_network(name)
         psd = effective_psd(grid, detectors, sensitivities)
         noise[name] = NetworkNoise(
@@ -219,9 +207,9 @@ def detector_noise(
         )
     return DetectorNoise(
         metadata=DetectorNoiseMetadata(
-            format_version=2,
+            format_version=FORMAT_VERSION,
             networks=names,
-            scientific_identity=content_key(_scientific_payload(registry, names)),
+            scientific_identity=content_key(scientific_payload(registry, names)),
             observation_time=float(observation_time),
         ),
         frequencies=grid,

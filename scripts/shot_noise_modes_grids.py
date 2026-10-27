@@ -85,7 +85,7 @@ def _setup(
         name: np.asarray(data["spectral_density"][0])
         for name, data in zip(names, drawn, strict=True)
     }
-    noise = DetectorNoise.open(ensemble / "detector_noise.h5")
+    noise = DetectorNoise.open(ensemble / "detector_noise.h5", registry=registry)
     catalog, catalog_metadata, _ = read_reference_catalog(catalog_path)
     population = catalog_metadata.population
     likelihood = ImportanceGaussianLikelihood.from_catalog(
