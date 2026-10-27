@@ -23,7 +23,6 @@ from astrogwb.simulators import (
     batch_keys,
     network_spectra_ensemble,
     population_key,
-    simulate_ensemble,
 )
 from astrogwb.simulators._io import (
     BACKGROUND_FILE,
@@ -217,18 +216,18 @@ def test_a_directory_without_a_realization_needs_population_settings(
         _simulator(waveform=WAVEFORM)(tmp_path)
 
 
-def test_an_ensemble_is_a_prefix_of_a_larger_one(tmp_path: Path) -> None:
+def test_a_realization_index_keys_its_population_by_batch_keys(
+    tmp_path: Path,
+) -> None:
     simulator = _simulator(population=POPULATION, keep_sources=False)
 
-    larger = simulate_ensemble(simulator, tmp_path / "larger", SEED, 3)
-    smaller = simulate_ensemble(simulator, tmp_path / "smaller", SEED, 2)
-
-    assert [r.directory.name for r in larger] == [f"{SEED}-{i}" for i in range(3)]
-    assert [r.manifest["realization"] for r in smaller] == [
-        r.manifest["realization"] for r in larger[:2]
+    realizations = [
+        simulator(tmp_path / f"{SEED}-{index}", seed=SEED, index=index)
+        for index in range(3)
     ]
+
     keys = np.asarray(jax.random.key_data(batch_keys(SEED, 3)))
-    assert [list(r.rng_key) for r in larger] == keys.tolist()
+    assert [list(r.rng_key) for r in realizations] == keys.tolist()
 
 
 @pytest.fixture(scope="module")
@@ -238,7 +237,8 @@ def ensemble(tmp_path_factory: pytest.TempPathFactory) -> Path:
     simulator = _simulator(
         population=POPULATION, waveform=WAVEFORM, background=NETWORKS
     )
-    simulate_ensemble(simulator, root, SEED, 2)
+    for index in range(2):
+        simulator(root / f"{SEED}-{index}", seed=SEED, index=index)
     return root
 
 

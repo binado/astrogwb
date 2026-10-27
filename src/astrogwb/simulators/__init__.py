@@ -18,9 +18,8 @@ Fused in memory, ``BackgroundSimulator(...)(WaveformSimulator(...)(
 population))`` never holds more than one chunk of polarizations. On disk, a
 realization is one directory, a :class:`Realization`: one ``metadata.toml``
 and at most one product per stage, which :class:`RealizationSimulator` adds to
-stage by stage, and :func:`simulate_ensemble` lays out by seed and index;
-:func:`network_spectra_ensemble` reads such an ensemble back, stacked per
-network. Only the population stage draws random numbers.
+stage by stage; :func:`network_spectra_ensemble` reads an ensemble of
+realizations, one directory per seed and index, back stacked per network. Only the population stage draws random numbers.
 """
 
 from astrogwb.simulators._io import batch_keys, realization_key
@@ -47,7 +46,6 @@ from astrogwb.simulators.realization import (
     Realization,
     RealizationSimulator,
     network_spectra_ensemble,
-    simulate_ensemble,
     simulate_realization,
 )
 from astrogwb.simulators.waveforms import (
@@ -78,6 +76,5 @@ __all__ = [
     "network_spectra_ensemble",
     "population_key",
     "realization_key",
-    "simulate_ensemble",
     "simulate_realization",
 ]

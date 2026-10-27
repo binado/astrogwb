@@ -180,7 +180,7 @@ layout version 1 are refused and are regenerated.
 ```python
 from astrogwb.simulators import (
     BackgroundSimulator, PopulationSimulator, RealizationSimulator,
-    WaveformSimulator, batch_keys, simulate_ensemble,
+    WaveformSimulator, batch_keys,
 )
 
 # Fused in memory: at most one chunk of polarizations
@@ -196,11 +196,11 @@ realization = RealizationSimulator(waveform=waveform_metadata, background=regist
 )
 spectra = realization.background()
 
-# An ensemble: draw i at root/41-i, keyed by batch_keys(41, n)[i]
+# An ensemble draw: root/41-i, keyed by batch_keys(41, i + 1)[i]
 simulator = RealizationSimulator(
     population_metadata, waveform_metadata, registry, keep_sources=False
 )
-realizations = simulate_ensemble(simulator, "root/", 41, 100)
+simulator("root/41-7", seed=41, index=7)
 ```
 
 `RealizationSimulator` builds the stage simulators of each realization it

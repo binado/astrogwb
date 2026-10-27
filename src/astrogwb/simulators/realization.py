@@ -68,7 +68,6 @@ __all__ = [
     "Realization",
     "RealizationSimulator",
     "network_spectra_ensemble",
-    "simulate_ensemble",
     "simulate_realization",
 ]
 
@@ -504,36 +503,6 @@ def simulate_realization(
     return simulator(directory, seed=seed, index=index)
 
 
-def simulate_ensemble(
-    simulator: RealizationSimulator,
-    root: str | Path,
-    seed: int,
-    num_draws: int,
-    *,
-    start: int = 0,
-) -> list[Realization]:
-    """Realizations ``start .. num_draws - 1`` of ``seed``, at ``root/<seed>-<index>``.
-
-    Realization ``i`` is keyed by ``batch_keys(seed, num_draws)[i]``, which
-    does not depend on ``num_draws``: a smaller ensemble is a prefix of a
-    larger one, an interrupted run resumes where it stopped, and ranges drawn
-    on several machines merge by copying their directories.
-
-    Raises
-    ------
-    ValueError
-        If ``start`` is not in ``[0, num_draws)``, or a directory holds
-        another realization (see :class:`RealizationSimulator`).
-    """
-    if not 0 <= start < num_draws:
-        raise ValueError(f"need 0 <= start < num_draws, got {start}, {num_draws}")
-    root = Path(root)
-    return [
-        simulator(root / f"{int(seed)}-{index}", seed=seed, index=index)
-        for index in range(start, num_draws)
-    ]
-
-
 class NetworkSpectra(TypedDict):
     """One network's draws, stacked along the leading draw axis.
 
@@ -564,7 +533,8 @@ def network_spectra_ensemble(
     """Draws ``start .. num_draws - 1`` of the networks ``names``, stacked per network.
 
     Draw ``i`` is the background of the realization at ``<root>/<seed>-<i>``,
-    as :func:`simulate_ensemble` lays them out.
+    as ``workflow/coverage_draws.smk`` lays them out, draw ``i`` keyed by
+    ``batch_keys(seed, i + 1)[i]``.
 
     Parameters
     ----------
