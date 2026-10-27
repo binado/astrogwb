@@ -630,7 +630,6 @@ def draw_spectra(
             seed,
             num_draws,
             [settings.network],
-            registry=detector_registry(),
         )
         return {
             "frequencies": drawn["frequencies"],

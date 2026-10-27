@@ -11,13 +11,14 @@ DetectorRegistry    --BackgroundSimulator(w)--> BackgroundArtifact
 ```
 
 `DetectorRegistry` resolves detector geometry and PSD references once for
-simulation. The same registry is supplied to readers and noise generation;
-background and noise metadata store network names only.
+simulation and noise generation. Background and noise metadata record each
+network's detector pairs, in the order of the pair axis of its arrays, so
+readers need no registry.
 
-The registry is frozen for the lifetime of an output dataset. Readers trust
-the registry they receive and preserve the recorded artifact identity without
-checking registry compatibility. Changing geometry, PSD references, or
-membership requires regenerating affected realizations and noise files.
+The registry is frozen for the lifetime of an output dataset. Readers trust the
+files they open and preserve the recorded artifact identity. Changing geometry,
+PSD references, or membership requires regenerating affected realizations and
+noise files.
 
 Only the population stage draws random numbers. The waveform and background
 stages are deterministic, given their inputs.
@@ -193,7 +194,7 @@ RealizationSimulator(population_metadata)("draw/", seed=41)
 realization = RealizationSimulator(waveform=waveform_metadata, background=registry)(
     "draw/"
 )
-spectra = realization.background(registry=registry)
+spectra = realization.background()
 
 # An ensemble: draw i at root/41-i, keyed by batch_keys(41, n)[i]
 simulator = RealizationSimulator(
@@ -205,11 +206,10 @@ realizations = simulate_ensemble(simulator, "root/", 41, 100)
 `RealizationSimulator` builds each stage simulator the first time it is
 needed and reuses it, so an ensemble compiles each stage once and a fully
 cached ensemble builds none. `Realization.population()`, `.waveforms()` and
-`.background(registry=registry)` read a stage's product. The registry is
-trusted to be the one the stage was simulated with. When the product is missing, pass the
+`.background()` read a stage's product. When the product is missing, pass the
 stage simulators to regenerate it.
 
-`astrogwb.simulators.network_spectra_ensemble(root, seed, n, names, registry=registry)` reads
+`astrogwb.simulators.network_spectra_ensemble(root, seed, n, names)` reads
 an ensemble's draws and stacks each network's spectra. It never simulates;
 `workflow/coverage_draws.smk` writes the paper's ensembles (see
 `docs/coverage-draws-on-slurm.md`).
@@ -238,13 +238,12 @@ astrogwb noise root/41-0 root/detector_noise.h5 \
 The population and waveform files hold the fields of `PopulationMetadata` and
 `WaveformMetadata` at their top level. Repeat `--detector-config PATH` to merge
 registry layers in argument order. Supplying it to `simulate` enables
-background simulation; the background manifest records network names only.
-Noise uses the same option and selects the network names recorded in the
-realization. The supplied registry is treated as frozen and trusted when
-reading artifacts: readers use its membership, geometry and PSDs to interpret
-the stored arrays, and preserve the recorded artifact identity without
-comparing registry compatibility. Changing a registry does not migrate old
-outputs; regenerate affected realizations and noise files.
+background simulation; the background manifest records each network's detector
+pairs. Noise uses the same option and selects the networks recorded in the
+realization. The supplied registry is treated as frozen. Readers trust the
+files they open and preserve the recorded artifact identity. Changing a
+registry does not migrate old outputs; regenerate affected realizations and
+noise files.
 
 `--seed` goes with
 `--population-metadata` and is refused without it. Realization `i` of a seed

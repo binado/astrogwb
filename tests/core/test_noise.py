@@ -22,7 +22,7 @@ def _registry() -> DetectorRegistry:
     )
 
 
-def test_noise_metadata_stores_network_names_only_and_round_trips(
+def test_noise_metadata_stores_network_pairs_and_round_trips(
     tmp_path: Path,
 ) -> None:
     registry = _registry()
@@ -30,8 +30,8 @@ def test_noise_metadata_stores_network_names_only_and_round_trips(
         np.array([10.0, 20.0, 30.0]), registry, 1.0, network_names=["pair"]
     )
     path = noise.write(tmp_path / "noise.h5")
-    recorded = DetectorNoise.open(path, registry=registry)
-    assert recorded.metadata.networks == ("pair",)
+    recorded = DetectorNoise.open(path)
+    assert recorded.metadata.pairs == {"pair": (("R1", "S1"),)}
     assert "detectors" not in recorded.metadata.model_dump()
     np.testing.assert_array_equal(
         recorded.network("pair").pair_overlap, noise.network("pair").pair_overlap
@@ -39,11 +39,10 @@ def test_noise_metadata_stores_network_names_only_and_round_trips(
 
 
 def test_old_noise_metadata_requires_regeneration(tmp_path: Path) -> None:
-    registry = _registry()
     path = tmp_path / "old-noise.h5"
     metadata = DetectorNoiseMetadata(
         format_version=1,
-        networks=("pair",),
+        pairs={"pair": (("R1", "S1"),)},
         scientific_identity="old",
         observation_time=1.0,
     )
@@ -65,4 +64,4 @@ def test_old_noise_metadata_requires_regeneration(tmp_path: Path) -> None:
         metadata,
     )
     with pytest.raises(ValueError, match="regenerate"):
-        DetectorNoise.open(path, registry=registry)
+        DetectorNoise.open(path)

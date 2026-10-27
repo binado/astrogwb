@@ -77,15 +77,14 @@ def _setup(
 ) -> tuple[ImportanceGaussianLikelihood, dict[str, NDArray], DetectorNoise, dict]:
     """The notebooks' amplitude-mode likelihood, each network's data, and its noise."""
     params = fiducials()
-    registry = detector_registry()
     names = [name for name, _ in DETECTOR_NETWORKS]
     # Draw 0 of DATA_SEED: one catalog, as each network records it.
-    drawn = network_spectra_ensemble(ensemble, DATA_SEED, 1, names, registry=registry)
+    drawn = network_spectra_ensemble(ensemble, DATA_SEED, 1, names)
     observed = {
         name: np.asarray(data["spectral_density"][0])
         for name, data in zip(names, drawn, strict=True)
     }
-    noise = DetectorNoise.open(ensemble / "detector_noise.h5", registry=registry)
+    noise = DetectorNoise.open(ensemble / "detector_noise.h5")
     catalog, catalog_metadata, _ = read_reference_catalog(catalog_path)
     population = catalog_metadata.population
     likelihood = ImportanceGaussianLikelihood.from_catalog(

@@ -45,12 +45,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from itertools import combinations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, Self
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from astrogwb.detector import pair_terms
 from astrogwb.detector.config import DetectorRegistry
 from astrogwb.simulators._io import atomic_h5
 from astrogwb.utils.io import content_key, h5py_module
@@ -67,6 +69,7 @@ __all__ = [
     "DetectorRegistry",
     "NetworkSpectrum",
     "background_key",
+    "background_pairs",
     "background_table",
     "combine_pair_spectra",
     "scientific_payload",
@@ -129,6 +132,13 @@ def select_networks(
     return selected
 
 
+def used_detectors(registry: DetectorRegistry, names: Sequence[str]) -> tuple[str, ...]:
+    """The sorted detectors that appear in the networks ``names`` of ``registry``."""
+    return tuple(
+        sorted({detector for name in names for detector in registry.networks[name]})
+    )
+
+
 def scientific_payload(
     registry: DetectorRegistry, names: Sequence[str]
 ) -> dict[str, Any]:
@@ -137,7 +147,7 @@ def scientific_payload(
     Network membership, and the geometry and PSD reference of the detectors
     those networks use. Labels and unused detectors are left out.
     """
-    used = sorted({detector for name in names for detector in registry.networks[name]})
+    used = used_detectors(registry, names)
     return {
         "networks": {name: list(registry.networks[name]) for name in sorted(names)},
         "detectors": {
@@ -197,10 +207,16 @@ def background_table(
     Returns
     -------
     dict
-        The network names, the key, the normalization convention and the units.
+        The pairs of each network, the key, the normalization convention and
+        the units.
     """
     return {
-        "metadata": {"networks": list(select_networks(registry, names))},
+        "metadata": {
+            "pairs": {
+                name: [list(pair) for pair in registry.pairs(name)]
+                for name in select_networks(registry, names)
+            }
+        },
         "key": background_key(waveform_key, registry, names),
         "normalization": _NORMALIZATION,
         "units": {
@@ -211,12 +227,24 @@ def background_table(
     }
 
 
-def _read_networks(table: Mapping[str, Any]) -> tuple[str, ...]:
-    """The recorded network names of a ``[background]`` table."""
-    names = table["metadata"].get("networks")
-    if not isinstance(names, list) or any(not isinstance(name, str) for name in names):
+def background_pairs(
+    table: Mapping[str, Any],
+) -> dict[str, tuple[tuple[str, str], ...]]:
+    """The detector pairs of each network recorded in a ``[background]`` table.
+
+    The pairs are in the order of the pair axis of the network's spectra.
+
+    Raises
+    ------
+    ValueError
+        If the table predates the recording of pairs.
+    """
+    if "pairs" not in table["metadata"]:
         raise ValueError("background metadata format is old; regenerate realizations")
-    return tuple(names)
+    return {
+        name: tuple((first, second) for first, second in members)
+        for name, members in table["metadata"]["pairs"].items()
+    }
 
 
 @dataclass(frozen=True)
@@ -224,7 +252,8 @@ class BackgroundArtifact:
     """The per-network spectra of one realization, in memory or read from disk.
 
     ``spectra`` holds each network's :class:`NetworkSpectrum`, keyed by
-    network name in sorted order. ``count``, ``total_merger_rate`` (per second) and
+    network name in sorted order, and ``pairs`` the detector pairs of its pair
+    axis. ``count``, ``total_merger_rate`` (per second) and
     ``hyperparameters`` are the realization's, carried over from its
     population. ``waveform_key`` names the polarizations the spectra were
     projected from.
@@ -232,6 +261,7 @@ class BackgroundArtifact:
 
     frequencies: NDArray[np.float64]
     spectra: dict[str, NetworkSpectrum]
+    pairs: dict[str, tuple[tuple[str, str], ...]]
     observation_seconds: float
     count: int
     total_merger_rate: float
@@ -265,8 +295,7 @@ class BackgroundArtifact:
         Datasets ``frequencies`` and, per network,
         ``networks/<name>/pair_spectral_density`` and
         ``networks/<name>/spectral_density``. The pair axis is in the order of
-        :meth:`DetectorRegistry.pairs` of the network in the registry used at
-        write time.
+        ``pairs``.
         """
         with atomic_h5(path) as file:
             file.create_dataset("frequencies", data=self.frequencies)
@@ -286,21 +315,19 @@ class BackgroundArtifact:
         table: Mapping[str, Any],
         realization: Mapping[str, Any],
         waveform_key: str,
-        registry: DetectorRegistry,
     ) -> Self:
         """Read the spectra at ``path`` with their manifest tables.
 
         ``table`` is the ``[background]`` table, ``realization`` the
         ``[realization]`` table and ``waveform_key`` the ``[waveforms]`` key.
-        The recorded identity is kept as is: ``registry`` is trusted to be the
-        one the spectra were simulated with, and only gives the pair order
-        and shapes.
+        The recorded identity is kept as is, and the file is trusted to hold
+        the networks and pairs of ``table``.
 
         Raises
         ------
         ValueError
-            If the table uses another normalization convention or the spectra
-            do not match its networks.
+            If the table uses another normalization convention or predates
+            the recording of pairs.
         """
         version = table["normalization"].get("version")
         if version != NORMALIZATION_VERSION:
@@ -308,13 +335,11 @@ class BackgroundArtifact:
                 f"{path} uses pair-spectrum normalization version {version}, "
                 f"not {NORMALIZATION_VERSION}"
             )
-        network_names = _read_networks(table)
+        pairs = background_pairs(table)
         h5py = h5py_module()
         with h5py.File(path, "r") as file:
             frequencies = np.asarray(file["frequencies"][()], dtype=np.float64)
-            stored = file.get("networks", {})
-            if set(stored) != set(network_names):
-                raise ValueError(f"{path}: networks do not match the manifest")
+            stored = file["networks"]
             spectra = {
                 name: NetworkSpectrum(
                     np.asarray(
@@ -322,20 +347,12 @@ class BackgroundArtifact:
                     ),
                     np.asarray(stored[name]["spectral_density"][()], dtype=np.float64),
                 )
-                for name in network_names
+                for name in pairs
             }
-        for name, spectrum in spectra.items():
-            shape = (len(registry.pairs(name)), frequencies.shape[0])
-            if (
-                spectrum.pair_spectral_density.shape != shape
-                or spectrum.spectral_density.shape != shape[1:]
-            ):
-                raise ValueError(
-                    f"{path}: the spectra of {name!r} do not match the manifest"
-                )
         return cls(
             frequencies=frequencies,
             spectra=spectra,
+            pairs=pairs,
             observation_seconds=float(realization["observation_seconds"]),
             count=int(realization["count"]),
             total_merger_rate=float(realization["total_merger_rate"]),
@@ -371,36 +388,14 @@ class BackgroundSimulator:
             raise ValueError("chunk_size must be positive")
         self._registry = registry
         self._network_names = select_networks(registry)
-        self._detector_names = tuple(
-            sorted({d for n in self._network_names for d in registry.networks[n]})
-        )
-        pair_names = [
-            (a, b)
-            for i, a in enumerate(self._detector_names)
-            for b in self._detector_names[i + 1 :]
-        ]
-        rows = {pair: index for index, pair in enumerate(pair_names)}
+        names = used_detectors(registry, self._network_names)
+        rows = {pair: row for row, pair in enumerate(combinations(names, 2))}
         self._rows = {
             name: [rows[pair] for pair in registry.pairs(name)]
             for name in self._network_names
         }
-        self._detectors, self._sensitivities = registry.build_detectors(
-            self._detector_names
-        )
-        self._detector_objects = dict(
-            zip(self._detector_names, self._detectors, strict=True)
-        )
-        self._pairs = [
-            (self._detector_objects[a], self._detector_objects[b])
-            for a, b in pair_names
-        ]
-        self._network_runtime = {
-            name: (
-                tuple(self._detector_objects[d] for d in registry.networks[name]),
-                {d: self._sensitivities[d] for d in registry.networks[name]},
-            )
-            for name in self._network_names
-        }
+        detectors, _ = registry.build_detectors(names)
+        self._pairs = list(combinations(detectors, 2))
         self._chunk_size = chunk_size
         self._pair_sums = jax.jit(self._chunk_pair_sums)
 
@@ -472,15 +467,16 @@ class BackgroundSimulator:
         spectra = {}
         for name in self._network_names:
             pairs = union[self._rows[name]]
-            detectors, sensitivities = self._network_runtime[name]
-            weights, denominator = _pair_weights_from_objects(
-                frequencies, detectors, sensitivities
+            spectra[name] = NetworkSpectrum(
+                pairs,
+                combine_pair_spectra(pairs, frequencies, self._registry, name),
             )
-            numerator = np.sum(weights * pairs, axis=-2)
-            spectra[name] = NetworkSpectrum(pairs, _combine(numerator, denominator))
         return BackgroundArtifact(
             frequencies=frequencies,
             spectra=spectra,
+            pairs={
+                name: tuple(self._registry.pairs(name)) for name in self._network_names
+            },
             observation_seconds=population.observation_seconds,
             count=population.count,
             total_merger_rate=population.total_merger_rate,
@@ -499,29 +495,6 @@ def _combine(
     """``numerator / denominator``, zero in the bins without a usable weight."""
     usable = denominator > 0.0
     return np.where(usable, numerator / np.where(usable, denominator, 1.0), 0.0)
-
-
-def _pair_weights(
-    frequencies: NDArray[np.float64], registry: DetectorRegistry, network_name: str
-) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """The pair weights ``(P, F)`` and their ORF-weighted sum ``(F,)`` of a network."""
-
-    detectors, sensitivities = registry.build_network(network_name)
-    return _pair_weights_from_objects(frequencies, detectors, sensitivities)
-
-
-def _pair_weights_from_objects(
-    frequencies: NDArray[np.float64],
-    detectors: Sequence[Any],
-    sensitivities: Mapping[str, Any],
-) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Pair weights and denominator using already-resolved runtime objects."""
-    from astrogwb.detector import pair_terms
-
-    terms = pair_terms(frequencies, detectors, sensitivities)
-    weights = np.stack([term.weight for term in terms])
-    denominator = np.sum([term.weight * term.overlap for term in terms], axis=0)
-    return weights, denominator
 
 
 def combine_pair_spectra(
@@ -555,8 +528,9 @@ def combine_pair_spectra(
     numpy.ndarray
         The network spectrum, ``(..., F)``.
     """
-    weights, denominator = _pair_weights(
-        np.asarray(frequencies), registry, network_name
-    )
+    detectors, sensitivities = registry.build_network(network_name)
+    terms = pair_terms(np.asarray(frequencies), detectors, sensitivities)
+    weights = np.stack([term.weight for term in terms])
+    denominator = np.sum([term.weight * term.overlap for term in terms], axis=0)
     numerator = np.sum(weights * np.asarray(pair_spectral_density), axis=-2)
     return _combine(numerator, denominator)

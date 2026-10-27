@@ -147,7 +147,7 @@ def test_a_staged_realization_reads_back_the_fused_background(
     )
     staged = simulate_realization(
         tmp_path, background=NETWORKS, chunk_size=8
-    ).background(registry=NETWORKS)
+    ).background()
 
     assert_same_spectra(staged, fused)
     assert staged.key() == fused.key()

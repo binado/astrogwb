@@ -219,7 +219,7 @@ def main() -> None:
         return
     fiducial = fiducials(root=ROOT_DIR)
     registry = detector_registry(root=ROOT_DIR)
-    noise = DetectorNoise.open(args.ensemble / "detector_noise.h5", registry=registry)
+    noise = DetectorNoise.open(args.ensemble / "detector_noise.h5")
     frequencies = noise.frequencies
     likelihood = build_likelihood(args.reference_catalog, noise)
     spectrum, _, extras = likelihood.predict(fiducial)

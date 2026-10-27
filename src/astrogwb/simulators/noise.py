@@ -15,7 +15,8 @@ cannot drift apart. Per network it holds
 - ``scale`` -- its :func:`~astrogwb.detector.gaussian_bin_scale`, ``(F,)``;
 
 the pairs in the order of
-:meth:`~astrogwb.simulators.DetectorRegistry.pairs`, the background's.
+:meth:`~astrogwb.detector.DetectorRegistry.pairs`, the background's, and
+recorded in the metadata.
 Frequency bands and padding are analysis choices and are left to the reader.
 """
 
@@ -42,22 +43,27 @@ __all__ = [
 ]
 
 #: The layout version of the metadata; a file of another version is regenerated.
-FORMAT_VERSION = 2
+FORMAT_VERSION = 3
 
 
 class DetectorNoiseMetadata(BaseModel):
     """What a :class:`DetectorNoise` is evaluated from, besides its frequencies.
 
-    ``networks`` are the recorded network names, and
-    ``observation_time`` is in years.
+    ``pairs`` are the detector pairs of each recorded network, in the order of
+    the pair axes of its noise, and ``observation_time`` is in years.
     """
 
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
 
     format_version: int = Field(strict=True)
-    networks: tuple[str, ...]
+    pairs: dict[str, tuple[tuple[str, str], ...]]
     scientific_identity: str
     observation_time: Annotated[float, Field(gt=0.0)]
+
+    @property
+    def networks(self) -> tuple[str, ...]:
+        """The recorded network names."""
+        return tuple(self.pairs)
 
     def key(self) -> str:
         """The content hash of the record."""
@@ -101,20 +107,17 @@ class DetectorNoise:
         return write(path, tree, self.metadata)
 
     @classmethod
-    def open(cls, path: str | Path, *, registry: DetectorRegistry) -> Self:
+    def open(cls, path: str | Path) -> Self:
         """Read the noise :meth:`write` wrote to ``path``.
 
-        ``registry`` is trusted to be the one the noise was evaluated with,
-        and only gives the pair order and shapes; the recorded identity is not
-        compared with it.
+        The file is trusted to hold the arrays of its recorded networks.
 
         Raises
         ------
         FileNotFoundError
             If ``path`` does not exist.
         ValueError
-            If the file uses another format version, or its arrays do not
-            match the recorded networks.
+            If the file uses another format version.
         """
         data, metadata, _ = load(path, DetectorNoiseMetadata)
         if metadata.format_version != FORMAT_VERSION:
@@ -130,17 +133,6 @@ class DetectorNoise:
             )
             for name in metadata.networks
         }
-        for name, values in noise.items():
-            shape = (len(registry.pairs(name)), frequencies.size)
-            if (
-                values.pair_overlap.shape != shape
-                or values.pair_scale.shape != shape
-                or values.effective_psd.shape != (frequencies.size,)
-                or values.scale.shape != (frequencies.size,)
-            ):
-                raise ValueError(
-                    f"{path}: noise arrays for {name!r} have invalid shapes"
-                )
         return cls(
             metadata=metadata,
             frequencies=frequencies,
@@ -209,7 +201,7 @@ def detector_noise(
     return DetectorNoise(
         metadata=DetectorNoiseMetadata(
             format_version=FORMAT_VERSION,
-            networks=names,
+            pairs={name: tuple(registry.pairs(name)) for name in names},
             scientific_identity=content_key(scientific_payload(registry, names)),
             observation_time=float(observation_time),
         ),

@@ -43,7 +43,7 @@ from astrogwb.simulators._io import (
 from astrogwb.simulators.background import (
     BackgroundArtifact,
     BackgroundSimulator,
-    _read_networks,
+    background_pairs,
     background_table,
     scientific_payload,
 )
@@ -160,7 +160,7 @@ class Realization:
     def networks(self) -> tuple[str, ...] | None:
         """The recorded background networks, by name; ``None`` if none are."""
         table = self.manifest.get("background")
-        return None if table is None else _read_networks(table)
+        return None if table is None else tuple(background_pairs(table))
 
     def population(
         self, simulator: PopulationSimulator | None = None
@@ -237,7 +237,6 @@ class Realization:
     def background(
         self,
         *,
-        registry: DetectorRegistry,
         simulator: BackgroundSimulator | None = None,
         waveforms: WaveformSimulator | None = None,
         population: PopulationSimulator | None = None,
@@ -266,7 +265,6 @@ class Realization:
                 table=table,
                 realization=self.manifest["realization"],
                 waveform_key=self.manifest["waveforms"]["key"],
-                registry=registry,
             )
         if simulator is None:
             raise FileNotFoundError(
@@ -591,7 +589,6 @@ def network_spectra_ensemble(
     num_draws: int,
     names: Sequence[str],
     *,
-    registry: DetectorRegistry,
     start: int = 0,
 ) -> list[NetworkSpectra]:
     """Draws ``start .. num_draws - 1`` of the networks ``names``, stacked per network.
@@ -627,7 +624,7 @@ def network_spectra_ensemble(
     """
     root = Path(root)
     draws = [
-        Realization.open(root / f"{int(seed)}-{index}").background(registry=registry)
+        Realization.open(root / f"{int(seed)}-{index}").background()
         for index in range(start, num_draws)
     ]
     return [_stack(draws, name) for name in names]

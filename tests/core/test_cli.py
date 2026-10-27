@@ -13,7 +13,6 @@ from astrogwb_tiny_pipeline import WAVEFORM, population_metadata
 from typer.testing import CliRunner
 
 from astrogwb.cli import app
-from astrogwb.detector.config import load_detector_config
 from astrogwb.simulators import DetectorNoise, Realization
 
 POPULATION = population_metadata()
@@ -74,9 +73,8 @@ def test_a_fused_simulate_run_writes_the_manifest_sources_and_background(
     )
 
     realization = Realization.open(tmp_path / "realization")
-    registry = load_detector_config([metadata_files["detector"]])
-    background = realization.background(registry=registry)
-    assert registry.pairs("ET") == [("R1", "S1")]
+    background = realization.background()
+    assert background.pairs == {"ET": (("R1", "S1"),)}
     assert background.count > 0
     assert np.any(background.network("ET").pair_spectral_density)
     assert sorted(path.name for path in realization.directory.iterdir()) == [
@@ -100,10 +98,7 @@ def test_a_background_run_adds_to_an_existing_realization(
 
     _simulate(directory, "--detector-config", str(metadata_files["detector"]))
 
-    registry = load_detector_config([metadata_files["detector"]])
-    assert Realization.open(directory).background(registry=registry).network_names == (
-        "ET",
-    )
+    assert Realization.open(directory).background().network_names == ("ET",)
 
 
 def test_a_seed_without_population_metadata_is_refused(tmp_path: Path) -> None:
@@ -137,10 +132,9 @@ def test_noise_writes_the_backgrounds_networks_on_its_grid(
     )
 
     assert result.exit_code == 0, result.output
-    registry = load_detector_config([metadata_files["detector"]])
-    noise = DetectorNoise.open(tmp_path / "detector_noise.h5", registry=registry)
+    noise = DetectorNoise.open(tmp_path / "detector_noise.h5")
     realization = Realization.open(directory)
-    background = realization.background(registry=registry)
+    background = realization.background()
     np.testing.assert_array_equal(noise.frequencies, background.frequencies)
     assert noise.metadata.networks == background.network_names
     assert noise.metadata.observation_time == POPULATION.observation_time

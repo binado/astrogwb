@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Sequence
+from functools import cache
 from pathlib import Path
 from typing import Annotated
 
@@ -46,6 +47,12 @@ class DetectorGeometry(BaseModel):
     yarm_tilt_rad: float = 0.0
 
 
+@cache
+def _sensitivity(psd_reference: str) -> Sensitivity:
+    """The shared :class:`Sensitivity` of a PSD reference."""
+    return Sensitivity(psd_reference)
+
+
 class DetectorConfig(BaseModel):
     """Geometry, PSD reference, and an optional presentation label.
 
@@ -73,8 +80,13 @@ class DetectorConfig(BaseModel):
 
     @property
     def sensitivity(self) -> Sensitivity:
-        """Sensitivity built from this detector's PSD reference."""
-        return Sensitivity(self.psd_reference)
+        """Sensitivity of this detector's PSD reference, shared by reference.
+
+        The curve is read on its first evaluation. The sensitivity is cached
+        per reference, not per instance, so ``model_copy(update=...)`` of a
+        detector cannot carry a stale curve.
+        """
+        return _sensitivity(self.psd_reference)
 
     def to_detector(self, name: str) -> CustomDetector:
         """gwmock geometry object addressed by ``name``."""
@@ -121,35 +133,18 @@ class DetectorRegistry(BaseModel):
 
     @model_validator(mode="after")
     def _validate_networks(self) -> DetectorRegistry:
+        """Require each network to be distinct, defined detectors."""
         for name, members in self.networks.items():
-            self.validate_members(members, label=f"network {name!r}")
+            if not members or len(set(members)) != len(members):
+                raise ValueError(
+                    f"network {name!r} must contain distinct detectors and be non-empty"
+                )
+            missing = [member for member in members if member not in self.detectors]
+            if missing:
+                raise ValueError(
+                    f"network {name!r} contains undefined detectors: {missing}"
+                )
         return self
-
-    def validate_members(
-        self, names: Sequence[str], *, label: str = "detectors"
-    ) -> None:
-        """Require a non-empty, distinct list of complete detector definitions.
-
-        Parameters
-        ----------
-        names
-            The detector names to check.
-        label
-            What ``names`` is, for the error message.
-
-        Raises
-        ------
-        ValueError
-            If ``names`` is empty, repeats a detector, or names one the
-            registry does not define.
-        """
-        if not names or len(set(names)) != len(names):
-            raise ValueError(
-                f"{label} must contain distinct detectors and be non-empty"
-            )
-        missing = [name for name in names if name not in self.detectors]
-        if missing:
-            raise ValueError(f"{label} contains undefined detectors: {missing}")
 
     def build_detectors(
         self, names: Sequence[str]
@@ -159,7 +154,7 @@ class DetectorRegistry(BaseModel):
         Parameters
         ----------
         names
-            The detectors to build; see :meth:`validate_members`.
+            The detectors to build, each defined by the registry.
 
         Returns
         -------
@@ -167,7 +162,6 @@ class DetectorRegistry(BaseModel):
             The detectors, in the order of ``names``, and their sensitivities
             keyed by name.
         """
-        self.validate_members(names)
         return (
             tuple(self.detectors[name].to_detector(name) for name in names),
             {name: self.detectors[name].sensitivity for name in names},
@@ -216,8 +210,9 @@ def load_detector_config(paths: Sequence[Path]) -> DetectorRegistry:
     Later layers override earlier geometry, sensitivities and network
     membership. References and ``extends`` resolve within this merge alone.
     An empty layer list loads packaged detectors without named networks.
-    Only ``[detectors]`` and ``[networks]`` are accepted in the resolved config;
-    no runtime detector objects are built during loading or validation.
+    Only ``[detectors]`` and ``[networks]`` are accepted in the resolved config.
+    Validation checks that each PSD reference resolves to a file; the curve
+    itself is read on first use.
 
     Parameters
     ----------

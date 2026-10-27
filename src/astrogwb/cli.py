@@ -40,6 +40,13 @@ __all__ = ["app"]
 
 app = typer.Typer(help="Bayesian inference for stochastic GW backgrounds.")
 
+DETECTOR_CONFIG_OPTION = typer.Option(
+    "--detector-config",
+    exists=True,
+    dir_okay=False,
+    help="Detector registry TOML layer; repeat to merge.",
+)
+
 
 @app.callback()
 def _main() -> None:
@@ -91,15 +98,7 @@ def simulate(
         Path | None,
         typer.Option(exists=True, dir_okay=False, help="Waveform metadata TOML."),
     ] = None,
-    detector_config: Annotated[
-        list[Path] | None,
-        typer.Option(
-            "--detector-config",
-            exists=True,
-            dir_okay=False,
-            help="Detector registry TOML layer; repeat to merge.",
-        ),
-    ] = None,
+    detector_config: Annotated[list[Path] | None, DETECTOR_CONFIG_OPTION] = None,
     keep_sources: Annotated[
         bool, typer.Option(help="Write source_parameters.h5.")
     ] = True,
@@ -167,15 +166,7 @@ def noise(
         ),
     ],
     output: Annotated[Path, typer.Argument(dir_okay=False, help="HDF5 file to write.")],
-    detector_config: Annotated[
-        list[Path],
-        typer.Option(
-            "--detector-config",
-            exists=True,
-            dir_okay=False,
-            help="Detector registry TOML layer; repeat to merge.",
-        ),
-    ],
+    detector_config: Annotated[list[Path], DETECTOR_CONFIG_OPTION],
     platform: Annotated[
         str, typer.Option(help="JAX platform: auto, cpu, cuda or tpu.")
     ] = "auto",
@@ -191,7 +182,7 @@ def noise(
 
     registry = load_detector_config(detector_config)
     recorded = Realization.open(realization)
-    background = recorded.background(registry=registry)
+    background = recorded.background()
     detector_noise(
         background.frequencies,
         registry,
