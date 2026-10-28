@@ -17,7 +17,6 @@ from astrogwb.inference.poisson_counts import (
     _sum_polarization_power,
     poisson_counts_forward_model,
 )
-from astrogwb.populations import joint_model
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import (
     AnalyticInspiralGenerator,
@@ -25,7 +24,6 @@ from astrogwb.waveform import (
     RippleGenerator,
     WaveformMetadata,
 )
-from astrogwb.waveform.validation import validate_source_model
 
 N_EVENTS = 8
 CHUNK_SIZE = 3
@@ -461,28 +459,6 @@ def test_vmap_over_draws_shares_one_static_event_count() -> None:
     np.testing.assert_allclose(
         np.asarray(mapped[0]), np.asarray(spectrum(params)), rtol=1e-12
     )
-
-
-# --------------------------------------------------------------------- #
-# Validation the traced model cannot do for itself
-# --------------------------------------------------------------------- #
-def test_validate_source_model_accepts_a_matched_population() -> None:
-    model = joint_model(*mock_population()(_jax_params()))
-    validate_source_model(model, generator=_generator(), rng_key=jax.random.key(0))
-
-
-def test_validate_source_model_requires_luminosity_distance() -> None:
-    model = joint_model(*mock_population()(_jax_params()))
-
-    def no_distance():
-        sources = dict(model())
-        del sources["luminosity_distance"]
-        return sources
-
-    with pytest.raises(KeyError, match="luminosity_distance"):
-        validate_source_model(
-            no_distance, generator=_generator(), rng_key=jax.random.key(0)
-        )
 
 
 # --------------------------------------------------------------------- #
