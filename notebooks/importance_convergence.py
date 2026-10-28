@@ -95,7 +95,7 @@ def _():
     $b$: at $\Xi_0 = 1$ the spectrum does not depend on it.
 
     The ladder's reference catalog is read from a file
-    (`scripts/draw_reference_catalog.py`, run by `workflow/coverage_draws.smk`);
+    (`astrogwb model-catalog`, run by `workflow/coverage_draws.smk`);
     the Monte Carlo and Sobol catalogs are drawn in memory.
     """)
 

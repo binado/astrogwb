@@ -880,13 +880,13 @@ def _():
 
 @app.cell
 def _(ROOT_DIR):
-    # The scan's reference catalog, written by workflow/coverage_draws.smk:
+    # The shared fiducial catalog, written by workflow/coverage_draws.smk:
     # 2^14 draws on a Sobol net at the default waveform, as in
-    # cosmology_grid_posteriors.py, each generated at the redshift where the
-    # fiducial luminosity distance is 1 Mpc, below every window of the scan,
+    # cosmology_grid_posteriors.py, each generated at reference redshift 1e-4,
+    # below every window of the scan,
     # on a reference grid from the lowest observed frequency to past the
     # detector-frame merger there.
-    scan_catalog_path = ROOT_DIR / CATALOGS_ROOT / "reference-scan.h5"
+    scan_catalog_path = ROOT_DIR / CATALOGS_ROOT / "reference-fiducial.h5"
     scan_redshift_nodes = 32  # converged to 1e-4 down to z_min = 0.01
     # Geometric where the curves are steep, uniform where the plot is linear.
     scan_redshifts = np.concatenate(

@@ -76,3 +76,36 @@ file, so a notebook can vary one value without editing TOML or retyping the
 table.
 
 See [`docs/`](.) for catalog generation and paper figures.
+
+## Reference catalogs
+
+Generate an importance-integration catalog with the CLI:
+
+```sh
+uv run astrogwb model-catalog outputs/catalogs/reference-fiducial.h5 \
+    --catalog-metadata config/catalogs/base.toml \
+    --catalog-metadata config/catalogs/reference-fiducial.toml \
+    --seed 42 --chunk-size 4096
+```
+
+Repeat `--catalog-metadata` to merge TOML layers in argument order using
+pyknf. Later fields override earlier fields, tables merge recursively, and
+`${...}` references and `extends` table inheritance are resolved by the shared
+config loader. The merged result is a complete `CatalogMetadata` record: top-level `num_samples`,
+`sampling`, optional `reference_redshift`, and tables for `waveform`,
+`population` (including `population.model_kwargs`), and `fiducials`.
+Omit optional null fields and `version`; the installed package supplies its
+version. The seed and execution options (`--chunk-size`, `--platform`, and
+`--cpu-threads`) are command-line arguments, outside the catalog record.
+
+`config/catalogs/base.toml` holds the shared population, waveform, fiducials,
+and default Sobol sample settings. Each `reference-*.toml` is a small override
+layer: fiducial sets `reference_redshift = 1e-4` and serves the posterior,
+coverage, and minimum-redshift-scan calculations; ladder changes the sample
+count and sampling method. These files do not
+inherit changes from the shared paper configuration. Regenerate affected
+outputs after editing the base or variant. `workflow/coverage_draws.smk`
+tracks both files as inputs and runs the command with the appropriate seeds;
+notebooks read `reference-fiducial.h5` or `reference-ladder.h5`.
+Regenerate `outputs/catalogs/reference-fiducial.h5` before running the notebooks
+after this change; the former `reference-scan.h5` output is no longer used.

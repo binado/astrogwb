@@ -17,7 +17,7 @@ def read_reference_catalog(
 ) -> tuple[PolarizationPowerData, CatalogMetadata, int]:
     """The reference catalog at ``path``, its record and the seed it was drawn at.
 
-    ``scripts/draw_reference_catalog.py`` writes it; nothing here draws.
+    ``astrogwb model-catalog`` writes it; nothing here draws.
 
     Raises
     ------

@@ -9,7 +9,7 @@ input, per ensemble:
 | --- | --- | --- |
 | `outputs/ensembles/<name>/<seed>-<i>/` | `astrogwb simulate`, one realization per job | every notebook with Poisson draws |
 | `outputs/ensembles/<name>/detector_noise.h5` | `astrogwb noise` of draw 0 | the grid and coverage notebooks, `scripts/shot_noise_*.py` |
-| `outputs/catalogs/reference-*.h5` | `scripts/draw_reference_catalog.py` | the posterior notebooks, `importance_convergence`, `ensemble_spectrum` |
+| `outputs/catalogs/reference-*.h5` | `astrogwb model-catalog` | the posterior notebooks, `importance_convergence`, `ensemble_spectrum` |
 
 The one ensemble is `fiducial`, the default waveform and grid: the grid
 notebooks' injection, `shot_noise_coverage`'s injections and the draws of
