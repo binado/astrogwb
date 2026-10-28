@@ -1,2 +1,0 @@
-# Overrides base.toml for the minimum-redshift scan (reference at 1 Mpc).
-reference_redshift = 2.2565039557e-4

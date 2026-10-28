@@ -100,9 +100,12 @@ version. The seed and execution options (`--chunk-size`, `--platform`, and
 
 `config/catalogs/base.toml` holds the shared population, waveform, fiducials,
 and default Sobol sample settings. Each `reference-*.toml` is a small override
-layer: fiducial inherits everything, ladder changes the sample count and
-sampling method, and scan changes the reference redshift. These files do not
+layer: fiducial sets `reference_redshift = 1e-4` and serves the posterior,
+coverage, and minimum-redshift-scan calculations; ladder changes the sample
+count and sampling method. These files do not
 inherit changes from the shared paper configuration. Regenerate affected
 outputs after editing the base or variant. `workflow/coverage_draws.smk`
 tracks both files as inputs and runs the command with the appropriate seeds;
-notebooks continue reading the same HDF5 paths.
+notebooks read `reference-fiducial.h5` or `reference-ladder.h5`.
+Regenerate `outputs/catalogs/reference-fiducial.h5` before running the notebooks
+after this change; the former `reference-scan.h5` output is no longer used.

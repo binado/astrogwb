@@ -12,8 +12,7 @@ cell names its inputs, all under `outputs/`:
 | Input | Read by |
 | --- | --- |
 | `ensembles/fiducial/` (+ `detector_noise.h5`) | `cosmology_grid_posteriors`, `madau_dickinson_grid`, `shot_noise_coverage`, `ensemble_spectrum`, `spectrum_snrs` (deprecated) |
-| `catalogs/reference-fiducial.h5` | `cosmology_grid_posteriors`, `madau_dickinson_grid`, `shot_noise_coverage` |
-| `catalogs/reference-scan.h5` | `ensemble_spectrum` |
+| `catalogs/reference-fiducial.h5` | `cosmology_grid_posteriors`, `madau_dickinson_grid`, `shot_noise_coverage`, `ensemble_spectrum` |
 | `catalogs/reference-ladder.h5` | `importance_convergence` |
 
 `workflow/coverage_draws.smk` writes them (`docs/coverage-draws-on-slurm.md`).
@@ -43,7 +42,7 @@ A missing input is a `FileNotFoundError`, never a simulation.
   (`network_spectra_ensemble` over the fiducial ensemble: one catalog, six
   spectra through the per-source antenna patterns), modeled with the rescaled
   reference-redshift spectrum (`astrogwb.gwb.importance`: $2^{14}$ intrinsic
-  draws on a scrambled Sobol net, one waveform each at the window's lower edge, rescaled to 32 redshift
+  draws on a scrambled Sobol net, one waveform each at reference redshift $10^{-4}$, rescaled to 32 redshift
   nodes; catalog seed 42, the injection being seed 41). The log densities are computed on every run. Each
   grid point is predicted once and shared by all six networks
   (`grid_log_posterior`); the numbers equal the per-network evaluation. The
@@ -94,7 +93,7 @@ A missing input is a `FileNotFoundError`, never a simulation.
   $z_{\min}$: the amplitude uncertainty
   $\sigma_{\mathrm{tot}}/A = (\rho^{-2} + s^2)^{1/2}$ per network
   (`minimum_redshift_scan.pdf`), from one reference catalog generated at the
-  redshift where $d_L = 1$ Mpc and rescaled to each window, checked against the
+  reference redshift $10^{-4}$ and rescaled to each window, checked against the
   draws' $\rho\,\mathrm{sd}(\epsilon)$. The ensemble is the fiducial ensemble,
   shared with `shot_noise_coverage.py`.
 - **`shot_noise_coverage.py`** — marimo notebook. Calibration of the

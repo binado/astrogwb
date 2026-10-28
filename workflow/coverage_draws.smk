@@ -55,7 +55,6 @@ CATALOGS = {
     "fiducial": {
         "reference-fiducial": "--seed 42 --chunk-size 4096",
         "reference-ladder": "--seed 100",
-        "reference-scan": "--seed 42 --chunk-size 4096",
     },
 }
 CATALOG_OPTIONS = {

@@ -1,1 +1,2 @@
-# Inherits all settings from base.toml; the posterior and coverage catalog.
+# Overrides base.toml for posteriors, coverage, and the minimum-redshift scan.
+reference_redshift = 1e-4
