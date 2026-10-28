@@ -3,23 +3,22 @@
 from __future__ import annotations
 
 import dataclasses
-from pathlib import Path
-from types import SimpleNamespace
+import tomllib
 
 import jax.numpy as jnp
 import numpy as np
 import pytest
 from repo import REPO_ROOT
 
-from astrogwb.paper import posteriors
-from astrogwb.paper.config import detector_registry
 from astrogwb.paper.posteriors import (
-    ensure_reference_catalog,
+    MAX_PAIRS,
     network_data,
-    noise_digest,
-    settings_digest,
+    network_pair_data,
     shot_noise_variant,
 )
+from astrogwb.simulators import DetectorConfiguration, DetectorNoise, detector_noise
+
+NETWORK = "ET-2L-aligned-CE-Hanford"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -30,99 +29,77 @@ class _Likelihood:
 
 
 @pytest.fixture(scope="module")
-def registry():
-    return detector_registry(root=REPO_ROOT)
-
-
-@pytest.mark.parametrize(
-    ("left", "right", "equal"),
-    [
-        ({"a": 1, "b": [2, 3]}, {"b": [2, 3], "a": 1}, True),
-        ({"a": 1, "b": 2}, {"a": 1, "b": 3}, False),
-        ({"a": 1}, {"a": 1, "b": 2}, False),
-    ],
-)
-def test_settings_digest(left: dict, right: dict, equal: bool) -> None:
-    assert (settings_digest(**left) == settings_digest(**right)) is equal
-
-
-def test_noise_digest_separates_networks_by_geometry(registry) -> None:
-    # The two 2L networks share PSDs and differ only in geometry.
-    frequencies = np.geomspace(5.0, 1000.0, 64)
-    data = {
-        name: network_data(
-            registry,
-            name,
-            frequencies,
-            observation_time=1.0,
-            minimum_frequency=5.0,
-            maximum_frequency=1000.0,
+def noise() -> DetectorNoise:
+    """The fiducial network's noise on a grid straddling the band's edges."""
+    with (REPO_ROOT / "config/networks.toml").open("rb") as file:
+        network = DetectorConfiguration.model_validate(
+            tomllib.load(file)["networks"][NETWORK]
         )
-        for name in ("ET-2L-aligned", "ET-2L-misaligned")
-    }
-    digests = noise_digest(data)
-
-    assert digests["ET-2L-aligned"] != digests["ET-2L-misaligned"]
-    assert noise_digest(data) == digests
-
-
-@pytest.mark.parametrize(("recorded_key", "recorded_seed"), [("other", 7), ("this", 8)])
-def test_reference_catalog_mismatch_raises(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    recorded_key: str,
-    recorded_seed: int,
-) -> None:
-    metadata = SimpleNamespace(key=lambda: "this")
-    recorded = SimpleNamespace(key=lambda: recorded_key)
-    (tmp_path / "reference_catalog-this-7.h5").touch()
-    monkeypatch.setattr(
-        posteriors, "load", lambda *_: (None, recorded, {"seed": recorded_seed})
-    )
-    with pytest.raises(ValueError, match="records"):
-        ensure_reference_catalog(metadata, 7, tmp_path)  # ty: ignore[invalid-argument-type]
-
-
-def test_network_data_masks_unusable_bins(registry) -> None:
     frequencies = np.array([0.5, 1.0, 10.0, 50.0, 100.0, 5000.0])
-    data = network_data(
-        registry,
-        "ET-2L-aligned-CE-Hanford",
-        frequencies,
-        observation_time=1.0,
-        minimum_frequency=2.0,
-        maximum_frequency=2048.0,
+    return detector_noise(frequencies, {NETWORK: network}, 1.0)
+
+
+def test_network_data_masks_out_of_band_bins(noise: DetectorNoise) -> None:
+    mask = np.asarray(
+        network_data(noise, NETWORK, minimum_frequency=2.0, maximum_frequency=2048.0)[
+            "frequency_mask"
+        ]
     )
+
+    np.testing.assert_array_equal(mask, [False, False, True, True, True, False])
+
+
+def test_network_data_gives_masked_bins_unit_scale(noise: DetectorNoise) -> None:
+    data = network_data(noise, NETWORK, minimum_frequency=2.0, maximum_frequency=2048.0)
     mask, scale = np.asarray(data["frequency_mask"]), np.asarray(data["scale"])
-    assert not mask[:2].any()
-    assert not mask[-1]
-    assert mask[2:-1].any()
-    assert np.all(scale[~mask] == 1.0)
-    assert np.all(np.isfinite(scale))
+
+    np.testing.assert_array_equal(scale[~mask], 1.0)
+    np.testing.assert_array_equal(scale[mask], noise.network(NETWORK).scale[mask])
+
+
+def test_network_pair_data_pads_to_max_pairs_with_masked_rows(
+    noise: DetectorNoise,
+) -> None:
+    data = network_pair_data(
+        noise, NETWORK, minimum_frequency=2.0, maximum_frequency=2048.0
+    )
+    mask = np.asarray(data["frequency_mask"])
+
+    assert mask.shape == (MAX_PAIRS, noise.frequencies.size)
+    assert not mask[3:].any()
+    np.testing.assert_array_equal(np.asarray(data["pair_overlap"])[3:], 0.0)
+    np.testing.assert_array_equal(np.asarray(data["scale"])[3:], 1.0)
+
+
+def test_network_pair_data_keeps_the_noise_files_overlaps(
+    noise: DetectorNoise,
+) -> None:
+    data = network_pair_data(
+        noise, NETWORK, minimum_frequency=2.0, maximum_frequency=2048.0
+    )
+
+    np.testing.assert_array_equal(
+        np.asarray(data["pair_overlap"])[:3], noise.network(NETWORK).pair_overlap
+    )
 
 
 @pytest.mark.parametrize(
-    ("variant", "mode", "has_variance", "settings"),
+    ("variant", "mode", "has_variance"),
     [
-        ("detector", None, False, {}),
-        ("amplitude", "amplitude", False, {"shot_noise": "amplitude"}),
-        ("per_frequency", "per_frequency", False, {"shot_noise": "per_frequency"}),
-        (
-            "fixed",
-            "fixed",
-            True,
-            {"shot_noise": "fixed", "relative_variance": [0.1, 0.2]},
-        ),
+        ("detector", None, False),
+        ("amplitude", "amplitude", False),
+        ("per_frequency", "per_frequency", False),
+        ("modes", "modes", False),
+        ("fixed", "fixed", True),
     ],
 )
-def test_shot_noise_variant(
-    variant: str, mode: str | None, has_variance: bool, settings: dict
+def test_shot_noise_variant_sets_the_mode(
+    variant: str, mode: str | None, has_variance: bool
 ) -> None:
-    likelihood, variance, recorded = shot_noise_variant(
+    likelihood, variance = shot_noise_variant(
         variant,
         _Likelihood(shot_noise="amplitude"),  # ty: ignore[invalid-argument-type]
         jnp.array([0.1, 0.2]),  # ty: ignore[invalid-argument-type]
     )
     assert likelihood.shot_noise == mode
     assert (variance is not None) is has_variance
-    assert recorded == settings

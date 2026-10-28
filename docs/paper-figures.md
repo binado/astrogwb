@@ -64,7 +64,7 @@ Every ensemble is a set of independent draws (100 by default) of the
 catalog-based forward model -- `R <P>` over `N` sources drawn at the fiducial
 hyperparameters (`astrogwb.gwb.catalog.draw_catalog`) -- served from the
 spectrum cache or generated on a miss. The Poisson option is a network
-realization from `astrogwb.paper.ensemble`. Other defaults are seed 41, batch size 1024, one observing
+realization from the fiducial ensemble (`astrogwb.simulators.network_spectra_ensemble`). Other defaults are seed 41, batch size 1024, one observing
 year, the 2-2048 Hz band, and network `ET-2L-aligned-CE-Hanford`.
 
 - The **count sweep** uses `N = 2^12 ... 2^18` at `z_min = 0.35`.
@@ -137,18 +137,15 @@ Figure styling uses the shared paper style, including its LaTeX requirement.
 No CSV or provenance JSON is exported.
 
 Draws contain source fluctuations only, with the population's inclination
-convention retained, and no detector-noise realizations. Execute the smoke
-test, which checks that the whole notebook runs, with:
+convention retained, and no detector-noise realizations. Lint the cell graph
+with:
 
 ```bash
 uv run --extra notebook --group dev marimo check --strict notebooks/spectrum_snrs.py
-ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/spectrum_snrs.py
 ```
 
-Smoke mode uses three draws, counts `[8, 16, 32]`, a short observation for the
-Poisson option, and no figure saving. A full run
-(`N = 2^18`, 100 draws, three cutoffs) is expensive the first time, until the
-spectrum cache is populated.
+A full run (`N = 2^18`, 100 draws, three cutoffs) is expensive the first time,
+until the spectrum cache is populated.
 
 ## Grid posteriors
 
@@ -160,18 +157,16 @@ spectrum of `astrogwb.gwb.importance` (`catalog_seed = 42`): `2^19` intrinsic
 draws, each generated once at the window's lower edge by `reference_catalog`,
 and `ImportanceGaussianLikelihood` rescaling their mean power to 32 Gauss-Legendre
 nodes in the scale factor `1/(1 + z)` at each grid point, with no intrinsic
-reweighting. The log densities are cached in `default_cache_dir() /
-"posteriors"`, in a file
-whose name carries a hash of the seeds, grids, band, observing time, version
-and catalog keys, so a stale cache is never served. The first run generates the
-reference catalog (`outputs/catalogs/reference_catalog-<key>-42.h5`, chunked
-by `reference_catalog(..., chunk_size=...)`).
+reweighting. The log densities are computed on every run. The notebook reads
+its inputs and never generates them: the injection ensemble
+(`outputs/ensembles/fiducial/`), its `detector_noise.h5` and the reference
+catalog (`outputs/catalogs/reference-fiducial.h5`), all written by
+`workflow/coverage_draws.smk` (see `docs/coverage-draws-on-slurm.md`).
 Figures go to `outputs/figures/cosmology_grid_posteriors/` when the
 `Write figures` switch is on:
 
 ```bash
 uv run --extra notebook --group dev marimo check --strict notebooks/cosmology_grid_posteriors.py
-ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/cosmology_grid_posteriors.py
 ```
 
 ## Importance convergence
@@ -188,11 +183,11 @@ draws of every catalog, so the `N` ladder costs no extra waveforms. Errors are
 reported in units of the most sensitive network's per-bin `sigma` and as each
 parameter's likelihood-peak shift in Fisher widths, at the fiducials and the
 grid windows' edges. A recommendation cell reports the cheapest pair below
-tolerance and the `N` the `1/N` variance law extrapolates to. Catalogs are
-cached in `outputs/catalogs/`; figures go to
+tolerance and the `N` the `1/N` variance law extrapolates to. The ladder's
+catalog is read from `outputs/catalogs/reference-ladder.h5`; the Monte Carlo
+catalogs are drawn in memory. Figures go to
 `outputs/figures/importance_convergence/` when `Write figures` is on:
 
 ```bash
 uv run --extra notebook --group dev marimo check --strict notebooks/importance_convergence.py
-ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/importance_convergence.py
 ```

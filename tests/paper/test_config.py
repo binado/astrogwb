@@ -45,8 +45,9 @@ def test_detector_loader_merges_packaged_definitions_and_ordered_overrides(
         encoding="utf-8",
     )
     registry = load_detector_config([base, override])
-    assert registry.networks["reference"] == ("S1", "C1")
-    assert registry.networks["comparison"] == ("S1", "C1")
+    # Members are stored sorted, the background's canonical pair order.
+    assert registry.networks["reference"] == ("C1", "S1")
+    assert registry.networks["comparison"] == ("C1", "S1")
     assert registry.detectors["custom"].geometry.xarm_azimuth_rad == 0.5
     assert (
         registry.detectors["custom"].geometry.latitude_rad
@@ -121,13 +122,14 @@ def test_waveform_generator_defaults_to_the_committed_ripple() -> None:
     assert generator.metadata.maximum_frequency == 2048.0
 
 
-def test_committed_waveform_uses_the_loglinear_grid() -> None:
-    metadata = waveform_generator(REPO_ROOT).metadata
+def test_committed_waveform_uses_the_400_point_loglinear_grid() -> None:
+    generator = waveform_generator(REPO_ROOT)
+    metadata = generator.metadata
 
     assert metadata.frequency_spacing == "loglinear"
     assert metadata.frequency_resolution == 1.0
     assert metadata.turnover_frequency == 100.0
-    assert metadata.dlogf is None
+    assert np.asarray(generator.frequencies).shape == (400,)
 
 
 def test_committed_waveform_variants_share_the_default_band_and_differ_in_grid() -> (
@@ -146,6 +148,7 @@ def test_committed_waveform_variants_share_the_default_band_and_differ_in_grid()
             update={
                 "frequency_spacing": default.frequency_spacing,
                 "turnover_frequency": default.turnover_frequency,
+                "dlogf": default.dlogf,
             }
         )
         == default

@@ -6,19 +6,31 @@ whose metadata is given into the realization directory ``DIRECTORY`` (see
 with ``--population-metadata`` and ``--seed``; later runs add stages to it,
 using the settings it records for the stages they leave out::
 
-    astrogwb simulate realization/ --population-metadata population.toml \\
-        --seed 41 --waveform-metadata waveform.toml \\
-        --background-metadata network.toml
+    astrogwb simulate ensemble/41-0 --population-metadata population.toml \\
+        --seed 41 --index 0 --waveform-metadata waveform.toml \\
+        --background-metadata networks.toml
     astrogwb simulate realization/ --population-metadata population.toml --seed 41
     astrogwb simulate realization/ --waveform-metadata waveform.toml \\
-        --background-metadata network.toml
+        --background-metadata networks.toml
 
 The sources are written unless ``--no-keep-sources``, the polarizations only
 with ``--keep-polarizations``, and a configured background always. The
-metadata files hold the fields of
-:class:`~astrogwb.simulators.PopulationMetadata`,
-:class:`~astrogwb.waveform.WaveformMetadata` and
-:class:`~astrogwb.simulators.DetectorConfiguration` at their top level.
+population and waveform files hold the fields of
+:class:`~astrogwb.simulators.PopulationMetadata` and
+:class:`~astrogwb.waveform.WaveformMetadata` at their top level; the
+background file holds one ``[networks.<name>]`` table per network, each the
+fields of :class:`~astrogwb.simulators.DetectorConfiguration`::
+
+    [networks.ET-2L]
+    detectors = ["S1", "R1"]
+    psd_references = { S1 = "ET_COBA_15km_psd.txt", R1 = "ET_COBA_15km_psd.txt" }
+
+``astrogwb noise REALIZATION OUTPUT`` writes the
+:class:`~astrogwb.simulators.DetectorNoise` of the networks, frequencies and
+observation time a realization's background was simulated with, once per
+ensemble::
+
+    astrogwb noise ensemble/41-0 ensemble/detector_noise.h5
 
 Runtime settings (``--platform``, ``--cpu-threads``) are applied before the JAX
 backend initializes, so this module imports nothing that touches JAX.
@@ -90,7 +102,7 @@ def simulate(
     ] = None,
     background_metadata: Annotated[
         Path | None,
-        typer.Option(exists=True, dir_okay=False, help="Detector configuration TOML."),
+        typer.Option(exists=True, dir_okay=False, help="Network configuration TOML."),
     ] = None,
     keep_sources: Annotated[
         bool, typer.Option(help="Write source_parameters.h5.")
@@ -137,7 +149,10 @@ def simulate(
         background=(
             None
             if background_metadata is None
-            else DetectorConfiguration.model_validate(_read_toml(background_metadata))
+            else {
+                name: DetectorConfiguration.model_validate(network)
+                for name, network in _read_toml(background_metadata)["networks"].items()
+            }
         ),
         seed=seed,
         index=index,
@@ -151,3 +166,30 @@ def simulate(
         f"realization {realization.id}: {realization.count} sources, "
         f"{', '.join(products) or 'no products'} -> {directory}"
     )
+
+
+@app.command()
+def noise(
+    realization: Annotated[
+        Path,
+        typer.Argument(
+            exists=True, file_okay=False, help="A realization with a background."
+        ),
+    ],
+    output: Annotated[Path, typer.Argument(dir_okay=False, help="HDF5 file to write.")],
+    platform: Annotated[
+        str, typer.Option(help="JAX platform: auto, cpu, cuda or tpu.")
+    ] = "auto",
+) -> None:
+    """Write the detector noise of a realization's background networks."""
+    _apply_runtime(platform, None)
+    from astrogwb.simulators import Realization, detector_noise
+
+    recorded = Realization.open(realization)
+    background = recorded.background()
+    detector_noise(
+        background.frequencies,
+        background.networks,
+        recorded.population_metadata.observation_time,
+    ).write(output)
+    typer.echo(f"noise of {', '.join(background.networks)} -> {output}")

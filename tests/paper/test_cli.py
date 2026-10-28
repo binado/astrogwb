@@ -18,6 +18,7 @@ def test_paper_imports_leave_the_xla_backend_uninitialized() -> None:
     code = """
 from pathlib import Path
 import astrogwb.paper.catalogs
+import astrogwb.paper.posteriors
 from astrogwb.paper.config import priors
 from astrogwb.paper.config.detectors import load_detector_config
 load_detector_config([Path('config/detectors.toml')])

@@ -22,12 +22,14 @@ the population stage is the only one that draws random numbers.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import json
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, Self, TypedDict
 
 import numpy as np
+from numpy.typing import NDArray
 
 from astrogwb.simulators._io import (
     BACKGROUND_FILE,
@@ -42,6 +44,8 @@ from astrogwb.simulators.background import (
     BackgroundArtifact,
     BackgroundSimulator,
     DetectorConfiguration,
+    NetworkConfiguration,
+    _read_networks,
     background_table,
 )
 from astrogwb.simulators.population import (
@@ -62,8 +66,10 @@ if TYPE_CHECKING:
     from astrogwb.simulators.waveforms import WaveformChunks
 
 __all__ = [
+    "NetworkSpectra",
     "Realization",
     "RealizationSimulator",
+    "network_spectra_ensemble",
     "simulate_ensemble",
     "simulate_realization",
 ]
@@ -151,14 +157,10 @@ class Realization:
         )
 
     @property
-    def detectors(self) -> DetectorConfiguration | None:
-        """The recorded background network, ``None`` if none is."""
+    def networks(self) -> dict[str, DetectorConfiguration] | None:
+        """The recorded background networks, by name; ``None`` if none are."""
         table = self.manifest.get("background")
-        return (
-            None
-            if table is None
-            else DetectorConfiguration.model_validate(table["metadata"]["detectors"])
-        )
+        return None if table is None else _read_networks(table)
 
     def population(
         self, simulator: PopulationSimulator | None = None
@@ -239,7 +241,7 @@ class Realization:
         waveforms: WaveformSimulator | None = None,
         population: PopulationSimulator | None = None,
     ) -> BackgroundArtifact:
-        """The pair spectra, read from ``background.h5`` or projected by ``simulator``.
+        """The network spectra, read from ``background.h5`` or projected by ``simulator``.
 
         ``waveforms`` and ``population`` regenerate the upstream data that is
         not on disk.
@@ -295,7 +297,7 @@ class RealizationSimulator:
         self,
         population: PopulationMetadata | None = None,
         waveform: WaveformMetadata | None = None,
-        background: DetectorConfiguration | None = None,
+        background: NetworkConfiguration | None = None,
         *,
         keep_sources: bool = True,
         keep_polarizations: bool = False,
@@ -310,33 +312,52 @@ class RealizationSimulator:
             raise ValueError("chunk sizes must be positive")
         self._population = population
         self._waveform = waveform
-        self._background = background
+        self._background = None if background is None else dict(background)
         self._keep_sources = keep_sources
         self._keep_polarizations = keep_polarizations
         self._chunk_size = chunk_size
         self._source_chunk_size = source_chunk_size
         self._simulators: dict[tuple[object, str], Any] = {}
 
-    def _simulator[S](self, cls: Callable[..., S], settings: Any, chunk_size: int) -> S:
-        """The ``cls`` simulator of ``settings``, built on first use."""
-        key = (cls, settings.model_dump_json())
+    def _simulator[S](
+        self, cls: Callable[..., S], settings: Any, chunk_size: int, identity: str
+    ) -> S:
+        """The ``cls`` simulator of ``settings``, serialized as ``identity``, built once."""
+        key = (cls, identity)
         if key not in self._simulators:
             self._simulators[key] = cls(settings, chunk_size=chunk_size)
         return self._simulators[key]
 
     def population_simulator(self, metadata: PopulationMetadata) -> PopulationSimulator:
         """The cached population simulator of ``metadata``."""
-        return self._simulator(PopulationSimulator, metadata, self._source_chunk_size)
+        return self._simulator(
+            PopulationSimulator,
+            metadata,
+            self._source_chunk_size,
+            metadata.model_dump_json(),
+        )
 
     def waveform_simulator(self, metadata: WaveformMetadata) -> WaveformSimulator:
         """The cached waveform simulator of ``metadata``."""
-        return self._simulator(WaveformSimulator, metadata, self._chunk_size)
+        return self._simulator(
+            WaveformSimulator, metadata, self._chunk_size, metadata.model_dump_json()
+        )
 
     def background_simulator(
-        self, detectors: DetectorConfiguration
+        self, networks: NetworkConfiguration
     ) -> BackgroundSimulator:
-        """The cached background simulator of ``detectors``."""
-        return self._simulator(BackgroundSimulator, detectors, self._chunk_size)
+        """The cached background simulator of ``networks``."""
+        return self._simulator(
+            BackgroundSimulator,
+            networks,
+            self._chunk_size,
+            json.dumps(
+                {
+                    name: network.model_dump(mode="json")
+                    for name, network in networks.items()
+                }
+            ),
+        )
 
     def __call__(
         self, directory: str | Path, *, seed: int | None = None, index: int = 0
@@ -499,7 +520,7 @@ def simulate_realization(
     *,
     population: PopulationMetadata | None = None,
     waveform: WaveformMetadata | None = None,
-    background: DetectorConfiguration | None = None,
+    background: NetworkConfiguration | None = None,
     seed: int | None = None,
     index: int = 0,
     keep_sources: bool = True,
@@ -548,3 +569,84 @@ def simulate_ensemble(
         simulator(root / f"{int(seed)}-{index}", seed=seed, index=index)
         for index in range(start, num_draws)
     ]
+
+
+class NetworkSpectra(TypedDict):
+    """One network's draws, stacked along the leading draw axis.
+
+    ``frequencies`` ``(F,)``; ``spectral_density`` ``(D, F)``, the
+    :func:`~astrogwb.simulators.combine_pair_spectra` of
+    ``pair_spectral_density`` ``(D, P, F)``; ``n_events`` and
+    ``total_merger_rate`` ``(D,)``; each ``hyperparameters`` value ``(D,)``.
+    """
+
+    frequencies: NDArray[np.float64]
+    spectral_density: NDArray[np.float64]
+    pair_spectral_density: NDArray[np.float64]
+    n_events: NDArray[np.int64]
+    total_merger_rate: NDArray[np.float64]
+    hyperparameters: dict[str, NDArray[np.float64]]
+
+
+def network_spectra_ensemble(
+    root: str | Path,
+    seed: int,
+    num_draws: int,
+    names: Sequence[str],
+    *,
+    start: int = 0,
+) -> list[NetworkSpectra]:
+    """Draws ``start .. num_draws - 1`` of the networks ``names``, stacked per network.
+
+    Draw ``i`` is the background of the realization at ``<root>/<seed>-<i>``,
+    as :func:`simulate_ensemble` lays them out.
+
+    Parameters
+    ----------
+    root
+        The ensemble root.
+    seed
+        The seed the ensemble was simulated with.
+    num_draws
+        One past the last index read.
+    names
+        Networks, each recorded in every draw's background.
+    start
+        The first index read.
+
+    Returns
+    -------
+    list of NetworkSpectra
+        Each network's draws, in ``names`` order.
+
+    Raises
+    ------
+    FileNotFoundError
+        If a draw, or its background, is missing.
+    KeyError
+        If a draw's background does not record one of ``names``.
+    """
+    root = Path(root)
+    draws = [
+        Realization.open(root / f"{int(seed)}-{index}").background()
+        for index in range(start, num_draws)
+    ]
+    return [_stack(draws, name) for name in names]
+
+
+def _stack(draws: Sequence[BackgroundArtifact], name: str) -> NetworkSpectra:
+    """One network's spectra of every draw, stacked."""
+    spectra = [draw.network(name) for draw in draws]
+    return {
+        "frequencies": draws[0].frequencies,
+        "spectral_density": np.stack([s.spectral_density for s in spectra]),
+        "pair_spectral_density": np.stack([s.pair_spectral_density for s in spectra]),
+        "n_events": np.asarray([draw.count for draw in draws], dtype=np.int64),
+        "total_merger_rate": np.asarray(
+            [draw.total_merger_rate for draw in draws], dtype=np.float64
+        ),
+        "hyperparameters": {
+            key: np.asarray([draw.hyperparameters[key] for draw in draws])
+            for key in draws[0].hyperparameters
+        },
+    }

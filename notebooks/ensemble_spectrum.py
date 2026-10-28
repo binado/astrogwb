@@ -4,7 +4,6 @@ __generated_with = "0.25.1"
 app = marimo.App()
 
 with app.setup(hide_code=True):
-    import os
     from collections.abc import Mapping, Sequence
     from pathlib import Path
 
@@ -25,9 +24,7 @@ with app.setup(hide_code=True):
     from matplotlib.projections import register_projection
     from matplotlib.ticker import LogFormatterMathtext, ScalarFormatter
     from numpy.typing import NDArray
-    from scipy.optimize import brentq
 
-    from astrogwb.cosmology import luminosity_distance
     from astrogwb.detector import (
         effective_psd,
         gaussian_bin_scale,
@@ -46,23 +43,12 @@ with app.setup(hide_code=True):
         CatalogMetadata,
         PolarizationPowerData,
     )
-    from astrogwb.gwb.importance import reference_catalog, reference_catalog_stem
     from astrogwb.inference import ImportanceGaussianLikelihood
     from astrogwb.inference import Network as LikelihoodNetwork
-    from astrogwb.paper.cache import default_cache_dir
-    from astrogwb.paper.config import (
-        detector_registry,
-        fiducials,
-        population_metadata,
-        waveform_metadata,
-    )
+    from astrogwb.paper.catalogs import read_reference_catalog
+    from astrogwb.paper.config import detector_registry
     from astrogwb.paper.config.detectors import DetectorRegistry
-    from astrogwb.paper.config.runs import CATALOGS_ROOT, FIGURES_DIR
-    from astrogwb.paper.ensemble import (
-        EnsembleRecord,
-        network_configuration,
-        network_spectra_ensemble,
-    )
+    from astrogwb.paper.config.runs import CATALOGS_ROOT, ENSEMBLES_ROOT, FIGURES_DIR
     from astrogwb.paper.plotting import (
         DETECTOR_COMPARISON_LEGEND,
         DETECTOR_NETWORKS,
@@ -74,10 +60,8 @@ with app.setup(hide_code=True):
     )
     from astrogwb.populations import build_population
     from astrogwb.populations.metadata import PopulationMetadata
-    from astrogwb.simulators import DetectorConfiguration, batch_keys
-    from astrogwb.simulators import PopulationMetadata as RealizationMetadata
+    from astrogwb.simulators import Realization, network_spectra_ensemble
     from astrogwb.utils import years_to_seconds
-    from astrogwb.utils.io import load, write
 
     # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes.
     # Restore them so plotting behaves as expected after the imports above.
@@ -100,12 +84,12 @@ def _():
     the draws. The same draws give the shot noise of a single realization about
     the mean.
 
-    The ensemble is cached one background per draw
-    (`astrogwb.paper.ensemble.network_spectra_ensemble`) under
-    `default_cache_dir() / "ensembles"`, shared with
-    `notebooks/shot_noise_coverage.py`, which uses the same record and seed
-    as its injections. A single interactive draw lives in
-    `notebooks/fiducial_spectrum.py`.
+    The ensemble is read, never drawn: the fiducial ensemble of
+    `workflow/coverage_draws.smk`, one background per draw holding every
+    network's spectra (`astrogwb.simulators.network_spectra_ensemble`),
+    shared with `notebooks/shot_noise_coverage.py`, which uses its draws as
+    injections. So is the reference catalog of the minimum-redshift scan. A
+    single interactive draw lives in `notebooks/fiducial_spectrum.py`.
     """)
     return
 
@@ -163,9 +147,6 @@ def _():
 def _():
     mo.md(r"""
     ## 2. Configuration
-
-    Setting `ASTROGWB_NOTEBOOK_SMOKE=1` swaps in a tiny ensemble of short
-    observations so the whole notebook runs in seconds.
     """)
     return
 
@@ -176,15 +157,9 @@ def _():
 
     num_draws = 1000
     seed = 41
-    chunk_size = 1024
     observation_time = 1.0  # years
     maximum_frequency = 2048.0
     minimum_frequencies = [2.0, 5.0, 10.0, 20.0]
-    minimum_redshift = 0.35
-    maximum_redshift = 20.0
-    approximant = "IMRPhenomXAS_NRTidalv3"
-    # Shared with shot_noise_coverage.py: same record, seed and directory.
-    ensemble_dir = default_cache_dir() / "ensembles"
     #: Where this notebook's figures and tables go: one folder per notebook under
     #: the figures root, named after the notebook file.
     BASE_DIR = ROOT_DIR / FIGURES_DIR / Path(__file__).stem
@@ -192,83 +167,37 @@ def _():
     # Percentiles of the plotted bands (16-84%).
     percentiles = (16.0, 50.0, 84.0)
 
-    # Execution smoke tests exercise the same code with tiny draws.
-    SMOKE = os.environ.get("ASTROGWB_NOTEBOOK_SMOKE") == "1"
-    if SMOKE:
-        num_draws = 3
-        chunk_size = 8
-
-    # Keep these settings in sync with shot_noise_coverage.py, which reads the
-    # same cached draws: fine spacing through the SNR peak, then a log tail
-    # for a 1024-point grid. A smoke run injects a short observation.
-    population = RealizationMetadata(
-        observation_time=1e-4 if SMOKE else observation_time,
-        hyperparameters={**fiducials(root=ROOT_DIR)},
-        population=population_metadata(
-            root=ROOT_DIR,
-            minimum_redshift=minimum_redshift,
-            maximum_redshift=maximum_redshift,
-        ),
-    )
-    waveform = waveform_metadata(
-        root=ROOT_DIR,
-        approximant=approximant,
-        frequency_resolution=0.125,
-        turnover_frequency=100.0,
-        dlogf=0.01266,
-    )
+    # The fiducial ensemble of workflow/coverage_draws.smk, shared with
+    # shot_noise_coverage.py: the default waveform and grid. Its population is
+    # draw 0's record.
+    ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / "fiducial"
+    ensemble_population = Realization.open(
+        ensemble_root / f"{seed}-0"
+    ).population_metadata
     registry = detector_registry(root=ROOT_DIR)
 
-    # ET-triangular with the ET-D PSD instead of the shared one. The geometry
-    # is copied from E1-E3; the overrides deep-merge, so ``registry`` is intact.
-    etd_psd = "ET-000A-18_ETD_hlf_psd.txt"
-    etd_registry = detector_registry(
-        root=ROOT_DIR,
-        detectors={
-            f"E{i}D": {
-                "geometry": registry.detectors[f"E{i}"].geometry.model_dump(),
-                "psd_reference": etd_psd,
-            }
-            for i in (1, 2, 3)
-        },
-        networks={
-            "ET-triangular-D-PSD": ["E1D", "E2D", "E3D"],
-            "ET-triangular-D-PSD-CE-Hanford": ["E1D", "E2D", "E3D", "C1"],
-        },
-    )
-    etd_swap = {
+    # Each ET-triangle network and its counterpart in config/detectors.toml
+    # with the ET-D noise curve instead of ET-COBA: same pairs, other weights.
+    etd_networks = {
         "ET-triangular": "ET-triangular-D-PSD",
         "ET-triangular-CE-Hanford": "ET-triangular-D-PSD-CE-Hanford",
     }
     coba_rows = DETECTOR_NETWORKS
-    etd_rows = tuple((etd_swap.get(name, name), label) for name, label in coba_rows)
-    # Every row's network records the same draws. An ET-D row is its ET-COBA
-    # network's pairs, weighted with the ET-D noise curve.
-    _networks = {name: network_configuration(registry, name) for name, _ in coba_rows}
-    for _base, _swapped in etd_swap.items():
-        _networks[_swapped] = DetectorConfiguration(
-            detectors=_networks[_base].detectors,
-            psd_references={
-                detector: etd_psd if detector.startswith("E") else reference
-                for detector, reference in _networks[_base].psd_references.items()
-            },
-        )
-    metadata = EnsembleRecord(
-        population=population, waveform=waveform, networks=_networks
-    )
+    etd_rows = tuple((etd_networks.get(name, name), label) for name, label in coba_rows)
+    # Every row's network records the same draws, each in the ensemble's
+    # backgrounds. An ET-D row is its ET-COBA network's pairs, weighted with
+    # the ET-D noise curve.
+    network_names = [name for name, _ in coba_rows] + list(etd_networks.values())
     return (
         BASE_DIR,
         ROOT_DIR,
-        SMOKE,
-        approximant,
-        chunk_size,
         coba_rows,
-        ensemble_dir,
-        etd_registry,
+        ensemble_population,
+        ensemble_root,
         etd_rows,
         maximum_frequency,
-        metadata,
         minimum_frequencies,
+        network_names,
         num_draws,
         observation_time,
         percentiles,
@@ -278,9 +207,8 @@ def _():
 
 
 @app.cell
-def _(SMOKE):
-    # A smoke run draws three spectra: never let it overwrite the paper files.
-    write_figures_switch = mo.ui.switch(value=not SMOKE, label="Write figures")
+def _():
+    write_figures_switch = mo.ui.switch(value=True, label="Write figures")
     write_figures_switch
     return (write_figures_switch,)
 
@@ -638,21 +566,19 @@ def _():
     mo.md(r"""
     ## 3. Draw the ensemble
 
-    The Poisson ensemble, one cached background per draw.
+    The Poisson ensemble, one background per draw.
     """)
     return
 
 
 @app.cell
-def _(chunk_size, ensemble_dir, metadata, num_draws, seed):
-    _ensembles = network_spectra_ensemble(
-        metadata, seed, num_draws, ensemble_dir, chunk_size=chunk_size
-    )
+def _(ensemble_root, network_names, num_draws, seed):
+    _ensembles = network_spectra_ensemble(ensemble_root, seed, num_draws, network_names)
     frequencies = np.asarray(_ensembles[0]["frequencies"], dtype=np.float64)
     # Each network's spectra (M, F), by network name.
     draws = {
         _name: _ensemble["spectral_density"]
-        for _name, _ensemble in zip(metadata.networks, _ensembles, strict=True)
+        for _name, _ensemble in zip(network_names, _ensembles, strict=True)
     }
     mean = {_name: _draws.mean(axis=0) for _name, _draws in draws.items()}
     return draws, frequencies, mean
@@ -673,7 +599,6 @@ def _():
 def _(
     coba_rows,
     draws,
-    etd_registry,
     etd_rows,
     frequencies,
     maximum_frequency,
@@ -691,7 +616,7 @@ def _(
         maximum_frequency,
     )
     snrs_etd = snr_per_draw(
-        etd_registry,
+        registry,
         etd_rows,
         frequencies,
         draws,
@@ -995,147 +920,38 @@ def _():
 
 
 @app.cell
-def _(SMOKE, ROOT_DIR, approximant, metadata, minimum_frequencies):
-    #: Where the reference waveforms sit: the redshift at which the fiducial
-    #: luminosity distance is this many Mpc. Below every window of the scan.
-    reference_distance_mpc = 1.0
-    scan_seed = 42
-    scan_num_samples = 2**14  # Sobol net, as in cosmology_grid_posteriors.py
+def _(ROOT_DIR):
+    # The scan's reference catalog, written by workflow/coverage_draws.smk:
+    # 2^14 draws on a Sobol net at the default waveform, as in
+    # cosmology_grid_posteriors.py, each generated at the redshift where the
+    # fiducial luminosity distance is 1 Mpc, below every window of the scan,
+    # on a reference grid from the lowest observed frequency to past the
+    # detector-frame merger there.
+    scan_catalog_path = ROOT_DIR / CATALOGS_ROOT / "reference-scan.h5"
     scan_redshift_nodes = 32  # converged to 1e-4 down to z_min = 0.01
     # Geometric where the curves are steep, uniform where the plot is linear.
     scan_redshifts = np.concatenate(
         [np.geomspace(0.01, 0.3, 60, endpoint=False), np.linspace(0.3, 1.5, 61)]
     )
-    scan_chunk_size = 4096
     # The shot noise carries each network's per-source response, from these
     # isotropic draws, as in the grid and coverage notebooks.
     scan_response_draws, scan_response_seed = 32_768, 0
-    if SMOKE:
-        scan_response_draws = 64
-        scan_num_samples = 64
-        scan_redshift_nodes = 8
-        scan_redshifts = np.geomspace(0.05, 3.0, 5)
-        scan_chunk_size = 64
 
-    scan_hyperparameters = {**metadata.population.hyperparameters}
-    reference_redshift = redshift_at_distance(
-        reference_distance_mpc,
-        scan_hyperparameters["H0"],
-        scan_hyperparameters["Omega_m"],
-    )
-    # The reference grid runs from the lowest observed frequency to past the
-    # detector-frame merger at the reference redshift.
-    scan_catalog_metadata = CatalogMetadata(
-        waveform=waveform_metadata(
-            root=ROOT_DIR,
-            approximant=approximant,
-            frequency_spacing="log",
-            minimum_frequency=minimum_frequencies[0],
-            maximum_frequency=4000.0,
-            frequency_resolution=0.02,
-            turnover_frequency=None,
-        ),
-        population=metadata.population.population,
-        fiducials=scan_hyperparameters,
-        num_samples=scan_num_samples,
-        sampling="sobol",
-        reference_redshift=reference_redshift,
-    )
+    scan_data, scan_catalog_metadata, _ = read_reference_catalog(scan_catalog_path)
+    scan_hyperparameters = dict(scan_catalog_metadata.fiducials)
     mo.md(
-        f"Reference redshift {reference_redshift:.6g} "
-        f"($d_L$ = {reference_distance_mpc:g} Mpc); window edges "
-        f"{scan_redshifts[0]:.3g} to {scan_redshifts[-1]:.3g}."
+        f"Reference redshift {scan_catalog_metadata.reference_redshift:.6g}; "
+        f"window edges {scan_redshifts[0]:.3g} to {scan_redshifts[-1]:.3g}."
     )
     return (
         scan_catalog_metadata,
-        scan_chunk_size,
+        scan_data,
         scan_hyperparameters,
         scan_redshift_nodes,
         scan_redshifts,
         scan_response_draws,
         scan_response_seed,
-        scan_seed,
     )
-
-
-@app.function(hide_code=True)
-def redshift_at_distance(
-    distance: float, hubble_constant: float, omega_m: float
-) -> float:
-    """The redshift at which the luminosity distance is ``distance`` Mpc.
-
-    Parameters
-    ----------
-    distance
-        Luminosity distance in Mpc.
-    hubble_constant, omega_m
-        The flat LCDM cosmology.
-
-    Returns
-    -------
-    float
-        The redshift, found by root-finding on
-        :func:`astrogwb.cosmology.luminosity_distance`.
-    """
-    return float(
-        brentq(
-            lambda z: (
-                float(luminosity_distance(z, hubble_constant, omega_m)) - distance
-            ),
-            1e-9,
-            1.0,
-            xtol=1e-16,
-        )
-    )
-
-
-@app.function(hide_code=True)
-def ensure_reference_catalog(
-    metadata: CatalogMetadata,
-    seed: int,
-    directory: Path,
-    *,
-    chunk_size: int | None = None,
-) -> PolarizationPowerData:
-    """The reference catalog of ``metadata`` at ``seed``, drawn on a miss.
-
-    The same file ``cosmology_grid_posteriors.py`` and
-    ``shot_noise_coverage.py`` read and write,
-    ``<directory>/reference_catalog-<key>-<seed>.h5``.
-
-    Parameters
-    ----------
-    metadata
-        The catalog record.
-    seed
-        The draw's seed.
-    directory
-        Where catalogs are kept.
-    chunk_size
-        Waveforms per batch when drawing.
-
-    Returns
-    -------
-    PolarizationPowerData
-        The catalog's frequencies, power and source parameters.
-
-    Raises
-    ------
-    ValueError
-        If the cached file records another metadata or seed.
-    """
-    path = directory / f"{reference_catalog_stem(metadata, seed)}.h5"
-    if path.is_file():
-        data, recorded, attrs = load(path, CatalogMetadata)
-        if recorded.key() != metadata.key() or attrs.get("seed") != seed:
-            raise ValueError(
-                f"{path} records {recorded.key()} at seed {attrs.get('seed')}, "
-                f"not the requested {metadata.key()} at seed {seed}"
-            )
-        return data  # ty: ignore[invalid-return-type]
-    data = reference_catalog(metadata, batch_keys(seed, 1)[0], chunk_size=chunk_size)
-    write(path, data, metadata, seed=seed)
-    return data
 
 
 @app.function(hide_code=True)
@@ -1326,33 +1142,25 @@ def plot_minimum_redshift_scan(
 
 @app.cell
 def _(
-    ROOT_DIR,
+    ensemble_population,
     frequencies,
     maximum_frequency,
-    metadata,
     minimum_frequencies,
     observation_time,
     registry,
     scan_catalog_metadata,
-    scan_chunk_size,
+    scan_data,
     scan_hyperparameters,
     scan_redshift_nodes,
     scan_redshifts,
     scan_response_draws,
     scan_response_seed,
-    scan_seed,
     coba_rows,
 ):
-    scan_data = ensure_reference_catalog(
-        scan_catalog_metadata,
-        scan_seed,
-        ROOT_DIR / CATALOGS_ROOT,
-        chunk_size=scan_chunk_size,
-    )
     scan = minimum_redshift_scan(
         scan_data,
         scan_catalog_metadata,
-        metadata.population,
+        ensemble_population.population,
         registry,
         coba_rows,
         frequencies,
@@ -1372,7 +1180,7 @@ def _(
 def _(
     BASE_DIR,
     ROOT_DIR,
-    metadata,
+    ensemble_population,
     plotted_colors,
     plotted_linestyles,
     plotted_networks,
@@ -1384,7 +1192,7 @@ def _(
         plotted_networks,
         plotted_colors,
         plotted_linestyles,
-        float(metadata.population.model_kwargs["minimum_redshift"]),
+        float(ensemble_population.population.model_kwargs["minimum_redshift"]),
     )
     if write_figures:
         BASE_DIR.mkdir(parents=True, exist_ok=True)
@@ -1410,34 +1218,27 @@ def _():
 
 @app.cell
 def _(
-    ROOT_DIR,
+    ensemble_population,
     frequencies,
     maximum_frequency,
-    metadata,
     minimum_frequencies,
     observation_time,
     registry,
     coba_rows,
     scan,
     scan_catalog_metadata,
-    scan_chunk_size,
+    scan_data,
     scan_hyperparameters,
     scan_redshift_nodes,
     scan_response_draws,
     scan_response_seed,
-    scan_seed,
     shot_noise,
 ):
-    _edge = float(metadata.population.model_kwargs["minimum_redshift"])
+    _edge = float(ensemble_population.population.model_kwargs["minimum_redshift"])
     _arguments = (
-        ensure_reference_catalog(
-            scan_catalog_metadata,
-            scan_seed,
-            ROOT_DIR / CATALOGS_ROOT,
-            chunk_size=scan_chunk_size,
-        ),
+        scan_data,
         scan_catalog_metadata,
-        metadata.population,
+        ensemble_population.population,
         registry,
         coba_rows,
         frequencies,

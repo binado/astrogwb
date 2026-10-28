@@ -12,18 +12,22 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from astrogwb_tiny_pipeline import DETECTORS, WAVEFORM
+from astrogwb_tiny_pipeline import DETECTORS, NETWORKS, WAVEFORM, assert_same_spectra
 from astrogwb_tiny_pipeline import population_metadata as _population
 
 from astrogwb.detector import isotropic_overlap_reduction_function
 from astrogwb.simulators import (
+    BackgroundArtifact,
     BackgroundSimulator,
+    DetectorConfiguration,
     PopulationArtifact,
     PopulationSimulator,
     WaveformSimulator,
     batch_keys,
+    combine_pair_spectra,
     simulate_realization,
 )
+from astrogwb.simulators.background import background_key
 from astrogwb.simulators.population import EXTRINSIC_COLUMNS
 from astrogwb.waveform import WaveformMetadata
 from astrogwb.waveform.polarization_power import polarization_stokes
@@ -98,7 +102,7 @@ def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum(
     realization = PopulationSimulator(_population(4e-3), chunk_size=1024)(
         batch_keys(7, 1)[0]
     )
-    background = BackgroundSimulator(DETECTORS, chunk_size=8)
+    background = BackgroundSimulator({"triangle": DETECTORS}, chunk_size=8)
     generator = WAVEFORM.build()
     group = 16
     ratios = []
@@ -109,7 +113,7 @@ def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum(
         }
         part = dataclasses.replace(realization, source_parameters=sources)
         power = np.asarray(generator.generate_batch(sources)).sum(axis=1)
-        spectra = background(waveforms(part)).pair_spectral_density
+        spectra = background(waveforms(part)).network("triangle").pair_spectral_density
         ratios.append(spectra / (power / realization.observation_seconds))
     ratios = np.asarray(ratios)
     expected = np.stack(
@@ -127,7 +131,7 @@ def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum(
 def test_a_staged_realization_reads_back_the_fused_background(
     tmp_path: Path, population: PopulationArtifact, waveforms: WaveformSimulator
 ) -> None:
-    fused = BackgroundSimulator(DETECTORS, chunk_size=8)(waveforms(population))
+    fused = BackgroundSimulator(NETWORKS, chunk_size=8)(waveforms(population))
 
     simulate_realization(
         tmp_path, population=_population(1e-4), seed=41, source_chunk_size=16
@@ -136,15 +140,13 @@ def test_a_staged_realization_reads_back_the_fused_background(
         tmp_path, waveform=WAVEFORM, keep_polarizations=True, chunk_size=8
     )
     staged = simulate_realization(
-        tmp_path, background=DETECTORS, chunk_size=8
+        tmp_path, background=NETWORKS, chunk_size=8
     ).background()
 
-    np.testing.assert_array_equal(
-        staged.pair_spectral_density, fused.pair_spectral_density
-    )
+    assert_same_spectra(staged, fused)
     assert staged.key() == fused.key()
     assert staged.count == population.count
-    assert staged.detectors == DETECTORS
+    assert staged.networks == NETWORKS
 
 
 def test_an_empty_realization_has_zero_spectra(
@@ -153,8 +155,72 @@ def test_an_empty_realization_has_zero_spectra(
     empty = PopulationSimulator(_population(1e-12))(batch_keys(41, 1)[0])
 
     written = waveforms(empty).write(tmp_path / "polarization.h5")
-    background = BackgroundSimulator(DETECTORS)(written)
+    background = BackgroundSimulator(NETWORKS)(written)
 
     assert empty.count == 0
-    assert background.pair_spectral_density.shape == (3, waveforms.frequencies.size)
-    assert not np.any(background.pair_spectral_density)
+    for name, network in NETWORKS.items():
+        pairs, combined = background.network(name)
+        assert pairs.shape == (len(network.pairs()), waveforms.frequencies.size)
+        assert not np.any(pairs) and not np.any(combined)
+
+
+@pytest.fixture(scope="module")
+def projected(
+    population: PopulationArtifact, waveforms: WaveformSimulator
+) -> BackgroundArtifact:
+    """The tiny population projected onto both networks."""
+    return BackgroundSimulator(NETWORKS, chunk_size=8)(waveforms(population))
+
+
+@pytest.mark.parametrize("name", list(NETWORKS))
+def test_each_network_holds_its_rows_of_a_single_network_projection(
+    projected: BackgroundArtifact,
+    population: PopulationArtifact,
+    waveforms: WaveformSimulator,
+    name: str,
+) -> None:
+    alone = BackgroundSimulator({name: NETWORKS[name]}, chunk_size=8)(
+        waveforms(population)
+    )
+
+    np.testing.assert_array_equal(
+        projected.network(name).pair_spectral_density,
+        alone.network(name).pair_spectral_density,
+    )
+
+
+@pytest.mark.parametrize("name", list(NETWORKS))
+def test_the_network_spectrum_combines_its_pair_spectra(
+    projected: BackgroundArtifact, name: str
+) -> None:
+    pairs, combined = projected.network(name)
+
+    np.testing.assert_array_equal(
+        combined, combine_pair_spectra(pairs, projected.frequencies, NETWORKS[name])
+    )
+
+
+@pytest.mark.parametrize(
+    "detectors", [["S1", "R1", "C1"], ["C1", "R1", "S1"], ["R1", "C1", "S1"]]
+)
+def test_declaration_order_changes_neither_pairs_nor_key(
+    detectors: list[str],
+) -> None:
+    reordered = DetectorConfiguration(
+        detectors=detectors, psd_references=DETECTORS.psd_references
+    )
+
+    assert reordered.pairs() == [("C1", "R1"), ("C1", "S1"), ("R1", "S1")]
+    assert background_key("w", {"triangle": reordered}) == background_key(
+        "w", {"triangle": DETECTORS}
+    )
+
+
+def test_noise_curves_are_part_of_the_key() -> None:
+    other = DETECTORS.model_copy(
+        update={"psd_references": {**DETECTORS.psd_references, "C1": "other.txt"}}
+    )
+
+    assert background_key("w", {"triangle": other}) != background_key(
+        "w", {"triangle": DETECTORS}
+    )

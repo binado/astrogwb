@@ -4,6 +4,21 @@ Workflows in this directory are plain `.py` files edited in [marimo](https://doc
 
 Every notebook here drives the `astrogwb.paper` configuration layer, so they all need the `notebook` extra for their imports and the `notebook` dependency group for the marimo editor. Run them from the repository root.
 
+## Inputs
+
+The notebooks read simulation data and never generate it. Each configuration
+cell names its inputs, all under `outputs/`:
+
+| Input | Read by |
+| --- | --- |
+| `ensembles/fiducial/` (+ `detector_noise.h5`) | `cosmology_grid_posteriors`, `madau_dickinson_grid`, `shot_noise_coverage`, `ensemble_spectrum`, `spectrum_snrs` |
+| `catalogs/reference-fiducial.h5` | `cosmology_grid_posteriors`, `madau_dickinson_grid`, `shot_noise_coverage` |
+| `catalogs/reference-scan.h5` | `ensemble_spectrum` |
+| `catalogs/reference-ladder.h5` | `importance_convergence` |
+
+`workflow/coverage_draws.smk` writes them (`docs/coverage-draws-on-slurm.md`).
+A missing input is a `FileNotFoundError`, never a simulation.
+
 ## Notebooks
 
 - **`fiducial_spectrum.py`** — marimo notebook. Interactive explorer of one
@@ -26,15 +41,13 @@ Every notebook here drives the `astrogwb.paper` configuration layer, so they all
 - **`cosmology_grid_posteriors.py`** — marimo notebook. Grid posteriors for
   $H_0$, $(H_0, \Omega_m)$ and $(\Xi_0, n)$ across the six detector networks,
   from a zero-noise Poisson injection as each network records it
-  (`network_spectra_ensemble`: one catalog, six spectra through the per-source
-  antenna patterns), modeled with the rescaled
+  (`network_spectra_ensemble` over the fiducial ensemble: one catalog, six
+  spectra through the per-source antenna patterns), modeled with the rescaled
   reference-redshift spectrum (`astrogwb.gwb.importance`: $2^{14}$ intrinsic
   draws on a scrambled Sobol net, one waveform each at the window's lower edge, rescaled to 32 redshift
-  nodes; a different seed). The log densities are cached under
-  `default_cache_dir() / "posteriors"`, keyed by a hash of their settings, so
-  the figures iterate without recomputing. Each grid point is predicted once
-  and shared by all six networks (`grid_log_posterior`); the numbers
-  equal the per-network evaluation, so existing cache files stay valid. The
+  nodes; a different seed). The log densities are computed on every run. Each
+  grid point is predicted once and shared by all six networks
+  (`grid_log_posterior`); the numbers equal the per-network evaluation. The
   injection is one catalog realization, so its physical shot noise is modeled
   as a rank-one covariance term from the same reference catalog, with each
   network's response (`Network.response`, its moments held per network)
@@ -83,13 +96,12 @@ Every notebook here drives the `astrogwb.paper` configuration layer, so they all
   $\sigma_{\mathrm{tot}}/A = (\rho^{-2} + s^2)^{1/2}$ per network
   (`minimum_redshift_scan.pdf`), from one reference catalog generated at the
   redshift where $d_L = 1$ Mpc and rescaled to each window, checked against the
-  draws' $\rho\,\mathrm{sd}(\epsilon)$. The ensemble is cached one draw per file
-  under `default_cache_dir() / "ensembles"` (`spectra_ensemble`) and shared
-  with `shot_noise_coverage.py`.
+  draws' $\rho\,\mathrm{sd}(\epsilon)$. The ensemble is the fiducial ensemble,
+  shared with `shot_noise_coverage.py`.
 - **`shot_noise_coverage.py`** — marimo notebook. Calibration of the
   shot-noise likelihood for $H_0$: the catalogs of the Poisson ensemble of
   `ensemble_spectrum.py`, each recorded by every network
-  (`network_spectra_ensemble`, cached one file per network and draw), plus
+  (`network_spectra_ensemble`), plus
   Gaussian detector noise per network, scored on an $H_0$ grid against an
   independent `IMRPhenomXAS_NRTidalv3` reference catalog with the `detector`,
   `amplitude`, `fixed` and `amplitude_sky` (no response) likelihoods. Compares the model's $\rho s$ with the
@@ -138,14 +150,6 @@ accessor returns fresh settings from one cached merge of the shared layers. To
 see file edits in a long-lived kernel, call
 `astrogwb.paper.config._shared.cache_clear()`.
 
-## Smoke runs
-
-`ASTROGWB_NOTEBOOK_SMOKE=1` shrinks the catalogs and the convergence sweeps. It
-changes only how long a notebook runs, never which cells execute — there is one
-code path in both modes. Run any notebook as a script to check it end to end:
-
-```bash
-ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/fiducial_spectrum.py
-```
+## Checking notebooks
 
 `marimo check --strict notebooks/<name>.py` lints a notebook's cell graph without running it.

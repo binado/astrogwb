@@ -3,9 +3,15 @@
 The reproducibility application for the `astrogwb` research project. It owns
 the shared configuration and the notebooks that produce the paper's figures and
 tables. Spectrum realizations are realization directories, written by the
-package's `astrogwb simulate` command or by
-`astrogwb.simulators.simulate_ensemble`, which `astrogwb.paper.ensemble` wraps
-(see [the simulator pipeline](simulator-pipeline.md)).
+package's `astrogwb simulate` command (see
+[the simulator pipeline](simulator-pipeline.md)).
+
+Generating data and reading it are separate steps. The notebooks never
+simulate: [`workflow/coverage_draws.smk`](../workflow/coverage_draws.smk)
+writes the ensembles, their detector noise and the reference catalogs under
+`outputs/` (see [simulation inputs on SLURM](coverage-draws-on-slurm.md)), and
+each notebook's configuration cell names the paths it reads. A missing input
+is a `FileNotFoundError`.
 
 The code ships inside the `astrogwb` wheel as `astrogwb.paper`, behind the
 `paper` extra. Its *assets* -- `config/`, `scripts/` and `notebooks/` -- are not
@@ -26,7 +32,9 @@ uv run --extra notebook --group notebook marimo edit notebooks/ensemble_spectrum
 
 Every path is relative to the repository root -- library code names no absolute
 path and does not go looking for a checkout. Committed configuration lives
-under `config/`; generated catalogs and figures under `outputs/`.
+under `config/`, including the simulation inputs `config/networks.toml` and
+`config/ensembles/<name>/`;
+generated ensembles, catalogs and figures under `outputs/`.
 
 The MCMC pipeline (Snakemake workflow, `run_mcmc`, SLURM profiles and the
 `config/runs/` experiments) was removed; it remains available at the

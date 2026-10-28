@@ -8,13 +8,20 @@ from typing import Any
 import jax
 import numpy as np
 import pytest
-from astrogwb_tiny_pipeline import DETECTORS, WAVEFORM, population_metadata
+from astrogwb_tiny_pipeline import (
+    DETECTORS,
+    NETWORKS,
+    WAVEFORM,
+    assert_same_spectra,
+    population_metadata,
+)
 
 from astrogwb.simulators import (
     DetectorConfiguration,
     Realization,
     RealizationSimulator,
     batch_keys,
+    network_spectra_ensemble,
     population_key,
     simulate_ensemble,
 )
@@ -42,7 +49,7 @@ def _products(directory: Path) -> list[str]:
 def fused(tmp_path_factory: pytest.TempPathFactory) -> Realization:
     """One fused run of every stage, sources kept."""
     directory = tmp_path_factory.mktemp("fused")
-    return _simulator(population=POPULATION, waveform=WAVEFORM, background=DETECTORS)(
+    return _simulator(population=POPULATION, waveform=WAVEFORM, background=NETWORKS)(
         directory, seed=SEED
     )
 
@@ -60,7 +67,7 @@ def test_a_fused_run_writes_the_manifest_and_background(
     realization = _simulator(
         population=POPULATION,
         waveform=WAVEFORM,
-        background=DETECTORS,
+        background=NETWORKS,
         keep_sources=keep_sources,
     )(tmp_path, seed=SEED, index=2)
 
@@ -78,12 +85,9 @@ def test_a_background_added_later_equals_the_fused_one(
     _simulator(population=POPULATION)(tmp_path, seed=SEED)
     assert _products(tmp_path) == [MANIFEST_FILE, SOURCES_FILE]
 
-    later = _simulator(waveform=WAVEFORM, background=DETECTORS)(tmp_path)
+    later = _simulator(waveform=WAVEFORM, background=NETWORKS)(tmp_path)
 
-    np.testing.assert_array_equal(
-        later.background().pair_spectral_density,
-        fused.background().pair_spectral_density,
-    )
+    assert_same_spectra(later.background(), fused.background())
     assert later.manifest["background"] == fused.manifest["background"]
 
 
@@ -93,22 +97,20 @@ def test_kept_polarizations_give_the_fused_background(
     realization = _simulator(
         population=POPULATION,
         waveform=WAVEFORM,
-        background=DETECTORS,
+        background=NETWORKS,
         keep_polarizations=True,
     )(tmp_path, seed=SEED)
     (tmp_path / BACKGROUND_FILE).unlink()
 
-    reprojected = realization.background(_simulator().background_simulator(DETECTORS))
+    reprojected = realization.background(_simulator().background_simulator(NETWORKS))
 
     assert POLARIZATION_FILE in _products(tmp_path)
-    np.testing.assert_array_equal(
-        reprojected.pair_spectral_density, fused.background().pair_spectral_density
-    )
+    assert_same_spectra(reprojected, fused.background())
 
 
 def test_a_rerun_with_the_same_settings_rewrites_nothing(tmp_path: Path) -> None:
     simulator = _simulator(
-        population=POPULATION, waveform=WAVEFORM, background=DETECTORS
+        population=POPULATION, waveform=WAVEFORM, background=NETWORKS
     )
     simulator(tmp_path, seed=SEED)
     stamps = {path.name: path.stat().st_mtime_ns for path in tmp_path.iterdir()}
@@ -125,13 +127,30 @@ def test_a_rerun_with_the_same_settings_rewrites_nothing(tmp_path: Path) -> None
     [
         {"waveform": WAVEFORM.model_copy(update={"maximum_frequency": 40.0})},
         {
-            "background": DetectorConfiguration(
-                detectors=["S1", "R1"], psd_references=DETECTORS.psd_references
-            )
+            "background": {
+                **NETWORKS,
+                "triangle": DetectorConfiguration(
+                    detectors=["S1", "R1"], psd_references=DETECTORS.psd_references
+                ),
+            }
         },
+        {
+            "background": {
+                **NETWORKS,
+                "triangle": DETECTORS.model_copy(
+                    update={
+                        "psd_references": {
+                            **DETECTORS.psd_references,
+                            "C1": "ET_COBA_15km_psd.txt",
+                        }
+                    }
+                ),
+            }
+        },
+        {"background": {"triangle": DETECTORS}},
         {"population": POPULATION, "seed": SEED + 1},
     ],
-    ids=["waveform", "background", "seed"],
+    ids=["waveform", "detectors", "noise-curves", "networks", "seed"],
 )
 def test_conflicting_settings_raise_and_touch_nothing(
     tmp_path: Path, fused: Realization, settings: dict[str, Any]
@@ -154,7 +173,7 @@ def test_a_deleted_background_is_regenerated_identically(
     simulator = _simulator(
         population=POPULATION,
         waveform=WAVEFORM,
-        background=DETECTORS,
+        background=NETWORKS,
         keep_sources=False,
     )
     simulator(tmp_path, seed=SEED)
@@ -162,16 +181,19 @@ def test_a_deleted_background_is_regenerated_identically(
 
     regenerated = simulator(tmp_path, seed=SEED).background()
 
-    np.testing.assert_array_equal(
-        regenerated.pair_spectral_density, fused.background().pair_spectral_density
-    )
+    assert_same_spectra(regenerated, fused.background())
 
 
 def test_a_background_without_waveform_settings_raises(tmp_path: Path) -> None:
     _simulator(population=POPULATION)(tmp_path, seed=SEED)
 
     with pytest.raises(ValueError, match="no waveform settings"):
-        _simulator(background=DETECTORS)(tmp_path)
+        _simulator(background=NETWORKS)(tmp_path)
+
+
+def test_the_manifest_records_the_networks_sorted(fused: Realization) -> None:
+    assert fused.networks == NETWORKS
+    assert fused.networks["pair"].detectors == ["C1", "S1"]
 
 
 def test_a_directory_without_a_realization_needs_population_settings(
@@ -193,3 +215,51 @@ def test_an_ensemble_is_a_prefix_of_a_larger_one(tmp_path: Path) -> None:
     ]
     keys = np.asarray(jax.random.key_data(batch_keys(SEED, 3)))
     assert [list(r.rng_key) for r in larger] == keys.tolist()
+
+
+@pytest.fixture(scope="module")
+def ensemble(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Two draws of ``SEED``, each recorded by every tiny network."""
+    root = tmp_path_factory.mktemp("ensemble")
+    simulator = _simulator(
+        population=POPULATION, waveform=WAVEFORM, background=NETWORKS
+    )
+    simulate_ensemble(simulator, root, SEED, 2)
+    return root
+
+
+def test_network_spectra_ensemble_stacks_every_draws_pairs(ensemble: Path) -> None:
+    triangle, pair = network_spectra_ensemble(ensemble, SEED, 2, ["triangle", "pair"])
+
+    assert triangle["pair_spectral_density"].shape[:2] == (2, 3)
+    # Sorted pairs: the triangle's (C1, S1) is its second, the pair's only one.
+    np.testing.assert_array_equal(
+        pair["pair_spectral_density"][:, 0], triangle["pair_spectral_density"][:, 1]
+    )
+
+
+@pytest.mark.parametrize("index", [0, 1])
+def test_network_spectra_ensemble_reads_each_stored_network_spectrum(
+    ensemble: Path, index: int
+) -> None:
+    (triangle,) = network_spectra_ensemble(ensemble, SEED, 2, ["triangle"])
+
+    stored = Realization.open(ensemble / f"{SEED}-{index}").background()
+    np.testing.assert_array_equal(
+        triangle["spectral_density"][index],
+        stored.network("triangle").spectral_density,
+    )
+
+
+def test_network_spectra_ensemble_from_start_is_a_suffix(ensemble: Path) -> None:
+    (full,) = network_spectra_ensemble(ensemble, SEED, 2, ["triangle"])
+    (second,) = network_spectra_ensemble(ensemble, SEED, 2, ["triangle"], start=1)
+
+    np.testing.assert_array_equal(
+        second["spectral_density"], full["spectral_density"][1:]
+    )
+
+
+def test_network_spectra_ensemble_of_a_missing_draw_raises(ensemble: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        network_spectra_ensemble(ensemble, SEED, 3, ["triangle"])

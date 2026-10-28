@@ -5,7 +5,8 @@ The paper writes the floor of the stacked per-pair data as three factors,
 \\langle Q_{\\rm int} \\rangle^2 \\, \\langle \\bar r^2 \\rangle`, and the response
 moment as intensity, linear and circular terms (eq. ``response-moment-main``).
 This script evaluates both per network at the fiducials, on the grid
-notebook's reference catalog and frequency grid:
+notebook's reference catalog and the fiducial ensemble's detector noise, both
+written by ``workflow/coverage_draws.smk``:
 
 - :math:`\\sigma_{\\rm shot}` under the per-pair response, and under the
   sky-averaged response, for which :math:`\\langle \\bar r^2 \\rangle = 355/252`;
@@ -40,30 +41,22 @@ import pandas as pd
 
 from astrogwb.detector.overlap import stokes_cross_power
 from astrogwb.detector.response import _isotropic_angles
-from astrogwb.gwb.catalog import CatalogMetadata
 from astrogwb.gwb.importance import INCLINATION_SECOND_MOMENT
 from astrogwb.inference import ImportanceGaussianLikelihood
 from astrogwb.inference import Network as LikelihoodNetwork
-from astrogwb.paper.config import (
-    detector_registry,
-    fiducials,
-    population_metadata,
-    waveform_metadata,
-)
-from astrogwb.paper.config.runs import CATALOGS_ROOT, FIGURES_DIR
+from astrogwb.paper.catalogs import read_reference_catalog
+from astrogwb.paper.config import detector_registry, fiducials
+from astrogwb.paper.config.runs import CATALOGS_ROOT, ENSEMBLES_ROOT, FIGURES_DIR
 from astrogwb.paper.plotting import DETECTOR_NETWORKS
-from astrogwb.paper.posteriors import ensure_reference_catalog, network_pair_data
+from astrogwb.paper.posteriors import network_pair_data
 from astrogwb.populations import build_population
+from astrogwb.simulators import DetectorNoise
 from astrogwb.waveform import quadrupolar_stokes_factors
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 
 # Keep in sync with the configuration of notebooks/cosmology_grid_posteriors.py.
-CATALOG_SEED = 42
-NUM_SAMPLES = 2**14
 REDSHIFT_NODES = 32
-CATALOG_CHUNK_SIZE = 4096
-OBSERVATION_TIME = 1.0
 MINIMUM_FREQUENCY, MAXIMUM_FREQUENCY = 2.0, 2048.0
 RESPONSE_DRAWS, RESPONSE_SEED = 32_768, 0
 
@@ -77,35 +70,21 @@ TERMS = {
 }
 
 
-def build_likelihood(frequencies: np.ndarray) -> ImportanceGaussianLikelihood:
+def build_likelihood(
+    catalog_path: Path, noise: DetectorNoise
+) -> ImportanceGaussianLikelihood:
     """The grid notebook's likelihood at the fiducials, amplitude mode."""
-    catalog_metadata = CatalogMetadata(
-        waveform=waveform_metadata(
-            root=ROOT_DIR,
-            frequency_spacing="log",
-            minimum_frequency=MINIMUM_FREQUENCY,
-            maximum_frequency=4000.0,
-            frequency_resolution=0.02,
-            turnover_frequency=None,
-        ),
-        population=population_metadata(root=ROOT_DIR),
-        fiducials=fiducials(root=ROOT_DIR),
-        num_samples=NUM_SAMPLES,
-        sampling="sobol",
-    )
-    data = ensure_reference_catalog(
-        catalog_metadata, CATALOG_SEED, CATALOGS_ROOT, chunk_size=CATALOG_CHUNK_SIZE
-    )
-    population = population_metadata(root=ROOT_DIR)
+    data, catalog_metadata, _ = read_reference_catalog(catalog_path)
+    population = catalog_metadata.population
     return ImportanceGaussianLikelihood.from_catalog(
         data,
         catalog_metadata,
         population=build_population(population.model_name, **population.model_kwargs),
-        frequencies=frequencies,
+        frequencies=noise.frequencies,
         num_redshift_nodes=REDSHIFT_NODES,
         density_sites=(),
         shot_noise="amplitude",
-        observation_time=OBSERVATION_TIME,
+        observation_time=noise.metadata.observation_time,
     )
 
 
@@ -219,7 +198,20 @@ def main() -> None:
     parser.add_argument(
         "--tex-only", action="store_true", help="rewrite the table from the CSV"
     )
-    if parser.parse_args().tex_only:
+    parser.add_argument(
+        "--ensemble",
+        type=Path,
+        default=ENSEMBLES_ROOT / "fiducial",
+        help="ensemble root holding detector_noise.h5 (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--reference-catalog",
+        type=Path,
+        default=CATALOGS_ROOT / "reference-fiducial.h5",
+        help="(default: %(default)s)",
+    )
+    args = parser.parse_args()
+    if args.tex_only:
         table = pd.read_csv(OUTPUT / "shot_noise_budget.csv")
         if "num_sources" not in table:
             table["num_sources"] = 7.134e5  # older CSVs predate the column
@@ -227,8 +219,9 @@ def main() -> None:
         return
     fiducial = fiducials(root=ROOT_DIR)
     registry = detector_registry(root=ROOT_DIR)
-    frequencies = np.asarray(waveform_metadata(root=ROOT_DIR).build().frequencies)
-    likelihood = build_likelihood(frequencies)
+    noise = DetectorNoise.open(args.ensemble / "detector_noise.h5")
+    frequencies = noise.frequencies
+    likelihood = build_likelihood(args.reference_catalog, noise)
     spectrum, _, extras = likelihood.predict(fiducial)
     num_sources = float(extras["total_merger_rate"]) * float(
         likelihood.observation_seconds
@@ -239,10 +232,8 @@ def main() -> None:
     for name, label in DETECTOR_NETWORKS:
         detectors, _ = registry.build_network(name)
         data = network_pair_data(
-            registry,
+            noise,
             name,
-            frequencies,
-            observation_time=OBSERVATION_TIME,
             minimum_frequency=MINIMUM_FREQUENCY,
             maximum_frequency=MAXIMUM_FREQUENCY,
             num_pairs=len(detectors) * (len(detectors) - 1) // 2,

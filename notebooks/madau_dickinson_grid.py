@@ -5,7 +5,6 @@ app = marimo.App()
 
 with app.setup(hide_code=True):
     import dataclasses
-    import os
     import time
     from collections.abc import Mapping, Sequence
     from pathlib import Path
@@ -30,24 +29,14 @@ with app.setup(hide_code=True):
     from xarray import DataTree
 
     from astrogwb.detector import sample_pair_response
-    from astrogwb.gwb.catalog import CatalogMetadata
     from astrogwb.inference import ImportanceGaussianLikelihood
     from astrogwb.inference import Network as LikelihoodNetwork
-    from astrogwb.paper.cache import default_cache_dir
-    from astrogwb.paper.catalogs import validate_matching_frequency_grids
-    from astrogwb.paper.config import (
-        detector_registry,
-        fiducials,
-        population_metadata,
-        priors,
-        waveform_metadata,
+    from astrogwb.paper.catalogs import (
+        read_reference_catalog,
+        validate_matching_frequency_grids,
     )
-    from astrogwb.paper.config.runs import CATALOGS_ROOT, FIGURES_DIR
-    from astrogwb.paper.ensemble import (
-        EnsembleRecord,
-        network_configuration,
-        network_spectra_ensemble,
-    )
+    from astrogwb.paper.config import detector_registry, fiducials, priors
+    from astrogwb.paper.config.runs import CATALOGS_ROOT, ENSEMBLES_ROOT, FIGURES_DIR
     from astrogwb.paper.plotting import (
         DETECTOR_NETWORKS,
         plot_corner,
@@ -56,13 +45,12 @@ with app.setup(hide_code=True):
         use_paper_style,
     )
     from astrogwb.paper.posteriors import (
-        ensure_reference_catalog,
         network_pair_data,
         pad_pairs,
         shot_noise_variant,
     )
     from astrogwb.populations import build_population
-    from astrogwb.simulators import PopulationMetadata as RealizationMetadata
+    from astrogwb.simulators import DetectorNoise, network_spectra_ensemble
 
     # Points of the coarse scan that locates the ridge, Newton iterations that
     # polish it, points of the integration window, and its half width in
@@ -153,8 +141,7 @@ def _():
     The data and the model spectrum are those of `cosmology_grid_posteriors.py`:
     the zero-noise Poisson injection as each network records it, through the
     per-source antenna patterns, and the rescaled reference-redshift catalog
-    drawn at a different seed. Setting `ASTROGWB_NOTEBOOK_SMOKE=1` swaps in a
-    tiny catalog and a coarse grid so the whole notebook runs quickly.
+    drawn at a different seed.
     """)
 
 
@@ -204,16 +191,10 @@ def _():
     ROOT_DIR = Path(__file__).resolve().parents[1]
     FIGURES = ROOT_DIR / FIGURES_DIR / "madau_dickinson_grid"
 
-    # Different seeds: the injection must not be a subset of the catalog.
+    # The injection's seed; the reference catalog is drawn at another, so the
+    # injection is not a subset of the catalog.
     data_seed = 41
-    catalog_seed = 42
-    # The same reference catalog and injection as the cosmology grid notebook.
-    num_samples = 2**14
     redshift_nodes = 32  # Gauss-Legendre nodes in 1/(1 + z); costs no waveforms
-    catalog_chunk_size = 4096  # reference waveforms per lax.map batch
-    # Injection waveforms per reduced chunk: peak memory is (pairs, F, chunk)
-    # for the 12 detector pairs of the six networks.
-    chunk_size = 4096
 
     observation_time = 1.0  # years
     minimum_frequency = 2.0
@@ -234,22 +215,6 @@ def _():
     num_draws = 20_000  # draws of the posterior, for the plots and summaries
     draw_seed = 44
 
-    SMOKE = os.environ.get("ASTROGWB_NOTEBOOK_SMOKE") == "1"
-    write_figures_default = True
-    cache_name_prefix = ""
-    if SMOKE:
-        num_samples = 64
-        redshift_nodes = 8
-        catalog_chunk_size = 512
-        chunk_size = 512
-        num_gamma, num_kappa = 24, 16
-        num_draws = 2_000
-        network_names = [fiducial_network]
-        response_draws, max_modes = 64, 4
-        write_figures_default = False
-        cache_name_prefix = "smoke_"
-
-    cache_dir = default_cache_dir() / "posteriors"
     FIDUCIALS = fiducials(root=ROOT_DIR)
     # The shared U(-10, 10) priors on gamma and kappa are restricted to positive
     # values; every other prior is the shared one.
@@ -257,39 +222,15 @@ def _():
     PRIORS = priors(root=ROOT_DIR, gamma=positive, kappa=positive)
     registry = detector_registry(root=ROOT_DIR)
 
-    waveform = waveform_metadata(root=ROOT_DIR)
-    frequencies = np.asarray(waveform.build().frequencies)
-    population = population_metadata(root=ROOT_DIR)
-    catalog_metadata = CatalogMetadata(
-        waveform=waveform_metadata(
-            root=ROOT_DIR,
-            frequency_spacing="log",
-            minimum_frequency=minimum_frequency,
-            maximum_frequency=4000.0,
-            frequency_resolution=0.02,
-            turnover_frequency=None,
-        ),
-        population=population,
-        fiducials=FIDUCIALS,
-        num_samples=num_samples,
-        sampling="sobol",
-    )
-    # The one catalog as each network records it. Smoke runs inject a short
-    # observation, a few hundred sources; the spectrum's mean does not depend
-    # on it.
-    network_injections = EnsembleRecord(
-        population=RealizationMetadata(
-            observation_time=1e-4 if SMOKE else observation_time,
-            hyperparameters={**FIDUCIALS},
-            population=population,
-        ),
-        waveform=waveform,
-        networks={
-            name: network_configuration(registry, name) for name in network_names
-        },
-    )
+    # The same inputs as cosmology_grid_posteriors.py, written by
+    # workflow/coverage_draws.smk and only read here: the injection ensemble,
+    # its detector noise and the reference catalog.
+    ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / "fiducial"
+    reference_catalog_path = ROOT_DIR / CATALOGS_ROOT / "reference-fiducial.h5"
+    noise = DetectorNoise.open(ensemble_root / "detector_noise.h5")
+    frequencies = noise.frequencies
 
-    write_figures = mo.ui.switch(value=write_figures_default, label="Write figures")
+    write_figures = mo.ui.switch(value=True, label="Write figures")
     write_figures
     use_paper_style(root=ROOT_DIR)
     # gwpy registers replacement default axes; keep matplotlib's.
@@ -298,12 +239,6 @@ def _():
         FIDUCIALS,
         FIGURES,
         PRIORS,
-        cache_dir,
-        cache_name_prefix,
-        catalog_chunk_size,
-        catalog_metadata,
-        catalog_seed,
-        chunk_size,
         data_seed,
         draw_seed,
         fiducial_network,
@@ -312,15 +247,16 @@ def _():
         max_modes,
         maximum_frequency,
         minimum_frequency,
+        ensemble_root,
         modes_tolerance,
-        network_injections,
         network_names,
+        noise,
         num_draws,
         num_gamma,
         num_kappa,
         observation_time,
-        population,
         redshift_nodes,
+        reference_catalog_path,
         registry,
         response_draws,
         response_seed,
@@ -555,28 +491,21 @@ def _():
     `density_sites=()` and the amplitude mode, which holds the squared power
     and the Gram matrix of the catalog so that every variant can be switched
     to afterwards and no evaluation contracts the catalog. The injection is one
-    Poisson catalog recorded by every network, cached beside the traces, one
-    file per network.
+    Poisson catalog recorded by every network, the ensemble's draw 0.
     """)
 
 
 @app.cell
-def _(
-    catalog_chunk_size,
-    catalog_metadata,
-    catalog_seed,
-    frequencies,
-    observation_time,
-    population,
-    redshift_nodes,
-):
+def _(frequencies, observation_time, redshift_nodes, reference_catalog_path):
     # The NumPy catalog is local to this cell, so it is freed once the device
     # copy made by the likelihood exists.
-    catalog_data = ensure_reference_catalog(
-        catalog_metadata, catalog_seed, CATALOGS_ROOT, chunk_size=catalog_chunk_size
+    catalog_data, catalog_metadata, _seed = read_reference_catalog(
+        reference_catalog_path
     )
+    population = catalog_metadata.population
     print(
-        f"reference catalog: {catalog_metadata.num_samples:,} draws, "
+        f"reference catalog: {catalog_metadata.num_samples:,} draws at seed "
+        f"{_seed}, "
         f"{redshift_nodes} redshift nodes"
     )
     target = build_population(population.model_name, **population.model_kwargs)
@@ -594,24 +523,11 @@ def _(
 
 
 @app.cell
-def _(
-    cache_dir,
-    cache_name_prefix,
-    chunk_size,
-    data_seed,
-    frequencies,
-    network_injections,
-):
+def _(data_seed, ensemble_root, frequencies, network_names):
     # Draw 0 of `data_seed`, shared with cosmology_grid_posteriors.py.
-    _drawn = network_spectra_ensemble(
-        network_injections,
-        data_seed,
-        1,
-        cache_dir / f"{cache_name_prefix}network_injections",
-        chunk_size=chunk_size,
-    )
+    _drawn = network_spectra_ensemble(ensemble_root, data_seed, 1, network_names)
     observed = {}
-    for _name, _data in zip(network_injections.networks, _drawn, strict=True):
+    for _name, _data in zip(network_names, _drawn, strict=True):
         validate_matching_frequency_grids(_data["frequencies"], frequencies)
         observed[_name] = pad_pairs(_data["pair_spectral_density"][0])
     print(
@@ -632,7 +548,7 @@ def _(
     minimum_frequency,
     modes_tolerance,
     network_names,
-    observation_time,
+    noise,
     observed,
     registry,
     response_draws,
@@ -640,10 +556,8 @@ def _(
 ):
     per_network = {
         name: network_pair_data(
-            registry,
+            noise,
             name,
-            frequencies,
-            observation_time=observation_time,
             minimum_frequency=minimum_frequency,
             maximum_frequency=maximum_frequency,
         )
@@ -687,7 +601,7 @@ def _(
             for network in base_networks.values()
         ]
     )
-    variant_likelihood, _s2, _ = shot_noise_variant(
+    variant_likelihood, _s2 = shot_noise_variant(
         likelihood_variant, likelihood, fiducial_relative_variance
     )
 

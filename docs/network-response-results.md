@@ -233,10 +233,8 @@ uv run --extra notebook python notebooks/shot_noise_coverage.py
 ```
 
 The minimum-redshift scan is section 9 of `notebooks/ensemble_spectrum.py`.
-The network injections are cached one file per network and draw under
-`default_cache_dir() / "ensembles"` (coverage, 1000 draws) and
-`default_cache_dir() / "posteriors" / "network_injections"` (grids), keyed by
-each network's `NetworkSpectralDensityMetadata`, apart from the sky-averaged
-caches. `network_spectra_ensemble` draws all networks in one waveform pass per
-catalog, about 45 s per paper-size catalog on an M4. Every likelihood holds
+The network injections are the ensembles `outputs/ensembles/coverage/` (1000
+draws) and `outputs/ensembles/fiducial/` (grids), written by
+`workflow/coverage_draws.smk`; each draw's background holds every network's
+spectra from one waveform pass, about 45 s per paper-size catalog on an M4. Every likelihood holds
 `Network.response_moments`, so the response costs nothing per grid point.

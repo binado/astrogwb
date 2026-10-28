@@ -1,0 +1,25 @@
+# The fiducial ensemble's population, `astrogwb simulate --population-metadata`:
+# the shared population at the fiducials (config/defaults.toml), observed for a
+# year. Regenerate outputs/ensembles/fiducial after an edit.
+observation_time = 1.0
+
+[population]
+model_name = "bns_coba"
+
+[population.model_kwargs]
+mass_model = "uniform"
+minimum_redshift = 0.35
+maximum_redshift = 20.0
+n_grid = 4096
+
+[hyperparameters]
+H0 = 67.66
+Omega_m = 0.3096
+xi_0 = 1.0
+xi_n = 1.91
+gamma = 1.42
+kappa = 4.62
+z_peak = 1.84
+local_merger_rate = 770.0
+minimum_mass = 1.0
+mass_width = 1.5

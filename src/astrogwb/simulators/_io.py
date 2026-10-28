@@ -163,13 +163,7 @@ def read_realization_manifest(directory: str | Path) -> dict[str, Any]:
     if version != LAYOUT_VERSION:
         raise ValueError(
             f"{path} has realization layout version {version}, but this astrogwb "
-            f"reads version {LAYOUT_VERSION}"
-            + (
-                "; it is a per-stage artifact of an earlier astrogwb, see "
-                "scripts/migrate_ensemble_cache.py"
-                if "artifact" in manifest
-                else ""
-            )
+            f"reads version {LAYOUT_VERSION}; regenerate it with astrogwb simulate"
         )
     return manifest
 

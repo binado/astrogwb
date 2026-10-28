@@ -23,6 +23,8 @@ reference_frequency = 20.0
 frequency_spacing = "loglinear"
 frequency_resolution = 1.0
 turnover_frequency = 100.0
+# 301 geometric bins above the turn, 400 in all.
+dlogf = 0.01005
 
 # The default waveform on a uniform grid at the default resolution: the grid
 # every catalog used before the loglinear grid, for checking one against the
