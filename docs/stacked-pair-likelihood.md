@@ -32,8 +32,8 @@ pairs first discards exactly the information the paper is about.
 | `paper/posteriors.py::network_data` | `gaussian_bin_scale(effective_psd(...))`, one `(F,)` scale | absent |
 | Exact response moments (App. B) | none; Monte Carlo draws only | n/a |
 
-Detector pairs per network: ET-triangle 3, ET-triangle + CE 6, ET-2L 1,
-ET-2L + CE 3. Stacking networks along `vmap` needs a common `P_max = 6`.
+Detector pairs per network: ET-triangle 3, ET-triangle + CE 6, ET-2L-mis 1,
+ET-2L-mis + CE 3. Stacking networks along `vmap` needs a common `P_max = 6`.
 
 ## Decisions
 
@@ -52,7 +52,7 @@ reproduces `gaussian_bin_scale(effective_psd(...))` bin by bin.
 Not $Y_{ab}/\gamma_{ab}$ (mean $S_h$). That form diverges at the
 zeros of $\gamma_{ab}$, and the per-source response
 $\gamma_{ab}(\hat n\ldots)/\gamma_{ab}$ becomes heavy-tailed for pairs
-with small overlap (ET-2L S2-R2 has $\gamma \simeq 0.09$ at 10 Hz).
+with small overlap (ET-2L-mis S2-R2 has $\gamma \simeq 0.09$ at 10 Hz).
 The two forms differ by a fixed per-entry rescaling, so they give the same
 posterior. The paper keeps the normalized notation
 $\mu_{ab,k} = S_h(f_k)$ and $\Delta S_{h,ab}$; the code uses the
@@ -129,7 +129,7 @@ The likelihood consumes moments only through two quantities: $\bar R$
 later supplies $\langle r_{ab,k} r_{cd,k'} \rangle$ directly, `(D, D)`,
 and replaces the draws without changing the likelihood. #380 found the Monte
 Carlo second moment still converging at $2.6\times10^5$ draws for
-ET-2L + CE, which is the argument for doing the exact evaluation and not
+ET-2L-mis + CE, which is the argument for doing the exact evaluation and not
 just increasing `L`.
 
 ### D5. Simulator: emit per-pair spectra, derive the combined one
