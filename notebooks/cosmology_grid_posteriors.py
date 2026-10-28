@@ -181,7 +181,7 @@ def _():
     # grids: the corner plot reads each density value as proportional to the
     # mass of its cell. Windows should hold the posterior comfortably; the
     # best network's sigma is ~0.2 for H0 and ~0.003 for xi_0, the worst's
-    # (ET-2L, at 45 deg from local North) ~1.5 and ~0.02. xi_n is flat at
+    # (ET-2L-mis, at 45 deg from local North) ~1.5 and ~0.02. xi_n is flat at
     # xi_0 = 1, so it takes its prior range.
     h0_window, h0_size = (58.5, 77.0), 926  # H0 alone: 0.02 step
     h0_omega_window, h0_omega_size = (59.0, 76.5), 351  # H0 in the 2D problem

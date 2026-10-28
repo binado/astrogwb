@@ -179,8 +179,8 @@ DETECTOR_NETWORKS: tuple[tuple[str, str], ...] = (
     ("ET-triangular-CE-Hanford", r"ET-$\Delta$ $+$ CE"),
     ("ET-2L-aligned", "ET-2L-par"),
     ("ET-2L-aligned-CE-Hanford", r"ET-2L-par $+$ CE"),
-    ("ET-2L-misaligned", "ET-2L"),
-    ("ET-2L-misaligned-CE-Hanford", r"ET-2L $+$ CE"),
+    ("ET-2L-misaligned", "ET-2L-mis"),
+    ("ET-2L-misaligned-CE-Hanford", r"ET-2L-mis $+$ CE"),
 )
 
 
