@@ -260,7 +260,6 @@ initializes.
 | `BackgroundSpectralDensityMetadata`, `NetworkSpectralDensityMetadata` | `PopulationMetadata` + `WaveformMetadata` + `DetectorRegistry` |
 | `PopulationDrawMetadata` (`count`, `num_events`) | `astrogwb.simulators.PopulationMetadata`, Poisson only |
 | `astrogwb.simulators.polarization_power` | `astrogwb.gwb.catalog` |
-| `astrogwb.simulators.spectra.poisson_counts_forward_model` | `astrogwb.inference.poisson_counts` |
 | `astrogwb.simulators.core.{write,load,content_key}` | `astrogwb.utils.io` |
 | `spectra_ensemble`, `network_spectra_ensemble(EnsembleRecord, ...)` | `workflow/coverage_draws.smk` writes the ensemble; `network_spectra_ensemble(root, seed, n, names)` reads it |
 | `scripts/simulate_spectra.py`, `config/simulations/spectrum/` | `astrogwb simulate` |
