@@ -55,20 +55,14 @@ hyperparameter *values* costs no compilation.
 Both generators are JAX-native and valid :func:`jax.jit`,
 :class:`~numpyro.infer.Predictive` and :func:`jax.vmap` targets.
 Neither validates physical values during generation -- a traced array cannot
-raise, and forcing the question would sync the host on every chunk. Run
-:func:`~astrogwb.waveform.validation.validate_source_model` once before inference to check a population
-against a generator's waveform family::
+raise, and forcing the question would sync the host on every chunk::
 
     from functools import partial
 
     from numpyro.infer import Predictive
 
-    from astrogwb.populations import joint_model
     from astrogwb.inference.poisson_counts import poisson_counts_forward_model
-    from astrogwb.waveform.validation import validate_source_model
 
-    model = joint_model(*population(params))
-    validate_source_model(model, generator=generator, rng_key=jax.random.key(0))
     simulate = Predictive(
         partial(
             poisson_counts_forward_model,
@@ -98,7 +92,6 @@ from jax.typing import ArrayLike
 from astrogwb.populations import Population, joint_model
 from astrogwb.utils import array_dict_shape, years_to_seconds
 from astrogwb.waveform import PolarizationPowerGenerator
-from astrogwb.waveform.validation import require_luminosity_distance
 
 _TOTAL_MERGER_RATE_SITE = "total_merger_rate"
 
@@ -230,7 +223,6 @@ def poisson_counts_forward_model(
     event_mask = jnp.arange(max_events) < n_events
     with numpyro.plate("events", max_events), numpyro.handlers.mask(mask=event_mask):
         sources = dict(model())
-    require_luminosity_distance(sources)
     power_sum = _sum_polarization_power(
         generator,
         sources,

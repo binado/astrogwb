@@ -335,10 +335,8 @@ def check_sources(approximant: str, source_parameters: Mapping[str, ArrayLike]) 
 
     Eager only, and never called from the generate path: a traced array cannot
     drive a Python exception, and converting one to decide would sync the host
-    on every batch. Call it once on a concrete catalog -- or on one eager draw
-    from a population, via
-    :func:`~astrogwb.waveform.validation.validate_source_model` -- before handing the
-    model to inference.
+    on every batch. Call it once on a concrete catalog or an eager draw from a
+    population before handing the model to inference.
 
     Raises:
         ValueError: If a value is unphysical, or names a degree of freedom the

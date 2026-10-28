@@ -180,15 +180,10 @@ class WaveformSimulator:
 
         Raises
         ------
-        KeyError
-            If the population has no ``luminosity_distance`` column.
         ValueError
             If ``validate_sources`` and a source value is outside what the
             approximant represents.
         """
-        from astrogwb.waveform.validation import require_luminosity_distance
-
-        require_luminosity_distance(population.source_parameters)
         if self._validate_sources and population.count:
             self._generator.check_sources(population.source_parameters)
         return Waveforms(self, population)
