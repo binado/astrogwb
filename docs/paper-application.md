@@ -76,3 +76,27 @@ file, so a notebook can vary one value without editing TOML or retyping the
 table.
 
 See [`docs/`](.) for catalog generation and paper figures.
+
+## Reference catalogs
+
+Generate an importance-integration catalog with the CLI:
+
+```sh
+uv run astrogwb model-catalog outputs/catalogs/reference-fiducial.h5 \
+    --catalog-metadata config/catalogs/reference-fiducial.toml \
+    --seed 42 --chunk-size 4096
+```
+
+The TOML is a complete `CatalogMetadata` record: top-level `num_samples`,
+`sampling`, optional `reference_redshift`, and tables for `waveform`,
+`population` (including `population.model_kwargs`), and `fiducials`.
+Omit optional null fields and `version`; the installed package supplies its
+version. The seed and execution options (`--chunk-size`, `--platform`, and
+`--cpu-threads`) are command-line arguments, outside the catalog record.
+
+The three files in `config/catalogs/` are explicit snapshots of the paper's
+fiducial, convergence-ladder, and minimum-redshift-scan inputs. They do not
+inherit changes from the shared paper configuration. Regenerate affected
+outputs after editing them. `workflow/coverage_draws.smk` runs the command
+with these files and the appropriate seeds; notebooks continue reading the
+same HDF5 paths.

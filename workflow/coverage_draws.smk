@@ -14,7 +14,7 @@
 #       the networks' noise on the same grid and observation time;
 #
 # and the reference catalogs the notebooks name, by
-# scripts/draw_reference_catalog.py, under outputs/catalogs/.
+# `astrogwb model-catalog`, under outputs/catalogs/.
 #
 # A realization is fixed by (seed, index) alone, so jobs are independent,
 # finished directories merge by copying, and a background that exists is not
@@ -49,18 +49,12 @@ DRAWS = {
     "fiducial": {41: 1000, 42: 1},
 }
 
-# The reference catalogs each ensemble's notebooks read, and their options.
+# Explicit catalog snapshots, with draw seeds and execution-only chunk sizes.
 CATALOGS = {
     "fiducial": {
-        # the grid and coverage notebooks, shot_noise_* scripts
-        "reference-fiducial": "--num-samples 16384 --chunk-size 4096",
-        # importance_convergence's redshift ladder
-        "reference-ladder": "--num-samples 256 --sampling random --seed 100",
-        # ensemble_spectrum's minimum-redshift scan, at 1 Mpc: the redshift of
-        # that luminosity distance at the fiducial H0 = 67.66, Omega_m = 0.3096
-        "reference-scan": (
-            "--num-samples 16384 --reference-redshift 2.2565039557e-4 --chunk-size 4096"
-        ),
+        "reference-fiducial": "--seed 42 --chunk-size 4096",
+        "reference-ladder": "--seed 100",
+        "reference-scan": "--seed 42 --chunk-size 4096",
     },
 }
 CATALOG_OPTIONS = {
@@ -167,6 +161,8 @@ rule noise:
 
 
 rule reference_catalog:
+    input:
+        metadata="config/catalogs/{catalog}.toml",
     output:
         f"{CATALOGS_ROOT}/{{catalog}}.h5",
     log:
@@ -176,6 +172,6 @@ rule reference_catalog:
     threads: THREADS
     shell:
         _RUN
-        + """ python scripts/draw_reference_catalog.py {params.options} \
-            --output {output:q} > {log:q} 2>&1
+        + """ astrogwb model-catalog {output:q} {params.options} \
+            --catalog-metadata {input.metadata:q} --cpu-threads {threads} > {log:q} 2>&1
         """

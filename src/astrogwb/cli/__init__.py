@@ -21,6 +21,10 @@ generation also requires the registry::
     astrogwb noise ensemble/41-0 ensemble/detector_noise.h5 \\
         --detector-config config/detectors.toml
 
+Importance-integration catalogs use explicit catalog metadata::
+
+    astrogwb model-catalog reference.h5 --catalog-metadata catalog.toml
+
 Readers trust the files they open and preserve the recorded artifact identity.
 Changing the registry requires regenerating affected outputs. Runtime settings (--platform,
 --cpu-threads) are applied before the JAX backend initializes.
@@ -28,6 +32,7 @@ Changing the registry requires regenerating affected outputs. Runtime settings (
 
 import typer
 
+from .model_catalog import model_catalog
 from .noise import noise
 from .simulate import simulate
 
@@ -43,3 +48,5 @@ def _main() -> None:
 
 app.command()(simulate)
 app.command()(noise)
+
+app.command()(model_catalog)

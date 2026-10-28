@@ -583,7 +583,7 @@ def _():
 
     The reference catalog generates every intrinsic draw once, at the
     window's lower edge, so its power is `(F_ref, N)`; it is read from
-    `reference_catalog_path` (`scripts/draw_reference_catalog.py`). The
+    `reference_catalog_path` (`astrogwb model-catalog`). The
     injection is one Poisson catalog recorded by every network, read from the
     ensemble's draw 0 (`network_spectra_ensemble`): each network's pair
     spectra were projected in one waveform pass shared by the networks.

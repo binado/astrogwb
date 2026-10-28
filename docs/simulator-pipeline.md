@@ -276,5 +276,5 @@ initializes.
 | one background over the detector union; `BackgroundArtifact.pair_spectra(network)`, `.detectors`, `.pairs` | per-network spectra; `BackgroundArtifact.spectra[name]`, `.pairs[name]` |
 | `Realization.detectors` | `Realization.networks` |
 | `--detector-config` with network and detector layers | repeated `--detector-config PATH` options |
-| `ensure_reference_catalog`, `settings_digest`, `noise_digest`, posterior grid caches | `scripts/draw_reference_catalog.py`; grids are computed on every run |
+| `ensure_reference_catalog`, `settings_digest`, `noise_digest`, posterior grid caches | `astrogwb model-catalog`; grids are computed on every run |
 | `astrogwb.paper.cache.default_cache_dir` | explicit paths under `outputs/` |
