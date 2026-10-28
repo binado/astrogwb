@@ -1,7 +1,7 @@
 """Ripple adapter: grid arithmetic, parameter mapping, and the waveform kernel.
 
 Everything that knows about ``ripplegw`` lives here so
-:mod:`astrogwb.waveform.generator.ripple` stays a thin descriptor. The split is
+:mod:`astrogwb.waveform.ripple` stays a thin descriptor. The split is
 also a licensing boundary: ``gwmock-signal`` ships a GPL-3 Ripple backend, and
 this module reimplements the parts astrogwb needs from Ripple's public API, so
 the package stays MIT. ``gwmock-signal`` remains the parity reference the tests
@@ -64,8 +64,8 @@ import jax.numpy as jnp
 from numpy.typing import ArrayLike
 
 __all__ = [
+    "build_polarization_kernel",
     "build_power_kernel",
-    "build_stokes_kernel",
     "check_sources",
     "next_smooth_even",
     "ripple_parameters",
@@ -436,63 +436,6 @@ def build_power_kernel(
     return full_polarization_power
 
 
-def build_stokes_kernel(
-    approximant: str,
-    reference_frequency: float,
-    *,
-    use_taper_in_tidal_corrections: bool = True,
-) -> Callable[[jax.Array, Mapping[str, jax.Array]], jax.Array]:
-    """Return a vmapped ``(frequencies, events) -> stokes`` evaluator, ``(4, F, N)``.
-
-    The Stokes counterpart of :func:`build_power_kernel`, dispatched the same
-    way. A :class:`~ripplegw.interfaces.AmplitudePhaseWaveform` evaluates only
-    its amplitude, and
-    :func:`~astrogwb.waveform.polarization_power.quadrupolar_stokes` supplies
-    the inclination dependence; its :math:`I` is the power kernel's output bit
-    for bit. Other models evaluate :math:`\\tilde h_+, \\tilde h_\\times` and
-    reduce them with
-    :func:`~astrogwb.waveform.polarization_power.polarization_stokes`. Higher
-    modes make those depend on ``phase_c``, which the caller then has to
-    supply. Not jitted, and NaN-guarded, as :func:`build_power_kernel` is.
-    """
-    # Imported here, not at module scope -- see the module docstring.
-    from ripplegw.interfaces import AmplitudePhaseWaveform
-
-    from astrogwb.waveform.polarization_power import (
-        polarization_stokes,
-        quadrupolar_stokes,
-    )
-
-    waveform = _build_ripple_waveform(
-        approximant,
-        reference_frequency,
-        use_taper_in_tidal_corrections=use_taper_in_tidal_corrections,
-    )
-
-    if isinstance(waveform, AmplitudePhaseWaveform):
-
-        def amplitude_stokes(
-            frequencies: jax.Array, events: Mapping[str, jax.Array]
-        ) -> jax.Array:
-            amplitudes = jax.vmap(
-                lambda event: waveform.amplitude(frequencies, dict(event)),
-                in_axes=0,
-            )(events)
-            return jnp.nan_to_num(quadrupolar_stokes(amplitudes, events["iota"]))
-
-        return amplitude_stokes
-
-    evaluate_polarizations = _polarization_evaluator(waveform)
-
-    def full_polarization_stokes(
-        frequencies: jax.Array, events: Mapping[str, jax.Array]
-    ) -> jax.Array:
-        plus, cross = evaluate_polarizations(frequencies, events)
-        return polarization_stokes(plus, cross)
-
-    return full_polarization_stokes
-
-
 def build_polarization_kernel(
     approximant: str,
     reference_frequency: float,
@@ -502,9 +445,8 @@ def build_polarization_kernel(
     """Return a vmapped ``(frequencies, events) -> (plus, cross)`` evaluator, each ``(N, F)``.
 
     Every model, amplitude-phase ones included, evaluates its full complex
-    polarizations here; :func:`build_stokes_kernel`'s amplitude-only shortcut
-    drops the phase, which the polarizations keep. Not jitted, and NaN-guarded,
-    as :func:`build_power_kernel` is.
+    polarizations here. Not jitted, and NaN-guarded, as
+    :func:`build_power_kernel` is.
     """
     return _polarization_evaluator(
         _build_ripple_waveform(

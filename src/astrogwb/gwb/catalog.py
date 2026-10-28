@@ -31,7 +31,7 @@ from astrogwb.populations import joint_model
 from astrogwb.populations.evaluation import sample_sources
 from astrogwb.populations.metadata import PopulationMetadata, widen_model_kwargs
 from astrogwb.utils.io import content_key
-from astrogwb.waveform.generator.base import PolarizationPowerGenerator
+from astrogwb.waveform.base import WaveformGenerator
 from astrogwb.waveform.metadata import WaveformMetadata
 
 __all__ = [
@@ -150,7 +150,7 @@ class PolarizationPowerData(TypedDict):
 
 
 def polarization_power_data(
-    generator: PolarizationPowerGenerator,
+    generator: WaveformGenerator,
     source_parameters: Mapping[str, ArrayLike],
     *,
     chunk_size: int | None = None,
@@ -161,7 +161,7 @@ def polarization_power_data(
     and trusts its inputs, so a source carrying a degree of freedom the
     approximant cannot represent would otherwise be silently dropped. The
     columns are passed through as arrays; ``chunk_size`` is
-    :meth:`~astrogwb.waveform.PolarizationPowerGenerator.generate_batch`'s.
+    :meth:`~astrogwb.waveform.WaveformGenerator.generate_batch`'s.
     """
     # Power is float64 throughout; see draw_catalog for why sources too.
     jax.config.update("jax_enable_x64", True)

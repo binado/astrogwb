@@ -42,9 +42,6 @@ def simulate(
     keep_sources: Annotated[
         bool, typer.Option(help="Write source_parameters.h5.")
     ] = True,
-    keep_polarizations: Annotated[
-        bool, typer.Option(help="Write polarization.h5.")
-    ] = False,
     chunk_size: Annotated[int, typer.Option(min=1, help="Waveforms per chunk.")] = 1024,
     source_chunk_size: Annotated[
         int, typer.Option(min=1, help="Sources drawn per piece.")
@@ -87,7 +84,6 @@ def simulate(
         seed=seed,
         index=index,
         keep_sources=keep_sources,
-        keep_polarizations=keep_polarizations,
         chunk_size=chunk_size,
         source_chunk_size=source_chunk_size,
     )

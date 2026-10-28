@@ -35,8 +35,7 @@ from astrogwb.populations import PopulationMetadata, build_population, joint_mod
 from astrogwb.populations.evaluation import evaluate_sources, sample_sources
 from astrogwb.simulators import batch_keys
 from astrogwb.utils import gauss_legendre_nodes_weights
-from astrogwb.waveform import WaveformMetadata
-from astrogwb.waveform.generator.analytical import inclination_factor
+from astrogwb.waveform import WaveformMetadata, inclination_factor
 
 #: The observed grid of the comparisons: four 10 Hz bins from 20 Hz.
 OBSERVED_WAVEFORM = WaveformMetadata(

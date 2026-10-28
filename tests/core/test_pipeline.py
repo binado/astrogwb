@@ -1,4 +1,4 @@
-"""The population, waveform and background stages, end to end.
+"""The population and background stages, end to end.
 
 Everything is generated for real on the closed-form inspiral: a tiny Poisson
 population and a four-bin grid. The Monte Carlo check compares in units of the
@@ -21,15 +21,13 @@ from astrogwb.simulators import (
     BackgroundSimulator,
     PopulationArtifact,
     PopulationSimulator,
-    WaveformSimulator,
     batch_keys,
     combine_pair_spectra,
     simulate_realization,
 )
 from astrogwb.simulators.background import background_key
 from astrogwb.simulators.population import EXTRINSIC_COLUMNS
-from astrogwb.waveform import WaveformMetadata
-from astrogwb.waveform.polarization_power import polarization_stokes
+from astrogwb.waveform import WaveformMetadata, polarization_stokes
 
 #: Standard errors a Monte Carlo mean may sit from its expectation.
 MAX_STANDARD_ERRORS = 5.0
@@ -39,11 +37,6 @@ MAX_STANDARD_ERRORS = 5.0
 def population() -> PopulationArtifact:
     """About fifty sources."""
     return PopulationSimulator(_population(1e-4), chunk_size=16)(batch_keys(41, 1)[0])
-
-
-@pytest.fixture(scope="module")
-def waveforms() -> WaveformSimulator:
-    return WaveformSimulator(WAVEFORM, chunk_size=8)
 
 
 @pytest.mark.parametrize("chunk_size", [3, 64])
@@ -65,7 +58,7 @@ def test_population_draws_its_extrinsics_whatever_the_chunk_size(
     "approximant",
     ["AnalyticInspiral", pytest.param("IMRPhenomD", marks=pytest.mark.integration)],
 )
-def test_polarizations_reduce_to_the_generators_stokes_parameters(
+def test_polarizations_reduce_to_the_generators_power(
     population: PopulationArtifact, approximant: str
 ) -> None:
     # A 1 Hz grid puts the band's edges on Ripple's FFT grid.
@@ -80,18 +73,16 @@ def test_polarizations_reduce_to_the_generators_stokes_parameters(
 
     plus, cross = generator.generate_polarizations_batch(sources)
 
-    stokes = np.asarray(generator.generate_stokes_batch(sources))
+    power = np.asarray(generator.generate_batch(sources))
     np.testing.assert_allclose(
-        np.asarray(polarization_stokes(plus, cross)),
-        stokes,
+        np.asarray(polarization_stokes(plus, cross)[0]),
+        power,
         rtol=1e-10,
-        atol=1e-12 * np.abs(stokes).max(),
+        atol=1e-12 * np.abs(power).max(),
     )
 
 
-def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum(
-    waveforms: WaveformSimulator,
-) -> None:
+def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum() -> None:
     r"""Over isotropic sources, :math:`E[Y_{ab}] = \gamma_{ab} S_h`.
 
     One realization is split into groups; in each, the ratio of every pair
@@ -102,6 +93,7 @@ def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum(
         batch_keys(7, 1)[0]
     )
     background = BackgroundSimulator(
+        WAVEFORM,
         DetectorRegistry(
             detectors=NETWORKS.detectors,
             networks={"triangle": NETWORKS.networks["triangle"]},
@@ -118,12 +110,12 @@ def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum(
         }
         part = dataclasses.replace(realization, source_parameters=sources)
         power = np.asarray(generator.generate_batch(sources)).sum(axis=1)
-        spectra = background(waveforms(part)).spectra["triangle"].pair_spectral_density
+        spectra = background(part).spectra["triangle"].pair_spectral_density
         ratios.append(spectra / (power / realization.observation_seconds))
     ratios = np.asarray(ratios)
     expected = np.stack(
         [
-            isotropic_overlap_reduction_function(waveforms.frequencies, first, second)
+            isotropic_overlap_reduction_function(background.frequencies, first, second)
             for first, second in NETWORKS.pairs("triangle")
         ]
     )
@@ -134,16 +126,14 @@ def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum(
 
 
 def test_a_staged_realization_reads_back_the_fused_background(
-    tmp_path: Path, population: PopulationArtifact, waveforms: WaveformSimulator
+    tmp_path: Path, population: PopulationArtifact
 ) -> None:
-    fused = BackgroundSimulator(NETWORKS, chunk_size=8)(waveforms(population))
+    fused = BackgroundSimulator(WAVEFORM, NETWORKS, chunk_size=8)(population)
 
     simulate_realization(
         tmp_path, population=_population(1e-4), seed=41, source_chunk_size=16
     )
-    simulate_realization(
-        tmp_path, waveform=WAVEFORM, keep_polarizations=True, chunk_size=8
-    )
+    simulate_realization(tmp_path, waveform=WAVEFORM, chunk_size=8)
     staged = simulate_realization(
         tmp_path, background=NETWORKS, chunk_size=8
     ).background()
@@ -154,40 +144,35 @@ def test_a_staged_realization_reads_back_the_fused_background(
     assert tuple(staged.spectra) == tuple(sorted(NETWORKS.networks))
 
 
-def test_an_empty_realization_has_zero_spectra(
-    tmp_path: Path, waveforms: WaveformSimulator
-) -> None:
+def test_an_empty_realization_has_zero_spectra() -> None:
     empty = PopulationSimulator(_population(1e-12))(batch_keys(41, 1)[0])
 
-    written = waveforms(empty).write(tmp_path / "polarization.h5")
-    background = BackgroundSimulator(NETWORKS)(written)
+    simulator = BackgroundSimulator(WAVEFORM, NETWORKS)
+    background = simulator(empty)
 
     assert empty.count == 0
     for name in NETWORKS.networks:
         pairs, combined = background.spectra[name]
-        assert pairs.shape == (len(NETWORKS.pairs(name)), waveforms.frequencies.size)
+        assert pairs.shape == (len(NETWORKS.pairs(name)), simulator.frequencies.size)
         assert not np.any(pairs) and not np.any(combined)
 
 
 @pytest.fixture(scope="module")
-def projected(
-    population: PopulationArtifact, waveforms: WaveformSimulator
-) -> BackgroundArtifact:
+def projected(population: PopulationArtifact) -> BackgroundArtifact:
     """The tiny population projected onto both networks."""
-    return BackgroundSimulator(NETWORKS, chunk_size=8)(waveforms(population))
+    return BackgroundSimulator(WAVEFORM, NETWORKS, chunk_size=8)(population)
 
 
 @pytest.mark.parametrize("name", list(NETWORKS.networks))
 def test_each_network_holds_its_rows_of_a_single_network_projection(
     projected: BackgroundArtifact,
     population: PopulationArtifact,
-    waveforms: WaveformSimulator,
     name: str,
 ) -> None:
     alone_registry = DetectorRegistry(
         detectors=NETWORKS.detectors, networks={name: NETWORKS.networks[name]}
     )
-    alone = BackgroundSimulator(alone_registry, chunk_size=8)(waveforms(population))
+    alone = BackgroundSimulator(WAVEFORM, alone_registry, chunk_size=8)(population)
 
     np.testing.assert_array_equal(
         projected.spectra[name].pair_spectral_density,
@@ -208,7 +193,7 @@ def test_the_network_spectrum_combines_its_pair_spectra(
 
 
 def test_custom_detector_geometry_is_used_for_projection(
-    population: PopulationArtifact, waveforms: WaveformSimulator
+    population: PopulationArtifact,
 ) -> None:
     custom = NETWORKS.detectors["E1"].model_copy(
         update={
@@ -229,12 +214,12 @@ def test_custom_detector_geometry_is_used_for_projection(
         networks={"custom": ("X1", "E2")},
     )
     moved = (
-        BackgroundSimulator(registry)(waveforms(population))
+        BackgroundSimulator(WAVEFORM, registry)(population)
         .spectra["custom"]
         .pair_spectral_density
     )
     original = (
-        BackgroundSimulator(reference)(waveforms(population))
+        BackgroundSimulator(WAVEFORM, reference)(population)
         .spectra["custom"]
         .pair_spectral_density
     )
@@ -242,7 +227,7 @@ def test_custom_detector_geometry_is_used_for_projection(
 
 
 def test_psd_override_preserves_pair_spectra_and_changes_combination(
-    population: PopulationArtifact, waveforms: WaveformSimulator
+    population: PopulationArtifact,
 ) -> None:
     mixed = DetectorRegistry(
         detectors=NETWORKS.detectors,
@@ -257,8 +242,8 @@ def test_psd_override_preserves_pair_spectra_and_changes_combination(
         },
         networks=mixed.networks,
     )
-    baseline = BackgroundSimulator(mixed)(waveforms(population)).spectra["mixed"]
-    overridden = BackgroundSimulator(changed)(waveforms(population)).spectra["mixed"]
+    baseline = BackgroundSimulator(WAVEFORM, mixed)(population).spectra["mixed"]
+    overridden = BackgroundSimulator(WAVEFORM, changed)(population).spectra["mixed"]
     np.testing.assert_array_equal(
         baseline.pair_spectral_density, overridden.pair_spectral_density
     )

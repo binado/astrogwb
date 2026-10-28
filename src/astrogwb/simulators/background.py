@@ -1,6 +1,10 @@
 r"""The background stage: per-pair cross-power spectra of one realization.
 
-Source :math:`i` reaches detector :math:`a` as
+Source :math:`i` has radiation-frame polarizations
+:math:`(\tilde h_{+,i}, \tilde h_{\times,i})` determined by its intrinsic
+parameters, inclination and coalescence phase (strain in :math:`\mathrm{Hz}^{-1}`,
+Fourier convention :math:`\tilde h(f) = \int h(t)\, e^{-2\pi i f t}\, dt`). It
+reaches detector :math:`a` as
 :math:`H_{a,i} = F^+_{a,i} \tilde h_{+,i} + F^\times_{a,i} \tilde h_{\times,i}`,
 with antenna patterns of its sky position and polarization angle, and leaves
 in the pair :math:`(a, b)` the real cross-power
@@ -28,13 +32,14 @@ reduction function, so for an isotropic, unpolarized population
 :data:`NORMALIZATION_VERSION`, recorded in every ``[background]`` table. The sum
 is never divided by the realized count.
 
-The stage is configured by named networks, a :data:`DetectorRegistry`.
-Every pair of the union of their detectors is projected once per chunk, so a
-pair two networks share costs one projection, and each network keeps its own
-rows, ``(P_n, F)``, with their :func:`combine_pair_spectra`, the optimally
-weighted network spectrum ``(F,)``. The combination weights come from the
-networks' noise curves, so the background depends on them and they are part
-of its key.
+The stage is configured by a :class:`~astrogwb.waveform.WaveformMetadata` and
+named networks, a :data:`DetectorRegistry`. Every pair of the union of their
+detectors is projected once per chunk in a single fused kernel (waveform
+evaluation plus Stokes contraction), so a pair two networks share costs one
+projection, and each network keeps its own rows, ``(P_n, F)``, with their
+:func:`combine_pair_spectra`, the optimally weighted network spectrum ``(F,)``.
+The combination weights come from the networks' noise curves, so the background
+depends on them and they are part of its key.
 
 The background is deterministic given its inputs and carries no detector
 noise. Detectors are static: the Earth's rotation during a signal is not
@@ -54,16 +59,20 @@ from numpy.typing import ArrayLike, NDArray
 
 from astrogwb.detector import pair_terms
 from astrogwb.detector.config import DetectorRegistry
+from astrogwb.simulators._chunks import iter_rows, pad_rows
 from astrogwb.simulators._io import atomic_h5
+from astrogwb.simulators.population import PopulationArtifact
 from astrogwb.utils.io import content_key, h5py_module
+from astrogwb.waveform.metadata import WaveformMetadata
 
 if TYPE_CHECKING:
     import jax
 
-    from astrogwb.simulators.waveforms import WaveformChunks
+    from astrogwb.waveform import WaveformGenerator
 
 __all__ = [
     "NORMALIZATION_VERSION",
+    "WAVEFORM_CONVENTIONS",
     "BackgroundArtifact",
     "BackgroundSimulator",
     "NetworkSpectrum",
@@ -73,9 +82,21 @@ __all__ = [
     "combine_pair_spectra",
     "scientific_payload",
     "select_networks",
+    "waveform_key",
+    "waveform_table",
 ]
 
+WAVEFORM_SCHEMA_VERSION = 1
 SCHEMA_VERSION = 3
+
+#: The conventions a waveform manifest records, so a reader can check them.
+WAVEFORM_CONVENTIONS = {
+    "frame": "radiation",
+    "polarization_angle": "applied_at_projection",
+    "fourier": "h(f) = int h(t) exp(-2 pi i f t) dt",
+    "strain_unit": "1 / Hz",
+    "frequency_unit": "Hz",
+}
 
 #: :math:`\langle K_{ab} \rangle = I \gamma_{ab}` over this, the factor in
 #: :math:`Y_{ab} = 5 D_{ab} / T`.
@@ -103,6 +124,26 @@ class NetworkSpectrum(NamedTuple):
 
     pair_spectral_density: NDArray[np.float64]
     spectral_density: NDArray[np.float64]
+
+
+def waveform_key(metadata: WaveformMetadata, population_key: str) -> str:
+    """The content hash of the waveforms of the population ``population_key``."""
+    return content_key(
+        {
+            "population": population_key,
+            "waveform": metadata.model_dump(mode="json"),
+            "schema_version": WAVEFORM_SCHEMA_VERSION,
+        }
+    )
+
+
+def waveform_table(metadata: WaveformMetadata, population_key: str) -> dict[str, Any]:
+    """The ``[waveforms]`` manifest table of a population's waveforms."""
+    return {
+        "metadata": metadata.model_dump(mode="json"),
+        "key": waveform_key(metadata, population_key),
+        "conventions": {**WAVEFORM_CONVENTIONS, "source_ordering": "source_id"},
+    }
 
 
 def select_networks(
@@ -356,26 +397,35 @@ class BackgroundArtifact:
 
 
 class BackgroundSimulator:
-    """Projects polarizations onto detector networks and sums the pair cross-powers.
+    """Generates waveforms chunk by chunk, projects onto networks and sums pair cross-powers.
 
-    ``simulator(waveforms)`` loops over ``waveforms.iter_chunks(chunk_size)``
-    -- a :class:`~astrogwb.simulators.WaveformArtifact` read from disk, or
-    :class:`~astrogwb.simulators.Waveforms` generated on the fly -- and
-    accumulates each chunk's cross-powers over the detector union's pairs,
-    so a pair shared by networks is projected
-    once. Each network then takes its rows and their
-    :func:`combine_pair_spectra`, using the registry's resolved geometry and
-    PSD references. One chunk shape is one compile, whatever the realized
-    count, and peak memory is one chunk of polarizations. The observation time
-    comes from the waveforms' population. Build once and call often.
+    ``simulator(population)`` iterates over fixed-size padded source chunks of
+    ``population``, evaluates the radiation-frame polarizations and accumulates
+    their cross-powers over the detector union's pairs in one fused JIT call
+    per chunk, so a pair shared by networks is projected once. Each network then
+    takes its rows and their :func:`combine_pair_spectra`, using the registry's
+    resolved geometry and PSD references. One chunk shape is one compile,
+    whatever the realized count, and peak memory is one chunk of polarizations.
+    The observation time comes from the population. Build once and call often.
     """
 
-    def __init__(self, registry: DetectorRegistry, *, chunk_size: int = 1024) -> None:
+    def __init__(
+        self,
+        waveform: WaveformMetadata,
+        registry: DetectorRegistry,
+        *,
+        chunk_size: int = 1024,
+        validate_sources: bool = True,
+    ) -> None:
         import jax
 
         jax.config.update("jax_enable_x64", True)
         if chunk_size <= 0:
             raise ValueError("chunk_size must be positive")
+        self._waveform = waveform
+        self._validate_sources = validate_sources
+        self._generator: WaveformGenerator = waveform.build()
+        self._frequencies = np.asarray(self._generator.frequencies, dtype=np.float64)
         self._registry = registry
         self._network_names = select_networks(registry)
         names = used_detectors(registry, self._network_names)
@@ -390,23 +440,41 @@ class BackgroundSimulator:
         self._pair_sums = jax.jit(self._chunk_pair_sums)
 
     @property
+    def waveform(self) -> WaveformMetadata:
+        """The waveform this simulator generates."""
+        return self._waveform
+
+    @property
+    def frequencies(self) -> NDArray[np.float64]:
+        """The frequency grid in Hz, ``(F,)``."""
+        return self._frequencies
+
+    @property
     def registry(self) -> DetectorRegistry:
         """The registry used to configure this simulator."""
         return self._registry
+
+    @property
+    def chunk_size(self) -> int:
+        """The number of sources evaluated per chunk."""
+        return self._chunk_size
 
     def _chunk_pair_sums(
         self,
         frequencies: jax.Array,
         sources: Mapping[str, jax.Array],
-        plus: jax.Array,
-        cross: jax.Array,
+        valid: jax.Array,
     ) -> jax.Array:
-        """The ``(P_union, F)`` cross-power summed over one chunk's sources."""
+        """The ``(P_union, F)`` cross-power summed over one padded chunk's sources."""
         import jax.numpy as jnp
 
         from astrogwb.detector import stokes_cross_power
         from astrogwb.waveform.polarization_power import polarization_stokes
 
+        plus, cross = self._generator.generate_polarizations_batch(sources)
+        real = (jnp.arange(plus.shape[0]) < valid)[:, None]
+        plus = jnp.where(real, plus, 0.0)
+        cross = jnp.where(real, cross, 0.0)
         # (4, F, C) -> (4, C, F)
         stokes = jnp.swapaxes(polarization_stokes(plus, cross), 1, 2)
         return jnp.stack(
@@ -424,31 +492,34 @@ class BackgroundSimulator:
             ]
         )
 
-    def __call__(self, waveforms: WaveformChunks) -> BackgroundArtifact:
-        """The per-network spectra of ``waveforms``.
+    def __call__(self, population: PopulationArtifact) -> BackgroundArtifact:
+        """The per-network spectra of ``population``.
 
         Raises
         ------
         KeyError
             If the sources carry no sky position or polarization angle.
+        ValueError
+            If ``validate_sources`` and a source value is outside what the
+            approximant represents.
         """
         import jax.numpy as jnp
 
-        population = waveforms.population
-        frequencies = np.asarray(waveforms.frequencies, dtype=np.float64)
         missing = {"polar_cosine", "azimuth", "polarization"} - set(
             population.source_parameters
         )
         if missing:
             raise KeyError(f"population has no extrinsic columns {sorted(missing)}")
+        if self._validate_sources and population.count:
+            self._generator.check_sources(population.source_parameters)
+        frequencies = self._frequencies
         total = jnp.zeros((len(self._pairs), frequencies.shape[0]))
         grid = jnp.asarray(frequencies)
-        for sources, plus, cross in waveforms.iter_chunks(self._chunk_size):
-            extrinsic = {
-                name: sources[name]
-                for name in ("polar_cosine", "azimuth", "polarization")
-            }
-            total = total + self._pair_sums(grid, extrinsic, plus, cross)
+        for start, _ in iter_rows(population.count, self._chunk_size):
+            rows, valid = pad_rows(
+                population.source_parameters, start, self._chunk_size
+            )
+            total = total + self._pair_sums(grid, rows, jnp.asarray(valid))
         union = (
             PAIR_RESPONSE_DENOMINATOR
             * np.asarray(total, dtype=np.float64)
@@ -461,6 +532,7 @@ class BackgroundSimulator:
                 pairs,
                 combine_pair_spectra(pairs, frequencies, self._registry, name),
             )
+        wf_key = waveform_key(self._waveform, population.key())
         return BackgroundArtifact(
             frequencies=frequencies,
             spectra=spectra,
@@ -471,10 +543,8 @@ class BackgroundSimulator:
             count=population.count,
             total_merger_rate=population.total_merger_rate,
             hyperparameters=dict(population.hyperparameters),
-            waveform_key=waveforms.key(),
-            identity=background_key(
-                waveforms.key(), self._registry, self._network_names
-            ),
+            waveform_key=wf_key,
+            identity=background_key(wf_key, self._registry, self._network_names),
             chunk_size=self._chunk_size,
         )
 
@@ -503,7 +573,7 @@ def combine_pair_spectra(
     return zero.
 
     Parameters
-    ----------
+    ------
     pair_spectral_density
         The pair spectra :math:`Y_{ab}`, ``(..., P, F)``.
     frequencies

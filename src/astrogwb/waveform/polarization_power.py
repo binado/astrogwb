@@ -27,7 +27,6 @@ __all__ = [
     "polarization_power",
     "polarization_stokes",
     "quadrupolar_polarizations",
-    "quadrupolar_stokes",
     "quadrupolar_stokes_factors",
 ]
 
@@ -75,50 +74,16 @@ def polarization_stokes(plus: ArrayLike, cross: ArrayLike) -> jax.Array:
     return jnp.swapaxes(stokes, 1, 2).astype(jnp.float64)
 
 
-def quadrupolar_stokes(amplitude: ArrayLike, inclination: ArrayLike) -> jax.Array:
-    r"""Stokes parameters ``(4, F, n)`` of the quadrupolar :math:`(2, 2)` mode.
-
-    For a pre-polarization strain :math:`h_0` of amplitude :math:`A` and the
-    LAL convention Ripple follows, :math:`h_+ = -\tfrac{1 + c^2}{2}\, h_0` and
-    :math:`h_\times = i c\, h_0` with :math:`c = \cos\iota`, so
-
-    .. math::
-
-        I = A^2 g(\iota), \quad
-        Q = A^2 \frac{(1 - c^2)^2}{4}, \quad U = 0, \quad
-        V = -A^2 c\, (1 + c^2),
-
-    with :math:`g = ((1 + c^2)/2)^2 + c^2`. The phase of :math:`h_0` cancels, so
-    the amplitude alone determines them. :math:`I` is formed exactly as the
-    quadrupolar power is, ``A**2 * g``, so the two agree bit for bit.
-
-    Parameters
-    ----------
-    amplitude:
-        :math:`A`, ``(n, F)``.
-    inclination:
-        :math:`\iota` in radians, ``(n,)``.
-
-    Returns
-    -------
-    jax.Array
-        ``(4, F, n)`` float64.
-    """
-    factors = quadrupolar_stokes_factors(jnp.cos(jnp.asarray(inclination)))
-    stokes = jnp.asarray(amplitude)[None] ** 2 * factors[:, :, None]
-    return jnp.swapaxes(stokes, 1, 2).astype(jnp.float64)
-
-
 def quadrupolar_polarizations(
     amplitude: ArrayLike, inclination: ArrayLike
 ) -> tuple[jax.Array, jax.Array]:
     r"""Polarizations ``(n, F)`` of the quadrupolar :math:`(2, 2)` mode at zero phase.
 
     :math:`h_+ = -\tfrac{1 + c^2}{2} A` and :math:`h_\times = i c A` with
-    :math:`c = \cos\iota`, the convention of :func:`quadrupolar_stokes`, whose
-    parameters these reduce to through :func:`polarization_stokes`. The orbital
-    phase of :math:`h_0` is set to zero: it cancels in every product
-    :math:`h^*_a h_b` of one source.
+    :math:`c = \cos\iota`, whose Stokes parameters through
+    :func:`polarization_stokes` are :math:`A^2` times
+    :func:`quadrupolar_stokes_factors`. The orbital phase of :math:`h_0` is set
+    to zero: it cancels in every product :math:`h^*_a h_b` of one source.
 
     Parameters
     ----------
@@ -141,7 +106,7 @@ def quadrupolar_stokes_factors(cos_inclination: ArrayLike) -> jax.Array:
     r"""The :math:`(2, 2)` Stokes parameters per unit :math:`A^2`, ``(4, ...)``.
 
     :math:`(g, (1 - c^2)^2/4, 0, -c(1 + c^2))` with :math:`c = \cos\iota`, the
-    inclination dependence of :func:`quadrupolar_stokes`, for any shape of
+    quadrupolar inclination dependence, for any shape of
     ``cos_inclination``. :math:`g` is formed as the quadrupolar power's
     inclination factor is.
     """
