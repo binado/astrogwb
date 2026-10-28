@@ -55,7 +55,7 @@ POLARIZATION_FILE = "polarization.h5"
 BACKGROUND_FILE = "background.h5"
 
 #: The version of the realization directory layout and its manifest.
-LAYOUT_VERSION = 1
+LAYOUT_VERSION = 2
 
 #: The order manifest tables are written in; any others follow.
 _TABLE_ORDER = ("realization", "population", "waveforms", "background", "execution")

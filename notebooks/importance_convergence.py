@@ -23,6 +23,7 @@ with app.setup(hide_code=True):
     from numpy.typing import NDArray
 
     from astrogwb.detector import effective_psd, gaussian_bin_scale
+    from astrogwb.detector.config import DetectorRegistry
     from astrogwb.frequency import frequency_mask
     from astrogwb.gwb.catalog import (
         CatalogMetadata,
@@ -38,7 +39,6 @@ with app.setup(hide_code=True):
         population_metadata,
         waveform_metadata,
     )
-    from astrogwb.paper.config.detectors import DetectorRegistry
     from astrogwb.paper.config.runs import CATALOGS_ROOT, FIGURES_DIR
     from astrogwb.paper.plotting import parameter_label, save_figures, use_paper_style
     from astrogwb.populations import Population, build_population

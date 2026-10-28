@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import tomllib
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -45,6 +45,19 @@ class Sensitivity:
     """
 
     psd_reference: str | Path
+    _curve: tuple[NDArray[np.float64], NDArray[np.float64]] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+
+    def _load_curve(self) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        """The PSD grid and values, read on first use and kept afterwards."""
+        curve = self._curve
+        if curve is None:
+            curve = load_spectral_series(
+                resolve_psd_path(self.psd_reference), kind="PSD"
+            )
+            object.__setattr__(self, "_curve", curve)
+        return curve
 
     def __call__(
         self, frequencies: ArrayLike, *, out_of_band: OutOfBand = "inf"
@@ -57,9 +70,8 @@ class Sensitivity:
         ``inf``, the astrogwb analysis convention so out-of-band bins drop
         out of an inverse-variance contraction. Grid endpoints stay finite.
         """
-        resolved = resolve_psd_path(self.psd_reference)
         frequencies = np.asarray(frequencies, dtype=float)
-        grid, grid_values = load_spectral_series(resolved, kind="PSD")
+        grid, grid_values = self._load_curve()
         values = interpolate_real_spectral_series(grid, grid_values, frequencies)
 
         if out_of_band == "zero":

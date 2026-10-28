@@ -11,9 +11,9 @@ from pydantic import ValidationError
 from repo import REPO_ROOT
 
 from astrogwb.constants import ISCO_ALPHA
+from astrogwb.detector.config import load_detector_config
 from astrogwb.distributions.config import DistributionConfig
 from astrogwb.paper.config import fiducials, networks, priors, waveform_generator
-from astrogwb.paper.config.detectors import load_detector_config
 from astrogwb.paper.config.runs import load_base
 from astrogwb.paper.utils import deep_merge, load_mapping
 from astrogwb.waveform import (
@@ -45,9 +45,10 @@ def test_detector_loader_merges_packaged_definitions_and_ordered_overrides(
         encoding="utf-8",
     )
     registry = load_detector_config([base, override])
-    # Members are stored sorted, the background's canonical pair order.
-    assert registry.networks["reference"] == ("C1", "S1")
-    assert registry.networks["comparison"] == ("C1", "S1")
+    # Members keep the order of the last layer; pairs are in canonical order.
+    assert registry.networks["reference"] == ("S1", "C1")
+    assert registry.networks["comparison"] == ("S1", "C1")
+    assert registry.pairs("reference") == [("C1", "S1")]
     assert registry.detectors["custom"].geometry.xarm_azimuth_rad == 0.5
     assert (
         registry.detectors["custom"].geometry.latitude_rad

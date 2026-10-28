@@ -3,20 +3,20 @@
 from __future__ import annotations
 
 import dataclasses
-import tomllib
 
 import jax.numpy as jnp
 import numpy as np
 import pytest
 from repo import REPO_ROOT
 
+from astrogwb.detector.config import load_detector_config
 from astrogwb.paper.posteriors import (
     MAX_PAIRS,
     network_data,
     network_pair_data,
     shot_noise_variant,
 )
-from astrogwb.simulators import DetectorConfiguration, DetectorNoise, detector_noise
+from astrogwb.simulators import DetectorNoise, detector_noise
 
 NETWORK = "ET-2L-aligned-CE-Hanford"
 
@@ -31,12 +31,9 @@ class _Likelihood:
 @pytest.fixture(scope="module")
 def noise() -> DetectorNoise:
     """The fiducial network's noise on a grid straddling the band's edges."""
-    with (REPO_ROOT / "config/networks.toml").open("rb") as file:
-        network = DetectorConfiguration.model_validate(
-            tomllib.load(file)["networks"][NETWORK]
-        )
+    registry = load_detector_config([REPO_ROOT / "config/detectors.toml"])
     frequencies = np.array([0.5, 1.0, 10.0, 50.0, 100.0, 5000.0])
-    return detector_noise(frequencies, {NETWORK: network}, 1.0)
+    return detector_noise(frequencies, registry, 1.0, network_names=[NETWORK])
 
 
 def test_network_data_masks_out_of_band_bins(noise: DetectorNoise) -> None:
@@ -54,7 +51,7 @@ def test_network_data_gives_masked_bins_unit_scale(noise: DetectorNoise) -> None
     mask, scale = np.asarray(data["frequency_mask"]), np.asarray(data["scale"])
 
     np.testing.assert_array_equal(scale[~mask], 1.0)
-    np.testing.assert_array_equal(scale[mask], noise.network(NETWORK).scale[mask])
+    np.testing.assert_array_equal(scale[mask], noise.noise[NETWORK].scale[mask])
 
 
 def test_network_pair_data_pads_to_max_pairs_with_masked_rows(
@@ -79,7 +76,7 @@ def test_network_pair_data_keeps_the_noise_files_overlaps(
     )
 
     np.testing.assert_array_equal(
-        np.asarray(data["pair_overlap"])[:3], noise.network(NETWORK).pair_overlap
+        np.asarray(data["pair_overlap"])[:3], noise.noise[NETWORK].pair_overlap
     )
 
 

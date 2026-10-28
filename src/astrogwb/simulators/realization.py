@@ -22,8 +22,7 @@ the population stage is the only one that draws random numbers.
 
 from __future__ import annotations
 
-import json
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self, TypedDict
@@ -31,6 +30,7 @@ from typing import TYPE_CHECKING, Any, Self, TypedDict
 import numpy as np
 from numpy.typing import NDArray
 
+from astrogwb.detector.config import DetectorRegistry
 from astrogwb.simulators._io import (
     BACKGROUND_FILE,
     MANIFEST_FILE,
@@ -43,9 +43,7 @@ from astrogwb.simulators._io import (
 from astrogwb.simulators.background import (
     BackgroundArtifact,
     BackgroundSimulator,
-    DetectorConfiguration,
-    NetworkConfiguration,
-    _read_networks,
+    background_pairs,
     background_table,
 )
 from astrogwb.simulators.population import (
@@ -70,7 +68,6 @@ __all__ = [
     "Realization",
     "RealizationSimulator",
     "network_spectra_ensemble",
-    "simulate_ensemble",
     "simulate_realization",
 ]
 
@@ -157,10 +154,10 @@ class Realization:
         )
 
     @property
-    def networks(self) -> dict[str, DetectorConfiguration] | None:
+    def networks(self) -> tuple[str, ...] | None:
         """The recorded background networks, by name; ``None`` if none are."""
         table = self.manifest.get("background")
-        return None if table is None else _read_networks(table)
+        return None if table is None else tuple(background_pairs(table))
 
     def population(
         self, simulator: PopulationSimulator | None = None
@@ -236,8 +233,8 @@ class Realization:
 
     def background(
         self,
-        simulator: BackgroundSimulator | None = None,
         *,
+        simulator: BackgroundSimulator | None = None,
         waveforms: WaveformSimulator | None = None,
         population: PopulationSimulator | None = None,
     ) -> BackgroundArtifact:
@@ -289,15 +286,14 @@ class RealizationSimulator:
     ``source_chunk_size`` (sources drawn per piece) change cost, never a
     realization.
 
-    The stage simulators are built when first needed and reused, so an
-    ensemble compiles each stage once and a fully cached one builds none.
+    The stage simulators are built for each realization that needs them.
     """
 
     def __init__(
         self,
         population: PopulationMetadata | None = None,
         waveform: WaveformMetadata | None = None,
-        background: NetworkConfiguration | None = None,
+        background: DetectorRegistry | None = None,
         *,
         keep_sources: bool = True,
         keep_polarizations: bool = False,
@@ -312,52 +308,11 @@ class RealizationSimulator:
             raise ValueError("chunk sizes must be positive")
         self._population = population
         self._waveform = waveform
-        self._background = None if background is None else dict(background)
+        self._background = background
         self._keep_sources = keep_sources
         self._keep_polarizations = keep_polarizations
         self._chunk_size = chunk_size
         self._source_chunk_size = source_chunk_size
-        self._simulators: dict[tuple[object, str], Any] = {}
-
-    def _simulator[S](
-        self, cls: Callable[..., S], settings: Any, chunk_size: int, identity: str
-    ) -> S:
-        """The ``cls`` simulator of ``settings``, serialized as ``identity``, built once."""
-        key = (cls, identity)
-        if key not in self._simulators:
-            self._simulators[key] = cls(settings, chunk_size=chunk_size)
-        return self._simulators[key]
-
-    def population_simulator(self, metadata: PopulationMetadata) -> PopulationSimulator:
-        """The cached population simulator of ``metadata``."""
-        return self._simulator(
-            PopulationSimulator,
-            metadata,
-            self._source_chunk_size,
-            metadata.model_dump_json(),
-        )
-
-    def waveform_simulator(self, metadata: WaveformMetadata) -> WaveformSimulator:
-        """The cached waveform simulator of ``metadata``."""
-        return self._simulator(
-            WaveformSimulator, metadata, self._chunk_size, metadata.model_dump_json()
-        )
-
-    def background_simulator(
-        self, networks: NetworkConfiguration
-    ) -> BackgroundSimulator:
-        """The cached background simulator of ``networks``."""
-        return self._simulator(
-            BackgroundSimulator,
-            networks,
-            self._chunk_size,
-            json.dumps(
-                {
-                    name: network.model_dump(mode="json")
-                    for name, network in networks.items()
-                }
-            ),
-        )
 
     def __call__(
         self, directory: str | Path, *, seed: int | None = None, index: int = 0
@@ -468,7 +423,9 @@ class RealizationSimulator:
         drawn: PopulationArtifact | None = None
         if recorded["population"] is None:
             assert self._population is not None and rng_key is not None
-            drawn = self.population_simulator(self._population)(rng_key)
+            drawn = PopulationSimulator(
+                self._population, chunk_size=self._source_chunk_size
+            )(rng_key)
             drawn_tables = drawn.tables()
             drawn_tables["realization"] |= {"seed": seed, "index": index}
             tables |= drawn_tables
@@ -490,7 +447,10 @@ class RealizationSimulator:
             drawn = realization.population(
                 None
                 if sources_path.is_file()
-                else self.population_simulator(realization.population_metadata)
+                else PopulationSimulator(
+                    realization.population_metadata,
+                    chunk_size=self._source_chunk_size,
+                )
             )
         if want_sources:
             drawn.write_sources(sources_path)
@@ -505,13 +465,15 @@ class RealizationSimulator:
                 polarization_path, metadata=metadata, population=drawn
             )
         else:
-            chunks = self.waveform_simulator(metadata)(drawn)
+            chunks = WaveformSimulator(metadata, chunk_size=self._chunk_size)(drawn)
             if want_polarizations:
                 assert isinstance(chunks, Waveforms)
                 chunks = chunks.write(polarization_path)
         if want_background:
             assert self._background is not None
-            self.background_simulator(self._background)(chunks).write(background_path)
+            BackgroundSimulator(self._background, chunk_size=self._chunk_size)(
+                chunks
+            ).write(background_path)
         return realization
 
 
@@ -520,7 +482,7 @@ def simulate_realization(
     *,
     population: PopulationMetadata | None = None,
     waveform: WaveformMetadata | None = None,
-    background: NetworkConfiguration | None = None,
+    background: DetectorRegistry | None = None,
     seed: int | None = None,
     index: int = 0,
     keep_sources: bool = True,
@@ -541,36 +503,6 @@ def simulate_realization(
     return simulator(directory, seed=seed, index=index)
 
 
-def simulate_ensemble(
-    simulator: RealizationSimulator,
-    root: str | Path,
-    seed: int,
-    num_draws: int,
-    *,
-    start: int = 0,
-) -> list[Realization]:
-    """Realizations ``start .. num_draws - 1`` of ``seed``, at ``root/<seed>-<index>``.
-
-    Realization ``i`` is keyed by ``batch_keys(seed, num_draws)[i]``, which
-    does not depend on ``num_draws``: a smaller ensemble is a prefix of a
-    larger one, an interrupted run resumes where it stopped, and ranges drawn
-    on several machines merge by copying their directories.
-
-    Raises
-    ------
-    ValueError
-        If ``start`` is not in ``[0, num_draws)``, or a directory holds
-        another realization (see :class:`RealizationSimulator`).
-    """
-    if not 0 <= start < num_draws:
-        raise ValueError(f"need 0 <= start < num_draws, got {start}, {num_draws}")
-    root = Path(root)
-    return [
-        simulator(root / f"{int(seed)}-{index}", seed=seed, index=index)
-        for index in range(start, num_draws)
-    ]
-
-
 class NetworkSpectra(TypedDict):
     """One network's draws, stacked along the leading draw axis.
 
@@ -578,6 +510,8 @@ class NetworkSpectra(TypedDict):
     :func:`~astrogwb.simulators.combine_pair_spectra` of
     ``pair_spectral_density`` ``(D, P, F)``; ``n_events`` and
     ``total_merger_rate`` ``(D,)``; each ``hyperparameters`` value ``(D,)``.
+    ``n_events`` is each draw's ``count``, named as the Poisson-count model's
+    site is.
     """
 
     frequencies: NDArray[np.float64]
@@ -599,7 +533,8 @@ def network_spectra_ensemble(
     """Draws ``start .. num_draws - 1`` of the networks ``names``, stacked per network.
 
     Draw ``i`` is the background of the realization at ``<root>/<seed>-<i>``,
-    as :func:`simulate_ensemble` lays them out.
+    as ``workflow/coverage_draws.smk`` lays them out, draw ``i`` keyed by
+    ``batch_keys(seed, i + 1)[i]``.
 
     Parameters
     ----------
@@ -612,7 +547,8 @@ def network_spectra_ensemble(
     names
         Networks, each recorded in every draw's background.
     start
-        The first index read.
+        The first index read; must be below ``num_draws``. Every draw is
+        taken to share one frequency grid and one set of hyperparameters.
 
     Returns
     -------
@@ -636,7 +572,7 @@ def network_spectra_ensemble(
 
 def _stack(draws: Sequence[BackgroundArtifact], name: str) -> NetworkSpectra:
     """One network's spectra of every draw, stacked."""
-    spectra = [draw.network(name) for draw in draws]
+    spectra = [draw.spectra[name] for draw in draws]
     return {
         "frequencies": draws[0].frequencies,
         "spectral_density": np.stack([s.spectral_density for s in spectra]),

@@ -6,8 +6,8 @@
 2. :class:`WaveformSimulator` turns it into complex radiation-frame
    polarizations, :class:`Waveforms`, generated chunk by chunk; written, they
    are a :class:`WaveformArtifact`.
-3. :class:`BackgroundSimulator` projects them onto named networks, a
-   :data:`NetworkConfiguration` of :class:`DetectorConfiguration`, and sums
+3. :class:`BackgroundSimulator` projects them onto the named networks of a
+   :class:`~astrogwb.detector.DetectorRegistry`, and sums
    the per-pair cross-powers into a :class:`BackgroundArtifact` holding each
    network's pair spectra and their :func:`combine_pair_spectra`.
 
@@ -18,20 +18,16 @@ Fused in memory, ``BackgroundSimulator(...)(WaveformSimulator(...)(
 population))`` never holds more than one chunk of polarizations. On disk, a
 realization is one directory, a :class:`Realization`: one ``metadata.toml``
 and at most one product per stage, which :class:`RealizationSimulator` adds to
-stage by stage, and :func:`simulate_ensemble` lays out by seed and index;
-:func:`network_spectra_ensemble` reads such an ensemble back, stacked per
-network. Only the population stage draws random numbers.
+stage by stage; :func:`network_spectra_ensemble` reads an ensemble of
+realizations, one directory per seed and index, back stacked per network. Only the population stage draws random numbers.
 """
 
 from astrogwb.simulators._io import batch_keys, realization_key
 from astrogwb.simulators.background import (
     BackgroundArtifact,
     BackgroundSimulator,
-    DetectorConfiguration,
-    NetworkConfiguration,
     NetworkSpectrum,
     combine_pair_spectra,
-    union_configuration,
 )
 from astrogwb.simulators.noise import (
     DetectorNoise,
@@ -50,7 +46,6 @@ from astrogwb.simulators.realization import (
     Realization,
     RealizationSimulator,
     network_spectra_ensemble,
-    simulate_ensemble,
     simulate_realization,
 )
 from astrogwb.simulators.waveforms import (
@@ -62,10 +57,8 @@ from astrogwb.simulators.waveforms import (
 __all__ = [
     "BackgroundArtifact",
     "BackgroundSimulator",
-    "DetectorConfiguration",
     "DetectorNoise",
     "DetectorNoiseMetadata",
-    "NetworkConfiguration",
     "NetworkNoise",
     "NetworkSpectra",
     "NetworkSpectrum",
@@ -83,7 +76,5 @@ __all__ = [
     "network_spectra_ensemble",
     "population_key",
     "realization_key",
-    "simulate_ensemble",
     "simulate_realization",
-    "union_configuration",
 ]

@@ -9,21 +9,20 @@ import jax
 import numpy as np
 import pytest
 from astrogwb_tiny_pipeline import (
-    DETECTORS,
     NETWORKS,
     WAVEFORM,
     assert_same_spectra,
     population_metadata,
 )
 
+from astrogwb.detector import DetectorRegistry
 from astrogwb.simulators import (
-    DetectorConfiguration,
+    BackgroundSimulator,
     Realization,
     RealizationSimulator,
     batch_keys,
     network_spectra_ensemble,
     population_key,
-    simulate_ensemble,
 )
 from astrogwb.simulators._io import (
     BACKGROUND_FILE,
@@ -102,7 +101,9 @@ def test_kept_polarizations_give_the_fused_background(
     )(tmp_path, seed=SEED)
     (tmp_path / BACKGROUND_FILE).unlink()
 
-    reprojected = realization.background(_simulator().background_simulator(NETWORKS))
+    reprojected = realization.background(
+        simulator=BackgroundSimulator(NETWORKS, chunk_size=8),
+    )
 
     assert POLARIZATION_FILE in _products(tmp_path)
     assert_same_spectra(reprojected, fused.background())
@@ -127,27 +128,33 @@ def test_a_rerun_with_the_same_settings_rewrites_nothing(tmp_path: Path) -> None
     [
         {"waveform": WAVEFORM.model_copy(update={"maximum_frequency": 40.0})},
         {
-            "background": {
-                **NETWORKS,
-                "triangle": DetectorConfiguration(
-                    detectors=["S1", "R1"], psd_references=DETECTORS.psd_references
-                ),
-            }
+            "background": NETWORKS.model_copy(
+                update={
+                    "networks": {
+                        "triangle": ("S1", "R1"),
+                        "pair": NETWORKS.networks["pair"],
+                    }
+                }
+            )
         },
         {
-            "background": {
-                **NETWORKS,
-                "triangle": DETECTORS.model_copy(
-                    update={
-                        "psd_references": {
-                            **DETECTORS.psd_references,
-                            "C1": "ET_COBA_15km_psd.txt",
-                        }
+            "background": NETWORKS.model_copy(
+                update={
+                    "detectors": {
+                        **NETWORKS.detectors,
+                        "C1": NETWORKS.detectors["C1"].model_copy(
+                            update={"psd_reference": "ET_COBA_15km_psd.txt"}
+                        ),
                     }
-                ),
-            }
+                }
+            )
         },
-        {"background": {"triangle": DETECTORS}},
+        {
+            "background": DetectorRegistry(
+                detectors=NETWORKS.detectors,
+                networks={"triangle": NETWORKS.networks["triangle"]},
+            )
+        },
         {"population": POPULATION, "seed": SEED + 1},
     ],
     ids=["waveform", "detectors", "noise-curves", "networks", "seed"],
@@ -192,8 +199,14 @@ def test_a_background_without_waveform_settings_raises(tmp_path: Path) -> None:
 
 
 def test_the_manifest_records_the_networks_sorted(fused: Realization) -> None:
-    assert fused.networks == NETWORKS
-    assert fused.networks["pair"].detectors == ["C1", "S1"]
+    assert fused.networks == ("pair", "triangle")
+    assert NETWORKS.pairs("pair") == [("C1", "S1")]
+    assert fused.manifest["background"]["metadata"] == {
+        "pairs": {
+            "pair": [["C1", "S1"]],
+            "triangle": [["C1", "R1"], ["C1", "S1"], ["R1", "S1"]],
+        }
+    }
 
 
 def test_a_directory_without_a_realization_needs_population_settings(
@@ -203,18 +216,18 @@ def test_a_directory_without_a_realization_needs_population_settings(
         _simulator(waveform=WAVEFORM)(tmp_path)
 
 
-def test_an_ensemble_is_a_prefix_of_a_larger_one(tmp_path: Path) -> None:
+def test_a_realization_index_keys_its_population_by_batch_keys(
+    tmp_path: Path,
+) -> None:
     simulator = _simulator(population=POPULATION, keep_sources=False)
 
-    larger = simulate_ensemble(simulator, tmp_path / "larger", SEED, 3)
-    smaller = simulate_ensemble(simulator, tmp_path / "smaller", SEED, 2)
-
-    assert [r.directory.name for r in larger] == [f"{SEED}-{i}" for i in range(3)]
-    assert [r.manifest["realization"] for r in smaller] == [
-        r.manifest["realization"] for r in larger[:2]
+    realizations = [
+        simulator(tmp_path / f"{SEED}-{index}", seed=SEED, index=index)
+        for index in range(3)
     ]
+
     keys = np.asarray(jax.random.key_data(batch_keys(SEED, 3)))
-    assert [list(r.rng_key) for r in larger] == keys.tolist()
+    assert [list(r.rng_key) for r in realizations] == keys.tolist()
 
 
 @pytest.fixture(scope="module")
@@ -224,7 +237,8 @@ def ensemble(tmp_path_factory: pytest.TempPathFactory) -> Path:
     simulator = _simulator(
         population=POPULATION, waveform=WAVEFORM, background=NETWORKS
     )
-    simulate_ensemble(simulator, root, SEED, 2)
+    for index in range(2):
+        simulator(root / f"{SEED}-{index}", seed=SEED, index=index)
     return root
 
 
@@ -247,7 +261,7 @@ def test_network_spectra_ensemble_reads_each_stored_network_spectrum(
     stored = Realization.open(ensemble / f"{SEED}-{index}").background()
     np.testing.assert_array_equal(
         triangle["spectral_density"][index],
-        stored.network("triangle").spectral_density,
+        stored.spectra["triangle"].spectral_density,
     )
 
 

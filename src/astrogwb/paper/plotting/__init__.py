@@ -55,7 +55,7 @@ from scipy.interpolate import CubicSpline
 if TYPE_CHECKING:
     from xarray import DataTree
 
-    from astrogwb.paper.config.detectors import DetectorRegistry
+    from astrogwb.detector.config import DetectorRegistry
 
 _STYLE_PATH = Path(__file__).parent / "paper.mplstyle"
 

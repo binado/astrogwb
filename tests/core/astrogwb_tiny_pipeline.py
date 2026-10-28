@@ -7,12 +7,14 @@ one and a pair it contains: every stage runs for real in well under a second.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 
+from astrogwb.detector.config import DetectorRegistry, load_detector_config
 from astrogwb.populations import PopulationMetadata as PopulationSpec
 from astrogwb.simulators import (
     BackgroundArtifact,
-    DetectorConfiguration,
     PopulationMetadata,
 )
 from astrogwb.waveform import WaveformMetadata
@@ -25,21 +27,13 @@ WAVEFORM = WaveformMetadata(
     sampling_frequency=128.0,
     frequency_resolution=10.0,
 )
-DETECTORS = DetectorConfiguration(
-    detectors=["S1", "R1", "C1"],
-    psd_references={
-        "S1": "ET_COBA_15km_psd.txt",
-        "R1": "ET_COBA_15km_psd.txt",
-        "C1": "cosmic_explorer_strain_psd.txt",
-    },
+_root = Path(__file__).parents[2]
+_base = load_detector_config([_root / "config/detectors.toml"])
+NETWORKS = DetectorRegistry(
+    detectors=_base.detectors,
+    networks={"triangle": ("S1", "R1", "C1"), "pair": ("S1", "C1")},
 )
-NETWORKS = {
-    "triangle": DETECTORS,
-    "pair": DetectorConfiguration(
-        detectors=["S1", "C1"],
-        psd_references={name: DETECTORS.psd_references[name] for name in ("C1", "S1")},
-    ),
-}
+DETECTORS = NETWORKS
 
 
 def assert_same_spectra(
@@ -49,7 +43,7 @@ def assert_same_spectra(
     assert actual.spectra.keys() == expected.spectra.keys()
     for name, spectrum in expected.spectra.items():
         for field, values in spectrum._asdict().items():
-            np.testing.assert_array_equal(getattr(actual.network(name), field), values)
+            np.testing.assert_array_equal(getattr(actual.spectra[name], field), values)
 
 
 def population_metadata(observation_time: float = 1e-4) -> PopulationMetadata:

@@ -95,7 +95,7 @@ def test_a_realization_manifest_round_trips_without_nones(tmp_path: Path) -> Non
     write_realization_manifest(tmp_path, manifest)
     read = read_realization_manifest(tmp_path)
 
-    assert read["layout"]["version"] == 1
+    assert read["layout"]["version"] == 2
     assert read["realization"] == {"id": "abc", "seed": 41}
     assert read["population"] == manifest["population"]
     assert [path.name for path in tmp_path.iterdir()] == [MANIFEST_FILE]

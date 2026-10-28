@@ -5,7 +5,7 @@
 #
 # Notebooks never simulate: they read what this writes and fail with a
 # FileNotFoundError when it is missing. Per ensemble <name> (the committed
-# config/ensembles/<name>/{population,waveform}.toml and config/networks.toml):
+# config/ensembles/<name>/{population,waveform}.toml and config/detectors.toml):
 #
 #   outputs/ensembles/<name>/<seed>-<index>/   one realization per
 #       `astrogwb simulate` job, its manifest and background.h5: every paper
@@ -56,9 +56,10 @@ CATALOGS = {
         "reference-fiducial": "--num-samples 16384 --chunk-size 4096",
         # importance_convergence's redshift ladder
         "reference-ladder": "--num-samples 256 --sampling random --seed 100",
-        # ensemble_spectrum's minimum-redshift scan
+        # ensemble_spectrum's minimum-redshift scan, at 1 Mpc: the redshift of
+        # that luminosity distance at the fiducial H0 = 67.66, Omega_m = 0.3096
         "reference-scan": (
-            "--num-samples 16384 --reference-distance-mpc 1 --chunk-size 4096"
+            "--num-samples 16384 --reference-redshift 2.2565039557e-4 --chunk-size 4096"
         ),
     },
 }
@@ -123,7 +124,7 @@ rule simulate:
     input:
         population="config/ensembles/{ensemble}/population.toml",
         waveform="config/ensembles/{ensemble}/waveform.toml",
-        networks="config/networks.toml",
+        detectors="config/detectors.toml",
     output:
         f"{ENSEMBLES_ROOT}/{{ensemble}}/{{seed}}-{{index}}/background.h5",
     log:
@@ -139,7 +140,7 @@ rule simulate:
             --population-metadata {input.population:q} \
             --seed {wildcards.seed} --index {wildcards.index} \
             --waveform-metadata {input.waveform:q} \
-            --background-metadata {input.networks:q} \
+            --background --detector-config {input.detectors:q} \
             --no-keep-sources --chunk-size 8192 --source-chunk-size 65536 \
             --cpu-threads {threads} > {log:q} 2>&1
         """
@@ -152,14 +153,16 @@ def first_draw(wildcards):
 
 rule noise:
     input:
-        first_draw,
+        background=first_draw,
+        detectors="config/detectors.toml",
     output:
         f"{ENSEMBLES_ROOT}/{{ensemble}}/detector_noise.h5",
     log:
         "logs/ensembles/{ensemble}/detector_noise.log",
     shell:
         _RUN
-        + """ astrogwb noise $(dirname {input:q}) {output:q} > {log:q} 2>&1
+        + """ astrogwb noise $(dirname {input.background:q}) {output:q} \
+            --detector-config {input.detectors:q} > {log:q} 2>&1
         """
 
 

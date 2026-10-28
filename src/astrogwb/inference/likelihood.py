@@ -216,7 +216,8 @@ def _pair_overlap(network: Network, num_bins: int) -> jax.Array:
 
 def _expand(mean: jax.Array, network: Network) -> jax.Array:
     r"""The predicted data :math:`\gamma_{ab} S` on the flat data axis, ``(D,)``."""
-    return jnp.reshape(_pair_overlap(network, mean.shape[-1]) * mean, -1)
+    num_frequencies = network.scale.shape[-1] if mean.ndim == 0 else mean.shape[-1]
+    return jnp.reshape(_pair_overlap(network, num_frequencies) * mean, -1)
 
 
 def _observed(observed: jax.Array | None, network: Network) -> jax.Array:

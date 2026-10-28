@@ -15,21 +15,24 @@ cannot drift apart. Per network it holds
 - ``scale`` -- its :func:`~astrogwb.detector.gaussian_bin_scale`, ``(F,)``;
 
 the pairs in the order of
-:meth:`~astrogwb.simulators.DetectorConfiguration.pairs`, the background's.
+:meth:`~astrogwb.detector.DetectorRegistry.pairs`, the background's, and
+recorded in the metadata.
 Frequency bands and padding are analysis choices and are left to the reader.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple, Self
+from typing import Annotated, NamedTuple, Self
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
-from astrogwb.simulators.background import DetectorConfiguration, NetworkConfiguration
+from astrogwb.detector.config import DetectorRegistry
+from astrogwb.simulators.background import scientific_payload, select_networks
 from astrogwb.utils.io import content_key, load, write
 
 __all__ = [
@@ -39,18 +42,28 @@ __all__ = [
     "detector_noise",
 ]
 
+#: The layout version of the metadata; a file of another version is regenerated.
+FORMAT_VERSION = 3
+
 
 class DetectorNoiseMetadata(BaseModel):
     """What a :class:`DetectorNoise` is evaluated from, besides its frequencies.
 
-    ``networks`` are the background's, noise curves included, and
-    ``observation_time`` is in years.
+    ``pairs`` are the detector pairs of each recorded network, in the order of
+    the pair axes of its noise, and ``observation_time`` is in years.
     """
 
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
 
-    networks: dict[str, DetectorConfiguration]
-    observation_time: float
+    format_version: int = Field(strict=True)
+    pairs: dict[str, tuple[tuple[str, str], ...]]
+    scientific_identity: str
+    observation_time: Annotated[float, Field(gt=0.0)]
+
+    @property
+    def networks(self) -> tuple[str, ...]:
+        """The recorded network names."""
+        return tuple(self.pairs)
 
     def key(self) -> str:
         """The content hash of the record."""
@@ -68,15 +81,14 @@ class NetworkNoise(NamedTuple):
 
 @dataclass(frozen=True)
 class DetectorNoise:
-    """Every network's :class:`NetworkNoise` on ``frequencies``, keyed as ``metadata.networks``."""
+    """Every network's :class:`NetworkNoise` on ``frequencies``.
+
+    ``noise`` is keyed as ``metadata.networks``.
+    """
 
     metadata: DetectorNoiseMetadata
     frequencies: NDArray[np.float64]
     noise: dict[str, NetworkNoise]
-
-    def network(self, name: str) -> NetworkNoise:
-        """The noise of the network ``name``."""
-        return self.noise[name]
 
     def write(self, path: str | Path) -> Path:
         """Write the noise to the HDF5 file ``path``, atomically.
@@ -94,46 +106,55 @@ class DetectorNoise:
     def open(cls, path: str | Path) -> Self:
         """Read the noise :meth:`write` wrote to ``path``.
 
+        The file is trusted to hold the arrays of its recorded networks.
+
         Raises
         ------
         FileNotFoundError
             If ``path`` does not exist.
+        ValueError
+            If the file uses another format version.
         """
-        if not Path(path).is_file():
-            raise FileNotFoundError(f"no detector noise at {path}")
         data, metadata, _ = load(path, DetectorNoiseMetadata)
+        if metadata.format_version != FORMAT_VERSION:
+            raise ValueError(f"{path} uses old detector noise metadata; regenerate it")
         networks = data["networks"]
-        assert isinstance(networks, dict)
+        frequencies = np.asarray(data["frequencies"], dtype=np.float64)
+        noise = {
+            name: NetworkNoise(
+                **{
+                    field: np.asarray(networks[name][field])
+                    for field in NetworkNoise._fields
+                }
+            )
+            for name in metadata.networks
+        }
         return cls(
             metadata=metadata,
-            frequencies=np.asarray(data["frequencies"], dtype=np.float64),
-            noise={
-                name: NetworkNoise(
-                    **{
-                        field: np.asarray(networks[name][field])
-                        for field in NetworkNoise._fields
-                    }
-                )
-                for name in metadata.networks
-            },
+            frequencies=frequencies,
+            noise=noise,
         )
 
 
 def detector_noise(
     frequencies: ArrayLike,
-    networks: NetworkConfiguration,
+    registry: DetectorRegistry,
     observation_time: float,
+    *,
+    network_names: Sequence[str] | None = None,
 ) -> DetectorNoise:
-    """The noise of every network of ``networks`` on ``frequencies``.
+    """The noise of selected registry networks on ``frequencies``.
 
     Parameters
     ----------
     frequencies
         The background's full frequency grid in Hz; bin widths come from it.
-    networks
-        Networks by name, each with a ``psd_references`` entry per detector.
+    registry
+        The frozen detector registry used for the realization.
     observation_time
         Observation time in years.
+    network_names
+        Select recorded networks; defaults to all registry networks.
 
     Returns
     -------
@@ -142,8 +163,9 @@ def detector_noise(
 
     Raises
     ------
-    KeyError
-        If a detector has no ``psd_references`` entry.
+    ValueError
+        If the registry defines no networks, or a selected network has fewer
+        than two detectors.
     """
     import jax.numpy as jnp
 
@@ -155,19 +177,17 @@ def detector_noise(
     )
 
     grid = np.asarray(frequencies, dtype=np.float64)
+    names = select_networks(registry, network_names)
     noise = {}
-    for name, network in networks.items():
-        sensitivities = network.sensitivities()
-        psd = effective_psd(grid, network.detectors, sensitivities)
+    for name in names:
+        detectors, sensitivities = registry.build_network(name)
+        psd = effective_psd(grid, detectors, sensitivities)
         noise[name] = NetworkNoise(
             pair_overlap=np.stack(
-                [
-                    term.overlap
-                    for term in pair_terms(grid, network.detectors, sensitivities)
-                ]
+                [term.overlap for term in pair_terms(grid, detectors, sensitivities)]
             ),
             pair_scale=np.asarray(
-                pair_bin_scale(grid, network.detectors, sensitivities, observation_time)
+                pair_bin_scale(grid, detectors, sensitivities, observation_time)
             ),
             effective_psd=np.asarray(psd),
             scale=np.asarray(
@@ -176,7 +196,10 @@ def detector_noise(
         )
     return DetectorNoise(
         metadata=DetectorNoiseMetadata(
-            networks=dict(networks), observation_time=float(observation_time)
+            format_version=FORMAT_VERSION,
+            pairs={name: tuple(registry.pairs(name)) for name in names},
+            scientific_identity=content_key(scientific_payload(registry, names)),
+            observation_time=float(observation_time),
         ),
         frequencies=grid,
         noise=noise,

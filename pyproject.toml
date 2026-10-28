@@ -34,6 +34,7 @@ dependencies = [
     # the dependency is declared rather than borrowed from a transitive edge
     # that gwmock-noise is free to drop.
     "pydantic>=2.11",
+    "pyknf>=0.6,<0.8",
     # Writes the TOML manifests of the simulator stages (astrogwb.simulators).
     "tomli-w>=1.2",
 ]
@@ -59,8 +60,6 @@ tpu = ["jax[tpu]>=0.11.0"]
 paper = [
     "astrogwb[io,simulation]",
     "arviz[h5netcdf]>=1.2.0",
-    # Merges the config layers (astrogwb.paper.config.runs).
-    "pyknf>=0.6,<0.8",
     # User cache paths, including XDG overrides on macOS.
     "platformdirs>=4.11.12",
 ]

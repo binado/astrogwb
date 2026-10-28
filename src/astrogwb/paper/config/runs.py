@@ -20,7 +20,7 @@ After the merge, every ``"${a.b}"`` string is replaced by the merged value at
 waveform and population by reference. A reference resolves against the *final*
 merge, and a reference to a table also merges as that table: a layer that sets
 a key under one overrides that field and keeps the rest. A table that is a base
-plus additions is written ``extends = "${a.b}"`` (:data:`MERGE_KEY`).
+plus additions is written ``extends = "${a.b}"`` (:data:`~astrogwb.config.MERGE_KEY`).
 
 Entrypoints that take layers on argv (see :func:`add_config_arguments`) merge
 them in process with :func:`load_merged_config`.
@@ -34,9 +34,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-import knf
-
-from astrogwb.paper.utils import require_toml
+from astrogwb.config import merge_layers
+from astrogwb.detector.config import DETECTOR_DEFAULT_PATHS
 
 logger = logging.getLogger(__name__)
 
@@ -54,12 +53,6 @@ DETECTORS_PATH = CONFIG_DIR / "detectors.toml"
 
 #: Every shared layer, in merge order.
 SHARED_LAYER_PATHS = (DEFAULTS_PATH, WAVEFORMS_PATH, POPULATIONS_PATH, DETECTORS_PATH)
-
-#: Packaged geometry and sensitivity use the same registry tables as overrides.
-DETECTOR_DEFAULT_PATHS = tuple(
-    Path(__file__).parents[2] / "detector" / filename
-    for filename in ("geometry.toml", "sensitivity.toml")
-)
 
 #: Presentation settings, read by `astrogwb.paper.plotting`. Deliberately *not*
 #: a config layer: nothing a simulation depends on reads it.
@@ -82,10 +75,6 @@ FIGURES_DIR = BASE_OUT_DIR / "figures"
 #: ``low`` / ``high`` beside ``loc`` / ``scale``.
 PRIOR_SHALLOW = "priors.*"
 
-#: The inheritance key: ``extends = "${a.b}"`` in a table starts it from the
-#: table ``a.b`` and lets its own fields win. It is removed from the result.
-MERGE_KEY = "extends"
-
 
 def merge_config_layers(paths: Sequence[Path]) -> dict[str, Any]:
     """Fold config layer files into one raw mapping, in the order given.
@@ -93,21 +82,14 @@ def merge_config_layers(paths: Sequence[Path]) -> dict[str, Any]:
     Packaged detector tables are the initial defaults. A deep merge, left to
     right -- arrays and scalars replace -- except at
     :data:`PRIOR_SHALLOW`, followed by resolving every ``${...}`` reference
-    against the merged result and every :data:`MERGE_KEY` inheritance.
+    against the merged result and every :data:`~astrogwb.config.MERGE_KEY` inheritance.
 
     Order is the caller's responsibility and it is not recoverable from the
     result, so :func:`load_merged_config` logs it.
     """
     if not paths:
         raise ValueError("no config layers given")
-    for path in paths:
-        require_toml(path)
-    return knf.load(
-        [*DETECTOR_DEFAULT_PATHS, *paths],
-        interpolate=True,
-        shallow=PRIOR_SHALLOW,
-        merge_key=MERGE_KEY,
-    )
+    return merge_layers([*DETECTOR_DEFAULT_PATHS, *paths], shallow=PRIOR_SHALLOW)
 
 
 def base_config_paths(root: Path | None = None) -> tuple[Path, ...]:

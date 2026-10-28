@@ -1,4 +1,11 @@
 from ._types import DetectorSpec
+from .config import (
+    DETECTOR_DEFAULT_PATHS,
+    DetectorConfig,
+    DetectorGeometry,
+    DetectorRegistry,
+    load_detector_config,
+)
 from .effective_psd import (
     PairTerms,
     effective_psd,
@@ -32,6 +39,10 @@ from .sensitivity import (
 )
 
 __all__ = [
+    "DETECTOR_DEFAULT_PATHS",
+    "DetectorConfig",
+    "DetectorGeometry",
+    "DetectorRegistry",
     "DetectorSpec",
     "OrientationReference",
     "PairTerms",
@@ -41,6 +52,7 @@ __all__ = [
     "gaussian_bin_scale",
     "isotropic_overlap_reduction_function",
     "load_detector",
+    "load_detector_config",
     "load_sensitivities_for_network",
     "load_sensitivity",
     "load_sensitivity_map",

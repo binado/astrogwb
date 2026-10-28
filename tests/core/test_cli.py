@@ -46,17 +46,7 @@ def metadata_files(tmp_path: Path) -> dict[str, Path]:
     tables = {
         "population": POPULATION.model_dump(mode="json", exclude={"version"}),
         "waveform": WAVEFORM.model_dump(mode="json", exclude_none=True),
-        "network": {
-            "networks": {
-                "ET": {
-                    "detectors": ["S1", "R1"],
-                    "psd_references": {
-                        "S1": "ET_COBA_15km_psd.txt",
-                        "R1": "ET_COBA_15km_psd.txt",
-                    },
-                }
-            }
-        },
+        "detector": {"networks": {"ET": ["S1", "R1"]}},
     }
     paths = {name: tmp_path / f"{name}.toml" for name in tables}
     for name, table in tables.items():
@@ -79,14 +69,15 @@ def test_a_fused_simulate_run_writes_the_manifest_sources_and_background(
         *("--population-metadata", str(metadata_files["population"])),
         *("--seed", "41"),
         *("--waveform-metadata", str(metadata_files["waveform"])),
-        *("--background-metadata", str(metadata_files["network"])),
+        "--background",
+        *("--detector-config", str(metadata_files["detector"])),
     )
 
     realization = Realization.open(tmp_path / "realization")
     background = realization.background()
-    assert background.networks["ET"].pairs() == [("R1", "S1")]
+    assert background.pairs == {"ET": (("R1", "S1"),)}
     assert background.count > 0
-    assert np.any(background.network("ET").pair_spectral_density)
+    assert np.any(background.spectra["ET"].pair_spectral_density)
     assert sorted(path.name for path in realization.directory.iterdir()) == [
         "background.h5",
         "metadata.toml",
@@ -106,9 +97,11 @@ def test_a_background_run_adds_to_an_existing_realization(
     )
     assert not (directory / "background.h5").exists()
 
-    _simulate(directory, "--background-metadata", str(metadata_files["network"]))
+    _simulate(
+        directory, "--background", "--detector-config", str(metadata_files["detector"])
+    )
 
-    assert list(Realization.open(directory).background().networks) == ["ET"]
+    assert tuple(Realization.open(directory).background().spectra) == ("ET",)
 
 
 def test_a_seed_without_population_metadata_is_refused(tmp_path: Path) -> None:
@@ -127,11 +120,19 @@ def test_noise_writes_the_backgrounds_networks_on_its_grid(
         *("--population-metadata", str(metadata_files["population"])),
         *("--seed", "41"),
         *("--waveform-metadata", str(metadata_files["waveform"])),
-        *("--background-metadata", str(metadata_files["network"])),
+        "--background",
+        *("--detector-config", str(metadata_files["detector"])),
     )
 
     result = CliRunner().invoke(
-        app, ["noise", str(directory), str(tmp_path / "detector_noise.h5")]
+        app,
+        [
+            "noise",
+            str(directory),
+            str(tmp_path / "detector_noise.h5"),
+            "--detector-config",
+            str(metadata_files["detector"]),
+        ],
     )
 
     assert result.exit_code == 0, result.output
@@ -139,12 +140,12 @@ def test_noise_writes_the_backgrounds_networks_on_its_grid(
     realization = Realization.open(directory)
     background = realization.background()
     np.testing.assert_array_equal(noise.frequencies, background.frequencies)
-    assert noise.metadata.networks == background.networks
+    assert noise.metadata.networks == tuple(background.spectra)
     assert noise.metadata.observation_time == POPULATION.observation_time
     shape = (1, background.frequencies.size)
-    assert noise.network("ET").pair_overlap.shape == shape
-    assert noise.network("ET").pair_scale.shape == shape
-    assert noise.network("ET").scale.shape == shape[1:]
+    assert noise.noise["ET"].pair_overlap.shape == shape
+    assert noise.noise["ET"].pair_scale.shape == shape
+    assert noise.noise["ET"].scale.shape == shape[1:]
 
 
 def test_noise_of_a_missing_realization_fails(tmp_path: Path) -> None:
@@ -153,3 +154,10 @@ def test_noise_of_a_missing_realization_fails(tmp_path: Path) -> None:
     )
 
     assert result.exit_code != 0
+
+
+def test_background_without_detector_config_is_refused(tmp_path: Path) -> None:
+    result = CliRunner().invoke(app, ["simulate", str(tmp_path), "--background"])
+
+    assert result.exit_code != 0
+    assert "together" in result.output

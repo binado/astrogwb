@@ -13,15 +13,12 @@ input, per ensemble:
 
 The one ensemble is `fiducial`, the default waveform and grid: the grid
 notebooks' injection, `shot_noise_coverage`'s injections and the draws of
-`ensemble_spectrum` and `spectrum_snrs`. Its settings are the committed
+`ensemble_spectrum` (and the deprecated `spectrum_snrs`). Its settings are the committed
 `config/ensembles/fiducial/{population,waveform}.toml` and
-`config/networks.toml`, edited by hand. They copy the shared layers
-(`config/defaults.toml`, `config/waveforms.toml`, `config/detectors.toml`) but
-are not derived from them: editing a shared layer does not change an
-ensemble.
+`config/detectors.toml`, which supplies the shared frozen detector registry.
 
-Every realization's background holds every paper network's pair spectra and
-combined spectrum. The pairs of all networks are projected once per draw, so
+Every realization's background records network names and holds each network's
+pair spectra and combined spectrum. The pairs are projected once per draw, so
 adding a network that shares their detectors costs no waveforms. Draw `i` of a
 seed is fixed by `(seed, i)` alone, so any split of the indices across
 machines gives the same directories, and they merge by copying.
@@ -30,7 +27,8 @@ machines gives the same directories, and they merge by copying.
 
 Nothing is migrated. If you change a detector, a noise curve, the fiducials,
 the population or the waveform, edit the committed simulation inputs to match
-and regenerate the ensemble:
+and regenerate the ensemble. The registry is trusted when reading outputs and
+must remain fixed for the dataset lifetime:
 
 ```bash
 rm -r outputs/ensembles/fiducial
@@ -39,9 +37,7 @@ uv run --no-sync snakemake -s workflow/coverage_draws.smk --profile workflow/pro
 
 Rerunning against a realization recorded with other settings fails on the
 conflict (`ValueError: ... holds background ...`) rather than mixing
-settings. Ensembles drawn before per-network backgrounds (one union background,
-under `<cache>/ensembles/<key>/`) are not read by anything any more; regenerate
-them on the cluster.
+settings. Ensembles of earlier layouts are not read; regenerate them as above.
 
 ## Job sizing
 
