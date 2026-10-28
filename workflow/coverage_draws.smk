@@ -49,7 +49,8 @@ DRAWS = {
     "fiducial": {41: 1000, 42: 1},
 }
 
-# Explicit catalog snapshots, with draw seeds and execution-only chunk sizes.
+# Catalog variants layered over config/catalogs/base.toml, with draw seeds
+# and execution-only chunk sizes.
 CATALOGS = {
     "fiducial": {
         "reference-fiducial": "--seed 42 --chunk-size 4096",
@@ -162,6 +163,7 @@ rule noise:
 
 rule reference_catalog:
     input:
+        base="config/catalogs/base.toml",
         metadata="config/catalogs/{catalog}.toml",
     output:
         f"{CATALOGS_ROOT}/{{catalog}}.h5",
@@ -173,5 +175,6 @@ rule reference_catalog:
     shell:
         _RUN
         + """ astrogwb model-catalog {output:q} {params.options} \
-            --catalog-metadata {input.metadata:q} --cpu-threads {threads} > {log:q} 2>&1
+            --catalog-metadata {input.base:q} --catalog-metadata {input.metadata:q} \
+            --cpu-threads {threads} > {log:q} 2>&1
         """

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-import tomllib
 from pathlib import Path
 from typing import Annotated
 
@@ -15,8 +14,12 @@ from ._common import _apply_runtime
 def model_catalog(
     output: Annotated[Path, typer.Argument(dir_okay=False, help="HDF5 file to write.")],
     catalog_metadata: Annotated[
-        Path,
-        typer.Option(exists=True, dir_okay=False, help="CatalogMetadata TOML."),
+        list[Path],
+        typer.Option(
+            exists=True,
+            dir_okay=False,
+            help="CatalogMetadata TOML layer; repeat to merge in argument order.",
+        ),
     ],
     seed: Annotated[int, typer.Option(help="Seed of the catalog draw.")] = 42,
     chunk_size: Annotated[
@@ -31,13 +34,13 @@ def model_catalog(
 ) -> None:
     """Write fixed source draws and waveform powers for importance weighting."""
     _apply_runtime(platform, cpu_threads)
+    from astrogwb.config import merge_layers
     from astrogwb.gwb.catalog import CatalogMetadata
     from astrogwb.gwb.importance import reference_catalog as draw_reference_catalog
     from astrogwb.simulators import batch_keys
     from astrogwb.utils.io import write
 
-    with catalog_metadata.open("rb") as file:
-        metadata = CatalogMetadata.model_validate(tomllib.load(file))
+    metadata = CatalogMetadata.model_validate(merge_layers(catalog_metadata))
     began = time.perf_counter()
     data = draw_reference_catalog(
         metadata, batch_keys(seed, 1)[0], chunk_size=chunk_size
