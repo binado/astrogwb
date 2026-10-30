@@ -139,9 +139,9 @@ There is one `metadata.toml`, rewritten atomically whenever a stage is added:
 | --- | --- |
 | `[layout]` | `version = 1`, `astrogwb_version` |
 | `[realization]` | `id` (the population key), `seed`, `index`, `rng_key`, `count`, `total_merger_rate` (`1 / s`), `observation_seconds`, `hyperparameters` |
-| `[population]` | `metadata`, `key`, `schema_version = 5`, `conventions` (celestial coordinates and polarization basis) |
+| `[population]` | `metadata`, `key`, `conventions` (celestial coordinates and polarization basis) |
 | `[waveforms]` | `metadata`, `key`, `conventions` (frame, polarization angle, Fourier convention, units, source ordering) |
-| `[background]` | `metadata` (the detector pairs per network), `key`, `schema_version = 4`, native projection `conventions`, `normalization`, `units` |
+| `[background]` | `metadata` (the detector pairs per network), `key`, native projection `conventions`, `normalization`, `units` |
 | `[execution]` | `chunk_size`; recorded but never hashed |
 
 A stage table means the stage is configured. A product file means it is
@@ -175,14 +175,12 @@ waveform key hashes the population key and the waveform metadata. The background
 key hashes the waveform key and the networks it covers (their members, and the
 geometry and `psd_reference` of the detectors they use, not the labels). Because
 the astrogwb version is part of the population metadata, a release that changes
-a convention re-keys the waveforms and backgrounds downstream of it. The schema
-versions and conventions recorded in the manifest are not hashed.
+a convention re-keys the waveforms and backgrounds downstream of it. The
+conventions recorded in the manifest are not hashed.
 
-Population schemas before 5 and background schemas before 4 are rejected with
-a regeneration message before hash validation. Regenerate affected realizations
-in new output directories; existing files are neither converted nor deleted.
-In-memory populations must also supply the new coordinate columns. Older
-realization layout versions remain unsupported.
+Manifests carry no schema version. A population without the extrinsic
+coordinate columns raises a `ValueError` asking to regenerate; regenerate in a
+new output directory, as existing files are neither converted nor deleted.
 
 ## Python
 

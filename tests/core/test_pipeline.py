@@ -345,38 +345,3 @@ def test_native_coordinate_columns_and_ranges(population: PopulationArtifact) ->
                 population,
                 source_parameters={k: v for k, v in columns.items() if k != missing},
             )
-
-
-@pytest.mark.parametrize("version", [None, 1, 2, 3, 4])
-def test_old_population_schema_rejected_before_hash_or_io(
-    population: PopulationArtifact, tmp_path: Path, version: int | None
-) -> None:
-    tables = population.tables()
-    if version is None:
-        tables["population"].pop("schema_version")
-    else:
-        tables["population"]["schema_version"] = version
-    tables["population"]["key"] = "invalid hash"
-    with pytest.raises(ValueError, match="regenerate.*schema 5"):
-        PopulationArtifact.from_tables(tables, tmp_path / "absent.h5")
-
-
-@pytest.mark.parametrize("version", [None, 1, 2, 3])
-def test_old_background_schema_rejected_before_io(
-    tmp_path: Path, version: int | None
-) -> None:
-    from astrogwb.simulators.background import background_table
-
-    table = background_table("waveforms", NETWORKS)
-    if version is None:
-        table.pop("schema_version")
-    else:
-        table["schema_version"] = version
-    table["key"] = "invalid hash"
-    with pytest.raises(ValueError, match="regenerate.*schema 4"):
-        BackgroundArtifact.open(
-            tmp_path / "absent.h5",
-            table=table,
-            realization={},
-            waveform_key="waveforms",
-        )

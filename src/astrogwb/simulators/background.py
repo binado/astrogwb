@@ -84,7 +84,6 @@ __all__ = [
     "waveform_table",
 ]
 
-SCHEMA_VERSION = 4
 
 PROJECTION_CONVENTIONS = {
     "geometry": "WGS-84 geodetic; tilted arms; metres",
@@ -239,7 +238,6 @@ def background_table(
             }
         },
         "key": background_key(waveform_key, registry, names),
-        "schema_version": SCHEMA_VERSION,
         "conventions": PROJECTION_CONVENTIONS,
         "normalization": _NORMALIZATION,
         "units": {
@@ -248,14 +246,6 @@ def background_table(
             "spectral_density": "1 / Hz",
         },
     }
-
-
-def validate_background_schema(table: Mapping[str, Any]) -> None:
-    """Reject old projections before checking identities or opening data."""
-    if table.get("schema_version") != SCHEMA_VERSION:
-        raise ValueError(
-            "background schema is old or unsupported; regenerate realizations (schema 4 required)"
-        )
 
 
 def background_pairs(
@@ -351,7 +341,6 @@ class BackgroundArtifact:
             If the table uses another normalization convention or predates
             the recording of pairs.
         """
-        validate_background_schema(table)
         version = table["normalization"].get("version")
         if version != NORMALIZATION_VERSION:
             raise ValueError(

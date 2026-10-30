@@ -43,23 +43,11 @@ __all__ = [
     "population_key",
 ]
 
-#: The manifest schema of a population realization: version 5 samples
-#: extrinsics in the joint model, requiring regeneration of older artifacts.
-SCHEMA_VERSION = 5
-
 COORDINATE_CONVENTIONS = {
     "sky": "right_ascension uniform [0, 2 pi); declination arcsin(uniform(-1, 1))",
     "polarization_angle": "uniform [0, pi); gwmock/LAL projection basis",
     "units": "radians; celestial frame compatible with supplied gmst",
 }
-
-
-def validate_population_schema(table: Mapping[str, Any]) -> None:
-    """Reject older population schemas before validating content hashes."""
-    if table.get("schema_version") != SCHEMA_VERSION:
-        raise ValueError(
-            "population schema is old or unsupported; regenerate realizations (schema 5 required)"
-        )
 
 
 #: One hyperparameter's declaration: the value it is fixed at, or the prior it
@@ -216,7 +204,6 @@ class PopulationArtifact:
         """
         return {
             "population": {
-                "schema_version": SCHEMA_VERSION,
                 "conventions": COORDINATE_CONVENTIONS,
                 "metadata": self.metadata.model_dump(mode="json"),
                 "key": self.key(),
@@ -250,7 +237,6 @@ class PopulationArtifact:
             rng key, or the sources do not match the recorded count.
         """
         population, realization = tables["population"], tables["realization"]
-        validate_population_schema(population)
         h5py = h5py_module()
         with h5py.File(sources_path, "r") as file:
             source_parameters = read_tree(file["source_parameters"])
