@@ -21,8 +21,7 @@ from numpy.typing import ArrayLike, NDArray
 from astrogwb.frequency import bin_widths
 from astrogwb.utils import years_to_seconds
 
-from ._types import DetectorSpec
-from .geometry import resolve_detector
+from .geometry import Detector
 from .overlap import isotropic_overlap_reduction_function
 
 # Normalization of the overlap reduction function: the paper's
@@ -53,7 +52,7 @@ class PairTerms(NamedTuple):
 
 def pair_terms(
     frequencies: ArrayLike,
-    detectors: Sequence[DetectorSpec],
+    detectors: Sequence[Detector],
 ) -> list[PairTerms]:
     r"""The optimal weight and isotropic ORF of every pair :math:`a < b`.
 
@@ -65,7 +64,7 @@ def pair_terms(
     """
     frequencies = np.asarray(frequencies, dtype=float)
     det_list = list(detectors)
-    psds = [resolve_detector(det).sensitivity(frequencies) for det in det_list]
+    psds = [det.sensitivity(frequencies) for det in det_list]
     pairs = []
     for i, det1 in enumerate(det_list):
         for j in range(i + 1, len(det_list)):
@@ -80,7 +79,7 @@ def pair_terms(
 
 def effective_psd(
     frequencies: ArrayLike,
-    detectors: Sequence[DetectorSpec],
+    detectors: Sequence[Detector],
 ) -> NDArray[np.float64]:
     r"""Network effective PSD from an inverse-variance cross-correlation sum.
 
@@ -139,7 +138,7 @@ def gaussian_bin_scale(
 
 def pair_bin_scale(
     frequencies: ArrayLike,
-    detectors: Sequence[DetectorSpec],
+    detectors: Sequence[Detector],
     observation_time: float,
 ) -> jax.Array:
     r"""Per-bin Gaussian noise scale of every pair's cross-power, ``(P, F)``.
@@ -170,10 +169,7 @@ def pair_bin_scale(
     """
     frequencies = np.asarray(frequencies, dtype=float)
     det_list = list(detectors)
-    psds = [
-        np.asarray(resolve_detector(det).sensitivity(frequencies), dtype=float)
-        for det in det_list
-    ]
+    psds = [np.asarray(det.sensitivity(frequencies), dtype=float) for det in det_list]
     modes = np.sqrt(
         2.0 * years_to_seconds(observation_time) * np.asarray(bin_widths(frequencies))
     )

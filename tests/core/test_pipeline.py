@@ -115,8 +115,10 @@ def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum() -> No
     ratios = np.asarray(ratios)
     expected = np.stack(
         [
-            isotropic_overlap_reduction_function(background.frequencies, first, second)
-            for first, second in NETWORKS.pairs("triangle")
+            isotropic_overlap_reduction_function(
+                background.frequencies, *NETWORKS.build_detectors(pair)
+            )
+            for pair in NETWORKS.pairs("triangle")
         ]
     )
     errors = ratios.std(axis=0, ddof=1) / np.sqrt(ratios.shape[0])

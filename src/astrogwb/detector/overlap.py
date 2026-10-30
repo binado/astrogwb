@@ -26,8 +26,7 @@ from numpy.typing import ArrayLike, NDArray
 from astrogwb.constants import EARTH_MEAN_RADIUS_IN_METERS, SPEED_OF_LIGHT
 from astrogwb.waveform.polarization_power import quadrupolar_stokes_factors
 
-from ._types import DetectorSpec
-from .geometry import Detector, DetectorGeometry, resolve_detector
+from .geometry import Detector, DetectorGeometry
 
 # The analytic ORF works in kilometres: detector chord distances are
 # O(1e4) km and the bundled overlap-reduction fixtures were generated in
@@ -265,18 +264,17 @@ def _get_orf(
 
 def isotropic_overlap_reduction_function(
     frequencies: ArrayLike,
-    detector_1: DetectorSpec,
-    detector_2: DetectorSpec,
+    detector_1: Detector,
+    detector_2: Detector,
 ) -> NDArray[np.float64]:
     """Frequency-dependent ORF between two detectors for an isotropic background.
 
     A spherical-Earth, level-arm approximation to the native projection
-    average. Elevation, WGS-84 flattening and arm tilts are omitted. Each
-    detector is a packaged name or an owned :class:`Detector`.
+    average. Elevation, WGS-84 flattening and arm tilts are omitted.
     """
     frequencies = np.asarray(frequencies, dtype=float)
-    det1 = resolve_detector(detector_1).geometry
-    det2 = resolve_detector(detector_2).geometry
+    det1 = detector_1.geometry
+    det2 = detector_2.geometry
 
     d = _chord_distance(
         det1.latitude_rad,
@@ -304,7 +302,7 @@ def isotropic_overlap_reduction_function(
 
 def pairwise_overlap_reduction_function(
     frequencies: ArrayLike,
-    detectors: Sequence[DetectorSpec],
+    detectors: Sequence[Detector],
 ) -> NDArray[np.float64]:
     """Symmetric ``(n, n, nfreq)`` isotropic ORF matrix with unit diagonal."""
     frequencies = np.asarray(frequencies, dtype=float)
@@ -334,8 +332,8 @@ def _wrap_half_turn(angle: float) -> float:
 
 
 def relative_orientation(
-    detector_1: DetectorSpec,
-    detector_2: DetectorSpec,
+    detector_1: Detector,
+    detector_2: Detector,
     reference: OrientationReference = "great_circle",
 ) -> float:
     r"""Rotation of the second detector's arm bisector relative to the first.
@@ -363,8 +361,8 @@ def relative_orientation(
     float
         Relative orientation in radians, in :math:`(-\pi/2, \pi/2]`.
     """
-    det1 = resolve_detector(detector_1).geometry
-    det2 = resolve_detector(detector_2).geometry
+    det1 = detector_1.geometry
+    det2 = detector_2.geometry
     angle = _bisector_from_east(det2) - _bisector_from_east(det1)
     if reference == "great_circle":
         ang_1, ang_2 = _great_circle_offsets(det1, det2)
@@ -375,8 +373,8 @@ def relative_orientation(
 
 
 def align_detector(
-    reference_detector: DetectorSpec,
-    detector: DetectorSpec,
+    reference_detector: Detector,
+    detector: Detector,
     angle: float,
     reference: OrientationReference = "great_circle",
 ) -> Detector:
@@ -403,7 +401,7 @@ def align_detector(
     Detector
         Copy of ``detector`` with rotated arm azimuths.
     """
-    det = resolve_detector(detector)
+    det = detector
     current = relative_orientation(reference_detector, det, reference)
     # A counter-clockwise rotation lowers gwmock's clockwise-from-North azimuths.
     rotation = _wrap_half_turn(angle - current)
@@ -426,8 +424,8 @@ _ISOTROPIC_PAIR_RESPONSE = 4.0 / 25.0
 
 def stokes_cross_power(
     frequencies: JaxArrayLike,
-    detector_1: DetectorSpec,
-    detector_2: DetectorSpec,
+    detector_1: Detector,
+    detector_2: Detector,
     right_ascension: JaxArrayLike,
     declination: JaxArrayLike,
     polarization_angle: JaxArrayLike,
@@ -446,7 +444,7 @@ def stokes_cross_power(
     frequencies
         Frequencies in Hz, ``(F,)``.
     detector_1, detector_2
-        Packaged names or owned detectors.
+        Owned detectors.
     right_ascension, declination, polarization_angle, gmst
         Celestial coordinates, polarization angle and compatible sidereal angle
         in radians, broadcasting to a common source shape. No epoch conversion.
@@ -464,7 +462,7 @@ def stokes_cross_power(
     the analytic spherical-Earth, level-arm ORF. Native geometry includes
     WGS-84 flattening, elevations and arm tilts, so equality is approximate.
     """
-    det1, det2 = resolve_detector(detector_1), resolve_detector(detector_2)
+    det1, det2 = detector_1, detector_2
     coordinates = {"right_ascension": right_ascension, "declination": declination}
     plus_1, cross_1 = det1.antenna_pattern(
         gmst, **coordinates, polarization_angle=polarization_angle
@@ -494,8 +492,8 @@ def stokes_cross_power(
 
 def overlap_reduction_function(
     frequencies: JaxArrayLike,
-    detector_1: DetectorSpec,
-    detector_2: DetectorSpec,
+    detector_1: Detector,
+    detector_2: Detector,
     right_ascension: JaxArrayLike,
     declination: JaxArrayLike,
     polarization_angle: JaxArrayLike,

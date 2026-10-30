@@ -9,6 +9,7 @@ from astrogwb.detector import (
     Sensitivity,
     effective_psd,
     isotropic_overlap_reduction_function,
+    load_detector,
     load_sensitivity_map,
 )
 
@@ -64,17 +65,21 @@ def test_load_sensitivity_map_multiple() -> None:
 
 def test_network_overlap_and_effective_psd(frequencies: np.ndarray) -> None:
 
-    orf = isotropic_overlap_reduction_function(frequencies, "H1", "L1")
+    orf = isotropic_overlap_reduction_function(
+        frequencies, load_detector("H1"), load_detector("L1")
+    )
     assert orf.shape == frequencies.shape
     assert np.all(np.isfinite(orf))
 
-    eff = effective_psd(frequencies, ["H1", "L1", "V1"])
+    eff = effective_psd(
+        frequencies, [load_detector(name) for name in ("H1", "L1", "V1")]
+    )
     assert eff.shape == frequencies.shape
     assert np.any(np.isfinite(eff))
 
 
 def test_effective_psd_inf_for_single_detector(frequencies: np.ndarray) -> None:
-    actual = effective_psd(frequencies, ["H1"])
+    actual = effective_psd(frequencies, [load_detector("H1")])
 
     assert actual.shape == frequencies.shape
     assert np.all(np.isinf(actual))

@@ -37,7 +37,7 @@ from astrogwb_mock_population import (
 )
 
 from astrogwb.constants import SECONDS_PER_YEAR
-from astrogwb.detector import effective_psd, gaussian_bin_scale
+from astrogwb.detector import effective_psd, gaussian_bin_scale, load_detector
 from astrogwb.frequency import frequency_mask
 from astrogwb.gwb import spectral_snr_squared
 from astrogwb.gwb.catalog import (
@@ -128,7 +128,11 @@ def _analysis_at(frequencies: jax.Array) -> dict[str, Any]:
     one wherever the mask excludes a bin, which keeps an infinite PSD out of
     the log density.
     """
-    network_psd = jnp.asarray(effective_psd(np.asarray(frequencies), DETECTORS))
+    network_psd = jnp.asarray(
+        effective_psd(
+            np.asarray(frequencies), [load_detector(name) for name in DETECTORS]
+        )
+    )
     mask = frequency_mask(frequencies, fmin=F_MIN, fmax=F_MAX) & jnp.isfinite(
         network_psd
     )

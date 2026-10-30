@@ -41,8 +41,8 @@ import jax.numpy as jnp
 import numpy as np
 from jax.typing import ArrayLike
 
-from ._types import DetectorSpec
 from .effective_psd import pair_terms
+from .geometry import Detector
 from .overlap import overlap_reduction_function
 
 __all__ = [
@@ -55,7 +55,7 @@ __all__ = [
 
 def network_response(
     frequencies: ArrayLike,
-    detectors: Sequence[DetectorSpec],
+    detectors: Sequence[Detector],
     right_ascension: ArrayLike,
     declination: ArrayLike,
     polarization_angle: ArrayLike,
@@ -74,7 +74,7 @@ def network_response(
     frequencies:
         Frequencies in Hz, ``(F,)``.
     detectors:
-        Two or more packaged names or owned detectors with sensitivities.
+        Two or more detectors with sensitivities.
     right_ascension, declination, polarization_angle, cos_inclination:
         The celestial source angles in radians of
         :func:`~astrogwb.detector.overlap.overlap_reduction_function`,
@@ -108,7 +108,7 @@ def network_response(
 
 def pair_response(
     frequencies: ArrayLike,
-    detectors: Sequence[DetectorSpec],
+    detectors: Sequence[Detector],
     right_ascension: ArrayLike,
     declination: ArrayLike,
     polarization_angle: ArrayLike,
@@ -178,7 +178,7 @@ def sample_network_response(
     key: jax.Array,
     num_draws: int,
     frequencies: ArrayLike,
-    detectors: Sequence[DetectorSpec],
+    detectors: Sequence[Detector],
 ) -> jax.Array:
     r""":func:`network_response` at isotropic draws, ``(num_draws, F)``.
 
@@ -194,7 +194,7 @@ def sample_pair_response(
     key: jax.Array,
     num_draws: int,
     frequencies: ArrayLike,
-    detectors: Sequence[DetectorSpec],
+    detectors: Sequence[Detector],
 ) -> jax.Array:
     r""":func:`pair_response` at isotropic draws, ``(num_draws, P, F)``.
 

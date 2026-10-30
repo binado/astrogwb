@@ -151,12 +151,3 @@ def load_detector(name: str) -> Detector:
     from .config import load_detector_config
 
     return load_detector_config([]).detectors[name].to_detector(name)
-
-
-def resolve_detector(spec: str | Detector) -> Detector:
-    """Resolve a packaged name, or return an owned detector unchanged."""
-    if isinstance(spec, Detector):
-        return spec
-    if not isinstance(spec, str):
-        raise TypeError("detector must be a name or astrogwb Detector")
-    return load_detector(spec)

@@ -15,6 +15,7 @@ from test_detector import _sky_quadrature_orf
 
 from astrogwb.detector import (
     isotropic_overlap_reduction_function,
+    load_detector,
     network_response,
     overlap_reduction_function,
     pair_response,
@@ -56,21 +57,23 @@ def _standard_errors(draws: jax.Array, expected: np.ndarray) -> np.ndarray:
 def test_the_isotropic_mean_of_the_per_source_orf_is_the_isotropic_orf(
     detector_1: str, detector_2: str
 ) -> None:
+    first, second = load_detector(detector_1), load_detector(detector_2)
     draws = overlap_reduction_function(
         FREQUENCIES,
-        detector_1,
-        detector_2,
+        first,
+        second,
         *_isotropic_angles(jax.random.key(0), NUM_DRAWS),
     )
-    expected = _sky_quadrature_orf(FREQUENCIES, detector_1, detector_2, native=True)
+    expected = _sky_quadrature_orf(FREQUENCIES, first, second, native=True)
 
     assert draws.shape == (NUM_DRAWS, FREQUENCIES.size)
     assert np.all(_standard_errors(draws, expected) < MAX_STANDARD_ERRORS)
 
 
 def test_a_detector_paired_with_itself_sees_a_non_negative_power() -> None:
+    h1 = load_detector("H1")
     draws = overlap_reduction_function(
-        FREQUENCIES, "H1", "H1", *_isotropic_angles(jax.random.key(1), 1_000)
+        FREQUENCIES, h1, h1, *_isotropic_angles(jax.random.key(1), 1_000)
     )
 
     assert np.all(np.asarray(draws) >= 0.0)
@@ -84,14 +87,21 @@ def test_the_per_source_orf_broadcasts_over_the_angles() -> None:
     azimuth = jnp.linspace(0.0, 6.0, 3)[None, :]
 
     draws = overlap_reduction_function(
-        FREQUENCIES, "H1", "L1", polar_cosine, azimuth, 0.3, 0.5
+        FREQUENCIES,
+        load_detector("H1"),
+        load_detector("L1"),
+        polar_cosine,
+        azimuth,
+        0.3,
+        0.5,
     )
 
     assert draws.shape == (5, 3, FREQUENCIES.size)
 
 
-@pytest.mark.parametrize("detectors", [["S1", "R1"], ["E1", "E2", "E3", "C1"]])
-def test_the_network_response_has_unit_isotropic_mean(detectors: list[str]) -> None:
+@pytest.mark.parametrize("names", [["S1", "R1"], ["E1", "E2", "E3", "C1"]])
+def test_the_network_response_has_unit_isotropic_mean(names: list[str]) -> None:
+    detectors = [load_detector(name) for name in names]
     draws = sample_network_response(
         jax.random.key(2),
         NUM_DRAWS,
@@ -116,24 +126,27 @@ def test_the_network_response_has_unit_isotropic_mean(detectors: list[str]) -> N
 def test_a_single_pair_response_does_not_depend_on_the_noise() -> None:
     angles = _isotropic_angles(jax.random.key(3), 100)
 
-    response = network_response(FREQUENCIES, ["S1", "R1"], *angles)
-    orf = overlap_reduction_function(FREQUENCIES, "S1", "R1", *angles)
+    first, second = load_detector("S1"), load_detector("R1")
+    response = network_response(FREQUENCIES, [first, second], *angles)
+    orf = overlap_reduction_function(FREQUENCIES, first, second, *angles)
 
     np.testing.assert_allclose(
         np.asarray(response),
-        np.asarray(orf / isotropic_overlap_reduction_function(FREQUENCIES, "S1", "R1")),
+        np.asarray(
+            orf / isotropic_overlap_reduction_function(FREQUENCIES, first, second)
+        ),
     )
 
 
 def test_a_misaligned_pair_scatters_more_than_an_aligned_one() -> None:
     """A nearly cancelled isotropic ORF leaves sources of either sign: more scatter."""
 
-    def variance(detectors: list[str]) -> np.ndarray:
+    def variance(names: list[str]) -> np.ndarray:
         draws = sample_network_response(
             jax.random.key(8),
             NUM_DRAWS,
             FREQUENCIES,
-            detectors,
+            [load_detector(name) for name in names],
         )
         return np.asarray(jnp.var(draws, axis=0))
 
@@ -141,7 +154,7 @@ def test_a_misaligned_pair_scatters_more_than_an_aligned_one() -> None:
 
 
 @pytest.mark.parametrize(
-    ("detectors", "pairs"),
+    ("names", "pairs"),
     [
         (["S1", "R1"], [("S1", "R1")]),
         (
@@ -158,23 +171,29 @@ def test_a_misaligned_pair_scatters_more_than_an_aligned_one() -> None:
     ],
 )
 def test_pair_response_stacks_each_pairs_orf_in_a_less_than_b_order(
-    detectors: list[str], pairs: list[tuple[str, str]]
+    names: list[str], pairs: list[tuple[str, str]]
 ) -> None:
     angles = _isotropic_angles(jax.random.key(4), 100)
 
-    stacked = pair_response(FREQUENCIES, detectors, *angles)
+    stacked = pair_response(
+        FREQUENCIES, [load_detector(name) for name in names], *angles
+    )
 
     assert stacked.shape == (100, len(pairs), FREQUENCIES.size)
     for index, (first, second) in enumerate(pairs):
         np.testing.assert_array_equal(
             np.asarray(stacked[:, index]),
-            np.asarray(overlap_reduction_function(FREQUENCIES, first, second, *angles)),
+            np.asarray(
+                overlap_reduction_function(
+                    FREQUENCIES, load_detector(first), load_detector(second), *angles
+                )
+            ),
         )
 
 
 def test_pair_response_draws_combine_to_the_network_response_draws() -> None:
     """Same key, same angles: the optimal combination of the pairs is the network."""
-    detectors = ["E1", "E2", "E3", "C1"]
+    detectors = [load_detector(name) for name in ("E1", "E2", "E3", "C1")]
     terms = pair_terms(FREQUENCIES, detectors)
     weights = np.stack([term.weight for term in terms])
     denominator = np.sum([term.weight * term.overlap for term in terms], axis=0)
@@ -190,12 +209,16 @@ def test_pair_response_draws_combine_to_the_network_response_draws() -> None:
 
 
 def test_pair_response_has_each_pairs_isotropic_orf_as_its_mean() -> None:
-    detectors = ["S2", "R2", "C1"]
+    detectors = [load_detector(name) for name in ("S2", "R2", "C1")]
     draws = sample_pair_response(jax.random.key(6), NUM_DRAWS, FREQUENCIES, detectors)
     expected = np.stack(
         [
             _sky_quadrature_orf(FREQUENCIES, first, second, native=True)
-            for first, second in [("S2", "R2"), ("S2", "C1"), ("R2", "C1")]
+            for first, second in [
+                (detectors[0], detectors[1]),
+                (detectors[0], detectors[2]),
+                (detectors[1], detectors[2]),
+            ]
         ]
     )
 
@@ -216,6 +239,7 @@ def _random_stokes(key: jax.Array, num_draws: int) -> jax.Array:
 def test_stokes_cross_power_of_unpolarized_sources_averages_to_the_isotropic_orf(
     detector_1: str, detector_2: str
 ) -> None:
+    first, second = load_detector(detector_1), load_detector(detector_2)
     polar_cosine, azimuth, polarization, _ = _isotropic_angles(
         jax.random.key(4), NUM_DRAWS
     )
@@ -223,14 +247,14 @@ def test_stokes_cross_power_of_unpolarized_sources_averages_to_the_isotropic_orf
 
     draws = 5.0 * stokes_cross_power(
         FREQUENCIES,
-        detector_1,
-        detector_2,
+        first,
+        second,
         polar_cosine,
         azimuth,
         polarization,
         unpolarized,
     )
-    expected = _sky_quadrature_orf(FREQUENCIES, detector_1, detector_2, native=True)
+    expected = _sky_quadrature_orf(FREQUENCIES, first, second, native=True)
 
     assert np.all(_standard_errors(draws, expected) < MAX_STANDARD_ERRORS)
 
@@ -239,8 +263,9 @@ def test_stokes_cross_power_of_a_detector_with_itself_is_blind_to_v() -> None:
     polar_cosine, azimuth, polarization, _ = _isotropic_angles(jax.random.key(5), 100)
     circular = jnp.array([0.0, 0.0, 0.0, 1.0])[:, None, None]
 
+    h1 = load_detector("H1")
     power = stokes_cross_power(
-        FREQUENCIES, "H1", "H1", polar_cosine, azimuth, polarization, circular
+        FREQUENCIES, h1, h1, polar_cosine, azimuth, polarization, circular
     )
 
     np.testing.assert_array_equal(np.asarray(power), 0.0)
@@ -249,10 +274,11 @@ def test_stokes_cross_power_of_a_detector_with_itself_is_blind_to_v() -> None:
 def test_stokes_cross_power_of_a_detector_with_itself_is_non_negative() -> None:
     polar_cosine, azimuth, polarization, _ = _isotropic_angles(jax.random.key(6), 200)
 
+    h1 = load_detector("H1")
     power = stokes_cross_power(
         FREQUENCIES,
-        "H1",
-        "H1",
+        h1,
+        h1,
         polar_cosine,
         azimuth,
         polarization,
@@ -267,14 +293,15 @@ def test_stokes_cross_power_rotates_linear_polarization_by_four_psi(
     detector_1: str, detector_2: str
 ) -> None:
     """Turning the basis by pi/4 is the same as flipping the signs of Q and U."""
+    first, second = load_detector(detector_1), load_detector(detector_2)
     polar_cosine, azimuth, polarization, _ = _isotropic_angles(jax.random.key(9), 50)
     stokes = _random_stokes(jax.random.key(10), 50)
     flipped = stokes * jnp.array([1.0, -1.0, -1.0, 1.0])[:, None, None]
 
     rotated = stokes_cross_power(
         FREQUENCIES,
-        detector_1,
-        detector_2,
+        first,
+        second,
         polar_cosine,
         azimuth,
         polarization + jnp.pi / 4,
@@ -282,8 +309,8 @@ def test_stokes_cross_power_rotates_linear_polarization_by_four_psi(
     )
     reflected = stokes_cross_power(
         FREQUENCIES,
-        detector_1,
-        detector_2,
+        first,
+        second,
         polar_cosine,
         azimuth,
         polarization,
@@ -333,12 +360,14 @@ def test_stokes_matches_direct_complex_strain_cross_power(
 def test_native_unpolarized_average_matches_independent_geometry_quadrature(
     pair: tuple[str, str],
 ) -> None:
+    first, second = (load_detector(name) for name in pair)
     mu, weights = np.polynomial.legendre.leggauss(48)
     phi = 2 * np.pi * np.arange(128) / 128
     frequencies = np.array([0.0, 10.0, 50.0])
     response = 5 * stokes_cross_power(
         frequencies,
-        *pair,
+        first,
+        second,
         phi[None, :],
         np.arcsin(mu[:, None]),
         0.7,
@@ -348,6 +377,6 @@ def test_native_unpolarized_average_matches_independent_geometry_quadrature(
     integrated = np.sum(np.asarray(response) * weights[:, None, None], axis=(0, 1)) / (
         2 * phi.size
     )
-    expected = _sky_quadrature_orf(frequencies, *pair, native=True)
+    expected = _sky_quadrature_orf(frequencies, first, second, native=True)
     # Both independent spherical quadratures are converged at these frequencies.
     assert np.all(np.abs(integrated - expected) < 512 * np.finfo(np.float64).eps)

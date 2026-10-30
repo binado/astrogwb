@@ -17,7 +17,6 @@ from astrogwb.detector import (
     load_detector,
     pairwise_overlap_reduction_function,
     relative_orientation,
-    resolve_detector,
 )
 from astrogwb.detector.overlap import C_LIGHT, R_EARTH
 
@@ -26,12 +25,9 @@ def _owned_detector(name: str, **fields: float) -> Detector:
     return Detector(name, DetectorGeometry(**fields), Sensitivity("ET_D_psd"))
 
 
-@pytest.mark.parametrize("loader", [resolve_detector, load_detector])
 @pytest.mark.parametrize("name", ["H1", "V1"])
-def test_detector_loaders_return_custom_detector(
-    loader: Callable[[str], Detector], name: str
-) -> None:
-    det = loader(name)
+def test_load_detector_returns_detector(name: str) -> None:
+    det = load_detector(name)
 
     assert isinstance(det, Detector)
     assert det.name == name
@@ -52,26 +48,10 @@ def test_load_detector_unknown_name_raises() -> None:
         load_detector("NOPE")
 
 
-def test_resolve_detector_passthrough_custom_detector() -> None:
-    custom = _owned_detector(
-        name="T1",
-        latitude_rad=0.1,
-        longitude_rad=0.2,
-        elevation_m=0.0,
-        xarm_azimuth_rad=0.3,
-        yarm_azimuth_rad=0.4,
-    )
-
-    assert resolve_detector(custom) is custom
-
-
-def test_resolve_detector_unknown_name_raises() -> None:
-    with pytest.raises(KeyError):
-        resolve_detector("NOPE")
-
-
 def test_orf_colocated_is_normalized(frequencies: np.ndarray) -> None:
-    actual = isotropic_overlap_reduction_function(frequencies, "H1", "H1")
+    actual = isotropic_overlap_reduction_function(
+        frequencies, load_detector("H1"), load_detector("H1")
+    )
 
     np.testing.assert_allclose(actual, np.ones_like(frequencies))
 
@@ -111,17 +91,16 @@ def _position_and_tensor(det: Detector) -> tuple[np.ndarray, np.ndarray]:
 
 
 def _sky_quadrature_orf(
-    frequencies: np.ndarray, spec_1: str, spec_2: str, *, native: bool = False
+    frequencies: np.ndarray, first: Detector, second: Detector, *, native: bool = False
 ) -> np.ndarray:
     """ORF by direct sky integration, (5/8pi) sum_A int dOmega F1^A F2^A e^(ik.dx).
 
     The sky is parametrized about the separation vector, so the phase only
     oscillates in cos(theta), where Gauss-Legendre converges exponentially.
     """
-    position_1, tensor_1 = _position_and_tensor(resolve_detector(spec_1))
-    position_2, tensor_2 = _position_and_tensor(resolve_detector(spec_2))
+    position_1, tensor_1 = _position_and_tensor(first)
+    position_2, tensor_2 = _position_and_tensor(second)
     if native:
-        first, second = resolve_detector(spec_1), resolve_detector(spec_2)
         position_1, tensor_1 = (
             first.geometry.location / 1000,
             first.geometry.response_tensor,
@@ -180,24 +159,18 @@ def test_orf_matches_direct_sky_quadrature(
     detector_1: str, detector_2: str, max_frequency: float
 ) -> None:
     freqs = np.concatenate([[0.0], np.geomspace(0.01, max_frequency, 400)])
+    first, second = load_detector(detector_1), load_detector(detector_2)
 
-    actual = isotropic_overlap_reduction_function(freqs, detector_1, detector_2)
+    actual = isotropic_overlap_reduction_function(freqs, first, second)
 
-    expected = _sky_quadrature_orf(freqs, detector_1, detector_2)
+    expected = _sky_quadrature_orf(freqs, first, second)
     np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1e-12)
 
 
-def test_orf_accepts_mixed_str_and_custom_detector(frequencies: np.ndarray) -> None:
-    custom_h1 = resolve_detector("H1")
-
-    from_str = isotropic_overlap_reduction_function(frequencies, "H1", "L1")
-    mixed = isotropic_overlap_reduction_function(frequencies, custom_h1, "L1")
-
-    np.testing.assert_allclose(mixed, from_str)
-
-
 def test_pairwise_overlap_shape_and_symmetry(frequencies: np.ndarray) -> None:
-    actual = pairwise_overlap_reduction_function(frequencies, ["H1", "L1", "V1"])
+    actual = pairwise_overlap_reduction_function(
+        frequencies, [load_detector(name) for name in ("H1", "L1", "V1")]
+    )
 
     assert actual.shape == (3, 3, frequencies.shape[0])
     np.testing.assert_allclose(actual, np.transpose(actual, (1, 0, 2)))
@@ -215,7 +188,9 @@ def test_matches_gwfast_reference(
         if key == "frequencies":
             continue
         det1_name, det2_name = key.split("_", maxsplit=1)
-        ours = isotropic_overlap_reduction_function(freqs, det1_name, det2_name)
+        ours = isotropic_overlap_reduction_function(
+            freqs, load_detector(det1_name), load_detector(det2_name)
+        )
         np.testing.assert_allclose(ours, reference, atol=1e-4)
 
 
@@ -325,7 +300,9 @@ def test_gwmock_et_triangle_orf_matches_geometry_table(
     preset_pw = pairwise_overlap_reduction_function(frequencies, preset)
     preset_sum = preset_pw[0, 1, :] + preset_pw[0, 2, :] + preset_pw[1, 2, :]
 
-    table_pw = pairwise_overlap_reduction_function(frequencies, ["E1", "E2", "E3"])
+    table_pw = pairwise_overlap_reduction_function(
+        frequencies, [load_detector(name) for name in ("E1", "E2", "E3")]
+    )
     table_sum = table_pw[0, 1, :] + table_pw[0, 2, :] + table_pw[1, 2, :]
 
     np.testing.assert_allclose(preset_sum, table_sum, atol=5e-3)
@@ -340,8 +317,9 @@ def test_et_2l_orientations_match_branchesi(
 ) -> None:
     # Branchesi et al. (2023), Sec. 2: alpha = 0 and 45 deg from local North,
     # with alpha ~= beta + 2.51 deg for the great-circle angle beta.
-    north = math.degrees(relative_orientation(*pair, reference="north"))
-    great_circle = math.degrees(relative_orientation(*pair))
+    first, second = (load_detector(name) for name in pair)
+    north = math.degrees(relative_orientation(first, second, reference="north"))
+    great_circle = math.degrees(relative_orientation(first, second))
 
     assert north == pytest.approx(north_deg, abs=1e-9)
     assert great_circle == pytest.approx(great_circle_deg, abs=0.01)
@@ -352,11 +330,14 @@ def test_et_2l_orientations_match_branchesi(
 def test_align_detector_reaches_target_orientation(
     reference: OrientationReference, angle_deg: float
 ) -> None:
-    rotated = align_detector("S1", "R2", math.radians(angle_deg), reference)
+    reference_detector = load_detector("S1")
     site = load_detector("R2")
+    rotated = align_detector(
+        reference_detector, site, math.radians(angle_deg), reference
+    )
 
     assert math.degrees(
-        relative_orientation("S1", rotated, reference)
+        relative_orientation(reference_detector, rotated, reference)
     ) == pytest.approx(angle_deg, abs=1e-9)
     assert (
         rotated.geometry.latitude_rad,
@@ -371,8 +352,11 @@ def test_align_detector_reaches_target_orientation(
 
 def test_orf_long_wavelength_scales_as_cos_two_orientation() -> None:
     def gamma(angle_deg: float) -> float:
-        rotated = align_detector("S1", "R1", math.radians(angle_deg))
-        return float(isotropic_overlap_reduction_function([1.0], "S1", rotated)[0])
+        reference = load_detector("S1")
+        rotated = align_detector(
+            reference, load_detector("R1"), math.radians(angle_deg)
+        )
+        return float(isotropic_overlap_reduction_function([1.0], reference, rotated)[0])
 
     assert gamma(30.0) / gamma(0.0) == pytest.approx(0.5, abs=1e-3)
     assert abs(gamma(45.0)) < 1e-3 * abs(gamma(0.0))
@@ -529,7 +513,7 @@ def test_geometry_cached_fields_are_immutable_and_excluded_from_identity() -> No
     assert hash(geometry) == before_hash
     assert TypeAdapter(DetectorGeometry).dump_python(geometry) == payload
     assert set(payload) == {f.name for f in dataclasses.fields(geometry)}
-    rotated = align_detector("L1", load_detector("H1"), 0.3)
+    rotated = align_detector(load_detector("L1"), load_detector("H1"), 0.3)
     assert rotated.name == "H1"
     assert rotated.sensitivity is load_detector("H1").sensitivity
     assert rotated.geometry is not geometry
