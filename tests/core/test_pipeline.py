@@ -345,3 +345,107 @@ def test_native_coordinate_columns_and_ranges(population: PopulationArtifact) ->
                 population,
                 source_parameters={k: v for k, v in columns.items() if k != missing},
             )
+
+
+@pytest.fixture(scope="module")
+def empty(population: PopulationArtifact) -> PopulationArtifact:
+    """A population with no sources, so the background is pure noise."""
+    return dataclasses.replace(
+        population,
+        source_parameters={k: v[:0] for k, v in population.source_parameters.items()},
+    )
+
+
+def test_noise_is_reproducible_for_the_same_population(
+    population: PopulationArtifact,
+) -> None:
+    simulator = BackgroundSimulator(
+        WAVEFORM, NETWORKS, chunk_size=8, segment_duration=60.0
+    )
+
+    assert_same_spectra(simulator(population), simulator(population))
+
+
+def test_noise_changes_the_spectra_and_the_key(
+    population: PopulationArtifact, projected: BackgroundArtifact
+) -> None:
+    noisy = BackgroundSimulator(
+        WAVEFORM, NETWORKS, chunk_size=8, segment_duration=60.0
+    )(population)
+
+    assert noisy.key() != projected.key()
+    assert not np.array_equal(
+        noisy.spectra["pair"].pair_spectral_density,
+        projected.spectra["pair"].pair_spectral_density,
+    )
+
+
+def test_noise_key_depends_on_the_segment_duration(
+    population: PopulationArtifact,
+) -> None:
+    keys = {
+        BackgroundSimulator(
+            WAVEFORM, NETWORKS, chunk_size=8, segment_duration=duration
+        )(population).key()
+        for duration in (60.0, 600.0)
+    }
+
+    assert len(keys) == 2
+
+
+@pytest.mark.parametrize("segment_duration", [60.0, 600.0])
+def test_pure_noise_matches_the_pair_scale_whatever_the_segment_duration(
+    empty: PopulationArtifact, segment_duration: float
+) -> None:
+    simulator = BackgroundSimulator(
+        WAVEFORM, NETWORKS, chunk_size=8, segment_duration=segment_duration
+    )
+    residuals = []
+    for draw in range(120):
+        background = simulator(dataclasses.replace(empty, rng_key=(0, draw)))
+        noise = background.noise(NETWORKS)
+        for name, spectrum in background.spectra.items():
+            scale = noise[name].pair_scale
+            residuals.append((spectrum.pair_spectral_density / scale).ravel())
+    residuals = np.concatenate(residuals)
+    segments = int(empty.observation_seconds // segment_duration)
+    size = residuals.size
+    # A mean of unit-variance terms, and a variance whose excess kurtosis is
+    # that of a product of Gaussians (6) averaged over the segments.
+    mean_bound = MAX_STANDARD_ERRORS / np.sqrt(size)
+    variance_bound = MAX_STANDARD_ERRORS * np.sqrt((2.0 + 6.0 / segments) / size)
+
+    assert abs(residuals.mean()) < mean_bound
+    assert abs(residuals.var() - 1.0) < variance_bound
+
+
+def test_a_segment_longer_than_the_observation_raises(
+    population: PopulationArtifact,
+) -> None:
+    simulator = BackgroundSimulator(
+        WAVEFORM, NETWORKS, chunk_size=8, segment_duration=1e9
+    )
+
+    with pytest.raises(ValueError, match="exceeds the observation"):
+        simulator(population)
+
+
+def test_a_nonpositive_segment_duration_raises() -> None:
+    with pytest.raises(ValueError, match="positive"):
+        BackgroundSimulator(WAVEFORM, NETWORKS, segment_duration=0.0)
+
+
+def test_noise_of_another_registry_raises(projected: BackgroundArtifact) -> None:
+    other = NETWORKS.model_copy(
+        update={
+            "detectors": {
+                **NETWORKS.detectors,
+                "C1": NETWORKS.detectors["C1"].model_copy(
+                    update={"psd_reference": "ET_COBA_15km_psd.txt"}
+                ),
+            }
+        }
+    )
+
+    with pytest.raises(ValueError, match="registry"):
+        projected.noise(other)

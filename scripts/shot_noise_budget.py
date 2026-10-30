@@ -50,7 +50,7 @@ from astrogwb.paper.config.runs import CATALOGS_ROOT, ENSEMBLES_ROOT, FIGURES_DI
 from astrogwb.paper.plotting import DETECTOR_NETWORKS
 from astrogwb.paper.posteriors import network_pair_data
 from astrogwb.populations import build_population
-from astrogwb.simulators import DetectorNoise
+from astrogwb.simulators import Realization
 from astrogwb.waveform import quadrupolar_stokes_factors
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -58,6 +58,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 # Keep in sync with the configuration of notebooks/cosmology_grid_posteriors.py.
 REDSHIFT_NODES = 32
 MINIMUM_FREQUENCY, MAXIMUM_FREQUENCY = 2.0, 2048.0
+DATA_SEED = 41  # the injection ensemble draw 0
 RESPONSE_DRAWS, RESPONSE_SEED = 32_768, 0
 
 #: The isotropic mean of the bracket of the per-source ORF.
@@ -71,7 +72,7 @@ TERMS = {
 
 
 def build_likelihood(
-    catalog_path: Path, noise: DetectorNoise
+    catalog_path: Path, frequencies: np.ndarray, observation_time: float
 ) -> ImportanceGaussianLikelihood:
     """The grid notebook's likelihood at the fiducials, amplitude mode."""
     data, catalog_metadata, _ = read_reference_catalog(catalog_path)
@@ -80,11 +81,11 @@ def build_likelihood(
         data,
         catalog_metadata,
         population=build_population(population.model_name, **population.model_kwargs),
-        frequencies=noise.frequencies,
+        frequencies=frequencies,
         num_redshift_nodes=REDSHIFT_NODES,
         density_sites=(),
         shot_noise="amplitude",
-        observation_time=noise.metadata.observation_time,
+        observation_time=observation_time,
     )
 
 
@@ -202,7 +203,7 @@ def main() -> None:
         "--ensemble",
         type=Path,
         default=ENSEMBLES_ROOT / "fiducial",
-        help="ensemble root holding detector_noise.h5 (default: %(default)s)",
+        help="ensemble root holding the draws (default: %(default)s)",
     )
     parser.add_argument(
         "--reference-catalog",
@@ -219,9 +220,15 @@ def main() -> None:
         return
     fiducial = fiducials(root=ROOT_DIR)
     registry = detector_registry(root=ROOT_DIR)
-    noise = DetectorNoise.open(args.ensemble / "detector_noise.h5")
-    frequencies = noise.frequencies
-    likelihood = build_likelihood(args.reference_catalog, noise)
+    injection = Realization.open(args.ensemble / f"{DATA_SEED}-0")
+    background = injection.background()
+    noise = background.noise(registry)
+    frequencies = background.frequencies
+    likelihood = build_likelihood(
+        args.reference_catalog,
+        frequencies,
+        injection.population_metadata.observation_time,
+    )
     spectrum, _, extras = likelihood.predict(fiducial)
     num_sources = float(extras["total_merger_rate"]) * float(
         likelihood.observation_seconds
@@ -232,8 +239,8 @@ def main() -> None:
     for name, label in DETECTOR_NETWORKS:
         detectors = registry.build_network(name)
         data = network_pair_data(
-            noise,
-            name,
+            frequencies,
+            noise[name],
             minimum_frequency=MINIMUM_FREQUENCY,
             maximum_frequency=MAXIMUM_FREQUENCY,
             num_pairs=len(detectors) * (len(detectors) - 1) // 2,

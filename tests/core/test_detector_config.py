@@ -7,10 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-import numpy as np
-
 from astrogwb.detector.config import DetectorRegistry, load_detector_config
-from astrogwb.simulators import detector_noise
 from astrogwb.simulators.background import background_key
 
 ROOT = Path(__file__).parents[2]
@@ -82,47 +79,6 @@ def test_background_identity_uses_only_referenced_scientific_settings() -> None:
         networks=registry.networks,
     )
     assert background_key("waveforms", changed_geometry) != key
-
-
-def test_geometry_overrides_change_noise_orfs_and_psd_overrides_change_noise() -> None:
-    registry = _registry()
-    frequencies = np.array([10.0, 20.0, 30.0])
-    baseline = detector_noise(frequencies, registry, 1.0, network_names=["pair"])
-    moved_geometry = dataclasses.replace(
-        registry.detectors["E1"].geometry,
-        longitude_rad=registry.detectors["E1"].geometry.longitude_rad + 0.2,
-    )
-    geometry_registry = DetectorRegistry(
-        detectors={
-            **registry.detectors,
-            "E1": registry.detectors["E1"].model_copy(
-                update={"geometry": moved_geometry}
-            ),
-        },
-        networks=registry.networks,
-    )
-    geometry_noise = detector_noise(
-        frequencies, geometry_registry, 1.0, network_names=["pair"]
-    )
-    assert not np.array_equal(
-        baseline.noise["pair"].pair_overlap,
-        geometry_noise.noise["pair"].pair_overlap,
-    )
-
-    psd_registry = DetectorRegistry(
-        detectors={
-            **registry.detectors,
-            "E1": registry.detectors["E1"].model_copy(
-                update={"psd_reference": "ET_COBA_15km_psd.txt"}
-            ),
-        },
-        networks=registry.networks,
-    )
-    psd_noise = detector_noise(frequencies, psd_registry, 1.0, network_names=["pair"])
-    assert not np.array_equal(
-        baseline.noise["pair"].effective_psd,
-        psd_noise.noise["pair"].effective_psd,
-    )
 
 
 def test_owned_registry_build_order_and_serialization() -> None:

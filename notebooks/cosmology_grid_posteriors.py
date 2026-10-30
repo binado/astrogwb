@@ -52,7 +52,6 @@ with app.setup(hide_code=True):
     )
     from astrogwb.populations import build_population
     from astrogwb.simulators import (
-        DetectorNoise,
         Realization,
         network_spectra_ensemble,
     )
@@ -235,8 +234,9 @@ def _():
     ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / "fiducial"
     reference_catalog_path = ROOT_DIR / CATALOGS_ROOT / "reference-fiducial.h5"
     injection = Realization.open(ensemble_root / f"{data_seed}-0")
-    noise = DetectorNoise.open(ensemble_root / "detector_noise.h5")
-    frequencies = noise.frequencies
+    background = injection.background()
+    noise = background.noise(registry)
+    frequencies = background.frequencies
 
     write_figures = mo.ui.switch(value=True, label="Write figures")
     write_figures
@@ -667,8 +667,8 @@ def _(
 ):
     per_network = {
         name: network_pair_data(
-            noise,
-            name,
+            frequencies,
+            noise[name],
             minimum_frequency=minimum_frequency,
             maximum_frequency=maximum_frequency,
         )

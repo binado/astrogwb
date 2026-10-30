@@ -43,6 +43,14 @@ def simulate(
         bool, typer.Option(help="Write source_parameters.h5.")
     ] = True,
     chunk_size: Annotated[int, typer.Option(min=1, help="Waveforms per chunk.")] = 1024,
+    segment_duration: Annotated[
+        float | None,
+        typer.Option(
+            min=0.0,
+            help="Noise segment length in seconds; samples detector noise "
+            "(with --background).",
+        ),
+    ] = None,
     platform: Annotated[
         str, typer.Option(help="JAX platform: auto, cpu, cuda or tpu.")
     ] = "auto",
@@ -60,6 +68,10 @@ def simulate(
         raise typer.BadParameter(
             "--background and --detector-config go together",
             param_hint="--background",
+        )
+    if segment_duration is not None and not background:
+        raise typer.BadParameter(
+            "--segment-duration needs --background", param_hint="--segment-duration"
         )
     from astrogwb.detector.config import load_detector_config
     from astrogwb.simulators import PopulationMetadata, simulate_realization
@@ -82,6 +94,7 @@ def simulate(
         index=index,
         keep_sources=keep_sources,
         chunk_size=chunk_size,
+        segment_duration=segment_duration,
     )
     products = sorted(path.name for path in directory.glob("*.h5"))
     typer.echo(

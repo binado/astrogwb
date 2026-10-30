@@ -106,14 +106,22 @@ combined spectrum is `S_h`.
 
 ## Detector noise
 
-The background carries no noise. `detector_noise(frequencies, registry,
-observation_time, network_names=None)` evaluates, per network, the pair ORFs and per-pair Gaussian
-scales `(P_n, F)` and the effective PSD and its Gaussian scale `(F,)`, as a
-`DetectorNoise`. `astrogwb noise REALIZATION OUTPUT` writes it for the
-networks, frequencies and observation time a realization's background was
-simulated with, so the two cannot drift apart. It is one file per ensemble:
-`DetectorNoise.write`/`open`, datasets `frequencies` and
-`networks/<name>/{pair_overlap,pair_scale,effective_psd,scale}`.
+By default the background carries no noise. With `segment_duration` (seconds;
+`--segment-duration` of `astrogwb simulate`, with `--background`) the
+`BackgroundSimulator` cuts the observation into `floor(T / tau)` segments,
+samples Gaussian detector noise per segment in the strain domain, and adds its
+cross terms with the coherent signal strain and with itself before averaging,
+rescaled per bin so the noise-by-noise term has the standard deviation of
+`pair_bin_scale` for any grid and any `tau`. The stream is folded from the
+realization's key, so the background stays a deterministic function of it, and
+`pair_spectral_density` then holds signal plus noise. The segment duration is
+part of the background's key.
+
+The likelihood inputs are not stored. `BackgroundArtifact.noise(registry)`
+derives, per network, the pair ORFs and per-pair Gaussian scales `(P_n, F)` and
+the effective PSD and its Gaussian scale `(F,)`, as a `NetworkNoise`, from the
+background's grid, pairs and observation time. It raises if `registry` is not
+the one the background was simulated with.
 
 The expected, sky-averaged spectrum is the likelihood's model prediction. No
 simulator draws it.
@@ -235,9 +243,9 @@ astrogwb simulate draw/ --population-metadata population.toml --seed 41
 astrogwb simulate draw/ --waveform-metadata waveform.toml
 astrogwb simulate draw/ --background --detector-config config/detectors.toml
 
-# The ensemble's detector noise, from one of its realizations
-astrogwb noise root/41-0 root/detector_noise.h5 \
-    --detector-config config/detectors.toml
+# With sampled detector noise, in segments of one day
+astrogwb simulate draw/ --background --detector-config config/detectors.toml \
+    --segment-duration 86400
 ```
 
 The population and waveform files hold the fields of `PopulationMetadata` and

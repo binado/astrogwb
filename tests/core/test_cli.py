@@ -1,4 +1,4 @@
-"""The ``astrogwb simulate`` and ``astrogwb noise`` command lines."""
+"""The ``astrogwb simulate`` command line."""
 
 from __future__ import annotations
 
@@ -13,12 +13,13 @@ from astrogwb_tiny_pipeline import WAVEFORM, population_metadata
 from typer.testing import CliRunner
 
 from astrogwb.cli import app
-from astrogwb.simulators import DetectorNoise, Realization
+from astrogwb.detector.config import load_detector_config
+from astrogwb.simulators import Realization
 
 POPULATION = population_metadata()
 
 
-@pytest.mark.parametrize("command", ["simulate", "noise"])
+@pytest.mark.parametrize("command", ["simulate"])
 def test_importing_the_cli_leaves_the_xla_backend_uninitialized(command: str) -> None:
     """A late ``set_host_device_count(2)`` still taking effect proves it."""
     code = f"""
@@ -111,7 +112,7 @@ def test_a_seed_without_population_metadata_is_refused(tmp_path: Path) -> None:
     assert "go together" in result.output
 
 
-def test_noise_writes_the_backgrounds_networks_on_its_grid(
+def test_segment_duration_records_noise_in_the_background(
     tmp_path: Path, metadata_files: dict[str, Path]
 ) -> None:
     directory = tmp_path / "41-0"
@@ -122,35 +123,20 @@ def test_noise_writes_the_backgrounds_networks_on_its_grid(
         *("--waveform-metadata", str(metadata_files["waveform"])),
         "--background",
         *("--detector-config", str(metadata_files["detector"])),
+        *("--segment-duration", "600"),
     )
 
+    background = Realization.open(directory).background()
+
+    assert background.segment_duration == 600.0
+    registry = load_detector_config([metadata_files["detector"]])
+    noise = background.noise(registry)
+    assert noise["ET"].pair_scale.shape == (1, background.frequencies.size)
+
+
+def test_segment_duration_without_background_is_refused(tmp_path: Path) -> None:
     result = CliRunner().invoke(
-        app,
-        [
-            "noise",
-            str(directory),
-            str(tmp_path / "detector_noise.h5"),
-            "--detector-config",
-            str(metadata_files["detector"]),
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    noise = DetectorNoise.open(tmp_path / "detector_noise.h5")
-    realization = Realization.open(directory)
-    background = realization.background()
-    np.testing.assert_array_equal(noise.frequencies, background.frequencies)
-    assert noise.metadata.networks == tuple(background.spectra)
-    assert noise.metadata.observation_time == POPULATION.observation_time
-    shape = (1, background.frequencies.size)
-    assert noise.noise["ET"].pair_overlap.shape == shape
-    assert noise.noise["ET"].pair_scale.shape == shape
-    assert noise.noise["ET"].scale.shape == shape[1:]
-
-
-def test_noise_of_a_missing_realization_fails(tmp_path: Path) -> None:
-    result = CliRunner().invoke(
-        app, ["noise", str(tmp_path / "absent"), str(tmp_path / "noise.h5")]
+        app, ["simulate", str(tmp_path), "--segment-duration", "10"]
     )
 
     assert result.exit_code != 0

@@ -10,8 +10,6 @@
 #   outputs/ensembles/<name>/<seed>-<index>/   one realization per
 #       `astrogwb simulate` job, its manifest and background.h5: every paper
 #       network's pair spectra and combined spectrum;
-#   outputs/ensembles/<name>/detector_noise.h5 `astrogwb noise` of draw 0,
-#       the networks' noise on the same grid and observation time;
 #
 # and the reference catalogs the notebooks name, by
 # `astrogwb model-catalog`, under outputs/catalogs/.
@@ -94,7 +92,6 @@ rule all:
             for name in SELECTED
             for seed, index in draws(name)
         ],
-        [f"{ENSEMBLES_ROOT}/{name}/detector_noise.h5" for name in SELECTED],
         [f"{CATALOGS_ROOT}/{catalog}.h5" for name in SELECTED for catalog in CATALOGS[name]],
 
 
@@ -137,26 +134,6 @@ rule simulate:
             --background --detector-config {input.detectors:q} \
             --no-keep-sources --chunk-size 8192 \
             --cpu-threads {threads} > {log:q} 2>&1
-        """
-
-
-def first_draw(wildcards):
-    seed, index = draws(wildcards.ensemble)[0]
-    return f"{ENSEMBLES_ROOT}/{wildcards.ensemble}/{seed}-{index}/background.h5"
-
-
-rule noise:
-    input:
-        background=first_draw,
-        detectors="config/detectors.toml",
-    output:
-        f"{ENSEMBLES_ROOT}/{{ensemble}}/detector_noise.h5",
-    log:
-        "logs/ensembles/{ensemble}/detector_noise.log",
-    shell:
-        _RUN
-        + """ astrogwb noise $(dirname {input.background:q}) {output:q} \
-            --detector-config {input.detectors:q} > {log:q} 2>&1
         """
 
 

@@ -15,11 +15,9 @@ with --keep-polarizations. For example::
         --background --detector-config config/detectors.toml
 
 The registry contains [detectors.<name>] definitions and [networks]
-memberships. Background manifests record each network's detector pairs. Noise
-generation also requires the registry::
-
-    astrogwb noise ensemble/41-0 ensemble/detector_noise.h5 \\
-        --detector-config config/detectors.toml
+memberships. Background manifests record each network's detector pairs.
+--segment-duration SECONDS (with --background) also samples detector noise in
+segments of that length and adds it to the background.
 
 Importance-integration catalogs use explicit catalog metadata::
 
@@ -33,7 +31,6 @@ Changing the registry requires regenerating affected outputs. Runtime settings (
 import typer
 
 from .model_catalog import model_catalog
-from .noise import noise
 from .simulate import simulate
 
 __all__ = ["app"]
@@ -47,6 +44,5 @@ def _main() -> None:
 
 
 app.command()(simulate)
-app.command()(noise)
 
 app.command()(model_catalog)

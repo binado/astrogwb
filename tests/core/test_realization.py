@@ -274,3 +274,30 @@ def test_network_spectra_ensemble_from_start_is_a_suffix(ensemble: Path) -> None
 def test_network_spectra_ensemble_of_a_missing_draw_raises(ensemble: Path) -> None:
     with pytest.raises(FileNotFoundError):
         network_spectra_ensemble(ensemble, SEED, 3, ["triangle"])
+
+
+def test_a_noisy_background_round_trips_its_segment_duration(tmp_path: Path) -> None:
+    written = _simulator(
+        population=POPULATION,
+        waveform=WAVEFORM,
+        background=NETWORKS,
+        segment_duration=60.0,
+    )(tmp_path, seed=SEED).background()
+
+    reopened = Realization.open(tmp_path).background()
+
+    assert reopened.segment_duration == 60.0
+    assert reopened.key() == written.key()
+    assert set(reopened.noise(NETWORKS)) == set(NETWORKS.networks)
+
+
+def test_a_noisy_background_conflicts_with_a_noiseless_rerun(tmp_path: Path) -> None:
+    _simulator(
+        population=POPULATION,
+        waveform=WAVEFORM,
+        background=NETWORKS,
+        segment_duration=60.0,
+    )(tmp_path, seed=SEED)
+
+    with pytest.raises(ValueError, match="holds background"):
+        _simulator(background=NETWORKS)(tmp_path)

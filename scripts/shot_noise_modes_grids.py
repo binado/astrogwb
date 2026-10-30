@@ -25,8 +25,8 @@ fiducials. The (H0, Omega_m) corners are checked the same way::
         --ensemble outputs/ensembles/fiducial \
         --reference-catalog outputs/catalogs/reference-fiducial.h5
 
-It reads, never draws: draw 0 of seed 41 of the ensemble, its
-``detector_noise.h5`` and the reference catalog, all written by
+It reads, never draws: draw 0 of seed 41 of the ensemble, whose
+background gives the detector noise, and the reference catalog, all written by
 ``workflow/coverage_draws.smk``.
 
 The notebooks' helpers are imported from their setup blocks, so the grids are
@@ -57,7 +57,7 @@ from astrogwb.paper.config.runs import CATALOGS_ROOT, ENSEMBLES_ROOT
 from astrogwb.paper.plotting import DETECTOR_NETWORKS
 from astrogwb.paper.posteriors import network_data
 from astrogwb.populations import build_population
-from astrogwb.simulators import DetectorNoise, network_spectra_ensemble
+from astrogwb.simulators import NetworkNoise, Realization, network_spectra_ensemble
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "notebooks"))
 import cosmology_grid_posteriors as cosmology
@@ -74,8 +74,14 @@ GRID_CHUNK_SIZE = 8
 
 def _setup(
     ensemble: Path, catalog_path: Path
-) -> tuple[ImportanceGaussianLikelihood, dict[str, NDArray], DetectorNoise, dict]:
-    """The notebooks' amplitude-mode likelihood, each network's data, and its noise."""
+) -> tuple[
+    ImportanceGaussianLikelihood,
+    dict[str, NDArray],
+    NDArray,
+    dict[str, NetworkNoise],
+    dict,
+]:
+    """The notebooks' amplitude-mode likelihood, each network's data, the grid and noise."""
     params = fiducials()
     names = [name for name, _ in DETECTOR_NETWORKS]
     # Draw 0 of DATA_SEED: one catalog, as each network records it.
@@ -84,20 +90,22 @@ def _setup(
         name: np.asarray(data["spectral_density"][0])
         for name, data in zip(names, drawn, strict=True)
     }
-    noise = DetectorNoise.open(ensemble / "detector_noise.h5")
+    injection = Realization.open(ensemble / f"{DATA_SEED}-0")
+    background = injection.background()
+    noise = background.noise(detector_registry())
     catalog, catalog_metadata, _ = read_reference_catalog(catalog_path)
     population = catalog_metadata.population
     likelihood = ImportanceGaussianLikelihood.from_catalog(
         catalog,
         catalog_metadata,
         population=build_population(population.model_name, **population.model_kwargs),
-        frequencies=noise.frequencies,
+        frequencies=background.frequencies,
         num_redshift_nodes=REDSHIFT_NODES,
         density_sites=(),
         shot_noise="amplitude",
-        observation_time=noise.metadata.observation_time,
+        observation_time=injection.population_metadata.observation_time,
     )
-    return likelihood, observed, noise, params
+    return likelihood, observed, background.frequencies, noise, params
 
 
 def _whitened(
@@ -185,15 +193,16 @@ def main() -> None:
     parser.add_argument("--tolerance", type=float, default=1e-3)
     args = parser.parse_args()
 
-    likelihood, observed, noise, params = _setup(args.ensemble, args.reference_catalog)
-    frequencies = noise.frequencies
+    likelihood, observed, frequencies, noise, params = _setup(
+        args.ensemble, args.reference_catalog
+    )
     registry = detector_registry()
     names = [name for name, _ in DETECTOR_NETWORKS]
     per_network, networks, sky_s2, response_s2 = {}, {}, [], []
     for name in names:
         data = network_data(
-            noise,
-            name,
+            frequencies,
+            noise[name],
             minimum_frequency=MINIMUM_FREQUENCY,
             maximum_frequency=MAXIMUM_FREQUENCY,
         )

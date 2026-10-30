@@ -1,7 +1,7 @@
 """Setup shared by the posterior notebooks.
 
 The per-network Gaussian data, read from a
-:class:`~astrogwb.simulators.DetectorNoise` and cut to an analysis band, and
+:class:`~astrogwb.simulators.NetworkNoise` and cut to an analysis band, and
 the shot-noise variants: everything a grid or a sampler needs besides its
 catalogs before it evaluates a likelihood. Only NumPy and :mod:`astrogwb` are
 imported at module scope, and ``jax.numpy`` inside the functions that use it,
@@ -17,7 +17,7 @@ from numpy.typing import ArrayLike, NDArray
 
 from astrogwb.frequency import frequency_mask
 from astrogwb.inference import ImportanceGaussianLikelihood
-from astrogwb.simulators import DetectorNoise
+from astrogwb.simulators import NetworkNoise
 
 __all__ = [
     "network_data",
@@ -28,14 +28,14 @@ __all__ = [
 
 
 def _band(
-    noise: DetectorNoise, minimum_frequency: float, maximum_frequency: float
+    frequencies: ArrayLike, minimum_frequency: float, maximum_frequency: float
 ) -> NDArray[np.bool_]:
-    """The bins of ``noise``'s grid inside ``[minimum_frequency, maximum_frequency]``."""
+    """The bins of ``frequencies`` inside ``[minimum_frequency, maximum_frequency]``."""
     import jax.numpy as jnp
 
     return np.asarray(
         frequency_mask(
-            jnp.asarray(noise.frequencies),
+            jnp.asarray(frequencies),
             fmin=minimum_frequency,
             fmax=maximum_frequency,
         )
@@ -43,8 +43,8 @@ def _band(
 
 
 def network_data(
-    noise: DetectorNoise,
-    name: str,
+    frequencies: ArrayLike,
+    noise: NetworkNoise,
     *,
     minimum_frequency: float,
     maximum_frequency: float,
@@ -55,23 +55,32 @@ def network_data(
     dropped from the mask and given a finite scale of one, as
     ``InferenceInputs.model_kwargs`` does.
 
+    Parameters
+    ----------
+    frequencies
+        The grid of ``noise`` in Hz, ``(F,)``.
+    noise
+        The network's noise, from
+        :meth:`~astrogwb.simulators.BackgroundArtifact.noise`.
+    minimum_frequency, maximum_frequency
+        The analysis band in Hz.
+
     Returns
     -------
     dict
-        ``scale`` and ``frequency_mask``, shape ``(F,)`` on ``noise``'s grid,
+        ``scale`` and ``frequency_mask``, shape ``(F,)`` on ``frequencies``,
         as model keyword arguments.
     """
     import jax.numpy as jnp
 
-    network = noise.noise[name]
-    psd = network.effective_psd
+    psd = noise.effective_psd
     mask = (
-        _band(noise, minimum_frequency, maximum_frequency)
+        _band(frequencies, minimum_frequency, maximum_frequency)
         & np.isfinite(psd)
         & (psd > 0.0)
     )
     return {
-        "scale": jnp.asarray(np.where(mask, network.scale, 1.0)),
+        "scale": jnp.asarray(np.where(mask, noise.scale, 1.0)),
         "frequency_mask": jnp.asarray(mask),
     }
 
@@ -90,8 +99,8 @@ def pad_pairs(values: ArrayLike, num_pairs: int = MAX_PAIRS) -> NDArray:
 
 
 def network_pair_data(
-    noise: DetectorNoise,
-    name: str,
+    frequencies: ArrayLike,
+    noise: NetworkNoise,
     *,
     minimum_frequency: float,
     maximum_frequency: float,
@@ -106,24 +115,26 @@ def network_pair_data(
     networks stack. Entries outside the band or with an infinite scale are
     masked and given a scale of one.
 
+    Parameters are those of :func:`network_data`, with ``num_pairs`` the padded
+    pair count.
+
     Returns
     -------
     dict
         ``scale``, ``frequency_mask`` and ``pair_overlap``, ``(num_pairs, F)``
-        on ``noise``'s grid, as :class:`~astrogwb.inference.Network` fields.
+        on ``frequencies``, as :class:`~astrogwb.inference.Network` fields.
     """
     import jax.numpy as jnp
 
-    network = noise.noise[name]
-    scale = network.pair_scale
-    band = _band(noise, minimum_frequency, maximum_frequency)
+    scale = noise.pair_scale
+    band = _band(frequencies, minimum_frequency, maximum_frequency)
     mask = band & np.isfinite(scale) & (scale > 0.0)
-    padded_scale = np.ones((num_pairs, noise.frequencies.size))
+    padded_scale = np.ones((num_pairs, np.size(frequencies)))
     padded_scale[: scale.shape[0]] = np.where(mask, scale, 1.0)
     return {
         "scale": jnp.asarray(padded_scale),
         "frequency_mask": jnp.asarray(pad_pairs(mask, num_pairs)),
-        "pair_overlap": jnp.asarray(pad_pairs(network.pair_overlap, num_pairs)),
+        "pair_overlap": jnp.asarray(pad_pairs(noise.pair_overlap, num_pairs)),
     }
 
 

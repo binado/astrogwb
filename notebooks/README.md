@@ -11,7 +11,7 @@ cell names its inputs, all under `outputs/`:
 
 | Input | Read by |
 | --- | --- |
-| `ensembles/fiducial/` (+ `detector_noise.h5`) | `cosmology_grid_posteriors`, `madau_dickinson_grid`, `shot_noise_coverage`, `ensemble_spectrum`, `spectrum_snrs` (deprecated) |
+| `ensembles/fiducial/` | `cosmology_grid_posteriors`, `madau_dickinson_grid`, `shot_noise_coverage`, `ensemble_spectrum`, `spectrum_snrs` (deprecated) |
 | `catalogs/reference-fiducial.h5` | `cosmology_grid_posteriors`, `madau_dickinson_grid`, `shot_noise_coverage`, `ensemble_spectrum` |
 | `catalogs/reference-ladder.h5` | `importance_convergence` |
 

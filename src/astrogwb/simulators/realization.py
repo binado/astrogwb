@@ -16,7 +16,8 @@ it was given, and adds to what is already there:
 
 Upstream data missing from disk is regenerated in memory: the sources from the
 recorded population metadata and ``rng_key``. Nothing upstream is redrawn
-differently, as the population stage is the only one that draws random numbers.
+differently: the population stage draws from the recorded key, and the
+background's detector noise from a stream folded out of it.
 """
 
 from __future__ import annotations
@@ -228,7 +229,8 @@ class RealizationSimulator:
 
     Each argument is a stage's settings, ``None`` to leave the stage as
     recorded. ``keep_sources`` writes ``source_parameters.h5``; a configured
-    background is always written. ``chunk_size`` controls waveforms per chunk.
+    background is always written. ``chunk_size`` controls waveforms per chunk, and
+    ``segment_duration`` (seconds) adds sampled detector noise to the background.
 
     The stage simulators are built for each realization that needs them.
     """
@@ -241,6 +243,7 @@ class RealizationSimulator:
         *,
         keep_sources: bool = True,
         chunk_size: int = 1024,
+        segment_duration: float | None = None,
     ) -> None:
         # x64 before the first key: seeds are 64-bit.
         jax.config.update("jax_enable_x64", True)
@@ -251,6 +254,7 @@ class RealizationSimulator:
         self._background = background
         self._keep_sources = keep_sources
         self._chunk_size = chunk_size
+        self._segment_duration = segment_duration
 
     def __call__(
         self, directory: str | Path, *, seed: int | None = None, index: int = 0
@@ -332,7 +336,9 @@ class RealizationSimulator:
                 raise ValueError(
                     f"{directory} records no waveform settings; a background needs them"
                 )
-            table = background_table(waveforms, self._background)
+            table = background_table(
+                waveforms, self._background, segment_duration=self._segment_duration
+            )
             if recorded["background"] is None:
                 tables["background"] = table
             elif recorded["background"]["key"] != table["key"]:
@@ -384,7 +390,10 @@ class RealizationSimulator:
             metadata = realization.waveform_metadata
             assert metadata is not None and self._background is not None
             BackgroundSimulator(
-                metadata, self._background, chunk_size=self._chunk_size
+                metadata,
+                self._background,
+                chunk_size=self._chunk_size,
+                segment_duration=self._segment_duration,
             )(drawn).write(background_path)
         return realization
 
@@ -399,6 +408,7 @@ def simulate_realization(
     index: int = 0,
     keep_sources: bool = True,
     chunk_size: int = 1024,
+    segment_duration: float | None = None,
 ) -> Realization:
     """Run the configured stages of one realization; see :class:`RealizationSimulator`."""
     simulator = RealizationSimulator(
@@ -407,6 +417,7 @@ def simulate_realization(
         background,
         keep_sources=keep_sources,
         chunk_size=chunk_size,
+        segment_duration=segment_duration,
     )
     return simulator(directory, seed=seed, index=index)
 

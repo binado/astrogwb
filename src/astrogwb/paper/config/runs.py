@@ -63,8 +63,8 @@ PLOTTING_PATH = CONFIG_DIR / "plotting.toml"
 BASE_OUT_DIR = Path("outputs")
 
 CATALOGS_ROOT = BASE_OUT_DIR / "catalogs"
-#: Ensemble roots, ``<name>/<seed>-<index>/`` realizations and
-#: ``<name>/detector_noise.h5``, written by ``workflow/coverage_draws.smk``.
+#: Ensemble roots, ``<name>/<seed>-<index>/`` realizations, written by
+#: ``workflow/coverage_draws.smk``.
 ENSEMBLES_ROOT = BASE_OUT_DIR / "ensembles"
 SPECTRA_ROOT = BASE_OUT_DIR / "spectra"
 FIGURES_DIR = BASE_OUT_DIR / "figures"

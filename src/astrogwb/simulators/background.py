@@ -39,15 +39,38 @@ projection, and each network keeps its own rows, ``(P_n, F)``, with their
 The combination weights come from the networks' noise curves, so the background
 depends on them and they are part of its key.
 
-The background is deterministic given its inputs and carries no detector
-noise. Detectors are static: the Earth's rotation during a signal is not
-modelled.
+Without a ``segment_duration`` the background is deterministic given its
+inputs and carries no detector noise. With one, :math:`\tau`, the observation is
+cut into :math:`N_\mathrm{seg} = \lfloor T/\tau \rfloor` segments of length
+:math:`\tau_\mathrm{eff} = T / N_\mathrm{seg}`, and per segment :math:`s`
+Gaussian noise :math:`n_a^s \sim \mathcal{CN}(0, \tau_\mathrm{eff} S_a / 2)` is
+drawn in each detector and bin, together with the segment's coherent signal
+strain :math:`h_a = \sqrt{\tau_\mathrm{eff}/T} \sum_i H_{a,i}`. The pair
+spectrum becomes
+
+.. math::
+
+    Y_{ab} = \frac{5}{T} \sum_i K_{ab,i}
+    + \frac{1}{\sqrt{\tau_\mathrm{eff} \Delta f_i}} \frac{1}{N_\mathrm{seg}}
+    \sum_s \frac{5}{\tau_\mathrm{eff}}
+    \mathrm{Re}\left[h_a^* n_b^s + n_a^{s*} h_b + n_a^{s*} n_b^s\right].
+
+The mean stays the incoherent signal; the strain enters only through the
+zero-mean cross terms. The per-bin factor rescales the averaged fluctuation to
+the :math:`\Delta f_i` of the grid, so the noise-by-noise term has the standard
+deviation :func:`~astrogwb.detector.pair_bin_scale` for any grid and any
+:math:`\tau`. The noise stream is folded from the realization's key, so the
+background stays a deterministic function of the realization. Bins where a PSD
+is not finite get no noise. ``pair_spectral_density`` then holds signal plus
+noise, and :meth:`BackgroundArtifact.noise` gives the matching likelihood inputs.
+Detectors are static: the Earth's rotation during a signal is not modelled.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from functools import partial
 from itertools import combinations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, Self
@@ -57,12 +80,19 @@ import jax.numpy as jnp
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from astrogwb.detector import pair_terms
+from astrogwb.detector import (
+    effective_psd,
+    gaussian_bin_scale,
+    pair_bin_scale,
+    pair_terms,
+)
 from astrogwb.detector.config import DetectorRegistry
 from astrogwb.detector.projection import project_polarizations_fd
+from astrogwb.frequency import bin_widths
 from astrogwb.simulators._chunks import iter_rows, pad_rows
 from astrogwb.simulators._io import atomic_h5
 from astrogwb.simulators.population import PopulationArtifact
+from astrogwb.utils import years_to_seconds
 from astrogwb.utils.io import content_key, h5py_module
 from astrogwb.waveform.metadata import WaveformMetadata
 
@@ -70,10 +100,12 @@ if TYPE_CHECKING:
     from astrogwb.waveform import WaveformGenerator
 
 __all__ = [
+    "NOISE_STREAM",
     "NORMALIZATION_VERSION",
     "WAVEFORM_CONVENTIONS",
     "BackgroundArtifact",
     "BackgroundSimulator",
+    "NetworkNoise",
     "NetworkSpectrum",
     "background_key",
     "background_pairs",
@@ -111,6 +143,9 @@ PAIR_RESPONSE_DENOMINATOR = 5.0
 #: The version of the pair-spectrum convention :math:`E[Y_{ab}] = \gamma_{ab} S_h`.
 NORMALIZATION_VERSION = 1
 
+#: The stream folded into a realization's key for the detector noise.
+NOISE_STREAM = 1
+
 _NORMALIZATION = {
     "convention": "E[Y_ab] = gamma_ab * S_h",
     "pair_spectrum": "Y_ab = 5 * D_ab / T",
@@ -130,6 +165,24 @@ class NetworkSpectrum(NamedTuple):
 
     pair_spectral_density: NDArray[np.float64]
     spectral_density: NDArray[np.float64]
+
+
+class NetworkNoise(NamedTuple):
+    """One network's noise on the background's grid, the likelihood inputs.
+
+    ``pair_overlap`` is the isotropic ORF :math:`\\gamma_{ab}` of each pair,
+    ``(P_n, F)``; ``pair_scale`` the per-pair Gaussian scale of
+    :func:`~astrogwb.detector.pair_bin_scale`, ``(P_n, F)``; ``effective_psd``
+    the network's :func:`~astrogwb.detector.effective_psd`, ``(F,)``; ``scale``
+    its :func:`~astrogwb.detector.gaussian_bin_scale`, ``(F,)``. The pairs are
+    in the order of :meth:`DetectorRegistry.pairs`. Frequency bands and padding
+    are analysis choices and are left to the reader.
+    """
+
+    pair_overlap: NDArray[np.float64]
+    pair_scale: NDArray[np.float64]
+    effective_psd: NDArray[np.float64]
+    scale: NDArray[np.float64]
 
 
 def waveform_key(metadata: WaveformMetadata, population_key: str) -> str:
@@ -183,7 +236,10 @@ def used_detectors(registry: DetectorRegistry, names: Sequence[str]) -> tuple[st
 
 
 def background_key(
-    waveform_key: str, registry: DetectorRegistry, names: Sequence[str] | None = None
+    waveform_key: str,
+    registry: DetectorRegistry,
+    names: Sequence[str] | None = None,
+    segment_duration: float | None = None,
 ) -> str:
     """The content hash of the spectra of the waveforms ``waveform_key``.
 
@@ -195,23 +251,29 @@ def background_key(
         The detector registry.
     names
         The networks of ``registry`` the spectra cover; defaults to all.
+    segment_duration
+        The noise segment length in seconds; ``None`` for no noise.
 
     Returns
     -------
     str
         Only the membership, geometry and PSD references of the detectors those
-        networks use affect it.
+        networks use, and the segment duration if there is noise, affect it.
     """
-    return content_key(
-        {
-            "waveforms": waveform_key,
-            "detectors": registry.select(select_networks(registry, names)).key(),
-        }
-    )
+    identity: dict[str, Any] = {
+        "waveforms": waveform_key,
+        "detectors": registry.select(select_networks(registry, names)).key(),
+    }
+    if segment_duration is not None:
+        identity["noise"] = {"segment_duration": float(segment_duration)}
+    return content_key(identity)
 
 
 def background_table(
-    waveform_key: str, registry: DetectorRegistry, names: Sequence[str] | None = None
+    waveform_key: str,
+    registry: DetectorRegistry,
+    names: Sequence[str] | None = None,
+    segment_duration: float | None = None,
 ) -> dict[str, Any]:
     """The ``[background]`` manifest table of the spectra :func:`background_key` names.
 
@@ -223,21 +285,23 @@ def background_table(
         The detector registry.
     names
         The networks of ``registry`` the spectra cover; defaults to all.
+    segment_duration
+        The noise segment length in seconds; ``None`` for no noise.
 
     Returns
     -------
     dict
         The pairs of each network, the key, the normalization convention and
-        the units.
+        the units, and the noise settings if there is noise.
     """
-    return {
+    table = {
         "metadata": {
             "pairs": {
                 name: [list(pair) for pair in registry.pairs(name)]
                 for name in select_networks(registry, names)
             }
         },
-        "key": background_key(waveform_key, registry, names),
+        "key": background_key(waveform_key, registry, names, segment_duration),
         "conventions": PROJECTION_CONVENTIONS,
         "normalization": _NORMALIZATION,
         "units": {
@@ -246,6 +310,12 @@ def background_table(
             "spectral_density": "1 / Hz",
         },
     }
+    if segment_duration is not None:
+        table["noise"] = {
+            "segment_duration": float(segment_duration),
+            "stream": NOISE_STREAM,
+        }
+    return table
 
 
 def background_pairs(
@@ -290,6 +360,7 @@ class BackgroundArtifact:
     waveform_key: str
     identity: str | None = None
     chunk_size: int | None = None
+    segment_duration: float | None = None
 
     def key(self) -> str:
         """The recorded background identity."""
@@ -299,7 +370,42 @@ class BackgroundArtifact:
 
     def table(self, registry: DetectorRegistry) -> dict[str, Any]:
         """The ``[background]`` table using the supplied registry."""
-        return background_table(self.waveform_key, registry, tuple(self.spectra))
+        return background_table(
+            self.waveform_key, registry, tuple(self.spectra), self.segment_duration
+        )
+
+    def noise(self, registry: DetectorRegistry) -> dict[str, NetworkNoise]:
+        """Each network's :class:`NetworkNoise` on this background's grid.
+
+        Derived from the registry, the grid and the observation time rather
+        than stored.
+
+        Raises
+        ------
+        ValueError
+            If ``registry`` is not the one the background was simulated with.
+        """
+        names = tuple(self.spectra)
+        key = background_key(self.waveform_key, registry, names, self.segment_duration)
+        if key != self.key():
+            raise ValueError(
+                f"registry gives background {key}, not the recorded {self.key()}"
+            )
+        grid = np.asarray(self.frequencies, dtype=np.float64)
+        years = self.observation_seconds / years_to_seconds(1.0)
+        noise = {}
+        for name in names:
+            detectors = registry.build_network(name)
+            psd = effective_psd(grid, detectors)
+            noise[name] = NetworkNoise(
+                pair_overlap=np.stack(
+                    [term.overlap for term in pair_terms(grid, detectors)]
+                ),
+                pair_scale=np.asarray(pair_bin_scale(grid, detectors, years)),
+                effective_psd=np.asarray(psd),
+                scale=np.asarray(gaussian_bin_scale(jnp.asarray(psd), years, grid)),
+            )
+        return noise
 
     def write(self, path: str | Path) -> Path:
         """Write the spectra to the HDF5 file ``path``, atomically.
@@ -332,7 +438,7 @@ class BackgroundArtifact:
 
         ``table`` is the ``[background]`` table, ``realization`` the
         ``[realization]`` table and ``waveform_key`` the ``[waveforms]`` key.
-        The recorded identity is kept as is, and the file is trusted to hold
+        The recorded identity and noise segment duration are kept as is, and the file is trusted to hold
         the networks and pairs of ``table``.
 
         Raises
@@ -374,6 +480,7 @@ class BackgroundArtifact:
             },
             waveform_key=waveform_key,
             identity=str(table["key"]),
+            segment_duration=table.get("noise", {}).get("segment_duration"),
         )
 
 
@@ -388,6 +495,10 @@ class BackgroundSimulator:
     resolved geometry and PSD references. One chunk shape is one compile,
     whatever the realized count, and peak memory is one chunk of polarizations.
     The observation time comes from the population. Build once and call often.
+
+    A ``segment_duration`` in seconds adds sampled detector noise to the pair
+    spectra, segment by segment (see the module docstring); ``None`` leaves
+    them noiseless.
     """
 
     def __init__(
@@ -397,10 +508,14 @@ class BackgroundSimulator:
         *,
         chunk_size: int = 1024,
         validate_sources: bool = True,
+        segment_duration: float | None = None,
     ) -> None:
         jax.config.update("jax_enable_x64", True)
         if chunk_size <= 0:
             raise ValueError("chunk_size must be positive")
+        if segment_duration is not None and segment_duration <= 0:
+            raise ValueError("segment_duration must be positive")
+        self._segment_duration = segment_duration
         self._waveform = waveform
         self._validate_sources = validate_sources
         self._generator: WaveformGenerator = waveform.build()
@@ -417,6 +532,9 @@ class BackgroundSimulator:
         self._tensors = np.stack([det.geometry.response_tensor for det in detectors])
         self._locations = np.stack([det.geometry.location for det in detectors])
         self._pairs = list(combinations(range(len(detectors)), 2))
+        self._psds = np.stack(
+            [np.asarray(det.sensitivity(self._frequencies)) for det in detectors]
+        )
         self._chunk_size = chunk_size
         self._pair_sums = jax.jit(self._chunk_pair_sums)
 
@@ -436,6 +554,11 @@ class BackgroundSimulator:
         return self._registry
 
     @property
+    def segment_duration(self) -> float | None:
+        """The noise segment length in seconds; ``None`` for no noise."""
+        return self._segment_duration
+
+    @property
     def chunk_size(self) -> int:
         """The number of sources evaluated per chunk."""
         return self._chunk_size
@@ -447,8 +570,12 @@ class BackgroundSimulator:
         valid: jax.Array,
         tensors: jax.Array,
         locations: jax.Array,
-    ) -> jax.Array:
-        """The ``(P_union, F)`` cross-power summed over one padded chunk's sources."""
+    ) -> tuple[jax.Array, jax.Array]:
+        """The cross-power and strain summed over one padded chunk's sources.
+
+        Returns the ``(P_union, F)`` real cross-powers and the ``(D, F)``
+        complex strain of the detector union.
+        """
         plus, cross = self._generator.generate_polarizations_batch(sources)
         real = (jnp.arange(plus.shape[0]) < valid)[:, None]
         plus = jnp.where(real, plus, 0.0)
@@ -466,12 +593,13 @@ class BackgroundSimulator:
                 polarization_angle=sources["polarization_angle"],
             )
         )(tensors, locations)
-        return jnp.stack(
+        cross = jnp.stack(
             [
                 jnp.real(jnp.conj(strains[first]) * strains[second]).sum(axis=0)
                 for first, second in self._pairs
             ]
         )
+        return cross, strains.sum(axis=1)
 
     def __call__(self, population: PopulationArtifact) -> BackgroundArtifact:
         """The per-network spectra of ``population``.
@@ -482,7 +610,8 @@ class BackgroundSimulator:
             If the sources carry no sky position or polarization angle.
         ValueError
             If ``validate_sources`` and a source value is outside what the
-            approximant represents.
+            approximant represents, or the observation is shorter than
+            ``segment_duration``.
         """
         missing = {"declination", "right_ascension", "polarization_angle"} - set(
             population.source_parameters
@@ -493,23 +622,28 @@ class BackgroundSimulator:
             self._generator.check_sources(population.source_parameters)
         frequencies = self._frequencies
         total = jnp.zeros((len(self._pairs), frequencies.shape[0]))
+        strain = jnp.zeros((self._psds.shape[0], frequencies.shape[0]), complex)
         grid = jnp.asarray(frequencies)
         for start, _ in iter_rows(population.count, self._chunk_size):
             rows, valid = pad_rows(
                 population.source_parameters, start, self._chunk_size
             )
-            total = total + self._pair_sums(
+            chunk_total, chunk_strain = self._pair_sums(
                 grid,
                 rows,
                 jnp.asarray(valid),
                 jnp.asarray(self._tensors),
                 jnp.asarray(self._locations),
             )
+            total = total + chunk_total
+            strain = strain + chunk_strain
         union = (
             PAIR_RESPONSE_DENOMINATOR
             * np.asarray(total, dtype=np.float64)
             / population.observation_seconds
         )
+        if self._segment_duration is not None:
+            union = union + self._noise(population, grid, strain)
         spectra = {}
         for name in self._network_names:
             pairs = union[self._rows[name]]
@@ -529,9 +663,88 @@ class BackgroundSimulator:
             total_merger_rate=population.total_merger_rate,
             hyperparameters=dict(population.hyperparameters),
             waveform_key=wf_key,
-            identity=background_key(wf_key, self._registry, self._network_names),
+            identity=background_key(
+                wf_key, self._registry, self._network_names, self._segment_duration
+            ),
             chunk_size=self._chunk_size,
+            segment_duration=self._segment_duration,
         )
+
+    def _noise(
+        self, population: PopulationArtifact, grid: jax.Array, strain: jax.Array
+    ) -> NDArray[np.float64]:
+        """The ``(P_union, F)`` sampled noise terms of the pair spectra."""
+        assert self._segment_duration is not None
+        segments = int(population.observation_seconds // self._segment_duration)
+        if segments < 1:
+            raise ValueError(
+                f"segment_duration {self._segment_duration} s exceeds the "
+                f"observation time {population.observation_seconds} s"
+            )
+        key = jax.random.fold_in(
+            jax.random.wrap_key_data(jnp.asarray(population.rng_key, dtype=jnp.uint32)),
+            NOISE_STREAM,
+        )
+        first, second = (jnp.asarray(index) for index in zip(*self._pairs, strict=True))
+        return np.asarray(
+            _sample_noise(
+                key,
+                strain,
+                jnp.asarray(self._psds),
+                bin_widths(grid),
+                first,
+                second,
+                population.observation_seconds,
+                num_segments=segments,
+            ),
+            dtype=np.float64,
+        )
+
+
+@partial(jax.jit, static_argnames="num_segments")
+def _sample_noise(
+    key: jax.Array,
+    signal_strain: jax.Array,
+    psds: jax.Array,
+    widths: jax.Array,
+    first: jax.Array,
+    second: jax.Array,
+    observation_seconds: jax.Array | float,
+    *,
+    num_segments: int,
+) -> jax.Array:
+    """The noise terms of the pair spectra, ``(P, F)``; see the module docstring.
+
+    ``signal_strain`` is the ``(D, F)`` complex strain summed over sources,
+    ``psds`` the ``(D, F)`` noise curves, ``widths`` the ``(F,)`` bin widths
+    and ``first``, ``second`` the detector indices of each pair. One compile
+    per ``num_segments``.
+    """
+    segment = observation_seconds / num_segments
+    finite = jnp.isfinite(psds)
+    amplitude = jnp.sqrt(segment * jnp.where(finite, psds, 0.0) / 4.0)
+    coherent = jnp.sqrt(segment / observation_seconds) * signal_strain
+
+    def accumulate(total: jax.Array, segment_key: jax.Array) -> tuple[jax.Array, None]:
+        real_key, imag_key = jax.random.split(segment_key)
+        noise = amplitude * jax.lax.complex(
+            jax.random.normal(real_key, psds.shape),
+            jax.random.normal(imag_key, psds.shape),
+        )
+        cross = (
+            jnp.conj(coherent[first]) * noise[second]
+            + jnp.conj(noise[first]) * coherent[second]
+            + jnp.conj(noise[first]) * noise[second]
+        )
+        return total + jnp.real(cross), None
+
+    zero = jnp.zeros((first.shape[0], psds.shape[1]))
+    total, _ = jax.lax.scan(accumulate, zero, jax.random.split(key, num_segments))
+    return (
+        PAIR_RESPONSE_DENOMINATOR
+        * total
+        / (num_segments * segment * jnp.sqrt(segment * widths))
+    )
 
 
 def _combine(
