@@ -24,13 +24,13 @@ from typing import Annotated, Any, Literal, Self, TypedDict
 import jax
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
 from astrogwb import __version__
 from astrogwb.populations.evaluation import sample_sources
 from astrogwb.populations.joint import fix_extrinsic_parameters, joint_model
 from astrogwb.populations.metadata import PopulationMetadata
-from astrogwb.utils.io import content_key
+from astrogwb.utils.io import ContentKeyed
 from astrogwb.waveform.base import WaveformGenerator
 from astrogwb.waveform.metadata import WaveformMetadata
 
@@ -48,7 +48,7 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
-class CatalogMetadata(BaseModel):
+class CatalogMetadata(ContentKeyed):
     """Everything that determines a polarization-power catalog's contents.
 
     It is both the request and the provenance: the
@@ -100,14 +100,6 @@ class CatalogMetadata(BaseModel):
                 f"got {self.num_samples}"
             )
         return self
-
-    def key(self) -> str:
-        """The content hash this catalog is cached under.
-
-        Hashes the canonical JSON of the whole record, ``version`` included, so
-        a catalog is keyed by the code that drew it.
-        """
-        return content_key(self.model_dump(mode="json"))
 
 
 def catalog_stem(metadata: CatalogMetadata, seed: int | np.integer) -> str:

@@ -29,11 +29,11 @@ from typing import Annotated, NamedTuple, Self
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 
 from astrogwb.detector.config import DetectorRegistry
 from astrogwb.simulators.background import scientific_payload, select_networks
-from astrogwb.utils.io import content_key, load, write
+from astrogwb.utils.io import ContentKeyed, content_key, load, write
 
 __all__ = [
     "DetectorNoise",
@@ -46,7 +46,7 @@ __all__ = [
 FORMAT_VERSION = 3
 
 
-class DetectorNoiseMetadata(BaseModel):
+class DetectorNoiseMetadata(ContentKeyed):
     """What a :class:`DetectorNoise` is evaluated from, besides its frequencies.
 
     ``pairs`` are the detector pairs of each recorded network, in the order of
@@ -64,10 +64,6 @@ class DetectorNoiseMetadata(BaseModel):
     def networks(self) -> tuple[str, ...]:
         """The recorded network names."""
         return tuple(self.pairs)
-
-    def key(self) -> str:
-        """The content hash of the record."""
-        return content_key(self.model_dump(mode="json"))
 
 
 class NetworkNoise(NamedTuple):

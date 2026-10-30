@@ -25,11 +25,13 @@ from typing import Any, Protocol
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
+from pydantic import BaseModel
 
 from astrogwb import __version__
 
 __all__ = [
     "Arrays",
+    "ContentKeyed",
     "Keyed",
     "content_key",
     "h5py_module",
@@ -60,6 +62,14 @@ def content_key(payload: dict[str, Any]) -> str:
     """
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()[:_KEY_LENGTH]
+
+
+class ContentKeyed(BaseModel):
+    """A record whose key is the content hash of its JSON dump."""
+
+    def key(self) -> str:
+        """The content hash of the record."""
+        return content_key(self.model_dump(mode="json"))
 
 
 class Keyed(Protocol):

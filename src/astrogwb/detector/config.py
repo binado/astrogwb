@@ -116,6 +116,24 @@ class DetectorRegistry(BaseModel):
                 )
         return self
 
+    def select(self, names: Sequence[str]) -> DetectorRegistry:
+        """The registry of the networks ``names`` and the detectors they use.
+
+        Network members are sorted and labels dropped, so what remains is the
+        scientific content: it serializes alike for any presentation of it.
+        """
+        networks = {name: tuple(sorted(self.networks[name])) for name in sorted(names)}
+        used = sorted(
+            {detector for members in networks.values() for detector in members}
+        )
+        return DetectorRegistry(
+            detectors={
+                name: self.detectors[name].model_copy(update={"label": None})
+                for name in used
+            },
+            networks=networks,
+        )
+
     def build_detectors(self, names: Sequence[str]) -> tuple[Detector, ...]:
         """Build owned detectors in the supplied order."""
         return tuple(self.detectors[name].to_detector(name) for name in names)

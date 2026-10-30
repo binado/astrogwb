@@ -56,11 +56,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
-from pydantic import TypeAdapter
 
 from astrogwb.detector import pair_terms
 from astrogwb.detector.config import DetectorRegistry
-from astrogwb.detector.geometry import DetectorGeometry
 from astrogwb.detector.projection import project_polarizations_fd
 from astrogwb.simulators._chunks import iter_rows, pad_rows
 from astrogwb.simulators._io import atomic_h5
@@ -185,14 +183,7 @@ def select_networks(
 
 def used_detectors(registry: DetectorRegistry, names: Sequence[str]) -> tuple[str, ...]:
     """The sorted detectors that appear in the networks ``names`` of ``registry``."""
-    return tuple(
-        sorted({detector for name in names for detector in registry.networks[name]})
-    )
-
-
-#: Geometry fields left at their defaults are not hashed, so a field added with
-#: a default leaves the key of every existing detector unchanged.
-_GEOMETRY = TypeAdapter(DetectorGeometry)
+    return tuple(sorted(registry.select(names).detectors))
 
 
 def scientific_payload(
@@ -203,19 +194,9 @@ def scientific_payload(
     Network membership, and the geometry and PSD reference of the detectors
     those networks use. Labels and unused detectors are left out.
     """
-    used = used_detectors(registry, names)
     return {
         "projection": PROJECTION_CONVENTIONS,
-        "networks": {name: sorted(registry.networks[name]) for name in sorted(names)},
-        "detectors": {
-            name: {
-                "geometry": _GEOMETRY.dump_python(
-                    registry.detectors[name].geometry, exclude_defaults=True
-                ),
-                "psd_reference": registry.detectors[name].psd_reference,
-            }
-            for name in used
-        },
+        "registry": registry.select(names).model_dump(mode="json"),
     }
 
 
