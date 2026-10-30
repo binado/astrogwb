@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from astrogwb import __version__
 from astrogwb.distributions.config import DistributionConfig
+from astrogwb.populations.joint import EXTRINSIC_SITES
 from astrogwb.populations.metadata import PopulationMetadata as PopulationSpec
 from astrogwb.populations.metadata import widen_model_kwargs
 from astrogwb.simulators._io import atomic_h5
@@ -48,12 +49,7 @@ __all__ = [
 SCHEMA_VERSION = 5
 
 #: The extrinsic source columns required by the background projection.
-EXTRINSIC_COLUMNS = (
-    "declination",
-    "right_ascension",
-    "polarization_angle",
-    "coa_phase",
-)
+EXTRINSIC_COLUMNS = EXTRINSIC_SITES
 
 COORDINATE_CONVENTIONS = {
     "sky": "right_ascension uniform [0, 2 pi); declination arcsin(uniform(-1, 1))",

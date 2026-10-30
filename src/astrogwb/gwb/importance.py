@@ -117,7 +117,7 @@ from astrogwb.populations.evaluation import (
     sample_sources,
     sample_sources_qmc,
 )
-from astrogwb.populations.joint import joint_model
+from astrogwb.populations.joint import fix_extrinsic_parameters, joint_model
 from astrogwb.populations.metadata import PopulationMetadata
 from astrogwb.utils import gauss_legendre_nodes_weights
 
@@ -270,16 +270,14 @@ def _pin_redshift_and_inclination(
     model: PopulationModel, redshift: ArrayLike
 ) -> PopulationModel:
     """``model`` with reference distance, inclination and extrinsics fixed."""
-    return handlers.condition(
-        model,
-        data={
-            REDSHIFT_SITE: jnp.asarray(redshift),
-            INCLINATION_SITE: EFFECTIVE_INCLINATION,
-            "declination": jnp.asarray(0.0),
-            "right_ascension": jnp.asarray(0.0),
-            "polarization_angle": jnp.asarray(0.0),
-            "coa_phase": jnp.asarray(0.0),
-        },
+    return fix_extrinsic_parameters(
+        handlers.condition(
+            model,
+            data={
+                REDSHIFT_SITE: jnp.asarray(redshift),
+                INCLINATION_SITE: EFFECTIVE_INCLINATION,
+            },
+        )
     )
 
 
@@ -302,11 +300,12 @@ def reference_catalog(
 
     The model is conditioned on :func:`reference_redshift` (the population's
     ``minimum_redshift`` unless ``metadata`` sets one) and
-    :data:`EFFECTIVE_INCLINATION` before the draw. Sky coordinates, polarization angle and coalescence phase
-    are fixed at zero, so they consume no Sobol coordinates. When the reference redshift is
-    below the population's, the distance table is extended down to it, so the
-    stored luminosity distance is the one at the reference redshift. The intrinsic parameters are
-    drawn i.i.d., or on a scrambled Sobol net seeded by ``key`` when
+    :data:`EFFECTIVE_INCLINATION` before the draw, and the extrinsic parameters
+    are fixed at zero (:func:`~astrogwb.populations.joint.fix_extrinsic_parameters`),
+    so they consume no Sobol coordinates. When the reference redshift is below
+    the population's, the distance table is extended down to it, so the stored
+    luminosity distance is the one at the reference redshift. The intrinsic
+    parameters are drawn i.i.d., or on a scrambled Sobol net seeded by ``key`` when
     ``metadata.sampling`` is ``"sobol"``
     (:func:`~astrogwb.populations.evaluation.sample_sources_qmc`): the only
     Monte Carlo left in the rescaled spectrum is this intrinsic average, and its

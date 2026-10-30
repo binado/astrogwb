@@ -2,16 +2,63 @@
 
 from __future__ import annotations
 
+import math
+
 import jax
 import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
+from numpyro import handlers
 
 from astrogwb.distributions.orientation import UniformCosineDistribution
 from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.populations._types import PopulationModel, SourceModel
 
-__all__ = ["joint_model"]
+__all__ = [
+    "EXTRINSIC_SITES",
+    "extrinsic_priors",
+    "fix_extrinsic_parameters",
+    "joint_model",
+]
+
+#: The extrinsic sites :func:`joint_model` samples.
+EXTRINSIC_SITES = (
+    "declination",
+    "right_ascension",
+    "polarization_angle",
+    "coa_phase",
+)
+
+
+def extrinsic_priors() -> dict[str, dist.Distribution]:
+    """The isotropic prior of each :data:`EXTRINSIC_SITES` entry.
+
+    Declination is the cosine law shifted from colatitude to
+    :math:`[-\\pi/2, \\pi/2]`. Built on call: constructing distributions
+    creates arrays, which must not happen at import.
+    """
+    return {
+        "declination": dist.TransformedDistribution(
+            UniformCosineDistribution(),
+            dist.transforms.AffineTransform(-math.pi / 2.0, 1.0),
+        ),
+        "right_ascension": dist.Uniform(0.0, 2.0 * math.pi),
+        "polarization_angle": dist.Uniform(0.0, math.pi),
+        "coa_phase": dist.Uniform(0.0, 2.0 * math.pi),
+    }
+
+
+def fix_extrinsic_parameters(
+    model: PopulationModel, value: float = 0.0
+) -> PopulationModel:
+    """``model`` with every extrinsic site fixed at ``value``.
+
+    Fixed sites draw no random numbers, so the intrinsic draws and any Sobol
+    coordinates are those of a model without extrinsics.
+    """
+    return handlers.condition(
+        model, data={name: jnp.asarray(value) for name in EXTRINSIC_SITES}
+    )
 
 
 def joint_model(
@@ -38,20 +85,12 @@ def joint_model(
 
     def model() -> dict[str, jax.Array]:
         sources = {**distance_model(), **source_model()}
-        declination = dist.TransformedDistribution(
-            UniformCosineDistribution(),
-            dist.transforms.AffineTransform(-jnp.pi / 2.0, 1.0),
-        )
         outputs = {
             **sources,
-            "declination": numpyro.sample("declination", declination),
-            "right_ascension": numpyro.sample(
-                "right_ascension", dist.Uniform(0.0, 2.0 * jnp.pi)
-            ),
-            "polarization_angle": numpyro.sample(
-                "polarization_angle", dist.Uniform(0.0, jnp.pi)
-            ),
-            "coa_phase": numpyro.sample("coa_phase", dist.Uniform(0.0, 2.0 * jnp.pi)),
+            **{
+                name: numpyro.sample(name, prior)
+                for name, prior in extrinsic_priors().items()
+            },
         }
         return {name: jnp.asarray(value) for name, value in outputs.items()}
 
