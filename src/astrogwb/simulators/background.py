@@ -52,11 +52,14 @@ from itertools import combinations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, Self
 
+import jax
+import jax.numpy as jnp
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from astrogwb.detector import pair_terms
 from astrogwb.detector.config import DetectorRegistry
+from astrogwb.detector.projection import project_polarizations_fd
 from astrogwb.simulators._chunks import iter_rows, pad_rows
 from astrogwb.simulators._io import atomic_h5
 from astrogwb.simulators.population import PopulationArtifact
@@ -64,8 +67,6 @@ from astrogwb.utils.io import content_key, h5py_module
 from astrogwb.waveform.metadata import WaveformMetadata
 
 if TYPE_CHECKING:
-    import jax
-
     from astrogwb.waveform import WaveformGenerator
 
 __all__ = [
@@ -437,8 +438,6 @@ class BackgroundSimulator:
         chunk_size: int = 1024,
         validate_sources: bool = True,
     ) -> None:
-        import jax
-
         jax.config.update("jax_enable_x64", True)
         if chunk_size <= 0:
             raise ValueError("chunk_size must be positive")
@@ -490,11 +489,6 @@ class BackgroundSimulator:
         locations: jax.Array,
     ) -> jax.Array:
         """The ``(P_union, F)`` cross-power summed over one padded chunk's sources."""
-        import jax
-        import jax.numpy as jnp
-
-        from astrogwb.detector.projection import project_polarizations_fd
-
         plus, cross = self._generator.generate_polarizations_batch(sources)
         real = (jnp.arange(plus.shape[0]) < valid)[:, None]
         plus = jnp.where(real, plus, 0.0)
@@ -530,8 +524,6 @@ class BackgroundSimulator:
             If ``validate_sources`` and a source value is outside what the
             approximant represents.
         """
-        import jax.numpy as jnp
-
         missing = {"declination", "right_ascension", "polarization_angle"} - set(
             population.source_parameters
         )
