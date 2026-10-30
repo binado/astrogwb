@@ -47,7 +47,7 @@ modelled.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from itertools import combinations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, Self
@@ -56,9 +56,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
+from pydantic import TypeAdapter
 
 from astrogwb.detector import pair_terms
 from astrogwb.detector.config import DetectorRegistry
+from astrogwb.detector.geometry import DetectorGeometry
 from astrogwb.detector.projection import project_polarizations_fd
 from astrogwb.simulators._chunks import iter_rows, pad_rows
 from astrogwb.simulators._io import atomic_h5
@@ -188,6 +190,11 @@ def used_detectors(registry: DetectorRegistry, names: Sequence[str]) -> tuple[st
     )
 
 
+#: Geometry fields left at their defaults are not hashed, so a field added with
+#: a default leaves the key of every existing detector unchanged.
+_GEOMETRY = TypeAdapter(DetectorGeometry)
+
+
 def scientific_payload(
     registry: DetectorRegistry, names: Sequence[str]
 ) -> dict[str, Any]:
@@ -202,7 +209,9 @@ def scientific_payload(
         "networks": {name: sorted(registry.networks[name]) for name in sorted(names)},
         "detectors": {
             name: {
-                "geometry": asdict(registry.detectors[name].geometry),
+                "geometry": _GEOMETRY.dump_python(
+                    registry.detectors[name].geometry, exclude_defaults=True
+                ),
                 "psd_reference": registry.detectors[name].psd_reference,
             }
             for name in used

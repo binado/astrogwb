@@ -8,10 +8,11 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from astrogwb.detector.config import DetectorRegistry, load_detector_config
 from astrogwb.simulators import detector_noise
-from astrogwb.simulators.background import background_key
+from astrogwb.simulators.background import background_key, scientific_payload
 
 ROOT = Path(__file__).parents[2]
 
@@ -82,6 +83,27 @@ def test_background_identity_uses_only_referenced_scientific_settings() -> None:
         networks=registry.networks,
     )
     assert background_key("waveforms", changed_geometry) != key
+
+
+@pytest.mark.parametrize(("tilt", "recorded"), [(0.0, False), (1e-3, True)])
+def test_payload_records_an_arm_tilt_only_when_it_is_not_the_default(
+    tilt: float, recorded: bool
+) -> None:
+    registry = _registry()
+    geometry = dataclasses.replace(
+        registry.detectors["E1"].geometry, xarm_tilt_rad=tilt
+    )
+    tilted = DetectorRegistry(
+        detectors={
+            **registry.detectors,
+            "E1": registry.detectors["E1"].model_copy(update={"geometry": geometry}),
+        },
+        networks=registry.networks,
+    )
+
+    fields = scientific_payload(tilted, ["pair"])["detectors"]["E1"]["geometry"]
+
+    assert ("xarm_tilt_rad" in fields) is recorded
 
 
 def test_geometry_overrides_change_noise_orfs_and_psd_overrides_change_noise() -> None:
