@@ -54,10 +54,9 @@ type Arrays = dict[str, NDArray[Any] | Arrays]
 def content_key(payload: dict[str, Any]) -> str:
     """The content address of one artifact's canonical JSON record.
 
-    ``payload`` is a record's ``model_dump(mode="json")`` after the record has
-    widened whatever it spells two ways -- an ``int`` setting that means the
-    same as its ``float`` -- to one form. Sorted keys and fixed separators do
-    the rest, so every artifact type hashes the same way and none can drift.
+    ``payload`` is a record's ``model_dump(mode="json")``. Sorted keys and fixed
+    separators make the JSON canonical, so every artifact type hashes the same
+    way and none can drift.
     """
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()[:_KEY_LENGTH]

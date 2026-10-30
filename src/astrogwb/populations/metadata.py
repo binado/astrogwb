@@ -2,17 +2,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Self
 
-from pydantic import BaseModel, ConfigDict, Field, SerializationInfo, field_serializer
+from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
     from astrogwb.populations.registry import Population
 
-__all__ = ["CANONICAL", "ModelKwargs", "PopulationMetadata"]
-
-#: Serialization context under which a record dumps its canonical, hashable form.
-#: Pass it as ``model_dump(mode="json", context=CANONICAL)``; a plain dump keeps
-#: values as written, so a manifest round-trips exactly.
-CANONICAL = {"canonical": True}
+__all__ = ["ModelKwargs", "PopulationMetadata"]
 
 
 #: Construction kwargs travel inside the metadata JSON, so they must be
@@ -44,23 +39,6 @@ class PopulationMetadata(BaseModel):
 
     model_name: str
     model_kwargs: ModelKwargs = Field(default_factory=dict)
-
-    @field_serializer("model_kwargs")
-    def _widen_model_kwargs(
-        self, kwargs: ModelKwargs, info: SerializationInfo
-    ) -> ModelKwargs:
-        """Under :data:`CANONICAL`, numeric kwargs as ``float``.
-
-        A setting spelled ``2`` in one config and ``2.0`` in another names the
-        same draw, so both must hash alike. Booleans and strings keep their type,
-        and a plain dump keeps integers, which a rebuilt population may need.
-        """
-        if not (info.context and info.context.get("canonical")):
-            return kwargs
-        return {
-            name: value if isinstance(value, bool | str) else float(value)
-            for name, value in kwargs.items()
-        }
 
     def build(self) -> Population:
         """Reconstruct the generating population with its kwargs bound.

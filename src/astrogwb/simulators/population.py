@@ -27,7 +27,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from astrogwb import __version__
 from astrogwb.distributions.config import DistributionConfig
 from astrogwb.populations.joint import EXTRINSIC_SITES
-from astrogwb.populations.metadata import CANONICAL
 from astrogwb.populations.metadata import PopulationMetadata as PopulationSpec
 from astrogwb.simulators._io import atomic_h5
 from astrogwb.utils import years_to_seconds
@@ -159,7 +158,7 @@ def population_key(metadata: PopulationMetadata, rng_key: Sequence[int]) -> str:
     """
     return content_key(
         {
-            "metadata": metadata.model_dump(mode="json", context=CANONICAL),
+            "metadata": metadata.model_dump(mode="json"),
             "rng_key": [int(v) for v in rng_key],
             "schema_version": SCHEMA_VERSION,
             "coordinates": COORDINATE_CONVENTIONS,
