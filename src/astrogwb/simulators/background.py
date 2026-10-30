@@ -79,13 +79,11 @@ __all__ = [
     "background_pairs",
     "background_table",
     "combine_pair_spectra",
-    "scientific_payload",
     "select_networks",
     "waveform_key",
     "waveform_table",
 ]
 
-WAVEFORM_SCHEMA_VERSION = 1
 SCHEMA_VERSION = 4
 
 PROJECTION_CONVENTIONS = {
@@ -141,7 +139,6 @@ def waveform_key(metadata: WaveformMetadata, population_key: str) -> str:
         {
             "population": population_key,
             "waveform": metadata.model_dump(mode="json"),
-            "schema_version": WAVEFORM_SCHEMA_VERSION,
         }
     )
 
@@ -186,20 +183,6 @@ def used_detectors(registry: DetectorRegistry, names: Sequence[str]) -> tuple[st
     return tuple(sorted(registry.select(names).detectors))
 
 
-def scientific_payload(
-    registry: DetectorRegistry, names: Sequence[str]
-) -> dict[str, Any]:
-    """The scientific content of the networks ``names`` of ``registry``.
-
-    Network membership, and the geometry and PSD reference of the detectors
-    those networks use. Labels and unused detectors are left out.
-    """
-    return {
-        "projection": PROJECTION_CONVENTIONS,
-        "registry": registry.select(names).model_dump(mode="json"),
-    }
-
-
 def background_key(
     waveform_key: str, registry: DetectorRegistry, names: Sequence[str] | None = None
 ) -> str:
@@ -223,9 +206,7 @@ def background_key(
     return content_key(
         {
             "waveforms": waveform_key,
-            **scientific_payload(registry, select_networks(registry, names)),
-            "normalization_version": NORMALIZATION_VERSION,
-            "schema_version": SCHEMA_VERSION,
+            "detectors": registry.select(select_networks(registry, names)).key(),
         }
     )
 

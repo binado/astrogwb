@@ -43,9 +43,8 @@ __all__ = [
     "population_key",
 ]
 
-#: The schema of a population realization. It is part of
-#: :func:`population_key`: version 5 samples extrinsics in the joint model, requiring
-#: regeneration of older artifacts.
+#: The manifest schema of a population realization: version 5 samples
+#: extrinsics in the joint model, requiring regeneration of older artifacts.
 SCHEMA_VERSION = 5
 
 COORDINATE_CONVENTIONS = {
@@ -160,8 +159,6 @@ def population_key(metadata: PopulationMetadata, rng_key: Sequence[int]) -> str:
         {
             "metadata": metadata.model_dump(mode="json"),
             "rng_key": [int(v) for v in rng_key],
-            "schema_version": SCHEMA_VERSION,
-            "coordinates": COORDINATE_CONVENTIONS,
         }
     )
 

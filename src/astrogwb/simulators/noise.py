@@ -32,8 +32,8 @@ from numpy.typing import ArrayLike, NDArray
 from pydantic import ConfigDict, Field
 
 from astrogwb.detector.config import DetectorRegistry
-from astrogwb.simulators.background import scientific_payload, select_networks
-from astrogwb.utils.io import ContentKeyed, content_key, load, write
+from astrogwb.simulators.background import select_networks
+from astrogwb.utils.io import ContentKeyed, load, write
 
 __all__ = [
     "DetectorNoise",
@@ -192,7 +192,7 @@ def detector_noise(
         metadata=DetectorNoiseMetadata(
             format_version=FORMAT_VERSION,
             pairs={name: tuple(registry.pairs(name)) for name in names},
-            scientific_identity=content_key(scientific_payload(registry, names)),
+            scientific_identity=registry.select(names).key(),
             observation_time=float(observation_time),
         ),
         frequencies=grid,

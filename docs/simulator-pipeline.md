@@ -62,7 +62,7 @@ response tensors computed from local north/east/up vectors. `Detector` owns a
 name, geometry and lazy sensitivity. Registry builders return tuples of these
 objects: `build_detectors` preserves supplied order; `build_network` sorts it.
 Projection uses the gwmock/LAL plus/cross basis and delay sign. Background
-simulation fixes `gmst=0`, recorded in hashed scientific conventions. Right
+simulation fixes `gmst=0`, recorded in the manifest's conventions. Right
 ascension and declination must be in the celestial frame compatible with the
 supplied sidereal angle; no GPS, epoch or precession conversion occurs.
 Tensors and locations are stacked outside JIT and passed into the chunk kernel.
@@ -169,15 +169,14 @@ from the recorded metadata and `rng_key`, and the polarizations are generated
 chunk by chunk from the `[waveforms]` metadata. A directory without a manifest
 needs population settings, or raises `FileNotFoundError`.
 
-Keys are content hashes. The population key hashes its metadata, including the
-schema version, together with its RNG key. The waveform key hashes the
-population key and the waveform metadata. The background key hashes the
-waveform key, the networks it covers (their members, and the geometry and
-`psd_reference` of the detectors they use, not the labels), the normalization
-version, native projection conventions (including fixed `gmst=0`) and schema
-version 4. Population schema version 5 samples extrinsics in the joint model and hashes the
-celestial coordinate and gwmock/LAL polarization conventions. These population changes also re-key
-waveforms and downstream backgrounds.
+Keys are content hashes of each record's JSON dump. The population key hashes
+its metadata, which carries the astrogwb version, together with its RNG key. The
+waveform key hashes the population key and the waveform metadata. The background
+key hashes the waveform key and the networks it covers (their members, and the
+geometry and `psd_reference` of the detectors they use, not the labels). Because
+the astrogwb version is part of the population metadata, a release that changes
+a convention re-keys the waveforms and backgrounds downstream of it. The schema
+versions and conventions recorded in the manifest are not hashed.
 
 Population schemas before 5 and background schemas before 4 are rejected with
 a regeneration message before hash validation. Regenerate affected realizations

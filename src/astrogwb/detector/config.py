@@ -17,6 +17,7 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from astrogwb.config import merge_layers
+from astrogwb.utils.io import ContentKeyed
 
 from .geometry import Detector, DetectorGeometry
 from .psd import resolve_psd_path
@@ -76,7 +77,7 @@ class DetectorConfig(BaseModel):
         return Detector(name, self.geometry, self.sensitivity)
 
 
-class DetectorRegistry(BaseModel):
+class DetectorRegistry(ContentKeyed):
     """A complete resolved registry, trusted and fixed for a dataset's lifetime.
 
     Network members are kept in the order they were declared in.
