@@ -159,8 +159,8 @@ def main() -> None:
     print("| network | model | " + " | ".join(columns) + " |")
     print("|---|---|" + "---|" * len(columns))
     for name, _ in DETECTOR_NETWORKS:
-        detectors, sensitivities = registry.build_network(name)
-        psd = jnp.asarray(effective_psd(grid, detectors, sensitivities))
+        detectors = registry.build_network(name)
+        psd = jnp.asarray(effective_psd(grid, detectors))
         mask = np.asarray(
             frequency_mask(grid, fmin=MINIMUM_FREQUENCY, fmax=MAXIMUM_FREQUENCY)
             & jnp.isfinite(psd)
@@ -177,7 +177,6 @@ def main() -> None:
                 num_draws,
                 frequencies,
                 detectors,
-                sensitivities,
             )
             network = Network(jnp.asarray(scale), jnp.asarray(mask), response=response)
             models[f"response, L={num_draws}"] = np.asarray(

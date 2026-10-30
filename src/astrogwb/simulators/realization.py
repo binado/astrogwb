@@ -161,6 +161,9 @@ class Realization:
         ValueError
             If the sources, read or redrawn, are not the recorded realization.
         """
+        from .population import validate_population_schema
+
+        validate_population_schema(self.manifest["population"])
         path = self.directory / SOURCES_FILE
         if path.is_file():
             return PopulationArtifact.from_tables(self.manifest, path)
@@ -203,6 +206,9 @@ class Realization:
         table = self.manifest.get("background")
         if table is None:
             raise ValueError(f"{self.directory} records no background settings")
+        from .background import validate_background_schema
+
+        validate_background_schema(table)
         path = self.directory / BACKGROUND_FILE
         if path.is_file():
             return BackgroundArtifact.open(
@@ -296,6 +302,14 @@ class RealizationSimulator:
             for stage in ("population", "waveforms", "background")
         }
         tables: dict[str, Any] = {}
+
+        from .background import validate_background_schema
+        from .population import validate_population_schema
+
+        if recorded["population"] is not None:
+            validate_population_schema(recorded["population"])
+        if recorded["background"] is not None:
+            validate_background_schema(recorded["background"])
 
         # Resolve every stage before running any, so a conflict touches nothing.
         rng_key = None

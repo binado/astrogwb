@@ -10,21 +10,20 @@ geometry stays in ``overlap``; GWB signal spectra stay in ``astrogwb.gwb``.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
 import numpy as np
-from gwmock_signal.stochastic.overlap import detector_names
 from numpy.typing import ArrayLike, NDArray
 
 from astrogwb.frequency import bin_widths
 from astrogwb.utils import years_to_seconds
 
 from ._types import DetectorSpec
+from .geometry import resolve_detector
 from .overlap import isotropic_overlap_reduction_function
-from .sensitivity import Sensitivity
 
 # Normalization of the overlap reduction function: the paper's
 # Gamma_ab = (2/5) gamma_ab, with gamma_ab the normalized ORF returned by
@@ -55,20 +54,18 @@ class PairTerms(NamedTuple):
 def pair_terms(
     frequencies: ArrayLike,
     detectors: Sequence[DetectorSpec],
-    sensitivities: Mapping[str, Sensitivity],
 ) -> list[PairTerms]:
     r"""The optimal weight and isotropic ORF of every pair :math:`a < b`.
 
     The weights of the optimal cross-correlation estimator, shared by
     :func:`effective_psd` (:math:`S_{\mathrm{eff}}^{-2} \propto \sum w_{ab}
     \gamma_{ab}`) and :func:`~astrogwb.detector.response.network_response`.
-    ``detectors`` are matched to ``sensitivities`` by their public name (gwmock
-    ``detector_names``): plain str codes match directly, while a
-    ``CustomDetector`` matches on its ``name``.
+    Sensitivity curves belong to each resolved detector. Geometry and PSD
+    evaluation happen on the host, outside JIT.
     """
     frequencies = np.asarray(frequencies, dtype=float)
     det_list = list(detectors)
-    psds = [sensitivities[name](frequencies) for name in detector_names(det_list)]
+    psds = [resolve_detector(det).sensitivity(frequencies) for det in det_list]
     pairs = []
     for i, det1 in enumerate(det_list):
         for j in range(i + 1, len(det_list)):
@@ -84,7 +81,6 @@ def pair_terms(
 def effective_psd(
     frequencies: ArrayLike,
     detectors: Sequence[DetectorSpec],
-    sensitivities: Mapping[str, Sensitivity],
 ) -> NDArray[np.float64]:
     r"""Network effective PSD from an inverse-variance cross-correlation sum.
 
@@ -102,7 +98,7 @@ def effective_psd(
         return np.full(frequencies.shape, np.inf, dtype=float)
 
     inverse_variance = np.zeros(frequencies.shape, dtype=float)
-    for pair in pair_terms(frequencies, detectors, sensitivities):
+    for pair in pair_terms(frequencies, detectors):
         inverse_variance += pair.weight * pair.overlap
 
     with np.errstate(invalid="ignore", divide="ignore"):
@@ -144,7 +140,6 @@ def gaussian_bin_scale(
 def pair_bin_scale(
     frequencies: ArrayLike,
     detectors: Sequence[DetectorSpec],
-    sensitivities: Mapping[str, Sensitivity],
     observation_time: float,
 ) -> jax.Array:
     r"""Per-bin Gaussian noise scale of every pair's cross-power, ``(P, F)``.
@@ -168,7 +163,7 @@ def pair_bin_scale(
     ----------
     frequencies:
         The frequency grid in Hz; bin widths as for :func:`gaussian_bin_scale`.
-    detectors, sensitivities:
+    detectors:
         As for :func:`effective_psd`.
     observation_time:
         Observation time in years.
@@ -176,8 +171,8 @@ def pair_bin_scale(
     frequencies = np.asarray(frequencies, dtype=float)
     det_list = list(detectors)
     psds = [
-        np.asarray(sensitivities[name](frequencies), dtype=float)
-        for name in detector_names(det_list)
+        np.asarray(resolve_detector(det).sensitivity(frequencies), dtype=float)
+        for det in det_list
     ]
     modes = np.sqrt(
         2.0 * years_to_seconds(observation_time) * np.asarray(bin_widths(frequencies))

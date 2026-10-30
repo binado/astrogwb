@@ -4,13 +4,11 @@ from typing import Literal
 
 import numpy as np
 import pytest
-from gwmock_signal.network import Network
 
 from astrogwb.detector import (
     Sensitivity,
     effective_psd,
     isotropic_overlap_reduction_function,
-    load_sensitivities_for_network,
     load_sensitivity_map,
 )
 
@@ -64,27 +62,19 @@ def test_load_sensitivity_map_multiple() -> None:
         assert np.all(values > 0.0)
 
 
-def test_load_sensitivities_for_network_str_network() -> None:
-    sensitivities = load_sensitivities_for_network("HLVK")
-
-    assert set(sensitivities) == {"H1", "L1", "V1", "K1"}
-
-
 def test_network_overlap_and_effective_psd(frequencies: np.ndarray) -> None:
-    network = Network.from_name("H1L1V1")
-    sensitivities = load_sensitivities_for_network(network)
 
     orf = isotropic_overlap_reduction_function(frequencies, "H1", "L1")
     assert orf.shape == frequencies.shape
     assert np.all(np.isfinite(orf))
 
-    eff = effective_psd(frequencies, network.detector_names, sensitivities)
+    eff = effective_psd(frequencies, ["H1", "L1", "V1"])
     assert eff.shape == frequencies.shape
     assert np.any(np.isfinite(eff))
 
 
 def test_effective_psd_inf_for_single_detector(frequencies: np.ndarray) -> None:
-    actual = effective_psd(frequencies, ["H1"], load_sensitivity_map(["H1"]))
+    actual = effective_psd(frequencies, ["H1"])
 
     assert actual.shape == frequencies.shape
     assert np.all(np.isinf(actual))

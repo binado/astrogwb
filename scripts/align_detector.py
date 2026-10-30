@@ -20,9 +20,8 @@ import math
 import sys
 from typing import get_args
 
-from gwmock_signal.detector import CustomDetector
-
 from astrogwb.detector import (
+    Detector,
     OrientationReference,
     align_detector,
     isotropic_overlap_reduction_function,
@@ -48,16 +47,16 @@ def _arm_line(key: str, azimuth_rad: float) -> str:
     )
 
 
-def geometry_block(detector: CustomDetector, name: str) -> str:
+def geometry_block(detector: Detector, name: str) -> str:
     """Format a detector as a ``geometry.toml`` table."""
     return "\n".join(
         [
             f"[detectors.{name}.geometry]",
-            f"latitude_rad = {detector.latitude_rad!r}",
-            f"longitude_rad = {detector.longitude_rad!r}",
-            f"elevation_m = {detector.elevation_m:g}",
-            _arm_line("xarm_azimuth_rad", detector.xarm_azimuth_rad),
-            _arm_line("yarm_azimuth_rad", detector.yarm_azimuth_rad),
+            f"latitude_rad = {detector.geometry.latitude_rad!r}",
+            f"longitude_rad = {detector.geometry.longitude_rad!r}",
+            f"elevation_m = {detector.geometry.elevation_m:g}",
+            _arm_line("xarm_azimuth_rad", detector.geometry.xarm_azimuth_rad),
+            _arm_line("yarm_azimuth_rad", detector.geometry.yarm_azimuth_rad),
         ]
     )
 

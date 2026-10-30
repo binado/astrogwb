@@ -252,8 +252,8 @@ def network_data(
         ``sigma`` and ``mask``, shape ``(F,)``.
     """
     grid = jnp.asarray(frequencies)
-    geometry, sensitivities = registry.build_network(name)
-    psd = jnp.asarray(effective_psd(grid, geometry, sensitivities))
+    geometry = registry.build_network(name)
+    psd = jnp.asarray(effective_psd(grid, geometry))
     mask = (
         frequency_mask(grid, fmin=minimum_frequency, fmax=maximum_frequency)
         & jnp.isfinite(psd)

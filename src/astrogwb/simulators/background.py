@@ -25,7 +25,9 @@ by the observation time :math:`T` as
 Over an isotropic sky and uniform polarization angle
 :math:`\langle K_{ab} \rangle = I \gamma_{ab} / 5`, with :math:`I` the
 polarization power and :math:`\gamma_{ab}` the normalized isotropic overlap
-reduction function, so for an isotropic, unpolarized population
+reduction function. This is approximate for native WGS-84 positions and
+tilted arms because the analytic ORF uses spherical, level-arm geometry.
+For an isotropic, unpolarized population the corresponding approximation is
 :math:`E[Y_{ab}] = \gamma_{ab} S_h`. This is convention version
 :data:`NORMALIZATION_VERSION`, recorded in every ``[background]`` table. The sum
 is never divided by the realized count.
@@ -47,7 +49,7 @@ modelled.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from itertools import combinations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, Self
@@ -85,7 +87,17 @@ __all__ = [
 ]
 
 WAVEFORM_SCHEMA_VERSION = 1
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
+
+PROJECTION_CONVENTIONS = {
+    "geometry": "WGS-84 geodetic; tilted arms; metres",
+    "polarization_basis": "gwmock/LAL",
+    "coordinates": "right_ascension, declination; radians; compatible with gmst",
+    "gmst_rad": 0.0,
+    "projection": "(F_plus * plus + F_cross * cross) * exp(-2 pi i f delay)",
+    "delay": "-dot(source_direction, location) / c",
+    "isotropic_orf": "spherical Earth, level arms; approximate normalization",
+}
 
 #: The conventions a waveform manifest records, so a reader can check them.
 WAVEFORM_CONVENTIONS = {
@@ -187,10 +199,11 @@ def scientific_payload(
     """
     used = used_detectors(registry, names)
     return {
+        "projection": PROJECTION_CONVENTIONS,
         "networks": {name: sorted(registry.networks[name]) for name in sorted(names)},
         "detectors": {
             name: {
-                "geometry": registry.detectors[name].geometry.model_dump(mode="json"),
+                "geometry": asdict(registry.detectors[name].geometry),
                 "psd_reference": registry.detectors[name].psd_reference,
             }
             for name in used
@@ -256,6 +269,8 @@ def background_table(
             }
         },
         "key": background_key(waveform_key, registry, names),
+        "schema_version": SCHEMA_VERSION,
+        "conventions": PROJECTION_CONVENTIONS,
         "normalization": _NORMALIZATION,
         "units": {
             "frequency": "Hz",
@@ -263,6 +278,14 @@ def background_table(
             "spectral_density": "1 / Hz",
         },
     }
+
+
+def validate_background_schema(table: Mapping[str, Any]) -> None:
+    """Reject old projections before checking identities or opening data."""
+    if table.get("schema_version") != SCHEMA_VERSION:
+        raise ValueError(
+            "background schema is old or unsupported; regenerate realizations (schema 4 required)"
+        )
 
 
 def background_pairs(
@@ -358,6 +381,7 @@ class BackgroundArtifact:
             If the table uses another normalization convention or predates
             the recording of pairs.
         """
+        validate_background_schema(table)
         version = table["normalization"].get("version")
         if version != NORMALIZATION_VERSION:
             raise ValueError(
@@ -432,10 +456,9 @@ class BackgroundSimulator:
             name: [rows[pair] for pair in registry.pairs(name)]
             for name in self._network_names
         }
-        detectors, _ = registry.build_detectors(names)
-        from astrogwb.detector.overlap import _detector_frame
-
-        self._frames = tuple(_detector_frame(detector) for detector in detectors)
+        detectors = registry.build_detectors(names)
+        self._tensors = np.stack([det.geometry.response_tensor for det in detectors])
+        self._locations = np.stack([det.geometry.location for det in detectors])
         self._pairs = list(combinations(range(len(detectors)), 2))
         self._chunk_size = chunk_size
         self._pair_sums = jax.jit(self._chunk_pair_sums)
@@ -465,42 +488,35 @@ class BackgroundSimulator:
         frequencies: jax.Array,
         sources: Mapping[str, jax.Array],
         valid: jax.Array,
+        tensors: jax.Array,
+        locations: jax.Array,
     ) -> jax.Array:
         """The ``(P_union, F)`` cross-power summed over one padded chunk's sources."""
+        import jax
         import jax.numpy as jnp
 
-        from astrogwb.detector.overlap import C_LIGHT, _polarization_tensors
+        from astrogwb.detector.projection import project_polarizations_fd
 
         plus, cross = self._generator.generate_polarizations_batch(sources)
         real = (jnp.arange(plus.shape[0]) < valid)[:, None]
         plus = jnp.where(real, plus, 0.0)
         cross = jnp.where(real, cross, 0.0)
-        direction, plus_tensor, cross_tensor = _polarization_tensors(
-            sources["polar_cosine"], sources["azimuth"], sources["polarization"]
-        )
-        strains = [
-            jnp.einsum("...ij,ij->...", plus_tensor, tensor)[:, None] * plus
-            + jnp.einsum("...ij,ij->...", cross_tensor, tensor)[:, None] * cross
-            for tensor, _ in self._frames
-        ]
+        strains = jax.vmap(
+            lambda tensor, location: project_polarizations_fd(
+                tensor,
+                location,
+                frequencies,
+                plus,
+                cross,
+                0.0,
+                right_ascension=sources["right_ascension"],
+                declination=sources["declination"],
+                polarization_angle=sources["polarization_angle"],
+            )
+        )(tensors, locations)
         return jnp.stack(
             [
-                jnp.real(
-                    jnp.exp(
-                        2j
-                        * jnp.pi
-                        * (
-                            direction
-                            @ jnp.asarray(
-                                self._frames[second][1] - self._frames[first][1]
-                            )
-                        )[:, None]
-                        / C_LIGHT
-                        * frequencies
-                    )
-                    * jnp.conj(strains[first])
-                    * strains[second]
-                ).sum(axis=0)
+                jnp.real(jnp.conj(strains[first]) * strains[second]).sum(axis=0)
                 for first, second in self._pairs
             ]
         )
@@ -518,7 +534,7 @@ class BackgroundSimulator:
         """
         import jax.numpy as jnp
 
-        missing = {"polar_cosine", "azimuth", "polarization"} - set(
+        missing = {"declination", "right_ascension", "polarization_angle"} - set(
             population.source_parameters
         )
         if missing:
@@ -532,7 +548,13 @@ class BackgroundSimulator:
             rows, valid = pad_rows(
                 population.source_parameters, start, self._chunk_size
             )
-            total = total + self._pair_sums(grid, rows, jnp.asarray(valid))
+            total = total + self._pair_sums(
+                grid,
+                rows,
+                jnp.asarray(valid),
+                jnp.asarray(self._tensors),
+                jnp.asarray(self._locations),
+            )
         union = (
             PAIR_RESPONSE_DENOMINATOR
             * np.asarray(total, dtype=np.float64)
@@ -601,8 +623,8 @@ def combine_pair_spectra(
     numpy.ndarray
         The network spectrum, ``(..., F)``.
     """
-    detectors, sensitivities = registry.build_network(network_name)
-    terms = pair_terms(np.asarray(frequencies), detectors, sensitivities)
+    detectors = registry.build_network(network_name)
+    terms = pair_terms(np.asarray(frequencies), detectors)
     weights = np.stack([term.weight for term in terms])
     denominator = np.sum([term.weight * term.overlap for term in terms], axis=0)
     numerator = np.sum(weights * np.asarray(pair_spectral_density), axis=-2)

@@ -4,8 +4,8 @@ A realization owns every stochastic property of its sources: the
 hyperparameters (fixed or drawn once), the Poisson count
 :math:`N \\sim \\mathrm{Poisson}(\\mathcal{R}\\, T)`, the intrinsic parameters
 and inclination the population model draws, and the extrinsic angles drawn
-here -- an isotropic direction (``polar_cosine``, ``azimuth``), the
-polarization angle ``polarization`` and the coalescence phase ``coa_phase``.
+here -- an isotropic direction (``declination``, ``right_ascension``), the
+polarization angle ``polarization_angle`` and the coalescence phase ``coa_phase``.
 The downstream stages draw nothing.
 
 One key is one realization. It splits into a hyperparameter key, a count key,
@@ -50,12 +50,32 @@ __all__ = [
 ]
 
 #: The schema of a population realization. It is part of
-#: :func:`population_key`: version 2 moved the extrinsic draws into this
-#: stage, so no realization of version 1 is served under the same key.
-SCHEMA_VERSION = 2
+#: :func:`population_key`: version 3 uses celestial coordinates and the
+#: gwmock/LAL polarization basis, requiring regeneration of older artifacts.
+SCHEMA_VERSION = 3
 
 #: The source columns this stage draws on top of the population model's.
-EXTRINSIC_COLUMNS = ("polar_cosine", "azimuth", "polarization", "coa_phase")
+EXTRINSIC_COLUMNS = (
+    "declination",
+    "right_ascension",
+    "polarization_angle",
+    "coa_phase",
+)
+
+COORDINATE_CONVENTIONS = {
+    "sky": "right_ascension uniform [0, 2 pi); declination arcsin(uniform(-1, 1))",
+    "polarization_angle": "uniform [0, pi); gwmock/LAL projection basis",
+    "units": "radians; celestial frame compatible with supplied gmst",
+}
+
+
+def validate_population_schema(table: Mapping[str, Any]) -> None:
+    """Reject older coordinate schemas before validating content hashes."""
+    if table.get("schema_version") != SCHEMA_VERSION:
+        raise ValueError(
+            "population schema is old or unsupported; regenerate realizations (schema 3 required)"
+        )
+
 
 #: One hyperparameter's declaration: the value it is fixed at, or the prior it
 #: is sampled from once per realization. Which one is decided by the type alone,
@@ -166,6 +186,7 @@ class PopulationMetadata(BaseModel):
             for name, value in payload["hyperparameters"].items()
         }
         payload["schema_version"] = SCHEMA_VERSION
+        payload["coordinates"] = COORDINATE_CONVENTIONS
         return payload
 
 
@@ -198,6 +219,14 @@ class PopulationArtifact:
     source_parameters: dict[str, NDArray[Any]]
     chunk_size: int | None = None
 
+    def __post_init__(self) -> None:
+        """Require the native coordinate columns for in-memory inputs too."""
+        missing = set(EXTRINSIC_COLUMNS) - self.source_parameters.keys()
+        if missing:
+            raise ValueError(
+                f"population missing coordinate columns {sorted(missing)}; regenerate realizations"
+            )
+
     @property
     def count(self) -> int:
         """The realized number of sources."""
@@ -225,6 +254,8 @@ class PopulationArtifact:
         """
         return {
             "population": {
+                "schema_version": SCHEMA_VERSION,
+                "conventions": COORDINATE_CONVENTIONS,
                 "metadata": self.metadata.model_dump(mode="json"),
                 "key": self.key(),
             },
@@ -257,6 +288,7 @@ class PopulationArtifact:
             rng key, or the sources do not match the recorded count.
         """
         population, realization = tables["population"], tables["realization"]
+        validate_population_schema(population)
         h5py = h5py_module()
         with h5py.File(sources_path, "r") as file:
             source_parameters = read_tree(file["source_parameters"])

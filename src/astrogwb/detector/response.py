@@ -13,8 +13,9 @@ power times the realised network response
 
 with :math:`\gamma_{ab}(\hat n, \psi, \iota; f)` the per-source
 :func:`~astrogwb.detector.overlap.overlap_reduction_function`. Its mean over an
-isotropic sky, uniform polarization and uniform :math:`\cos\iota` is one at
-every frequency, so the expected spectrum is unchanged, but its scatter adds to
+isotropic sky, uniform polarization and uniform :math:`\cos\iota` is approximately one at
+every frequency under the analytic spherical-Earth, level-arm approximation.
+Native WGS-84 geometry, elevation and tilts change that mean slightly. Its scatter adds to
 the shot noise. It carries the inclination too: it replaces the quadrupolar
 factor :math:`g(\iota)` normalized to its mean, which a catalog pinned at the
 effective inclination stands in for.
@@ -26,14 +27,14 @@ moment of the power
 
 :func:`pair_response` keeps the pairs apart: the per-source ORF
 :math:`\gamma_{ab}(\hat n, \psi, \iota; f)` of every pair, unnormalized, with
-isotropic mean :math:`\gamma_{ab}(f)`. It is the response of the stacked
+approximate isotropic mean :math:`\gamma_{ab}(f)`. It is the response of the stacked
 per-pair data, whose mean is :math:`\gamma_{ab} S_h`, and does not divide by
 :math:`\gamma_{ab}`, which crosses zero.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 
 import jax
 import jax.numpy as jnp
@@ -43,7 +44,6 @@ from jax.typing import ArrayLike
 from ._types import DetectorSpec
 from .effective_psd import pair_terms
 from .overlap import overlap_reduction_function
-from .sensitivity import Sensitivity
 
 __all__ = [
     "network_response",
@@ -56,15 +56,16 @@ __all__ = [
 def network_response(
     frequencies: ArrayLike,
     detectors: Sequence[DetectorSpec],
-    sensitivities: Mapping[str, Sensitivity],
-    polar_cosine: ArrayLike,
-    azimuth: ArrayLike,
-    polarization: ArrayLike,
+    right_ascension: ArrayLike,
+    declination: ArrayLike,
+    polarization_angle: ArrayLike,
     cos_inclination: ArrayLike,
+    *,
+    gmst: ArrayLike = 0.0,
 ) -> jax.Array:
     r"""The network response :math:`r(\hat n, \psi, \iota; f)` to one source.
 
-    Normalized to unit isotropic mean at every frequency (see the module
+    Normalized to approximately unit isotropic mean at every frequency (see the module
     docstring). Bins where no pair has a finite weight return zero; they carry
     no signal-to-noise either.
 
@@ -73,12 +74,9 @@ def network_response(
     frequencies:
         Frequencies in Hz, ``(F,)``.
     detectors:
-        Two or more detectors, matched to ``sensitivities`` by public name as in
-        :func:`~astrogwb.detector.effective_psd.effective_psd`.
-    sensitivities:
-        Name -> :class:`~astrogwb.detector.sensitivity.Sensitivity`.
-    polar_cosine, azimuth, polarization, cos_inclination:
-        The source angles of
+        Two or more packaged names or owned detectors with sensitivities.
+    right_ascension, declination, polarization_angle, cos_inclination:
+        The celestial source angles in radians of
         :func:`~astrogwb.detector.overlap.overlap_reduction_function`,
         broadcasting to ``(...)``.
 
@@ -88,13 +86,19 @@ def network_response(
         Shape ``(..., F)``.
     """
     frequencies = np.asarray(frequencies, dtype=float)
-    terms = pair_terms(frequencies, detectors, sensitivities)
+    terms = pair_terms(frequencies, detectors)
     weights = np.stack([term.weight for term in terms])
     denominator = np.sum([term.weight * term.overlap for term in terms], axis=0)
     numerator = jnp.sum(
         weights
         * pair_response(
-            frequencies, detectors, polar_cosine, azimuth, polarization, cos_inclination
+            frequencies,
+            detectors,
+            right_ascension,
+            declination,
+            polarization_angle,
+            cos_inclination,
+            gmst=gmst,
         ),
         axis=-2,
     )
@@ -105,17 +109,19 @@ def network_response(
 def pair_response(
     frequencies: ArrayLike,
     detectors: Sequence[DetectorSpec],
-    polar_cosine: ArrayLike,
-    azimuth: ArrayLike,
-    polarization: ArrayLike,
+    right_ascension: ArrayLike,
+    declination: ArrayLike,
+    polarization_angle: ArrayLike,
     cos_inclination: ArrayLike,
+    *,
+    gmst: ArrayLike = 0.0,
 ) -> jax.Array:
     r"""The per-source ORF of every pair of ``detectors``, ``(..., P, F)``.
 
     :func:`~astrogwb.detector.overlap.overlap_reduction_function` of each pair
     :math:`a < b`, in the order of
     :func:`~astrogwb.detector.effective_psd.pair_terms`, stacked on the
-    second-to-last axis. Its isotropic mean is the isotropic ORF of each pair;
+    second-to-last axis. Its isotropic mean approximates the analytic ORF of each pair;
     it is not normalized by it (see the module docstring), and does not depend
     on the noise curves.
 
@@ -125,8 +131,8 @@ def pair_response(
         Frequencies in Hz, ``(F,)``.
     detectors:
         Two or more detectors.
-    polar_cosine, azimuth, polarization, cos_inclination:
-        The source angles of
+    right_ascension, declination, polarization_angle, cos_inclination:
+        The celestial source angles in radians of
         :func:`~astrogwb.detector.overlap.overlap_reduction_function`,
         broadcasting to ``(...)``.
 
@@ -143,10 +149,11 @@ def pair_response(
                 frequencies,
                 detectors[first],
                 detectors[second],
-                polar_cosine,
-                azimuth,
-                polarization,
+                right_ascension,
+                declination,
+                polarization_angle,
                 cos_inclination,
+                gmst=gmst,
             )
             for first in range(len(detectors))
             for second in range(first + 1, len(detectors))
@@ -160,8 +167,8 @@ def _isotropic_angles(key: jax.Array, num_draws: int) -> tuple[jax.Array, ...]:
     keys = jax.random.split(key, 4)
     shape = (num_draws,)
     return (
-        jax.random.uniform(keys[0], shape, minval=-1.0, maxval=1.0),
         jax.random.uniform(keys[1], shape, maxval=2.0 * jnp.pi),
+        jnp.arcsin(jax.random.uniform(keys[0], shape, minval=-1.0, maxval=1.0)),
         jax.random.uniform(keys[2], shape, maxval=jnp.pi),
         jax.random.uniform(keys[3], shape, minval=-1.0, maxval=1.0),
     )
@@ -172,7 +179,6 @@ def sample_network_response(
     num_draws: int,
     frequencies: ArrayLike,
     detectors: Sequence[DetectorSpec],
-    sensitivities: Mapping[str, Sensitivity],
 ) -> jax.Array:
     r""":func:`network_response` at isotropic draws, ``(num_draws, F)``.
 
@@ -181,9 +187,7 @@ def sample_network_response(
     likelihood's frequency grid to use the draws as a
     :class:`~astrogwb.inference.likelihood.Network` ``response``.
     """
-    return network_response(
-        frequencies, detectors, sensitivities, *_isotropic_angles(key, num_draws)
-    )
+    return network_response(frequencies, detectors, *_isotropic_angles(key, num_draws))
 
 
 def sample_pair_response(

@@ -89,10 +89,10 @@ def build_likelihood(
 
 
 def term_response(
-    frequencies: np.ndarray, detectors: list, angles: tuple, mask: np.ndarray
+    frequencies: np.ndarray, detectors: tuple, angles: tuple, mask: np.ndarray
 ) -> jax.Array:
     """Every pair's per-source response from the Stokes components ``mask``, ``(L, P, F)``."""
-    polar_cosine, azimuth, polarization, cos_inclination = angles
+    right_ascension, declination, polarization_angle, cos_inclination = angles
     stokes = (quadrupolar_stokes_factors(cos_inclination) * mask[:, None])[..., None]
     return jnp.stack(
         [
@@ -100,9 +100,9 @@ def term_response(
                 frequencies,
                 detectors[first],
                 detectors[second],
-                polar_cosine,
-                azimuth,
-                polarization,
+                right_ascension,
+                declination,
+                polarization_angle,
                 stokes,
             )
             / _ISOTROPIC_PAIR_RESPONSE
@@ -230,7 +230,7 @@ def main() -> None:
 
     rows = []
     for name, label in DETECTOR_NETWORKS:
-        detectors, _ = registry.build_network(name)
+        detectors = registry.build_network(name)
         data = network_pair_data(
             noise,
             name,

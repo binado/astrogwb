@@ -197,11 +197,9 @@ def test_custom_detector_geometry_is_used_for_projection(
 ) -> None:
     custom = NETWORKS.detectors["E1"].model_copy(
         update={
-            "geometry": NETWORKS.detectors["E1"].geometry.model_copy(
-                update={
-                    "longitude_rad": NETWORKS.detectors["E1"].geometry.longitude_rad
-                    + 0.2
-                }
+            "geometry": dataclasses.replace(
+                NETWORKS.detectors["E1"].geometry,
+                longitude_rad=NETWORKS.detectors["E1"].geometry.longitude_rad + 0.2,
             )
         }
     )
@@ -280,3 +278,77 @@ def test_noise_curves_are_part_of_the_key() -> None:
     )
 
     assert background_key("w", other) != background_key("w", NETWORKS)
+
+
+def test_native_coordinate_columns_and_ranges(population: PopulationArtifact) -> None:
+    columns = population.source_parameters
+    assert set(EXTRINSIC_COLUMNS) == {
+        "right_ascension",
+        "declination",
+        "polarization_angle",
+        "coa_phase",
+    }
+    assert np.all(
+        (columns["right_ascension"] >= 0) & (columns["right_ascension"] < 2 * np.pi)
+    )
+    assert np.all(abs(columns["declination"]) <= np.pi / 2)
+    assert np.all(
+        (columns["polarization_angle"] >= 0) & (columns["polarization_angle"] < np.pi)
+    )
+    for missing in ("right_ascension", "declination", "polarization_angle"):
+        with pytest.raises(ValueError, match="regenerate"):
+            dataclasses.replace(
+                population,
+                source_parameters={k: v for k, v in columns.items() if k != missing},
+            )
+
+
+@pytest.mark.parametrize("version", [None, 1, 2])
+def test_old_population_schema_rejected_before_hash_or_io(
+    population: PopulationArtifact, tmp_path: Path, version: int | None
+) -> None:
+    tables = population.tables()
+    if version is None:
+        tables["population"].pop("schema_version")
+    else:
+        tables["population"]["schema_version"] = version
+    tables["population"]["key"] = "invalid hash"
+    with pytest.raises(ValueError, match="regenerate.*schema 3"):
+        PopulationArtifact.from_tables(tables, tmp_path / "absent.h5")
+
+
+@pytest.mark.parametrize("version", [None, 1, 2, 3])
+def test_old_background_schema_rejected_before_io(
+    tmp_path: Path, version: int | None
+) -> None:
+    from astrogwb.simulators.background import background_table
+
+    table = background_table("waveforms", NETWORKS)
+    if version is None:
+        table.pop("schema_version")
+    else:
+        table["schema_version"] = version
+    table["key"] = "invalid hash"
+    with pytest.raises(ValueError, match="regenerate.*schema 4"):
+        BackgroundArtifact.open(
+            tmp_path / "absent.h5",
+            table=table,
+            realization={},
+            waveform_key="waveforms",
+        )
+
+
+def test_projection_and_coordinate_conventions_are_hashed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from astrogwb.simulators import background, population
+
+    metadata = _population()
+    old_population_key = metadata.key()
+    monkeypatch.setitem(
+        population.COORDINATE_CONVENTIONS, "polarization_angle", "different basis"
+    )
+    assert metadata.key() != old_population_key
+    old_background_key = background_key("waveforms", NETWORKS)
+    monkeypatch.setitem(background.PROJECTION_CONVENTIONS, "gmst_rad", 1.0)
+    assert background_key("waveforms", NETWORKS) != old_background_key

@@ -528,8 +528,8 @@ def network_noise(settings: AnalysisSettings, frequencies: jax.Array) -> jax.Arr
     """Return the network's effective noise PSD on the full frequency grid."""
     if settings.network not in settings.registry.networks:
         raise ValueError(f"unknown network {settings.network!r}")
-    geometry, sensitivities = settings.registry.build_network(settings.network)
-    return jnp.asarray(effective_psd(frequencies, geometry, sensitivities))
+    geometry = settings.registry.build_network(settings.network)
+    return jnp.asarray(effective_psd(frequencies, geometry))
 
 
 @app.function(hide_code=True)

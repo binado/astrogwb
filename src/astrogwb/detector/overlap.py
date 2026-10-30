@@ -5,7 +5,7 @@ contribution: gwmock ships only the long-wavelength, co-located limit
 (``gamma = 2 D_i:D_j``). This module keeps the validated analytic isotropic
 ORF (angle-based ``g1/g2/g3`` expansion) for resolved detector geometry,
 :func:`isotropic_overlap_reduction_function`, and the response of a pair to
-one source, :func:`overlap_reduction_function`, whose isotropic average it is.
+one source, :func:`overlap_reduction_function`, whose isotropic average it approximates.
 Both single-source responses go through :func:`stokes_cross_power`, which
 takes any source's polarization Stokes parameters.
 """
@@ -20,7 +20,6 @@ from typing import Literal
 import jax
 import jax.numpy as jnp
 import numpy as np
-from gwmock_signal.detector import CustomDetector
 from jax.typing import ArrayLike as JaxArrayLike
 from numpy.typing import ArrayLike, NDArray
 
@@ -28,9 +27,9 @@ from astrogwb.constants import EARTH_MEAN_RADIUS_IN_METERS, SPEED_OF_LIGHT
 from astrogwb.waveform.polarization_power import quadrupolar_stokes_factors
 
 from ._types import DetectorSpec
-from .geometry import resolve_detector
+from .geometry import Detector, DetectorGeometry, resolve_detector
 
-# This module works in kilometres throughout: detector chord distances are
+# The analytic ORF works in kilometres: detector chord distances are
 # O(1e4) km and the bundled overlap-reduction fixtures were generated in
 # those units. Both conversions are exact in float64, so these are
 # bit-identical to the literals they replace.
@@ -127,7 +126,7 @@ def _azimuth_bisector(az1: float, az2: float) -> float:
     return math.atan2(math.sin(az1) + math.sin(az2), math.cos(az1) + math.cos(az2))
 
 
-def _bisector_from_east(det: CustomDetector) -> float:
+def _bisector_from_east(det: DetectorGeometry) -> float:
     """Arm bisector of a detector, counter-clockwise from local East (radians).
 
     The analytic ORF expansion uses counter-clockwise-from-East bisectors,
@@ -140,7 +139,7 @@ def _bisector_from_east(det: CustomDetector) -> float:
 
 
 def _great_circle_offsets(
-    det1: CustomDetector, det2: CustomDetector
+    det1: DetectorGeometry, det2: DetectorGeometry
 ) -> tuple[float, float]:
     """Great-circle bearings at both sites, shifted by a quarter turn (radians).
 
@@ -271,12 +270,13 @@ def isotropic_overlap_reduction_function(
 ) -> NDArray[np.float64]:
     """Frequency-dependent ORF between two detectors for an isotropic background.
 
-    The isotropic average of :func:`overlap_reduction_function`. Each detector is a ``str`` site code (resolved via ``geometry.toml``)
-    or a gwmock ``CustomDetector``.
+    A spherical-Earth, level-arm approximation to the native projection
+    average. Elevation, WGS-84 flattening and arm tilts are omitted. Each
+    detector is a packaged name or an owned :class:`Detector`.
     """
     frequencies = np.asarray(frequencies, dtype=float)
-    det1 = resolve_detector(detector_1)
-    det2 = resolve_detector(detector_2)
+    det1 = resolve_detector(detector_1).geometry
+    det2 = resolve_detector(detector_2).geometry
 
     d = _chord_distance(
         det1.latitude_rad,
@@ -353,7 +353,7 @@ def relative_orientation(
     Parameters
     ----------
     detector_1, detector_2
-        Site codes resolved through ``geometry.toml``, or ``CustomDetector``
+        Site codes resolved through ``geometry.toml``, or owned ``Detector``
         instances.
     reference
         ``"great_circle"`` or ``"north"``.
@@ -363,8 +363,8 @@ def relative_orientation(
     float
         Relative orientation in radians, in :math:`(-\pi/2, \pi/2]`.
     """
-    det1 = resolve_detector(detector_1)
-    det2 = resolve_detector(detector_2)
+    det1 = resolve_detector(detector_1).geometry
+    det2 = resolve_detector(detector_2).geometry
     angle = _bisector_from_east(det2) - _bisector_from_east(det1)
     if reference == "great_circle":
         ang_1, ang_2 = _great_circle_offsets(det1, det2)
@@ -379,7 +379,7 @@ def align_detector(
     detector: DetectorSpec,
     angle: float,
     reference: OrientationReference = "great_circle",
-) -> CustomDetector:
+) -> Detector:
     """Rotate a detector about its vertex to a target relative orientation.
 
     Only the arm azimuths change: the site, elevation, tilts and opening
@@ -400,17 +400,21 @@ def align_detector(
 
     Returns
     -------
-    CustomDetector
+    Detector
         Copy of ``detector`` with rotated arm azimuths.
     """
     det = resolve_detector(detector)
     current = relative_orientation(reference_detector, det, reference)
     # A counter-clockwise rotation lowers gwmock's clockwise-from-North azimuths.
     rotation = _wrap_half_turn(angle - current)
+    geometry = det.geometry
     return dataclasses.replace(
         det,
-        xarm_azimuth_rad=(det.xarm_azimuth_rad - rotation) % (2.0 * math.pi),
-        yarm_azimuth_rad=(det.yarm_azimuth_rad - rotation) % (2.0 * math.pi),
+        geometry=dataclasses.replace(
+            geometry,
+            xarm_azimuth_rad=(geometry.xarm_azimuth_rad - rotation) % (2.0 * math.pi),
+            yarm_azimuth_rad=(geometry.yarm_azimuth_rad - rotation) % (2.0 * math.pi),
+        ),
     )
 
 
@@ -420,134 +424,62 @@ def align_detector(
 _ISOTROPIC_PAIR_RESPONSE = 4.0 / 25.0
 
 
-def _detector_frame(detector: DetectorSpec) -> tuple[np.ndarray, np.ndarray]:
-    r"""Detector tensor and Earth-fixed position in km of one detector.
-
-    :math:`D = (\hat u \hat u^T - \hat v \hat v^T)/2` with the arm unit vectors
-    in the local tangent plane (azimuths clockwise from North, tilts ignored),
-    at the site on the sphere of radius ``R_EARTH``, where
-    :func:`isotropic_overlap_reduction_function` places it.
-    """
-    det = resolve_detector(detector)
-    lat, lon = det.latitude_rad, det.longitude_rad
-    east = np.array([-math.sin(lon), math.cos(lon), 0.0])
-    north = np.array(
-        [-math.sin(lat) * math.cos(lon), -math.sin(lat) * math.sin(lon), math.cos(lat)]
-    )
-
-    def arm(azimuth: float) -> np.ndarray:
-        return math.cos(azimuth) * north + math.sin(azimuth) * east
-
-    x_arm, y_arm = arm(det.xarm_azimuth_rad), arm(det.yarm_azimuth_rad)
-    tensor = 0.5 * (np.outer(x_arm, x_arm) - np.outer(y_arm, y_arm))
-    position = R_EARTH * np.array(
-        [math.cos(lat) * math.cos(lon), math.cos(lat) * math.sin(lon), math.sin(lat)]
-    )
-    return tensor, position
-
-
-def _polarization_tensors(
-    polar_cosine: jax.Array, azimuth: jax.Array, polarization: jax.Array
-) -> tuple[jax.Array, jax.Array, jax.Array]:
-    """Source direction ``(..., 3)`` and plus and cross tensors ``(..., 3, 3)``."""
-    polar_sine = jnp.sqrt(jnp.clip(1.0 - polar_cosine**2, 0.0))
-    cos_azimuth, sin_azimuth = jnp.cos(azimuth), jnp.sin(azimuth)
-    direction = jnp.stack(
-        [polar_sine * cos_azimuth, polar_sine * sin_azimuth, polar_cosine], axis=-1
-    )
-    e_theta = jnp.stack(
-        [polar_cosine * cos_azimuth, polar_cosine * sin_azimuth, -polar_sine], axis=-1
-    )
-    e_phi = jnp.stack([-sin_azimuth, cos_azimuth, jnp.zeros_like(azimuth)], axis=-1)
-    cos_psi = jnp.cos(polarization)[..., None]
-    sin_psi = jnp.sin(polarization)[..., None]
-    m = cos_psi * e_theta + sin_psi * e_phi
-    n = -sin_psi * e_theta + cos_psi * e_phi
-    plus = m[..., :, None] * m[..., None, :] - n[..., :, None] * n[..., None, :]
-    cross = m[..., :, None] * n[..., None, :] + n[..., :, None] * m[..., None, :]
-    return direction, plus, cross
-
-
 def stokes_cross_power(
     frequencies: JaxArrayLike,
     detector_1: DetectorSpec,
     detector_2: DetectorSpec,
-    polar_cosine: JaxArrayLike,
-    azimuth: JaxArrayLike,
-    polarization: JaxArrayLike,
+    right_ascension: JaxArrayLike,
+    declination: JaxArrayLike,
+    polarization_angle: JaxArrayLike,
     stokes: JaxArrayLike,
+    *,
+    gmst: JaxArrayLike = 0.0,
 ) -> jax.Array:
-    r"""The cross-power one source leaves in a detector pair, from its Stokes parameters.
+    r"""Cross-power of radiation-frame Stokes parameters through native projection.
 
-    .. math::
-
-        K_{ab} = \mathrm{Re}\left[e^{i\phi_{ab}} H_a^* H_b\right]
-            = \frac12\left[\cos\phi_{ab}\,(I A_I + Q A_Q + U A_U)
-              - \sin\phi_{ab}\, V A_V\right],
-
-    with :math:`H_a = h_+ F^+_a + h_\times F^\times_a`, the delay phase
-    :math:`\phi_{ab} = 2\pi f\, \hat n \cdot (\vec x_b - \vec x_a)/c` and
-
-    .. math::
-
-        A_I = F^+_a F^+_b + F^\times_a F^\times_b, \quad
-        A_Q = F^+_a F^+_b - F^\times_a F^\times_b, \quad
-        A_U = F^+_a F^\times_b + F^\times_a F^+_b, \quad
-        A_V = F^+_a F^\times_b - F^\times_a F^+_b.
-
-    :math:`(I, Q, U, V)` are the source's Stokes parameters in its radiation
-    frame (:mod:`astrogwb.waveform.polarization_power`), and the polarization
-    angle :math:`\psi` rotates the antenna patterns rather than them. :math:`V`
-    enters only through the delay, so a co-located pair is blind to circular
-    polarization. Averaged over an isotropic sky and uniform :math:`\psi`,
-    :math:`\langle K_{ab} \rangle = I\, \gamma_{ab} / 5` with :math:`\gamma_{ab}`
-    the :func:`isotropic_overlap_reduction_function`.
-
-    Detectors are resolved with
-    :func:`~astrogwb.detector.geometry.resolve_detector`; arm tilts and
-    elevation are ignored, as in the isotropic ORF.
+    Uses the gwmock/LAL polarization basis and delay sign. This equals
+    :math:`\mathrm{Re}(\tilde h_a^* \tilde h_b)` for directly projected
+    polarizations whose Stokes parameters are ``stokes``.
 
     Parameters
     ----------
-    frequencies:
+    frequencies
         Frequencies in Hz, ``(F,)``.
-    detector_1, detector_2:
-        ``str`` site codes or gwmock ``CustomDetector`` instances.
-    polar_cosine, azimuth:
-        Cosine of the polar angle and the azimuth of the direction to the
-        source, Earth-fixed (z towards the North pole, x towards Greenwich).
-    polarization:
-        Polarization angle :math:`\psi` in radians. The three angles broadcast
-        to a shape ``(...)``.
-    stokes:
-        :math:`(I, Q, U, V)`, broadcasting to ``(4, ..., F)``.
+    detector_1, detector_2
+        Packaged names or owned detectors.
+    right_ascension, declination, polarization_angle, gmst
+        Celestial coordinates, polarization angle and compatible sidereal angle
+        in radians, broadcasting to a common source shape. No epoch conversion.
+    stokes
+        Radiation-frame ``(I, Q, U, V)``, broadcasting to ``(4, ..., F)``.
 
     Returns
     -------
     jax.Array
-        Shape ``(..., F)``.
+        Cross-power with shape ``(..., F)``.
+
+    Notes
+    -----
+    The isotropic mean is approximately ``I * gamma / 5`` when ``gamma`` is
+    the analytic spherical-Earth, level-arm ORF. Native geometry includes
+    WGS-84 flattening, elevations and arm tilts, so equality is approximate.
     """
-    tensor_1, position_1 = _detector_frame(detector_1)
-    tensor_2, position_2 = _detector_frame(detector_2)
-    polar_cosine, azimuth, polarization = jnp.broadcast_arrays(
-        polar_cosine, azimuth, polarization
+    det1, det2 = resolve_detector(detector_1), resolve_detector(detector_2)
+    coordinates = {"right_ascension": right_ascension, "declination": declination}
+    plus_1, cross_1 = det1.antenna_pattern(
+        gmst, **coordinates, polarization_angle=polarization_angle
     )
-    direction, plus, cross = _polarization_tensors(polar_cosine, azimuth, polarization)
-
-    def patterns(tensor: np.ndarray) -> tuple[jax.Array, jax.Array]:
-        return (
-            jnp.einsum("...ij,ij->...", plus, tensor),
-            jnp.einsum("...ij,ij->...", cross, tensor),
-        )
-
-    plus_1, cross_1 = patterns(tensor_1)
-    plus_2, cross_2 = patterns(tensor_2)
+    plus_2, cross_2 = det2.antenna_pattern(
+        gmst, **coordinates, polarization_angle=polarization_angle
+    )
     response_i = plus_1 * plus_2 + cross_1 * cross_2
     response_q = plus_1 * plus_2 - cross_1 * cross_2
     response_u = plus_1 * cross_2 + cross_1 * plus_2
     response_v = plus_1 * cross_2 - cross_1 * plus_2
 
-    delay = direction @ jnp.asarray(position_2 - position_1) / C_LIGHT
+    delay = det1.time_delay_from_geocenter(
+        gmst, **coordinates
+    ) - det2.time_delay_from_geocenter(gmst, **coordinates)
     phase = 2.0 * jnp.pi * delay[..., None] * jnp.asarray(frequencies, dtype=float)
     intensity, linear_q, linear_u, circular = jnp.asarray(stokes)
     linear = (
@@ -564,53 +496,29 @@ def overlap_reduction_function(
     frequencies: JaxArrayLike,
     detector_1: DetectorSpec,
     detector_2: DetectorSpec,
-    polar_cosine: JaxArrayLike,
-    azimuth: JaxArrayLike,
-    polarization: JaxArrayLike,
+    right_ascension: JaxArrayLike,
+    declination: JaxArrayLike,
+    polarization_angle: JaxArrayLike,
     cos_inclination: JaxArrayLike,
+    *,
+    gmst: JaxArrayLike = 0.0,
 ) -> jax.Array:
-    r"""The ORF of a pair for one source: its realised cross-correlation response.
+    r"""Return the native per-source pair response, normalized by 4/25.
 
-    .. math::
+    This is :func:`stokes_cross_power` of the unit quadrupolar polarizations
+    :math:`h_+ = -(1+c^2)/2`, :math:`h_\times = i c`, with
+    :math:`c = \cos\iota`. Coordinates and ``gmst`` are radians in compatible
+    celestial frames. Inputs broadcast to a source shape and the output has
+    a final frequency axis.
 
-        \gamma_{ab}(\hat n, \psi, \iota; f) = \frac{25}{4}\,
-            \mathrm{Re}\left[H_a^* H_b\,
-            e^{2\pi i f \hat n \cdot (\vec x_b - \vec x_a)/c}\right],
-        \qquad H_a = h_+ F^+_a + h_\times F^\times_a,
-
-    with :math:`h_+ = -(1 + \cos^2\iota)/2` and :math:`h_\times = i\cos\iota`
-    the :math:`(2, 2)` polarization amplitudes in the LAL convention Ripple
-    follows, and :math:`F^{+,\times}_a = D_a : e^{+,\times}` the antenna patterns
-    of a source at :math:`\hat n` (Earth-fixed) with polarization angle
-    :math:`\psi`. It is :func:`stokes_cross_power` of the unit-amplitude
-    :func:`~astrogwb.waveform.polarization_power.quadrupolar_stokes_factors`.
-    The factor :math:`25/4` inverts the isotropic mean of the bracket for
-    co-located aligned L-shaped detectors, so averaging over an isotropic sky,
-    uniform :math:`\psi` and uniform :math:`\cos\iota` gives
-    :func:`isotropic_overlap_reduction_function`. A detector paired with itself
-    gives :math:`(25/4)|H_a|^2`.
-
-    Parameters
-    ----------
-    frequencies:
-        Frequencies in Hz, ``(F,)``.
-    detector_1, detector_2:
-        ``str`` site codes or gwmock ``CustomDetector`` instances.
-    polar_cosine, azimuth:
-        Cosine of the polar angle and the azimuth of the direction to the
-        source, Earth-fixed (z towards the North pole, x towards Greenwich).
-    polarization:
-        Polarization angle :math:`\psi` in radians.
-    cos_inclination:
-        :math:`\cos\iota`. The four angles broadcast to a shape ``(...)``.
-
-    Returns
-    -------
-    jax.Array
-        Shape ``(..., F)``.
+    The isotropic mean equals one for co-located, aligned, orthogonal, level
+    arms. For general sites it approximates the analytic isotropic ORF,
+    which omits WGS-84 flattening, elevation and arm tilts.
     """
-    polar_cosine, azimuth, polarization, cos_inclination = jnp.broadcast_arrays(
-        polar_cosine, azimuth, polarization, cos_inclination
+    declination, right_ascension, polarization_angle, cos_inclination = (
+        jnp.broadcast_arrays(
+            declination, right_ascension, polarization_angle, cos_inclination
+        )
     )
     stokes = quadrupolar_stokes_factors(cos_inclination)[..., None]
     return (
@@ -618,10 +526,11 @@ def overlap_reduction_function(
             frequencies,
             detector_1,
             detector_2,
-            polar_cosine,
-            azimuth,
-            polarization,
+            right_ascension,
+            declination,
+            polarization_angle,
             stokes,
+            gmst=gmst,
         )
         / _ISOTROPIC_PAIR_RESPONSE
     )

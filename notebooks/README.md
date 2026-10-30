@@ -133,7 +133,7 @@ from astrogwb.paper.config import detector_registry, fiducials, networks, priors
 fid = fiducials()
 detectors = networks()["ET-2L-aligned-CE-Hanford"]
 registry = detector_registry()
-geometry, sensitivities = registry.build_network("ET-2L-aligned-CE-Hanford")
+detectors = registry.build_network("ET-2L-aligned-CE-Hanford")
 higher_h0 = fiducials(H0=70.0)  # keyword overrides, merged over the file
 ```
 

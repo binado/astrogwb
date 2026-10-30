@@ -1,6 +1,6 @@
 """Serializable detector settings, resolved before runtime objects are built.
 
-Angles use gwmock's radians (azimuths clockwise from North); elevations use
+Angles use radians (azimuths clockwise from North); elevations use
 metres. Importing this module loads the detector package, including JAX.
 Validating settings leaves the XLA backend uninitialized.
 """
@@ -8,18 +8,17 @@ Validating settings leaves the XLA backend uninitialized.
 from __future__ import annotations
 
 import logging
-import math
 from collections.abc import Sequence
 from functools import cache
 from itertools import combinations
 from pathlib import Path
 from typing import Annotated
 
-from gwmock_signal.detector import CustomDetector
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from astrogwb.config import merge_layers
 
+from .geometry import Detector, DetectorGeometry
 from .psd import resolve_psd_path
 from .sensitivity import Sensitivity
 
@@ -32,20 +31,6 @@ DETECTOR_DEFAULT_PATHS = tuple(
 
 _STRICT = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 logger = logging.getLogger(__name__)
-
-
-class DetectorGeometry(BaseModel):
-    """Complete geometry in gwmock radians and metres, matching ``geometry.toml``."""
-
-    model_config = _STRICT
-
-    latitude_rad: Annotated[float, Field(ge=-math.pi / 2.0, le=math.pi / 2.0)]
-    longitude_rad: Annotated[float, Field(ge=-math.pi, le=math.pi)]
-    elevation_m: Annotated[float, Field(ge=-1e4, le=1e5)]
-    xarm_azimuth_rad: float
-    yarm_azimuth_rad: float
-    xarm_tilt_rad: float = 0.0
-    yarm_tilt_rad: float = 0.0
 
 
 @cache
@@ -86,9 +71,9 @@ class DetectorConfig(BaseModel):
         """
         return _sensitivity(self.psd_reference)
 
-    def to_detector(self, name: str) -> CustomDetector:
-        """gwmock geometry object addressed by ``name``."""
-        return CustomDetector(name=name, **self.geometry.model_dump())
+    def to_detector(self, name: str) -> Detector:
+        """Build an owned detector addressed by ``name``."""
+        return Detector(name, self.geometry, self.sensitivity)
 
 
 class DetectorRegistry(BaseModel):
@@ -131,45 +116,12 @@ class DetectorRegistry(BaseModel):
                 )
         return self
 
-    def build_detectors(
-        self, names: Sequence[str]
-    ) -> tuple[tuple[CustomDetector, ...], dict[str, Sensitivity]]:
-        """Build selected geometry and sensitivities in the supplied order.
+    def build_detectors(self, names: Sequence[str]) -> tuple[Detector, ...]:
+        """Build owned detectors in the supplied order."""
+        return tuple(self.detectors[name].to_detector(name) for name in names)
 
-        Parameters
-        ----------
-        names
-            The detectors to build, each defined by the registry.
-
-        Returns
-        -------
-        tuple
-            The detectors, in the order of ``names``, and their sensitivities
-            keyed by name.
-        """
-        return (
-            tuple(self.detectors[name].to_detector(name) for name in names),
-            {name: self.detectors[name].sensitivity for name in names},
-        )
-
-    def build_network(
-        self, name: str
-    ) -> tuple[tuple[CustomDetector, ...], dict[str, Sensitivity]]:
-        """Build a named network, its detectors sorted.
-
-        Unlike :meth:`build_detectors`, the order is the canonical one of the
-        network, not the order it was declared in.
-
-        Parameters
-        ----------
-        name
-            A network of the registry.
-
-        Returns
-        -------
-        tuple
-            The detectors and their sensitivities keyed by name.
-        """
+    def build_network(self, name: str) -> tuple[Detector, ...]:
+        """Build a named network in canonical sorted order."""
         return self.build_detectors(sorted(self.networks[name]))
 
     def pairs(self, network_name: str) -> list[tuple[str, str]]:

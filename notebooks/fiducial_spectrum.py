@@ -426,11 +426,9 @@ def _(
 
     effective_psds: dict[str, jax.Array] = {}
     for _network in NETWORKS:
-        _geometry, _sensitivities = _network.detector_registry.build_detectors(
-            _network.detectors
-        )
+        _geometry = _network.detector_registry.build_detectors(_network.detectors)
         effective_psds[_network.name] = jnp.asarray(
-            effective_psd(frequencies, _geometry, _sensitivities)
+            effective_psd(frequencies, _geometry)
         )
 
     _observation_time_sec = years_to_seconds(observation_time)
