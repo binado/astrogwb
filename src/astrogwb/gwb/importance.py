@@ -306,7 +306,7 @@ def reference_catalog(
     (:func:`~astrogwb.populations.evaluation.sample_sources_qmc`): the only
     Monte Carlo left in the rescaled spectrum is this intrinsic average, and its
     integrand is smooth and dominated by the chirp mass. ``chunk_size`` is
-    :meth:`~astrogwb.waveform.PolarizationPowerGenerator.generate_batch`'s.
+    :meth:`~astrogwb.waveform.WaveformGenerator.generate_batch`'s.
     """
     # x64 before the draw, as for a plain catalog: see draw_catalog.
     jax.config.update("jax_enable_x64", True)

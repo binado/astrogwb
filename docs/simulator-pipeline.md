@@ -1,13 +1,12 @@
 # The simulator pipeline
 
-`astrogwb.simulators` draws Poisson realizations of the background in three
+`astrogwb.simulators` draws Poisson realizations of the background in two
 stages. The stages run fused in memory, or one at a time into a single
 realization directory that each later stage adds to.
 
 ```text
-PopulationMetadata --PopulationSimulator(key)--> PopulationArtifact
-WaveformMetadata   --WaveformSimulator(pop)----> Waveforms / WaveformArtifact
-DetectorRegistry    --BackgroundSimulator(w)--> BackgroundArtifact
+PopulationMetadata                     --PopulationSimulator(key)--> PopulationArtifact
+WaveformMetadata + DetectorRegistry    --BackgroundSimulator(pop)--> BackgroundArtifact
 ```
 
 `DetectorRegistry` resolves detector geometry and PSD references once for
@@ -40,21 +39,13 @@ fixed-count mode was removed. A fixed-size Monte Carlo sample of a population
 is a reference catalog for importance weighting (`astrogwb.gwb.catalog`), not
 a realization.
 
-**Waveforms.** `WaveformSimulator(metadata)(population)` returns `Waveforms`,
-the complex polarizations `(h+, hx)` of every source. They are in the
-radiation frame: they depend on the intrinsic parameters, the inclination and
-the coalescence phase. The sky position and polarization angle are applied
-once, through the antenna patterns, at projection. `Waveforms` generate
-lazily: `iter_chunks(chunk_size)` yields `(source_parameters, plus, cross)`
-one fixed-size chunk at a time. The last chunk is padded with copies of its
-first source, whose polarizations are zero, so every realization compiles
-once. `Waveforms.write(path)` streams those chunks to an HDF5 file;
-`WaveformArtifact.open` reads them back the same way.
-
-**Background.** `BackgroundSimulator(networks)(waveforms)` loops over the
-chunks. For each chunk it projects the polarizations onto every pair `a < b`
-of the union of the networks' detectors, once, and accumulates the real
-cross-power
+**Background.** `BackgroundSimulator(waveform_metadata, networks)(population)`
+loops over fixed-size source chunks (the last chunk padded with copies of its
+first source whose polarizations are masked to zero, so every realization
+compiles once). For each chunk it evaluates the complex radiation-frame
+polarizations `(h+, hx)` (which depend on the intrinsic parameters, inclination
+and coalescence phase), projects them onto every pair `a < b` of the union of
+the networks' detectors once, and accumulates the real cross-power
 
 ```text
 H[a,i]   = F+[a,i] h+[i] + Fx[a,i] hx[i]
@@ -63,9 +54,8 @@ D[a,b]   = sum_i K[a,b,i]
 Y[a,b]   = 5 D[a,b] / T
 ```
 
-The product is computed through the Stokes contraction
-(`polarization_stokes`, then `stokes_cross_power`), which keeps every
-polarization term. The observation time `T` comes from the population. The
+The detector strains are projected directly from both polarizations before
+the cross-power is formed. The observation time `T` comes from the population. The
 sum is never divided by the realized count. Each network then keeps its own
 rows, `(P_n, F)`, and their combined spectrum, `(F,)` (see below):
 `artifact.spectra[name]` returns both. A network sharing detectors with
@@ -121,7 +111,6 @@ of each stage:
 <directory>/
   metadata.toml
   source_parameters.h5   # unless keep_sources=False / --no-keep-sources
-  polarization.h5        # only with keep_polarizations / --keep-polarizations
   background.h5          # when a background is configured
 ```
 
@@ -146,7 +135,6 @@ an interrupted run never leaves a partial product at its final path.
 | Product | Datasets |
 | --- | --- |
 | `source_parameters.h5` | `source_id` `(N,)`, `source_parameters/<name>` `(N,)` |
-| `polarization.h5` | `frequencies` `(F,)`, `source_id` `(N,)`, `plus`, `cross` `(N, F)` complex |
 | `background.h5` | `frequencies` `(F,)`; per network, `networks/<name>/pair_spectral_density` `(P_n, F)` and `networks/<name>/spectral_density` `(F,)` |
 
 `RealizationSimulator(population, waveform, background)` applies one rule per
@@ -180,14 +168,13 @@ layout version 1 are refused and are regenerated.
 ```python
 from astrogwb.simulators import (
     BackgroundSimulator, PopulationSimulator, RealizationSimulator,
-    WaveformSimulator, batch_keys,
+    batch_keys,
 )
 
 # Fused in memory: at most one chunk of polarizations
 key = batch_keys(41, 1)[0]
 population = PopulationSimulator(population_metadata)(key)
-waveforms = WaveformSimulator(waveform_metadata, chunk_size=1024)
-spectra = BackgroundSimulator(registry, chunk_size=1024)(waveforms(population))
+spectra = BackgroundSimulator(waveform_metadata, registry, chunk_size=1024)(population)
 
 # One realization directory, stage by stage
 RealizationSimulator(population_metadata)("draw/", seed=41)
@@ -204,7 +191,7 @@ simulator("root/41-7", seed=41, index=7)
 ```
 
 `RealizationSimulator` builds the stage simulators of each realization it
-runs, so a stage that is already recorded builds none. `Realization.population()`, `.waveforms()` and
+runs, so a stage that is already recorded builds none. `Realization.population()` and
 `.background()` read a stage's product. When the product is missing, pass the
 stage simulators to regenerate it.
 
@@ -226,7 +213,7 @@ astrogwb simulate root/41-0 --population-metadata population.toml --seed 41 \
 
 # Stage by stage into the same directory
 astrogwb simulate draw/ --population-metadata population.toml --seed 41
-astrogwb simulate draw/ --waveform-metadata waveform.toml --keep-polarizations
+astrogwb simulate draw/ --waveform-metadata waveform.toml
 astrogwb simulate draw/ --background --detector-config config/detectors.toml
 
 # The ensemble's detector noise, from one of its realizations
@@ -265,7 +252,7 @@ initializes.
 | `scripts/simulate_spectra.py`, `config/simulations/spectrum/` | `astrogwb simulate` |
 | one artifact directory per stage (`metadata.toml` + `data.h5`, `[parent]` references) | one realization directory: `metadata.toml` + `source_parameters.h5`, `polarization.h5`, `background.h5` |
 | `PopulationArtifact.write(dir)` / `.open(path)` | `RealizationSimulator`, `Realization.population()`; `write_sources`, `from_tables` |
-| `Waveforms.write(dir)` / `WaveformArtifact.open(path)` | `Waveforms.write(path)` / `WaveformArtifact.open(path, metadata=, population=)` |
+| `WaveformSimulator`, `Waveforms`, `WaveformArtifact`, `polarization.h5` | removed; `BackgroundSimulator(waveform_metadata, registry)(population)` fuses waveform evaluation and pair projection |
 | `BackgroundArtifact.upstream`, `.manifest_path` | `BackgroundArtifact.waveform_key`; the manifest belongs to the `Realization` |
 | `astrogwb simulate population` / `waveforms` / `background` | `astrogwb simulate DIRECTORY` with `--population-metadata`, `--waveform-metadata`, `--detector-config` |
 | per-run network metadata snapshots | core `DetectorRegistry`, supplied to simulation and readers |

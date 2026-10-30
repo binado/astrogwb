@@ -27,7 +27,6 @@ from astrogwb.simulators import (
 from astrogwb.simulators._io import (
     BACKGROUND_FILE,
     MANIFEST_FILE,
-    POLARIZATION_FILE,
     SOURCES_FILE,
 )
 
@@ -90,22 +89,20 @@ def test_a_background_added_later_equals_the_fused_one(
     assert later.manifest["background"] == fused.manifest["background"]
 
 
-def test_kept_polarizations_give_the_fused_background(
+def test_a_missing_background_file_is_reprojected_from_kept_sources(
     tmp_path: Path, fused: Realization
 ) -> None:
     realization = _simulator(
         population=POPULATION,
         waveform=WAVEFORM,
         background=NETWORKS,
-        keep_polarizations=True,
     )(tmp_path, seed=SEED)
     (tmp_path / BACKGROUND_FILE).unlink()
 
     reprojected = realization.background(
-        simulator=BackgroundSimulator(NETWORKS, chunk_size=8),
+        simulator=BackgroundSimulator(WAVEFORM, NETWORKS, chunk_size=8),
     )
 
-    assert POLARIZATION_FILE in _products(tmp_path)
     assert_same_spectra(reprojected, fused.background())
 
 

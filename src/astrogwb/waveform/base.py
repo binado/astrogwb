@@ -1,4 +1,4 @@
-"""Common interface for polarization-power generation."""
+"""Common interface for waveform generation."""
 
 from __future__ import annotations
 
@@ -11,11 +11,11 @@ from numpy.typing import ArrayLike
 
 from astrogwb.waveform.metadata import WaveformMetadata
 
-__all__ = ["PolarizationPowerGenerator"]
+__all__ = ["WaveformGenerator"]
 
 
 @dataclass(frozen=True, slots=True)
-class PolarizationPowerGenerator:
+class WaveformGenerator:
     """Base for live generators; persisted description lives in ``metadata``."""
 
     metadata: WaveformMetadata
@@ -61,36 +61,6 @@ class PolarizationPowerGenerator:
         """
         return _chunked(self._generate_batch, source_parameters, chunk_size)
 
-    def generate_stokes(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
-        """Generate the Stokes parameters ``(4, F)`` of one source."""
-        stokes = self.generate_stokes_batch(
-            {
-                name: jnp.atleast_1d(jnp.asarray(value))
-                for name, value in source_parameters.items()
-            }
-        )
-        if stokes.shape[-1] != 1:
-            raise ValueError(
-                "generate_stokes expects a single source; received "
-                f"{stokes.shape[-1]} events"
-            )
-        return stokes[..., 0]
-
-    def generate_stokes_batch(
-        self,
-        source_parameters: Mapping[str, ArrayLike],
-        *,
-        chunk_size: int | None = None,
-    ) -> jax.Array:
-        r"""Generate the Stokes parameters ``(4, F, N)`` of a catalog.
-
-        :math:`(I, Q, U, V)` in each source's radiation frame at zero
-        polarization angle (see :mod:`astrogwb.waveform.polarization_power`);
-        :math:`I` is :meth:`generate_batch`'s power. Trace-safe, and
-        ``chunk_size`` bounds peak memory as it does for :meth:`generate_batch`.
-        """
-        return _chunked(self._generate_stokes_batch, source_parameters, chunk_size)
-
     def generate_polarizations_batch(
         self, source_parameters: Mapping[str, ArrayLike]
     ) -> tuple[jax.Array, jax.Array]:
@@ -99,21 +69,12 @@ class PolarizationPowerGenerator:
         :math:`(\tilde h_+, \tilde h_\times)` in each source's radiation frame:
         they depend on the intrinsic parameters, the inclination and the
         coalescence phase, never on the sky position or the polarization angle,
-        which enter through the antenna patterns. Their
-        :func:`~astrogwb.waveform.polarization_power.polarization_stokes` is
-        :meth:`generate_stokes_batch`'s output. Trace-safe.
+        which enter through the antenna patterns. Trace-safe.
         """
         return self._generate_polarizations_batch(source_parameters)
 
     def _generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
         """Every source in one vectorized pass; what a concrete generator implements."""
-        del source_parameters
-        raise NotImplementedError
-
-    def _generate_stokes_batch(
-        self, source_parameters: Mapping[str, ArrayLike]
-    ) -> jax.Array:
-        """The Stokes parameters of every source in one pass, ``(4, F, N)``."""
         del source_parameters
         raise NotImplementedError
 

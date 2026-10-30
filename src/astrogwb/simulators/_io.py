@@ -1,8 +1,8 @@
 """The realization manifest, atomic product files and batched keys.
 
 A realization is one directory holding ``metadata.toml``, its manifest, and at
-most one product file per stage: ``source_parameters.h5``,
-``polarization.h5`` and ``background.h5``. The manifest has a table per
+most one product file per stage: ``source_parameters.h5`` and
+``background.h5``. The manifest has a table per
 configured stage; a product file is written beside its final name and renamed
 into place, so an existing product is a complete one. Its tables:
 
@@ -40,7 +40,6 @@ __all__ = [
     "BACKGROUND_FILE",
     "LAYOUT_VERSION",
     "MANIFEST_FILE",
-    "POLARIZATION_FILE",
     "SOURCES_FILE",
     "atomic_h5",
     "batch_keys",
@@ -51,7 +50,6 @@ __all__ = [
 
 MANIFEST_FILE = "metadata.toml"
 SOURCES_FILE = "source_parameters.h5"
-POLARIZATION_FILE = "polarization.h5"
 BACKGROUND_FILE = "background.h5"
 
 #: The version of the realization directory layout and its manifest.

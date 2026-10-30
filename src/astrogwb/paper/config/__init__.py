@@ -64,7 +64,7 @@ from astrogwb.paper.utils import deep_merge
 from astrogwb.populations import PopulationMetadata
 from astrogwb.populations.registry import Population
 from astrogwb.waveform import (
-    PolarizationPowerGenerator,
+    WaveformGenerator,
     WaveformMetadata,
 )
 
@@ -178,10 +178,8 @@ def detector_registry(root: Path | None = None, **overrides: Any) -> DetectorReg
     return DetectorRegistry.model_validate(settings)
 
 
-def waveform_generator(
-    root: Path | None = None, **kwargs: Any
-) -> PolarizationPowerGenerator:
-    """Build the polarization-power generator the default draw uses.
+def waveform_generator(root: Path | None = None, **kwargs: Any) -> WaveformGenerator:
+    """Build the waveform generator the default draw uses.
 
     Keyword arguments override the file. ``approximant="AnalyticInspiral"`` selects
     the closed-form inspiral, and is the only approximant taking an ``alpha``;

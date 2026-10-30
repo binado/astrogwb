@@ -46,11 +46,8 @@ from numpy.typing import ArrayLike
 from astrogwb.constants import MPC_IN_SECONDS, SOLAR_MASS_IN_SECONDS
 from astrogwb.frequency import frequency_grid
 from astrogwb.utils import require_x64
-from astrogwb.waveform.generator.base import PolarizationPowerGenerator
-from astrogwb.waveform.polarization_power import (
-    quadrupolar_polarizations,
-    quadrupolar_stokes,
-)
+from astrogwb.waveform.base import WaveformGenerator
+from astrogwb.waveform.polarization_power import quadrupolar_polarizations
 
 __all__ = [
     "AnalyticInspiralGenerator",
@@ -296,7 +293,7 @@ def inspiral_polarization_power(
 
 
 @dataclass(frozen=True, slots=True)
-class AnalyticInspiralGenerator(PolarizationPowerGenerator):
+class AnalyticInspiralGenerator(WaveformGenerator):
     """Generate inspiral-only polarization power on the descriptor grid."""
 
     @property
@@ -319,17 +316,6 @@ class AnalyticInspiralGenerator(PolarizationPowerGenerator):
         return inspiral_polarization_power(
             frequencies, prepared_parameters, alpha=self.metadata.alpha
         ).T
-
-    def _generate_stokes_batch(
-        self, source_parameters: Mapping[str, ArrayLike]
-    ) -> jax.Array:
-        r"""Quadrupolar Stokes parameters ``(4, F, N)`` of the closed form.
-
-        The face-on power is :math:`2 A^2`, since :math:`g(0) = 2` exactly, which
-        gives the amplitude
-        :func:`~astrogwb.waveform.polarization_power.quadrupolar_stokes` needs.
-        """
-        return quadrupolar_stokes(*self._face_on_amplitude(source_parameters))
 
     def _generate_polarizations_batch(
         self, source_parameters: Mapping[str, ArrayLike]

@@ -1,4 +1,4 @@
-"""Ripple-backed frequency-domain polarization-power generator."""
+"""Ripple-backed frequency-domain waveform generator."""
 
 from __future__ import annotations
 
@@ -11,15 +11,14 @@ from numpy.typing import ArrayLike
 
 from astrogwb.frequency import frequency_grid
 from astrogwb.utils import require_x64
-from astrogwb.waveform.generator._ripple import (
+from astrogwb.waveform._ripple import (
     build_polarization_kernel,
     build_power_kernel,
-    build_stokes_kernel,
     check_sources,
     next_smooth_even,
     ripple_parameters,
 )
-from astrogwb.waveform.generator.base import PolarizationPowerGenerator
+from astrogwb.waveform.base import WaveformGenerator
 from astrogwb.waveform.metadata import WaveformMetadata
 
 __all__ = ["RippleGenerator"]
@@ -32,8 +31,8 @@ __all__ = ["RippleGenerator"]
 _ALIGNMENT_TOLERANCE_EPS = 64.0
 
 
-class RippleGenerator(PolarizationPowerGenerator):
-    """Generate polarization power with one fixed Ripple frequency grid.
+class RippleGenerator(WaveformGenerator):
+    """Generate waveforms and polarization power with one fixed Ripple frequency grid.
 
     A run has one approximant, one reference frequency, and one sampling grid.
     Those fix the frequency axis and the waveform kernel at construction, so
@@ -54,12 +53,10 @@ class RippleGenerator(PolarizationPowerGenerator):
         "_n_samples",
         "_polarization_kernel",
         "_segment_duration",
-        "_stokes_kernel",
     )
     _band: slice
     _frequencies: np.ndarray
     _kernel: Callable[[jax.Array, Mapping[str, jax.Array]], jax.Array]
-    _stokes_kernel: Callable[[jax.Array, Mapping[str, jax.Array]], jax.Array]
     _polarization_kernel: Callable[
         [jax.Array, Mapping[str, jax.Array]], tuple[jax.Array, jax.Array]
     ]
@@ -107,13 +104,6 @@ class RippleGenerator(PolarizationPowerGenerator):
             self,
             "_kernel",
             build_power_kernel(
-                metadata.approximant, metadata.reference_frequency, **kernel_options
-            ),
-        )
-        object.__setattr__(
-            self,
-            "_stokes_kernel",
-            build_stokes_kernel(
                 metadata.approximant, metadata.reference_frequency, **kernel_options
             ),
         )
@@ -230,7 +220,7 @@ class RippleGenerator(PolarizationPowerGenerator):
         """Check source values against what this approximant can represent.
 
         Eager only; see
-        :meth:`~astrogwb.waveform.PolarizationPowerGenerator.check_sources`.
+        :meth:`~astrogwb.waveform.WaveformGenerator.check_sources`.
         """
         check_sources(self.metadata.approximant, source_parameters)
 
@@ -250,19 +240,6 @@ class RippleGenerator(PolarizationPowerGenerator):
         events = ripple_parameters(self.metadata.approximant, source_parameters)
         power = self._kernel(jnp.asarray(self._frequencies), events)
         return power[self._band, :]
-
-    @require_x64
-    def _generate_stokes_batch(
-        self, source_parameters: Mapping[str, ArrayLike]
-    ) -> jax.Array:
-        """Generate Stokes parameters ``(4, frequency, sample)`` via Ripple.
-
-        The same grid and band as :meth:`_generate_batch`, whose power is the
-        :math:`I` slice.
-        """
-        events = ripple_parameters(self.metadata.approximant, source_parameters)
-        stokes = self._stokes_kernel(jnp.asarray(self._frequencies), events)
-        return stokes[:, self._band, :]
 
     @require_x64
     def _generate_polarizations_batch(

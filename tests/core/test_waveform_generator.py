@@ -18,7 +18,7 @@ from astrogwb.waveform import (
     RippleGenerator,
     WaveformMetadata,
 )
-from astrogwb.waveform.generator._ripple import (
+from astrogwb.waveform._ripple import (
     PRECESSING_MODELS,
     SUPPORTED_APPROXIMANTS,
     TIDAL_MODELS,
@@ -334,7 +334,7 @@ def test_build_power_kernel_disables_taper_only_when_requested(
     waveform = Mock()
     monkeypatch.setattr(ripplegw, "waveform", waveform)
 
-    from astrogwb.waveform.generator._ripple import build_power_kernel
+    from astrogwb.waveform._ripple import build_power_kernel
 
     build_power_kernel("TaylorF2", 20.0)
     waveform.assert_called_once_with("TaylorF2", f_ref=20.0)
@@ -351,7 +351,7 @@ def test_build_power_kernel_disables_taper_only_when_requested(
 
 
 def test_build_power_kernel_rejects_disabled_tidal_taper_for_non_tidal_ripple() -> None:
-    from astrogwb.waveform.generator._ripple import build_power_kernel
+    from astrogwb.waveform._ripple import build_power_kernel
 
     with pytest.raises(ValueError, match="only supported for tidal Ripple"):
         build_power_kernel("IMRPhenomD", 20.0, use_taper_in_tidal_corrections=False)
@@ -360,7 +360,7 @@ def test_build_power_kernel_rejects_disabled_tidal_taper_for_non_tidal_ripple() 
 def test_build_power_kernel_rejects_tidal_ripple_without_taper_setting_support() -> (
     None
 ):
-    from astrogwb.waveform.generator._ripple import build_power_kernel
+    from astrogwb.waveform._ripple import build_power_kernel
 
     with pytest.raises(ValueError, match="does not support"):
         build_power_kernel("TaylorF2", 20.0, use_taper_in_tidal_corrections=False)
