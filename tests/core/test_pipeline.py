@@ -36,22 +36,67 @@ MAX_STANDARD_ERRORS = 5.0
 @pytest.fixture(scope="module")
 def population() -> PopulationArtifact:
     """About fifty sources."""
-    return PopulationSimulator(_population(1e-4), chunk_size=16)(batch_keys(41, 1)[0])
+    return PopulationSimulator(_population(1e-4))(batch_keys(41, 1)[0])
 
 
-@pytest.mark.parametrize("chunk_size", [3, 64])
-def test_population_draws_its_extrinsics_whatever_the_chunk_size(
-    population: PopulationArtifact, chunk_size: int
-) -> None:
-    redrawn = PopulationSimulator(_population(1e-4), chunk_size=chunk_size)(
-        batch_keys(41, 1)[0]
-    )
+def test_population_is_reproducible(population: PopulationArtifact) -> None:
+    redrawn = PopulationSimulator(_population(1e-4))(batch_keys(41, 1)[0])
 
     assert population.count > 0
     assert set(EXTRINSIC_COLUMNS) <= set(population.source_parameters)
     assert redrawn.source_parameters.keys() == population.source_parameters.keys()
     for name, values in population.source_parameters.items():
         np.testing.assert_array_equal(redrawn.source_parameters[name], values)
+
+
+def test_population_changes_with_seed(population: PopulationArtifact) -> None:
+    other = PopulationSimulator(population.metadata)(batch_keys(42, 1)[0])
+    assert other.key() != population.key()
+    assert not np.array_equal(
+        other.source_parameters["redshift"], population.source_parameters["redshift"]
+    )
+
+
+def test_population_deterministics_replay_exactly(
+    population: PopulationArtifact,
+) -> None:
+    from astrogwb.populations import joint_model
+    from astrogwb.populations.evaluation import evaluate_sources
+
+    model = joint_model(
+        *population.metadata.population.build()(population.hyperparameters)
+    )
+    _, replayed = evaluate_sources(
+        model, population.source_parameters, density_sites=()
+    )
+    for name, values in replayed.items():
+        np.testing.assert_array_equal(values, population.source_parameters[name])
+
+
+@pytest.mark.parametrize("sample_prior", [False, True])
+def test_population_hyperparameters(sample_prior: bool) -> None:
+    from astrogwb.distributions.config import DistributionConfig
+
+    metadata = _population()
+    if sample_prior:
+        metadata = metadata.model_copy(
+            update={
+                "hyperparameters": {
+                    **metadata.hyperparameters,
+                    "H0": DistributionConfig.model_validate(
+                        {"dist": "Uniform", "kwargs": {"low": 60.0, "high": 80.0}}
+                    ),
+                }
+            }
+        )
+    drawn = PopulationSimulator(metadata)(batch_keys(41, 1)[0])
+    if sample_prior:
+        assert 60.0 < drawn.hyperparameters["H0"] < 80.0
+    else:
+        assert drawn.hyperparameters == metadata.fixed
+    for values in drawn.source_parameters.values():
+        assert values.shape == (drawn.count,)
+        assert np.all(np.isfinite(values))
 
 
 @pytest.mark.parametrize(
@@ -89,9 +134,7 @@ def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum() -> No
     spectrum to the group's sky-averaged spectrum :math:`\sum_i I_i / T`
     isolates the response, and its mean over groups is :math:`\gamma_{ab}`.
     """
-    realization = PopulationSimulator(_population(4e-3), chunk_size=1024)(
-        batch_keys(7, 1)[0]
-    )
+    realization = PopulationSimulator(_population(4e-3))(batch_keys(7, 1)[0])
     background = BackgroundSimulator(
         WAVEFORM,
         DetectorRegistry(
@@ -132,9 +175,7 @@ def test_a_staged_realization_reads_back_the_fused_background(
 ) -> None:
     fused = BackgroundSimulator(WAVEFORM, NETWORKS, chunk_size=8)(population)
 
-    simulate_realization(
-        tmp_path, population=_population(1e-4), seed=41, source_chunk_size=16
-    )
+    simulate_realization(tmp_path, population=_population(1e-4), seed=41)
     simulate_realization(tmp_path, waveform=WAVEFORM, chunk_size=8)
     staged = simulate_realization(
         tmp_path, background=NETWORKS, chunk_size=8
@@ -153,6 +194,7 @@ def test_an_empty_realization_has_zero_spectra() -> None:
     background = simulator(empty)
 
     assert empty.count == 0
+    assert all(values.shape == (0,) for values in empty.source_parameters.values())
     for name in NETWORKS.networks:
         pairs, combined = background.spectra[name]
         assert pairs.shape == (len(NETWORKS.pairs(name)), simulator.frequencies.size)
@@ -305,7 +347,7 @@ def test_native_coordinate_columns_and_ranges(population: PopulationArtifact) ->
             )
 
 
-@pytest.mark.parametrize("version", [None, 1, 2])
+@pytest.mark.parametrize("version", [None, 1, 2, 3, 4])
 def test_old_population_schema_rejected_before_hash_or_io(
     population: PopulationArtifact, tmp_path: Path, version: int | None
 ) -> None:
@@ -315,7 +357,7 @@ def test_old_population_schema_rejected_before_hash_or_io(
     else:
         tables["population"]["schema_version"] = version
     tables["population"]["key"] = "invalid hash"
-    with pytest.raises(ValueError, match="regenerate.*schema 3"):
+    with pytest.raises(ValueError, match="regenerate.*schema 5"):
         PopulationArtifact.from_tables(tables, tmp_path / "absent.h5")
 
 

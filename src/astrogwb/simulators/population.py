@@ -4,24 +4,17 @@ A realization owns every stochastic property of its sources: the
 hyperparameters (fixed or drawn once), the Poisson count
 :math:`N \\sim \\mathrm{Poisson}(\\mathcal{R}\\, T)`, the intrinsic parameters
 and inclination the population model draws, and the extrinsic angles drawn
-here -- an isotropic direction (``declination``, ``right_ascension``), the
+by the joint model -- an isotropic direction (``declination``, ``right_ascension``), the
 polarization angle ``polarization_angle`` and the coalescence phase ``coa_phase``.
 The downstream stages draw nothing.
 
-One key is one realization. It splits into a hyperparameter key, a count key,
-a source key and an extrinsic key, in that order, and event ``i`` is drawn from
-``fold_in(source_key, i)`` and ``fold_in(extrinsic_key, i)`` wherever it falls,
-so sources are drawn in fixed ``chunk_size`` pieces -- one compile -- and
-``chunk_size`` changes cost, never the realization. Source sampling does not use
-``numpyro.plate`` at a rate-derived size, so the source draws are independent
-of the merger rate.
+One key splits into independent hyperparameter, count and source streams. Sources are drawn in one batch; waveform evaluation may use chunks.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Self
 
@@ -50,11 +43,11 @@ __all__ = [
 ]
 
 #: The schema of a population realization. It is part of
-#: :func:`population_key`: version 3 uses celestial coordinates and the
-#: gwmock/LAL polarization basis, requiring regeneration of older artifacts.
-SCHEMA_VERSION = 3
+#: :func:`population_key`: version 5 samples extrinsics in the joint model, requiring
+#: regeneration of older artifacts.
+SCHEMA_VERSION = 5
 
-#: The source columns this stage draws on top of the population model's.
+#: The extrinsic source columns required by the background projection.
 EXTRINSIC_COLUMNS = (
     "declination",
     "right_ascension",
@@ -70,10 +63,10 @@ COORDINATE_CONVENTIONS = {
 
 
 def validate_population_schema(table: Mapping[str, Any]) -> None:
-    """Reject older coordinate schemas before validating content hashes."""
+    """Reject older population schemas before validating content hashes."""
     if table.get("schema_version") != SCHEMA_VERSION:
         raise ValueError(
-            "population schema is old or unsupported; regenerate realizations (schema 3 required)"
+            "population schema is old or unsupported; regenerate realizations (schema 5 required)"
         )
 
 
@@ -217,7 +210,6 @@ class PopulationArtifact:
     total_merger_rate: float
     hyperparameters: dict[str, float]
     source_parameters: dict[str, NDArray[Any]]
-    chunk_size: int | None = None
 
     def __post_init__(self) -> None:
         """Require the native coordinate columns for in-memory inputs too."""
@@ -302,7 +294,6 @@ class PopulationArtifact:
                 for name, value in realization["hyperparameters"].items()
             },
             source_parameters=source_parameters,  # ty: ignore[invalid-argument-type]
-            chunk_size=tables.get("execution", {}).get("source_chunk_size"),
         )
         if artifact.key() != population["key"]:
             raise ValueError(
@@ -316,69 +307,22 @@ class PopulationArtifact:
         return artifact
 
 
-def _hyperparameters_and_count(
-    key: jax.Array,
-    *,
-    population: Any,
-    prior_model: Callable[[], Mapping[str, jax.Array]],
-    observation_seconds: float,
-) -> tuple[dict[str, jax.Array], jax.Array, jax.Array]:
-    """Hyperparameters, merger rate and Poisson source count of one realization."""
-    import jax
-    import jax.numpy as jnp
-    from numpyro import handlers
-
-    theta_key, count_key, _, _ = jax.random.split(key, 4)
-    theta = dict(handlers.seed(prior_model, theta_key)())
-    redshift_distribution, _ = population(theta)
-    rate = jnp.reshape(redshift_distribution.total_merger_rate(), ())
-    count = jax.random.poisson(count_key, rate * observation_seconds).astype(jnp.int64)
-    return theta, rate, count
-
-
 class PopulationSimulator:
-    """Draws population realizations of one :class:`PopulationMetadata`.
+    """Draw a full population realization for each input key."""
 
-    ``simulator(key)`` is one :class:`PopulationArtifact`; loop over
-    :func:`~astrogwb.simulators.batch_keys` for several. Sources are drawn in
-    ``chunk_size`` pieces, one compile and ``ceil(count / chunk_size)`` calls.
-    Build once and call often: the simulator holds the jitted stages.
-    """
-
-    def __init__(self, metadata: PopulationMetadata, *, chunk_size: int = 8192) -> None:
+    def __init__(self, metadata: PopulationMetadata) -> None:
         import jax
 
-        from astrogwb.simulators._chunks import (
-            sample_extrinsic_by_key,
-            sample_sources_by_key,
-        )
-
-        # x64 before any array: keys are built from 64-bit seeds and the rate
-        # must not depend on a waveform import turning it on as a side effect.
+        # Set precision before creating arrays or initializing the backend.
         jax.config.update("jax_enable_x64", True)
-        if chunk_size <= 0:
-            raise ValueError("chunk_size must be positive")
         if metadata.version != __version__:
             raise ValueError(
                 f"metadata is for astrogwb {metadata.version}, but {__version__} "
                 "is installed; realizations are generated by the code their key names"
             )
-        population = metadata.population.build()
         self._metadata = metadata
-        self._chunk_size = chunk_size
-        # Static configuration is bound by ``partial``, so jit traces only keys.
-        self._hyperparameters_and_count = jax.jit(
-            partial(
-                _hyperparameters_and_count,
-                population=population,
-                prior_model=metadata.prior_model(),
-                observation_seconds=metadata.observation_seconds,
-            )
-        )
-        self._draw_sources = jax.jit(
-            partial(sample_sources_by_key, population), static_argnames="size"
-        )
-        self._draw_extrinsic = jax.jit(sample_extrinsic_by_key, static_argnames="size")
+        self._population = metadata.population.build()
+        self._prior_model = metadata.prior_model()
 
     @property
     def metadata(self) -> PopulationMetadata:
@@ -386,35 +330,34 @@ class PopulationSimulator:
         return self._metadata
 
     def __call__(self, key: jax.Array) -> PopulationArtifact:
-        """The realization at ``key``, a single typed JAX key."""
+        """Draw the realization at a single typed JAX key."""
         import jax
+        import jax.numpy as jnp
+        from numpyro import handlers
+
+        from astrogwb.populations import joint_model
+        from astrogwb.populations.evaluation import sample_sources
 
         if key.shape != ():
             raise ValueError(f"key must be a single key, got shape {key.shape}")
-        _, _, source_key, extrinsic_key = jax.random.split(key, 4)
-        theta, rate, count_device = self._hyperparameters_and_count(key)
-        hyperparameters = {n: float(v) for n, v in theta.items()}
-        count = int(count_device)
-        pieces = []
-        # One piece even for an empty realization, so the columns have names.
-        for start in range(0, max(count, 1), self._chunk_size):
-            offset = np.uint32(start)
-            sources = self._draw_sources(
-                hyperparameters, source_key, offset, size=self._chunk_size
-            )
-            extrinsic = self._draw_extrinsic(
-                extrinsic_key, offset, size=self._chunk_size
-            )
-            pieces.append({**sources, **extrinsic})
-        columns = {
-            name: np.concatenate([np.asarray(piece[name]) for piece in pieces])[:count]
-            for name in pieces[0]
-        }
+        theta_key, count_key, source_key = jax.random.split(key, 3)
+        with handlers.block():
+            theta = dict(handlers.seed(self._prior_model, theta_key)())
+        redshift, source_model = self._population(theta)
+        rate = jnp.reshape(redshift.total_merger_rate(), ())
+        count = int(
+            jax.random.poisson(count_key, rate * self.metadata.observation_seconds)
+        )
+        # One sample preserves column names even for an empty realization.
+        sources = sample_sources(
+            joint_model(redshift, source_model), source_key, num_samples=max(count, 1)
+        )
         return PopulationArtifact(
-            metadata=self._metadata,
+            metadata=self.metadata,
             rng_key=tuple(int(v) for v in np.asarray(jax.random.key_data(key))),
             total_merger_rate=float(rate),
-            hyperparameters=hyperparameters,
-            source_parameters=columns,
-            chunk_size=self._chunk_size,
+            hyperparameters={name: float(value) for name, value in theta.items()},
+            source_parameters={
+                name: np.asarray(values)[:count] for name, values in sources.items()
+            },
         )

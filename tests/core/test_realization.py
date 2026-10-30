@@ -35,8 +35,8 @@ POPULATION = population_metadata()
 
 
 def _simulator(**settings: Any) -> RealizationSimulator:
-    """A tiny-chunk simulator: three chunks or more, whatever the count."""
-    return RealizationSimulator(chunk_size=8, source_chunk_size=16, **settings)
+    """A simulator with small waveform chunks."""
+    return RealizationSimulator(chunk_size=8, **settings)
 
 
 def _products(directory: Path) -> list[str]:

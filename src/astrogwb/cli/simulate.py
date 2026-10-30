@@ -43,9 +43,6 @@ def simulate(
         bool, typer.Option(help="Write source_parameters.h5.")
     ] = True,
     chunk_size: Annotated[int, typer.Option(min=1, help="Waveforms per chunk.")] = 1024,
-    source_chunk_size: Annotated[
-        int, typer.Option(min=1, help="Sources drawn per piece.")
-    ] = 8192,
     platform: Annotated[
         str, typer.Option(help="JAX platform: auto, cpu, cuda or tpu.")
     ] = "auto",
@@ -85,7 +82,6 @@ def simulate(
         index=index,
         keep_sources=keep_sources,
         chunk_size=chunk_size,
-        source_chunk_size=source_chunk_size,
     )
     products = sorted(path.name for path in directory.glob("*.h5"))
     typer.echo(

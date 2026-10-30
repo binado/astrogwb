@@ -269,12 +269,16 @@ def reference_redshift(metadata: CatalogMetadata) -> float:
 def _pin_redshift_and_inclination(
     model: PopulationModel, redshift: ArrayLike
 ) -> PopulationModel:
-    """``model`` with redshift and inclination fixed rather than drawn."""
+    """``model`` with reference distance, inclination and extrinsics fixed."""
     return handlers.condition(
         model,
         data={
             REDSHIFT_SITE: jnp.asarray(redshift),
             INCLINATION_SITE: EFFECTIVE_INCLINATION,
+            "declination": jnp.asarray(0.0),
+            "right_ascension": jnp.asarray(0.0),
+            "polarization_angle": jnp.asarray(0.0),
+            "coa_phase": jnp.asarray(0.0),
         },
     )
 
@@ -298,7 +302,8 @@ def reference_catalog(
 
     The model is conditioned on :func:`reference_redshift` (the population's
     ``minimum_redshift`` unless ``metadata`` sets one) and
-    :data:`EFFECTIVE_INCLINATION` before the draw. When the reference redshift is
+    :data:`EFFECTIVE_INCLINATION` before the draw. Sky coordinates, polarization angle and coalescence phase
+    are fixed at zero, so they consume no Sobol coordinates. When the reference redshift is
     below the population's, the distance table is extended down to it, so the
     stored luminosity distance is the one at the reference redshift. The intrinsic parameters are
     drawn i.i.d., or on a scrambled Sobol net seeded by ``key`` when

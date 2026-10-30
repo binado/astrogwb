@@ -110,8 +110,8 @@ class CatalogMetadata(BaseModel):
         already type-stable under strict validation.
 
         The payload nests ``waveform`` and ``population`` under ``metadata``,
-        the shape this record had before it was flattened, so every catalog
-        already on disk keeps its key. For the same reason the default
+        the shape this record had before it was flattened. A source schema version
+        distinguishes catalogs with jointly sampled extrinsics. The default
         ``sampling="random"`` and ``reference_redshift=None`` are left out of
         the payload.
         """
@@ -125,6 +125,7 @@ class CatalogMetadata(BaseModel):
             "waveform": payload.pop("waveform"),
             "population": payload.pop("population"),
         }
+        payload["source_schema_version"] = 1
         return content_key(payload)
 
 

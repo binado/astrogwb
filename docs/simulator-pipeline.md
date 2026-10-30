@@ -33,9 +33,10 @@ hyperparameters (fixed, or drawn from their priors), a Poisson count
   `declination = arcsin(uniform(-1, 1))` (an isotropic celestial direction),
   `polarization_angle` uniform on `[0, pi)`, and `coa_phase`. Angles are radians.
 
-Event `i` is drawn from `fold_in(source_key, i)` and
-`fold_in(extrinsic_key, i)`, so `chunk_size` changes the cost and never the
-realization. Source `i` has the stable ID `i`. Counts are Poisson only; the
+All sources are drawn in one batch through `sample_sources`, with independent
+random streams for hyperparameters, count, and the joint source model.
+The joint model samples intrinsic parameters and extrinsic angles together.
+Source `i` has the stable ID `i`. Counts are Poisson only; the
 fixed-count mode was removed. A fixed-size Monte Carlo sample of a population
 is a reference catalog for importance weighting (`astrogwb.gwb.catalog`), not
 a realization.
@@ -138,10 +139,10 @@ There is one `metadata.toml`, rewritten atomically whenever a stage is added:
 | --- | --- |
 | `[layout]` | `version = 1`, `astrogwb_version` |
 | `[realization]` | `id` (the population key), `seed`, `index`, `rng_key`, `count`, `total_merger_rate` (`1 / s`), `observation_seconds`, `hyperparameters` |
-| `[population]` | `metadata`, `key`, `schema_version = 3`, `conventions` (celestial coordinates and polarization basis) |
+| `[population]` | `metadata`, `key`, `schema_version = 5`, `conventions` (celestial coordinates and polarization basis) |
 | `[waveforms]` | `metadata`, `key`, `conventions` (frame, polarization angle, Fourier convention, units, source ordering) |
 | `[background]` | `metadata` (the detector pairs per network), `key`, `schema_version = 4`, native projection `conventions`, `normalization`, `units` |
-| `[execution]` | `chunk_size`, `source_chunk_size`; recorded but never hashed |
+| `[execution]` | `chunk_size`; recorded but never hashed |
 
 A stage table means the stage is configured. A product file means it is
 complete. Products are written to a temporary file and renamed into place, so
@@ -174,11 +175,11 @@ population key and the waveform metadata. The background key hashes the
 waveform key, the networks it covers (their members, and the geometry and
 `psd_reference` of the detectors they use, not the labels), the normalization
 version, native projection conventions (including fixed `gmst=0`) and schema
-version 4. Population schema version 3 hashes the celestial coordinate and
-gwmock/LAL polarization conventions. These population changes also re-key
+version 4. Population schema version 5 samples extrinsics in the joint model and hashes the
+celestial coordinate and gwmock/LAL polarization conventions. These population changes also re-key
 waveforms and downstream backgrounds.
 
-Population schemas before 3 and background schemas before 4 are rejected with
+Population schemas before 5 and background schemas before 4 are rejected with
 a regeneration message before hash validation. Regenerate affected realizations
 in new output directories; existing files are neither converted nor deleted.
 In-memory populations must also supply the new coordinate columns. Older
