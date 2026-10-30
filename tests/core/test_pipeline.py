@@ -388,11 +388,11 @@ def test_projection_and_coordinate_conventions_are_hashed(
     from astrogwb.simulators import background, population
 
     metadata = _population()
-    old_population_key = metadata.key()
+    old_population_key = population.population_key(metadata, [0, 0])
     monkeypatch.setitem(
         population.COORDINATE_CONVENTIONS, "polarization_angle", "different basis"
     )
-    assert metadata.key() != old_population_key
+    assert population.population_key(metadata, [0, 0]) != old_population_key
     old_background_key = background_key("waveforms", NETWORKS)
     monkeypatch.setitem(background.PROJECTION_CONVENTIONS, "gmst_rad", 1.0)
     assert background_key("waveforms", NETWORKS) != old_background_key

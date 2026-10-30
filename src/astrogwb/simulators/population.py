@@ -27,8 +27,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from astrogwb import __version__
 from astrogwb.distributions.config import DistributionConfig
 from astrogwb.populations.joint import EXTRINSIC_SITES
+from astrogwb.populations.metadata import CANONICAL
 from astrogwb.populations.metadata import PopulationMetadata as PopulationSpec
-from astrogwb.populations.metadata import widen_model_kwargs
 from astrogwb.simulators._io import atomic_h5
 from astrogwb.utils import years_to_seconds
 from astrogwb.utils.io import content_key, h5py_module, read_tree, write_tree
@@ -151,31 +151,6 @@ class PopulationMetadata(BaseModel):
 
         return model
 
-    def key(self) -> str:
-        """The content hash of this record.
-
-        Numeric construction kwargs, fixed values and prior kwargs are widened
-        to ``float``, so ``2`` and ``2.0`` name the same record. Boolean
-        construction choices retain their type.
-        """
-        return content_key(self.payload())
-
-    def payload(self) -> dict[str, object]:
-        """The canonical JSON-ready form :meth:`key` hashes, with the schema version."""
-        payload = self.model_dump(mode="json")
-        widen_model_kwargs(payload["population"])
-        payload["hyperparameters"] = {
-            name: (
-                {**value, "kwargs": {k: float(v) for k, v in value["kwargs"].items()}}
-                if isinstance(value, dict)
-                else float(value)
-            )
-            for name, value in payload["hyperparameters"].items()
-        }
-        payload["schema_version"] = SCHEMA_VERSION
-        payload["coordinates"] = COORDINATE_CONVENTIONS
-        return payload
-
 
 def population_key(metadata: PopulationMetadata, rng_key: Sequence[int]) -> str:
     """The content hash of the realization of ``metadata`` at the key data ``rng_key``.
@@ -183,7 +158,12 @@ def population_key(metadata: PopulationMetadata, rng_key: Sequence[int]) -> str:
     It is the realization's ID, known before anything is drawn.
     """
     return content_key(
-        {"metadata": metadata.payload(), "rng_key": [int(v) for v in rng_key]}
+        {
+            "metadata": metadata.model_dump(mode="json", context=CANONICAL),
+            "rng_key": [int(v) for v in rng_key],
+            "schema_version": SCHEMA_VERSION,
+            "coordinates": COORDINATE_CONVENTIONS,
+        }
     )
 
 

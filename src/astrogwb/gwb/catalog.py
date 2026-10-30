@@ -29,7 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from astrogwb import __version__
 from astrogwb.populations.evaluation import sample_sources
 from astrogwb.populations.joint import fix_extrinsic_parameters, joint_model
-from astrogwb.populations.metadata import PopulationMetadata, widen_model_kwargs
+from astrogwb.populations.metadata import CANONICAL, PopulationMetadata
 from astrogwb.utils.io import content_key
 from astrogwb.waveform.base import WaveformGenerator
 from astrogwb.waveform.metadata import WaveformMetadata
@@ -104,29 +104,10 @@ class CatalogMetadata(BaseModel):
     def key(self) -> str:
         """The content hash this catalog is cached under.
 
-        Hashes the canonical JSON of the whole record. Numeric construction
-        kwargs are widened to ``float``, so ``2`` and ``2.0`` name the same
-        catalog; boolean choices retain their type. Everything else is
-        already type-stable under strict validation.
-
-        The payload nests ``waveform`` and ``population`` under ``metadata``,
-        the shape this record had before it was flattened. A source schema version
-        distinguishes catalogs with jointly sampled extrinsics. The default
-        ``sampling="random"`` and ``reference_redshift=None`` are left out of
-        the payload.
+        Hashes the canonical JSON of the whole record, ``version`` included, so
+        a catalog is keyed by the code that drew it.
         """
-        payload = self.model_dump(mode="json")
-        if payload["sampling"] == "random":
-            del payload["sampling"]
-        if payload["reference_redshift"] is None:
-            del payload["reference_redshift"]
-        widen_model_kwargs(payload["population"])
-        payload["metadata"] = {
-            "waveform": payload.pop("waveform"),
-            "population": payload.pop("population"),
-        }
-        payload["source_schema_version"] = 1
-        return content_key(payload)
+        return content_key(self.model_dump(mode="json", context=CANONICAL))
 
 
 def catalog_stem(metadata: CatalogMetadata, seed: int | np.integer) -> str:
