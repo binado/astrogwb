@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Self
 
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
     from astrogwb.populations.registry import Population
 
-__all__ = ["ModelKwargs", "PopulationMetadata", "widen_model_kwargs"]
+__all__ = ["ModelKwargs", "PopulationMetadata"]
 
 
 #: Construction kwargs travel inside the metadata JSON, so they must be
@@ -15,18 +15,6 @@ __all__ = ["ModelKwargs", "PopulationMetadata", "widen_model_kwargs"]
 #: is what makes the round trip type-stable: an ``int`` stays an ``int``, a
 #: ``float`` stays a ``float``, and a flag stays a ``bool`` or a ``str``.
 type ModelKwargs = dict[str, float | int | bool | str]
-
-
-def widen_model_kwargs(population: dict[str, Any]) -> None:
-    """Widen numeric construction kwargs to ``float``, preserving booleans and strings.
-
-    A setting spelled ``2`` in one config and ``2.0`` in another names the
-    same draw, so both must hash alike.
-    """
-    population["model_kwargs"] = {
-        name: value if isinstance(value, bool | str) else float(value)
-        for name, value in population["model_kwargs"].items()
-    }
 
 
 class PopulationMetadata(BaseModel):

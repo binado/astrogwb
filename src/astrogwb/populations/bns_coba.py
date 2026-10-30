@@ -220,9 +220,8 @@ def bns_coba_population_fn(
             lambda_1 = numpyro.sample("lambda_1", lambda_dist)
             lambda_2 = numpyro.sample("lambda_2", lambda_dist)
 
-            # Phase- and time-aligned; inclination is a separate stochastic site.
+            # Time-aligned; inclination is a separate stochastic site.
             zeros = jnp.zeros_like(mass_1)
-            coa_phase = numpyro.deterministic("coa_phase", zeros)
             coa_time = numpyro.deterministic("coa_time", zeros)
             inclination = numpyro.sample(
                 "inclination", UniformCosineDistribution(validate_args=True)
@@ -235,7 +234,6 @@ def bns_coba_population_fn(
                 "spin_2z": spin_2z,
                 "lambda_1": lambda_1,
                 "lambda_2": lambda_2,
-                "coa_phase": coa_phase,
                 "coa_time": coa_time,
                 "inclination": inclination,
             }

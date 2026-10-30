@@ -45,7 +45,6 @@ from astrogwb.simulators.background import (
     BackgroundSimulator,
     background_pairs,
     background_table,
-    validate_background_schema,
     waveform_table,
 )
 from astrogwb.simulators.population import (
@@ -53,7 +52,6 @@ from astrogwb.simulators.population import (
     PopulationMetadata,
     PopulationSimulator,
     population_key,
-    validate_population_schema,
 )
 from astrogwb.waveform.metadata import WaveformMetadata
 
@@ -165,7 +163,6 @@ class Realization:
         ValueError
             If the sources, read or redrawn, are not the recorded realization.
         """
-        validate_population_schema(self.manifest["population"])
         path = self.directory / SOURCES_FILE
         if path.is_file():
             return PopulationArtifact.from_tables(self.manifest, path)
@@ -205,7 +202,6 @@ class Realization:
         table = self.manifest.get("background")
         if table is None:
             raise ValueError(f"{self.directory} records no background settings")
-        validate_background_schema(table)
         path = self.directory / BACKGROUND_FILE
         if path.is_file():
             return BackgroundArtifact.open(
@@ -232,9 +228,7 @@ class RealizationSimulator:
 
     Each argument is a stage's settings, ``None`` to leave the stage as
     recorded. ``keep_sources`` writes ``source_parameters.h5``; a configured
-    background is always written. ``chunk_size`` (waveforms per chunk) and
-    ``source_chunk_size`` (sources drawn per piece) change cost, never a
-    realization.
+    background is always written. ``chunk_size`` controls waveforms per chunk.
 
     The stage simulators are built for each realization that needs them.
     """
@@ -247,18 +241,16 @@ class RealizationSimulator:
         *,
         keep_sources: bool = True,
         chunk_size: int = 1024,
-        source_chunk_size: int = 8192,
     ) -> None:
         # x64 before the first key: seeds are 64-bit.
         jax.config.update("jax_enable_x64", True)
-        if chunk_size <= 0 or source_chunk_size <= 0:
+        if chunk_size <= 0:
             raise ValueError("chunk sizes must be positive")
         self._population = population
         self._waveform = waveform
         self._background = background
         self._keep_sources = keep_sources
         self._chunk_size = chunk_size
-        self._source_chunk_size = source_chunk_size
 
     def __call__(
         self, directory: str | Path, *, seed: int | None = None, index: int = 0
@@ -295,11 +287,6 @@ class RealizationSimulator:
             for stage in ("population", "waveforms", "background")
         }
         tables: dict[str, Any] = {}
-
-        if recorded["population"] is not None:
-            validate_population_schema(recorded["population"])
-        if recorded["background"] is not None:
-            validate_background_schema(recorded["background"])
 
         # Resolve every stage before running any, so a conflict touches nothing.
         rng_key = None
@@ -366,16 +353,13 @@ class RealizationSimulator:
         drawn: PopulationArtifact | None = None
         if recorded["population"] is None:
             assert self._population is not None and rng_key is not None
-            drawn = PopulationSimulator(
-                self._population, chunk_size=self._source_chunk_size
-            )(rng_key)
+            drawn = PopulationSimulator(self._population)(rng_key)
             drawn_tables = drawn.tables()
             drawn_tables["realization"] |= {"seed": seed, "index": index}
             tables |= drawn_tables
         if want_background or want_sources:
             tables["execution"] = {
                 "chunk_size": self._chunk_size,
-                "source_chunk_size": self._source_chunk_size,
             }
         if tables:
             write_realization_manifest(directory, {**manifest, **tables})
@@ -392,7 +376,6 @@ class RealizationSimulator:
                 if sources_path.is_file()
                 else PopulationSimulator(
                     realization.population_metadata,
-                    chunk_size=self._source_chunk_size,
                 )
             )
         if want_sources:
@@ -416,7 +399,6 @@ def simulate_realization(
     index: int = 0,
     keep_sources: bool = True,
     chunk_size: int = 1024,
-    source_chunk_size: int = 8192,
 ) -> Realization:
     """Run the configured stages of one realization; see :class:`RealizationSimulator`."""
     simulator = RealizationSimulator(
@@ -425,7 +407,6 @@ def simulate_realization(
         background,
         keep_sources=keep_sources,
         chunk_size=chunk_size,
-        source_chunk_size=source_chunk_size,
     )
     return simulator(directory, seed=seed, index=index)
 

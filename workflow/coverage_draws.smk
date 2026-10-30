@@ -135,7 +135,7 @@ rule simulate:
             --seed {wildcards.seed} --index {wildcards.index} \
             --waveform-metadata {input.waveform:q} \
             --background --detector-config {input.detectors:q} \
-            --no-keep-sources --chunk-size 8192 --source-chunk-size 65536 \
+            --no-keep-sources --chunk-size 8192 \
             --cpu-threads {threads} > {log:q} 2>&1
         """
 

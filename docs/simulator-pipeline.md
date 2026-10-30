@@ -33,9 +33,10 @@ hyperparameters (fixed, or drawn from their priors), a Poisson count
   `declination = arcsin(uniform(-1, 1))` (an isotropic celestial direction),
   `polarization_angle` uniform on `[0, pi)`, and `coa_phase`. Angles are radians.
 
-Event `i` is drawn from `fold_in(source_key, i)` and
-`fold_in(extrinsic_key, i)`, so `chunk_size` changes the cost and never the
-realization. Source `i` has the stable ID `i`. Counts are Poisson only; the
+All sources are drawn in one batch through `sample_sources`, with independent
+random streams for hyperparameters, count, and the joint source model.
+The joint model samples intrinsic parameters and extrinsic angles together.
+Source `i` has the stable ID `i`. Counts are Poisson only; the
 fixed-count mode was removed. A fixed-size Monte Carlo sample of a population
 is a reference catalog for importance weighting (`astrogwb.gwb.catalog`), not
 a realization.
@@ -61,7 +62,7 @@ response tensors computed from local north/east/up vectors. `Detector` owns a
 name, geometry and lazy sensitivity. Registry builders return tuples of these
 objects: `build_detectors` preserves supplied order; `build_network` sorts it.
 Projection uses the gwmock/LAL plus/cross basis and delay sign. Background
-simulation fixes `gmst=0`, recorded in hashed scientific conventions. Right
+simulation fixes `gmst=0`, recorded in the manifest's conventions. Right
 ascension and declination must be in the celestial frame compatible with the
 supplied sidereal angle; no GPS, epoch or precession conversion occurs.
 Tensors and locations are stacked outside JIT and passed into the chunk kernel.
@@ -138,10 +139,10 @@ There is one `metadata.toml`, rewritten atomically whenever a stage is added:
 | --- | --- |
 | `[layout]` | `version = 1`, `astrogwb_version` |
 | `[realization]` | `id` (the population key), `seed`, `index`, `rng_key`, `count`, `total_merger_rate` (`1 / s`), `observation_seconds`, `hyperparameters` |
-| `[population]` | `metadata`, `key`, `schema_version = 3`, `conventions` (celestial coordinates and polarization basis) |
+| `[population]` | `metadata`, `key`, `conventions` (celestial coordinates and polarization basis) |
 | `[waveforms]` | `metadata`, `key`, `conventions` (frame, polarization angle, Fourier convention, units, source ordering) |
-| `[background]` | `metadata` (the detector pairs per network), `key`, `schema_version = 4`, native projection `conventions`, `normalization`, `units` |
-| `[execution]` | `chunk_size`, `source_chunk_size`; recorded but never hashed |
+| `[background]` | `metadata` (the detector pairs per network), `key`, native projection `conventions`, `normalization`, `units` |
+| `[execution]` | `chunk_size`; recorded but never hashed |
 
 A stage table means the stage is configured. A product file means it is
 complete. Products are written to a temporary file and renamed into place, so
@@ -168,21 +169,18 @@ from the recorded metadata and `rng_key`, and the polarizations are generated
 chunk by chunk from the `[waveforms]` metadata. A directory without a manifest
 needs population settings, or raises `FileNotFoundError`.
 
-Keys are content hashes. The population key hashes its metadata, including the
-schema version, together with its RNG key. The waveform key hashes the
-population key and the waveform metadata. The background key hashes the
-waveform key, the networks it covers (their members, and the geometry and
-`psd_reference` of the detectors they use, not the labels), the normalization
-version, native projection conventions (including fixed `gmst=0`) and schema
-version 4. Population schema version 3 hashes the celestial coordinate and
-gwmock/LAL polarization conventions. These population changes also re-key
-waveforms and downstream backgrounds.
+Keys are content hashes of each record's JSON dump. The population key hashes
+its metadata, which carries the astrogwb version, together with its RNG key. The
+waveform key hashes the population key and the waveform metadata. The background
+key hashes the waveform key and the networks it covers (their members, and the
+geometry and `psd_reference` of the detectors they use, not the labels). Because
+the astrogwb version is part of the population metadata, a release that changes
+a convention re-keys the waveforms and backgrounds downstream of it. The
+conventions recorded in the manifest are not hashed.
 
-Population schemas before 3 and background schemas before 4 are rejected with
-a regeneration message before hash validation. Regenerate affected realizations
-in new output directories; existing files are neither converted nor deleted.
-In-memory populations must also supply the new coordinate columns. Older
-realization layout versions remain unsupported.
+Manifests carry no schema version. A population without the extrinsic
+coordinate columns raises a `ValueError` asking to regenerate; regenerate in a
+new output directory, as existing files are neither converted nor deleted.
 
 ## Python
 

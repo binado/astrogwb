@@ -83,12 +83,15 @@ STOCHASTIC_SITES = frozenset(
         "lambda_1",
         "lambda_2",
         "inclination",
+        "declination",
+        "right_ascension",
+        "polarization_angle",
+        "coa_phase",
     }
 )
 DETERMINISTIC_SITES = frozenset(
     {
         LUMINOSITY_DISTANCE_SITE,
-        "coa_phase",
         "coa_time",
     }
 )
@@ -99,6 +102,10 @@ def sample_values(redshift: jax.Array = SAMPLE_REDSHIFTS) -> dict[str, jax.Array
     ones = jnp.ones_like(redshift)
     return {
         REDSHIFT_SITE: redshift,
+        "declination": 0.1 * ones,
+        "right_ascension": 0.2 * ones,
+        "polarization_angle": 0.3 * ones,
+        "coa_phase": 0.4 * ones,
         "source_frame_mass_1": 1.4 * ones,
         "source_frame_mass_2": 1.3 * ones,
         "spin_1z": 0.01 * ones,
@@ -235,6 +242,22 @@ def test_time_delay_without_a_delay_floor_is_rejected() -> None:
 # --------------------------------------------------------------------------- #
 # Explicit site metadata and recomputation
 # --------------------------------------------------------------------------- #
+def test_joint_model_extrinsics_are_conditionable_sample_sites() -> None:
+    model = joint_model(*mock_population()(POPULATION_PARAMS))
+    fixed: dict[str, ArrayLike] = {
+        "declination": 0.1,
+        "right_ascension": 0.2,
+        "polarization_angle": 0.3,
+        "coa_phase": 0.4,
+    }
+    conditioned = handlers.condition(model, data=fixed)
+    trace = handlers.trace(handlers.seed(conditioned, 0)).get_trace()
+    for name, value in fixed.items():
+        assert trace[name]["type"] == "sample"
+        assert trace[name]["is_observed"]
+        assert trace[name]["value"] == value
+
+
 def test_source_call_returns_every_declared_site() -> None:
     model = joint_model(*mock_population()(POPULATION_PARAMS))
     sources = handlers.seed(model, 0)()

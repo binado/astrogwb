@@ -56,11 +56,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
-from pydantic import TypeAdapter
 
 from astrogwb.detector import pair_terms
 from astrogwb.detector.config import DetectorRegistry
-from astrogwb.detector.geometry import DetectorGeometry
 from astrogwb.detector.projection import project_polarizations_fd
 from astrogwb.simulators._chunks import iter_rows, pad_rows
 from astrogwb.simulators._io import atomic_h5
@@ -81,14 +79,11 @@ __all__ = [
     "background_pairs",
     "background_table",
     "combine_pair_spectra",
-    "scientific_payload",
     "select_networks",
     "waveform_key",
     "waveform_table",
 ]
 
-WAVEFORM_SCHEMA_VERSION = 1
-SCHEMA_VERSION = 4
 
 PROJECTION_CONVENTIONS = {
     "geometry": "WGS-84 geodetic; tilted arms; metres",
@@ -143,7 +138,6 @@ def waveform_key(metadata: WaveformMetadata, population_key: str) -> str:
         {
             "population": population_key,
             "waveform": metadata.model_dump(mode="json"),
-            "schema_version": WAVEFORM_SCHEMA_VERSION,
         }
     )
 
@@ -185,38 +179,7 @@ def select_networks(
 
 def used_detectors(registry: DetectorRegistry, names: Sequence[str]) -> tuple[str, ...]:
     """The sorted detectors that appear in the networks ``names`` of ``registry``."""
-    return tuple(
-        sorted({detector for name in names for detector in registry.networks[name]})
-    )
-
-
-#: Geometry fields left at their defaults are not hashed, so a field added with
-#: a default leaves the key of every existing detector unchanged.
-_GEOMETRY = TypeAdapter(DetectorGeometry)
-
-
-def scientific_payload(
-    registry: DetectorRegistry, names: Sequence[str]
-) -> dict[str, Any]:
-    """The scientific content of the networks ``names`` of ``registry``.
-
-    Network membership, and the geometry and PSD reference of the detectors
-    those networks use. Labels and unused detectors are left out.
-    """
-    used = used_detectors(registry, names)
-    return {
-        "projection": PROJECTION_CONVENTIONS,
-        "networks": {name: sorted(registry.networks[name]) for name in sorted(names)},
-        "detectors": {
-            name: {
-                "geometry": _GEOMETRY.dump_python(
-                    registry.detectors[name].geometry, exclude_defaults=True
-                ),
-                "psd_reference": registry.detectors[name].psd_reference,
-            }
-            for name in used
-        },
-    }
+    return tuple(sorted(registry.select(names).detectors))
 
 
 def background_key(
@@ -242,9 +205,7 @@ def background_key(
     return content_key(
         {
             "waveforms": waveform_key,
-            **scientific_payload(registry, select_networks(registry, names)),
-            "normalization_version": NORMALIZATION_VERSION,
-            "schema_version": SCHEMA_VERSION,
+            "detectors": registry.select(select_networks(registry, names)).key(),
         }
     )
 
@@ -277,7 +238,6 @@ def background_table(
             }
         },
         "key": background_key(waveform_key, registry, names),
-        "schema_version": SCHEMA_VERSION,
         "conventions": PROJECTION_CONVENTIONS,
         "normalization": _NORMALIZATION,
         "units": {
@@ -286,14 +246,6 @@ def background_table(
             "spectral_density": "1 / Hz",
         },
     }
-
-
-def validate_background_schema(table: Mapping[str, Any]) -> None:
-    """Reject old projections before checking identities or opening data."""
-    if table.get("schema_version") != SCHEMA_VERSION:
-        raise ValueError(
-            "background schema is old or unsupported; regenerate realizations (schema 4 required)"
-        )
 
 
 def background_pairs(
@@ -389,7 +341,6 @@ class BackgroundArtifact:
             If the table uses another normalization convention or predates
             the recording of pairs.
         """
-        validate_background_schema(table)
         version = table["normalization"].get("version")
         if version != NORMALIZATION_VERSION:
             raise ValueError(

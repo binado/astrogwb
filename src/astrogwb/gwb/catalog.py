@@ -24,13 +24,13 @@ from typing import Annotated, Any, Literal, Self, TypedDict
 import jax
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
 from astrogwb import __version__
-from astrogwb.populations import joint_model
 from astrogwb.populations.evaluation import sample_sources
-from astrogwb.populations.metadata import PopulationMetadata, widen_model_kwargs
-from astrogwb.utils.io import content_key
+from astrogwb.populations.joint import fix_extrinsic_parameters, joint_model
+from astrogwb.populations.metadata import PopulationMetadata
+from astrogwb.utils.io import ContentKeyed
 from astrogwb.waveform.base import WaveformGenerator
 from astrogwb.waveform.metadata import WaveformMetadata
 
@@ -48,7 +48,7 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
-class CatalogMetadata(BaseModel):
+class CatalogMetadata(ContentKeyed):
     """Everything that determines a polarization-power catalog's contents.
 
     It is both the request and the provenance: the
@@ -100,32 +100,6 @@ class CatalogMetadata(BaseModel):
                 f"got {self.num_samples}"
             )
         return self
-
-    def key(self) -> str:
-        """The content hash this catalog is cached under.
-
-        Hashes the canonical JSON of the whole record. Numeric construction
-        kwargs are widened to ``float``, so ``2`` and ``2.0`` name the same
-        catalog; boolean choices retain their type. Everything else is
-        already type-stable under strict validation.
-
-        The payload nests ``waveform`` and ``population`` under ``metadata``,
-        the shape this record had before it was flattened, so every catalog
-        already on disk keeps its key. For the same reason the default
-        ``sampling="random"`` and ``reference_redshift=None`` are left out of
-        the payload.
-        """
-        payload = self.model_dump(mode="json")
-        if payload["sampling"] == "random":
-            del payload["sampling"]
-        if payload["reference_redshift"] is None:
-            del payload["reference_redshift"]
-        widen_model_kwargs(payload["population"])
-        payload["metadata"] = {
-            "waveform": payload.pop("waveform"),
-            "population": payload.pop("population"),
-        }
-        return content_key(payload)
 
 
 def catalog_stem(metadata: CatalogMetadata, seed: int | np.integer) -> str:
@@ -211,7 +185,9 @@ def draw_catalog(
         metadata.num_samples,
         metadata.population.model_kwargs,
     )
-    model = joint_model(*metadata.population.build()(metadata.fiducials))
+    model = fix_extrinsic_parameters(
+        joint_model(*metadata.population.build()(metadata.fiducials))
+    )
     samples = sample_sources(model, key, num_samples=metadata.num_samples)
     return polarization_power_data(
         metadata.waveform.build(), samples, chunk_size=chunk_size

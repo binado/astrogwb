@@ -17,6 +17,7 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from astrogwb.config import merge_layers
+from astrogwb.utils.io import ContentKeyed
 
 from .geometry import Detector, DetectorGeometry
 from .psd import resolve_psd_path
@@ -76,7 +77,7 @@ class DetectorConfig(BaseModel):
         return Detector(name, self.geometry, self.sensitivity)
 
 
-class DetectorRegistry(BaseModel):
+class DetectorRegistry(ContentKeyed):
     """A complete resolved registry, trusted and fixed for a dataset's lifetime.
 
     Network members are kept in the order they were declared in.
@@ -115,6 +116,24 @@ class DetectorRegistry(BaseModel):
                     f"network {name!r} contains undefined detectors: {missing}"
                 )
         return self
+
+    def select(self, names: Sequence[str]) -> DetectorRegistry:
+        """The registry of the networks ``names`` and the detectors they use.
+
+        Network members are sorted and labels dropped, so what remains is the
+        scientific content: it serializes alike for any presentation of it.
+        """
+        networks = {name: tuple(sorted(self.networks[name])) for name in sorted(names)}
+        used = sorted(
+            {detector for members in networks.values() for detector in members}
+        )
+        return DetectorRegistry(
+            detectors={
+                name: self.detectors[name].model_copy(update={"label": None})
+                for name in used
+            },
+            networks=networks,
+        )
 
     def build_detectors(self, names: Sequence[str]) -> tuple[Detector, ...]:
         """Build owned detectors in the supplied order."""

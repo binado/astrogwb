@@ -48,7 +48,7 @@ draws=5` packs five draws into one SLURM job, run one after another.
 | --- | --- | --- |
 | draws per SLURM job (`group-components`) | 5 | short jobs that schedule easily and lose little on failure; JIT is a negligible share of a ~80 s draw |
 | CPUs per draw (`threads`) | 8 | XLA spreads each waveform chunk over the job's CPUs |
-| `mem_mb` | 8000 | two draws on an M4 peaked at 2.1 GB RSS (`/usr/bin/time -l`), with `chunk_size=8192` and `source_chunk_size=65_536`; headroom for per-thread buffers |
+| `mem_mb` | 8000 | two draws on an M4 peaked at 2.1 GB RSS (`/usr/bin/time -l`), with `chunk_size=8192`; headroom for per-thread buffers |
 | `runtime` | 60 min | the first cluster batch, 10 draws on 4 cores, took 50-90 min; 8 cores should bring 5 draws to ~15-30 min |
 | `jobs` | 100 | 500 draws in flight at once |
 

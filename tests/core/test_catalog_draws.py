@@ -75,22 +75,6 @@ def test_polarization_power_round_trips_through_a_file(tmp_path: Path) -> None:
     assert attrs["seed"] == 41
 
 
-def test_catalog_key_of_random_sampling_is_the_key_without_it() -> None:
-    """Existing catalogs predate the field: the default must not change keys."""
-    explicit = CatalogMetadata.model_validate(
-        {**CATALOG.model_dump(), "sampling": "random"}
-    )
-    assert explicit.key() == CATALOG.key()
-
-
-def test_catalog_key_of_default_reference_redshift_is_the_key_without_it() -> None:
-    """Existing catalogs predate the field: the default must not change keys."""
-    explicit = CatalogMetadata.model_validate(
-        {**CATALOG.model_dump(), "reference_redshift": None}
-    )
-    assert explicit.key() == CATALOG.key()
-
-
 def test_catalog_key_tells_reference_redshifts_apart() -> None:
     keys = {
         CatalogMetadata.model_validate(
