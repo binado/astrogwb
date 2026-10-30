@@ -13,9 +13,9 @@ power times the realised network response
 
 with :math:`\gamma_{ab}(\hat n, \psi, \iota; f)` the per-source
 :func:`~astrogwb.detector.overlap.overlap_reduction_function`. Its mean over an
-isotropic sky, uniform polarization and uniform :math:`\cos\iota` is approximately one at
-every frequency under the analytic spherical-Earth, level-arm approximation.
-Native WGS-84 geometry, elevation and tilts change that mean slightly. Its scatter adds to
+isotropic sky, uniform polarization and uniform :math:`\cos\iota` is one at every
+frequency: the denominator is the isotropic ORF of the same native geometry as the
+per-source response. Its scatter adds to
 the shot noise. It carries the inclination too: it replaces the quadrupolar
 factor :math:`g(\iota)` normalized to its mean, which a catalog pinned at the
 effective inclination stands in for.
@@ -27,7 +27,7 @@ moment of the power
 
 :func:`pair_response` keeps the pairs apart: the per-source ORF
 :math:`\gamma_{ab}(\hat n, \psi, \iota; f)` of every pair, unnormalized, with
-approximate isotropic mean :math:`\gamma_{ab}(f)`. It is the response of the stacked
+isotropic mean :math:`\gamma_{ab}(f)`. It is the response of the stacked
 per-pair data, whose mean is :math:`\gamma_{ab} S_h`, and does not divide by
 :math:`\gamma_{ab}`, which crosses zero.
 """
@@ -65,7 +65,7 @@ def network_response(
 ) -> jax.Array:
     r"""The network response :math:`r(\hat n, \psi, \iota; f)` to one source.
 
-    Normalized to approximately unit isotropic mean at every frequency (see the module
+    Normalized to unit isotropic mean at every frequency (see the module
     docstring). Bins where no pair has a finite weight return zero; they carry
     no signal-to-noise either.
 
@@ -121,7 +121,7 @@ def pair_response(
     :func:`~astrogwb.detector.overlap.overlap_reduction_function` of each pair
     :math:`a < b`, in the order of
     :func:`~astrogwb.detector.effective_psd.pair_terms`, stacked on the
-    second-to-last axis. Its isotropic mean approximates the analytic ORF of each pair;
+    second-to-last axis. Its isotropic mean is the isotropic ORF of each pair;
     it is not normalized by it (see the module docstring), and does not depend
     on the noise curves.
 

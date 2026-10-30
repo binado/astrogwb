@@ -25,10 +25,8 @@ by the observation time :math:`T` as
 Over an isotropic sky and uniform polarization angle
 :math:`\langle K_{ab} \rangle = I \gamma_{ab} / 5`, with :math:`I` the
 polarization power and :math:`\gamma_{ab}` the normalized isotropic overlap
-reduction function. This is approximate for native WGS-84 positions and
-tilted arms because the analytic ORF uses spherical, level-arm geometry.
-For an isotropic, unpolarized population the corresponding approximation is
-:math:`E[Y_{ab}] = \gamma_{ab} S_h`. This is convention version
+reduction function of the native geometry. For an isotropic, unpolarized
+population this gives :math:`E[Y_{ab}] = \gamma_{ab} S_h`. This is convention version
 :data:`NORMALIZATION_VERSION`, recorded in every ``[background]`` table. The sum
 is never divided by the realized count.
 
@@ -96,7 +94,7 @@ PROJECTION_CONVENTIONS = {
     "gmst_rad": 0.0,
     "projection": "(F_plus * plus + F_cross * cross) * exp(-2 pi i f delay)",
     "delay": "-dot(source_direction, location) / c",
-    "isotropic_orf": "spherical Earth, level arms; approximate normalization",
+    "isotropic_orf": "native WGS-84 geometry; exact invariant factorization",
 }
 
 #: The conventions a waveform manifest records, so a reader can check them.

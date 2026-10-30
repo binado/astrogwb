@@ -88,10 +88,10 @@ The background does not model:
 
 Averaged over isotropic sky positions and a uniform polarization angle,
 `<K_ab> = I gamma_ab / 5`. Here `I = |h+|^2 + |hx|^2` and `gamma_ab` is the
-normalized isotropic overlap reduction function. The analytic ORF retains its
-spherical-Earth, level-arm approximation, so this relationship,
+normalized isotropic overlap reduction function of the native WGS-84 geometry
+(elevations and arm tilts included), so this relationship,
 `E[Y_ab] = gamma_ab S_h`, and the unit-mean network-response normalization
-are approximate for native WGS-84 geometry, elevations and arm tilts.
+are exact.
 The factor-five pair normalization and intrinsic waveform conventions remain unchanged.
 
 Every `[background]` table records this convention as its `normalization`,

@@ -2,10 +2,10 @@
 
 The frequency-dependent overlap reduction function (ORF) is astrogwb's own
 contribution: gwmock ships only the long-wavelength, co-located limit
-(``gamma = 2 D_i:D_j``). This module keeps the validated analytic isotropic
-ORF (angle-based ``g1/g2/g3`` expansion) for resolved detector geometry,
-:func:`isotropic_overlap_reduction_function`, and the response of a pair to
-one source, :func:`overlap_reduction_function`, whose isotropic average it approximates.
+(``gamma = 2 D_i:D_j``). This module provides the analytic isotropic ORF for
+the native detector geometry, :func:`isotropic_overlap_reduction_function`, and
+the response of a pair to one source, :func:`overlap_reduction_function`, whose
+isotropic average it equals.
 Both single-source responses go through :func:`stokes_cross_power`, which
 takes any source's polarization Stokes parameters.
 """
@@ -23,17 +23,10 @@ import numpy as np
 from jax.typing import ArrayLike as JaxArrayLike
 from numpy.typing import ArrayLike, NDArray
 
-from astrogwb.constants import EARTH_MEAN_RADIUS_IN_METERS, SPEED_OF_LIGHT
+from astrogwb.constants import SPEED_OF_LIGHT
 from astrogwb.waveform.polarization_power import quadrupolar_stokes_factors
 
 from .geometry import Detector, DetectorGeometry
-
-# The analytic ORF works in kilometres: detector chord distances are
-# O(1e4) km and the bundled overlap-reduction fixtures were generated in
-# those units. Both conversions are exact in float64, so these are
-# bit-identical to the literals they replace.
-R_EARTH: float = EARTH_MEAN_RADIUS_IN_METERS / 1000.0  # km
-C_LIGHT: float = SPEED_OF_LIGHT / 1000.0  # km / s
 
 # Below this alpha the closed-form g1/g2/g3 lose ~eps/alpha^4 to cancellation
 # (their O(alpha) numerator terms cancel to O(alpha^5)), so they switch to
@@ -80,22 +73,6 @@ _G3_SERIES: tuple[float, ...] = (
 )
 
 
-def _chord_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Straight-line (chord) distance in km between two points on Earth.
-
-    All angles are in radians.
-    """
-    x1 = math.cos(lat1) * math.cos(lon1)
-    y1 = math.cos(lat1) * math.sin(lon1)
-    z1 = math.sin(lat1)
-
-    x2 = math.cos(lat2) * math.cos(lon2)
-    y2 = math.cos(lat2) * math.sin(lon2)
-    z2 = math.sin(lat2)
-
-    return R_EARTH * math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2 + (z2 - z1) ** 2)
-
-
 def _initial_course(lat1: float, lat2: float, lon1: float, lon2: float) -> float:
     """Initial great-circle bearing from point 1 to point 2 (radians)."""
     dlon = lon2 - lon1
@@ -109,15 +86,6 @@ def _initial_course(lat1: float, lat2: float, lon1: float, lon2: float) -> float
 def _final_course(lat1: float, lat2: float, lon1: float, lon2: float) -> float:
     """Final great-circle bearing arriving at point 2 (radians)."""
     return (_initial_course(lat2, lat1, lon2, lon1) + math.pi) % (2.0 * math.pi)
-
-
-def _opening_angle(az1: float, az2: float) -> float:
-    """Signed opening from y to x in gwmock's clockwise-from-North convention.
-
-    Keeping the sign accounts for reversed arm ordering in external detectors;
-    all packaged paper detectors retain their positive opening angles.
-    """
-    return ((az1 - az2 + math.pi) % (2.0 * math.pi)) - math.pi
 
 
 def _azimuth_bisector(az1: float, az2: float) -> float:
@@ -236,29 +204,61 @@ def _g3(alpha: NDArray[np.float64]) -> NDArray[np.float64]:
     return _series_or_closed_form(alpha, _G3_SERIES, _g3_closed_form)
 
 
-def _get_orf(
-    alpha: NDArray[np.float64],
-    beta: float,
-    delta: float,
-    big_delta: float,
-    ang_btw_arms_1: float,
-    ang_btw_arms_2: float,
+def _isotropic_orf_from_tensors(
+    frequencies: ArrayLike,
+    tensor_1: ArrayLike,
+    tensor_2: ArrayLike,
+    separation_m: ArrayLike,
 ) -> NDArray[np.float64]:
-    sin1 = math.sin(ang_btw_arms_1)
-    sin2 = math.sin(ang_btw_arms_2)
+    r"""Isotropic ORF for arbitrary traceless symmetric response tensors.
 
-    g1 = _g1(alpha)
-    g2 = _g2(alpha)
-    g3 = _g3(alpha)
+    The polarization sum is a quartic polynomial in the propagation direction
+    and the phase moments are derivatives of :math:`j_0`, so for traceless
+    :math:`D_a` the sky integral factors into three geometric invariants and
+    three functions of :math:`\alpha = 2 \pi f |\Delta x| / c`:
 
-    theta_1 = (math.cos(0.5 * beta) ** 4) * g1
-    theta_2 = (
-        (math.cos(0.5 * beta) ** 4) * g2 + g3 - (math.sin(0.5 * beta) ** 4) * (g2 + g1)
-    )
+    .. math::
+
+        \gamma = \rho_1 \, \mathrm{tr}(D_1 D_2)
+        + \rho_2 \, \hat d^T \{D_1, D_2\} \hat d
+        + \rho_3 \, (\hat d^T D_1 \hat d)(\hat d^T D_2 \hat d),
+
+    with :math:`\rho_1 = 2(g_1 + g_2 - g_3)`, :math:`\rho_2 = 4 g_3` and
+    :math:`\rho_3 = -8 (g_2 + g_3)`. Nothing here assumes a spherical Earth,
+    level arms or perpendicular arms.
+
+    Parameters
+    ----------
+    frequencies
+        Frequencies in Hz.
+    tensor_1, tensor_2
+        Traceless symmetric ``(3, 3)`` response tensors in the Earth-fixed frame.
+    separation_m
+        Earth-fixed separation vector between the two vertices in metres.
+
+    Returns
+    -------
+    numpy.ndarray
+        The ORF on ``frequencies``.
+    """
+    frequencies = np.asarray(frequencies, dtype=float)
+    d1 = np.asarray(tensor_1, dtype=float)
+    d2 = np.asarray(tensor_2, dtype=float)
+    separation = np.asarray(separation_m, dtype=float)
+    distance = float(np.linalg.norm(separation))
+    # Co-located detectors have alpha = 0, where rho_2 and rho_3 vanish, so the
+    # direction is arbitrary.
+    direction = separation / distance if distance > 0.0 else np.array([0.0, 0.0, 1.0])
+    alpha = 2.0 * math.pi * frequencies * distance / SPEED_OF_LIGHT
+
+    g1, g2, g3 = _g1(alpha), _g2(alpha), _g3(alpha)
+    trace = float(np.sum(d1 * d2))
+    anticommutator = float(direction @ (d1 @ d2 + d2 @ d1) @ direction)
+    aligned = float((direction @ d1 @ direction) * (direction @ d2 @ direction))
     return (
-        (math.cos(4.0 * delta) * theta_1 + math.cos(4.0 * big_delta) * theta_2)
-        * sin1
-        * sin2
+        2.0 * (g1 + g2 - g3) * trace
+        + 4.0 * g3 * anticommutator
+        - 8.0 * (g2 + g3) * aligned
     )
 
 
@@ -269,35 +269,17 @@ def isotropic_overlap_reduction_function(
 ) -> NDArray[np.float64]:
     """Frequency-dependent ORF between two detectors for an isotropic background.
 
-    A spherical-Earth, level-arm approximation to the native projection
-    average. Elevation, WGS-84 flattening and arm tilts are omitted.
+    Exact for the native geometry: WGS-84 positions, elevation and arm tilts
+    enter through the response tensors and the vertex separation (see
+    :func:`_isotropic_orf_from_tensors`).
     """
-    frequencies = np.asarray(frequencies, dtype=float)
-    det1 = detector_1.geometry
-    det2 = detector_2.geometry
-
-    d = _chord_distance(
-        det1.latitude_rad,
-        det1.longitude_rad,
-        det2.latitude_rad,
-        det2.longitude_rad,
+    first, second = detector_1.geometry, detector_2.geometry
+    return _isotropic_orf_from_tensors(
+        frequencies,
+        first.response_tensor,
+        second.response_tensor,
+        second.location - first.location,
     )
-    alpha = 2.0 * math.pi * frequencies * d / C_LIGHT
-
-    xax_1 = _bisector_from_east(det1)
-    xax_2 = _bisector_from_east(det2)
-    ang_1, ang_2 = _great_circle_offsets(det1, det2)
-
-    delta = 0.5 * ((xax_1 + ang_1) - (xax_2 + ang_2))
-    big_delta = 0.5 * ((xax_1 + ang_1) + (xax_2 + ang_2))
-
-    asin_arg = max(-1.0, min(1.0, 0.5 * d / R_EARTH))
-    beta = 2.0 * math.asin(asin_arg)
-
-    ang_btw_arms_1 = _opening_angle(det1.xarm_azimuth_rad, det1.yarm_azimuth_rad)
-    ang_btw_arms_2 = _opening_angle(det2.xarm_azimuth_rad, det2.yarm_azimuth_rad)
-
-    return _get_orf(alpha, beta, delta, big_delta, ang_btw_arms_1, ang_btw_arms_2)
 
 
 def pairwise_overlap_reduction_function(
@@ -458,9 +440,8 @@ def stokes_cross_power(
 
     Notes
     -----
-    The isotropic mean is approximately ``I * gamma / 5`` when ``gamma`` is
-    the analytic spherical-Earth, level-arm ORF. Native geometry includes
-    WGS-84 flattening, elevations and arm tilts, so equality is approximate.
+    The isotropic mean is ``I * gamma / 5`` with ``gamma`` the
+    :func:`isotropic_overlap_reduction_function` of the same native geometry.
     """
     det1, det2 = detector_1, detector_2
     coordinates = {"right_ascension": right_ascension, "declination": declination}
@@ -509,9 +490,8 @@ def overlap_reduction_function(
     celestial frames. Inputs broadcast to a source shape and the output has
     a final frequency axis.
 
-    The isotropic mean equals one for co-located, aligned, orthogonal, level
-    arms. For general sites it approximates the analytic isotropic ORF,
-    which omits WGS-84 flattening, elevation and arm tilts.
+    The isotropic mean is the :func:`isotropic_overlap_reduction_function` of
+    the pair, equal to one for co-located, aligned, orthogonal arms.
     """
     declination, right_ascension, polarization_angle, cos_inclination = (
         jnp.broadcast_arrays(

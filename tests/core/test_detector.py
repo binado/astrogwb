@@ -7,6 +7,7 @@ from collections.abc import Callable
 import numpy as np
 import pytest
 
+from astrogwb.constants import EARTH_MEAN_RADIUS_IN_METERS, SPEED_OF_LIGHT
 from astrogwb.detector import (
     Detector,
     DetectorGeometry,
@@ -18,7 +19,11 @@ from astrogwb.detector import (
     pairwise_overlap_reduction_function,
     relative_orientation,
 )
-from astrogwb.detector.overlap import C_LIGHT, R_EARTH
+from astrogwb.detector.overlap import _isotropic_orf_from_tensors
+
+# The sky-quadrature references work in kilometres.
+R_EARTH = EARTH_MEAN_RADIUS_IN_METERS / 1000.0
+C_LIGHT = SPEED_OF_LIGHT / 1000.0
 
 
 def _owned_detector(name: str, **fields: float) -> Detector:
@@ -163,8 +168,88 @@ def test_orf_matches_direct_sky_quadrature(
 
     actual = isotropic_overlap_reduction_function(freqs, first, second)
 
+    expected = _sky_quadrature_orf(freqs, first, second, native=True)
+    np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1e-11)
+
+
+@pytest.mark.parametrize(
+    ("detector_1", "detector_2", "max_frequency"),
+    [("E1", "E2", 1e4), ("H1", "L1", 2e3), ("V1", "K1", 2e3)],
+)
+def test_tensor_orf_matches_spherical_level_sky_quadrature(
+    detector_1: str, detector_2: str, max_frequency: float
+) -> None:
+    freqs = np.concatenate([[0.0], np.geomspace(0.01, max_frequency, 400)])
+    first, second = load_detector(detector_1), load_detector(detector_2)
+    position_1, tensor_1 = _position_and_tensor(first)
+    position_2, tensor_2 = _position_and_tensor(second)
+
+    actual = _isotropic_orf_from_tensors(
+        freqs, tensor_1, tensor_2, 1000.0 * (position_2 - position_1)
+    )
+
     expected = _sky_quadrature_orf(freqs, first, second)
     np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1e-12)
+
+
+@pytest.mark.parametrize(
+    ("fields_1", "fields_2"),
+    [
+        pytest.param(
+            {
+                "latitude_rad": 0.8,
+                "longitude_rad": -1.9,
+                "elevation_m": 500.0,
+                "xarm_azimuth_rad": 0.3,
+                "yarm_azimuth_rad": 1.9,
+                "xarm_tilt_rad": 0.02,
+                "yarm_tilt_rad": -0.05,
+            },
+            {
+                "latitude_rad": 0.5,
+                "longitude_rad": -1.4,
+                "elevation_m": 2000.0,
+                "xarm_azimuth_rad": 2.5,
+                "yarm_azimuth_rad": 4.0,
+                "xarm_tilt_rad": 0.1,
+                "yarm_tilt_rad": 0.03,
+            },
+            id="continental-tilted",
+        ),
+        pytest.param(
+            {
+                "latitude_rad": 0.7,
+                "longitude_rad": 0.15,
+                "elevation_m": -200.0,
+                "xarm_azimuth_rad": 1.0,
+                "yarm_azimuth_rad": 2.0,
+                "xarm_tilt_rad": 0.3,
+                "yarm_tilt_rad": 0.2,
+            },
+            {
+                "latitude_rad": 0.7,
+                "longitude_rad": 0.16,
+                "elevation_m": 300.0,
+                "xarm_azimuth_rad": 2.2,
+                "yarm_azimuth_rad": 3.1,
+                "xarm_tilt_rad": -0.1,
+                "yarm_tilt_rad": 0.4,
+            },
+            id="nearby-steeply-tilted",
+        ),
+    ],
+)
+def test_orf_matches_native_sky_quadrature_for_tilted_elevated_arms(
+    fields_1: dict[str, float], fields_2: dict[str, float]
+) -> None:
+    freqs = np.concatenate([[0.0], np.geomspace(0.01, 2e3, 300)])
+    first = _owned_detector("T1", **fields_1)
+    second = _owned_detector("T2", **fields_2)
+
+    actual = isotropic_overlap_reduction_function(freqs, first, second)
+
+    expected = _sky_quadrature_orf(freqs, first, second, native=True)
+    np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1e-11)
 
 
 def test_pairwise_overlap_shape_and_symmetry(frequencies: np.ndarray) -> None:
@@ -178,9 +263,11 @@ def test_pairwise_overlap_shape_and_symmetry(frequencies: np.ndarray) -> None:
 
 
 @pytest.mark.integration
-def test_matches_gwfast_reference(
+def test_tensor_orf_matches_gwfast_reference_for_spherical_level_arms(
     load_orf_fixture: Callable[[str], dict[str, np.ndarray]],
 ) -> None:
+    # gwfast tabulates the spherical-Earth, level-arm ORF, not the native WGS-84
+    # one, so the reference is reproduced from spherical, level inputs.
     fixture = load_orf_fixture("gwfast_orf_reference")
     freqs = fixture["frequencies"]
 
@@ -188,8 +275,10 @@ def test_matches_gwfast_reference(
         if key == "frequencies":
             continue
         det1_name, det2_name = key.split("_", maxsplit=1)
-        ours = isotropic_overlap_reduction_function(
-            freqs, load_detector(det1_name), load_detector(det2_name)
+        position_1, tensor_1 = _position_and_tensor(load_detector(det1_name))
+        position_2, tensor_2 = _position_and_tensor(load_detector(det2_name))
+        ours = _isotropic_orf_from_tensors(
+            freqs, tensor_1, tensor_2, 1000.0 * (position_2 - position_1)
         )
         np.testing.assert_allclose(ours, reference, atol=1e-4)
 
