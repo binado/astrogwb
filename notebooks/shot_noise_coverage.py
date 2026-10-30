@@ -925,7 +925,7 @@ def _(frequencies, registry, response_draws, response_seed):
         Drawn on demand: at (32768, 6, F) they are too large to hold for
         every network at once.
         """
-        detectors, _ = registry.build_network(name)
+        detectors = registry.build_network(name)
         return jnp.asarray(
             pad_pairs(
                 sample_pair_response(

@@ -260,8 +260,8 @@ def shot_noise_table(
         mean = draws[name].mean(axis=0)
         residual = (draws[name] - mean) / np.where(mean > 0, mean, 1.0)
         count = draws[name].shape[0]
-        geometry, sensitivities = registry.build_network(name)
-        noise = jnp.asarray(effective_psd(grid, geometry, sensitivities))
+        geometry = registry.build_network(name)
+        noise = jnp.asarray(effective_psd(grid, geometry))
         keep = np.asarray(
             frequency_mask(grid, fmin=minimum_frequency, fmax=maximum_frequency)
             & jnp.isfinite(noise)
@@ -325,8 +325,8 @@ def snr_per_draw(
     values: dict[str, NDArray[np.float64]] = {}
     for name, label in rows:
         spectra = jnp.asarray(draws[name])
-        geometry, sensitivities = registry.build_network(name)
-        noise = jnp.asarray(effective_psd(grid, geometry, sensitivities))
+        geometry = registry.build_network(name)
+        noise = jnp.asarray(effective_psd(grid, geometry))
         values[label] = np.stack(
             [
                 np.asarray(
@@ -448,8 +448,8 @@ def amplitude_curves(
     curves = {}
     for name, _ in rows:
         spectra = jnp.asarray(draws[name])
-        geometry, sensitivities = registry.build_network(name)
-        noise = jnp.asarray(effective_psd(grid, geometry, sensitivities))
+        geometry = registry.build_network(name)
+        noise = jnp.asarray(effective_psd(grid, geometry))
         keep = band & np.isfinite(np.asarray(noise)) & (np.asarray(noise) > 0.0)
         density = spectral_snr_squared_per_log_frequency(spectra, noise, grid, seconds)
         curves[name] = {
@@ -996,10 +996,10 @@ def minimum_redshift_scan(
     records = []
     # One network at a time: its (L, P, F) per-pair response draws are large.
     for name, label in rows:
-        geometry, sensitivities = registry.build_network(name)
-        noise = jnp.asarray(effective_psd(grid, geometry, sensitivities))
+        geometry = registry.build_network(name)
+        noise = jnp.asarray(effective_psd(grid, geometry))
         combined_keep = band & jnp.isfinite(noise) & (noise > 0.0)
-        scale = pair_bin_scale(grid, geometry, sensitivities, observation_time)
+        scale = pair_bin_scale(grid, geometry, observation_time)
         keep = band & jnp.isfinite(scale) & (scale > 0.0)
         network = LikelihoodNetwork(
             jnp.where(keep, scale, 1.0),
@@ -1012,9 +1012,7 @@ def minimum_redshift_scan(
                 )
             ),
             pair_overlap=jnp.asarray(
-                np.stack(
-                    [term.overlap for term in pair_terms(grid, geometry, sensitivities)]
-                )
+                np.stack([term.overlap for term in pair_terms(grid, geometry)])
             ),
         )
         for edge, likelihood, spectrum in zip(

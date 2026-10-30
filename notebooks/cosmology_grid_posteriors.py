@@ -682,7 +682,7 @@ def _(
     # exact.
     _uses_modes = any("modes" in v for v in problem_variants.values())
     for _name, _data in per_network.items():
-        _detectors, _sensitivities = registry.build_network(_name)
+        _detectors = registry.build_network(_name)
         _network = LikelihoodNetwork(
             jnp.asarray(_data["scale"]),
             jnp.asarray(_data["frequency_mask"]),

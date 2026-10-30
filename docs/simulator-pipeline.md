@@ -29,8 +29,9 @@ hyperparameters (fixed, or drawn from their priors), a Poisson count
 `N ~ Poisson(R T)`, and every source:
 
 - the intrinsic parameters and the inclination, from the population model;
-- the extrinsic angles: `polar_cosine` and `azimuth` (an isotropic,
-  Earth-fixed direction), `polarization` and `coa_phase`.
+- the extrinsic angles: `right_ascension` uniform on `[0, 2 pi)`,
+  `declination = arcsin(uniform(-1, 1))` (an isotropic celestial direction),
+  `polarization_angle` uniform on `[0, pi)`, and `coa_phase`. Angles are radians.
 
 Event `i` is drawn from `fold_in(source_key, i)` and
 `fold_in(extrinsic_key, i)`, so `chunk_size` changes the cost and never the
@@ -48,11 +49,22 @@ and coalescence phase), projects them onto every pair `a < b` of the union of
 the networks' detectors once, and accumulates the real cross-power
 
 ```text
-H[a,i]   = F+[a,i] h+[i] + Fx[a,i] hx[i]
-K[a,b,i] = Re(exp(i phase[a,b,i]) conj(H[a,i]) H[b,i])
+delay[a,i] = -dot(source_direction[i], location[a]) / c
+H[a,i]   = (F+[a,i] h+[i] + Fx[a,i] hx[i]) exp(-2 pi i f delay[a,i])
+K[a,b,i] = Re(conj(H[a,i]) H[b,i])
 D[a,b]   = sum_i K[a,b,i]
 Y[a,b]   = 5 D[a,b] / T
 ```
+
+`DetectorGeometry` owns WGS-84 vertex locations in metres and tilted-arm
+response tensors computed from local north/east/up vectors. `Detector` owns a
+name, geometry and lazy sensitivity. Registry builders return tuples of these
+objects: `build_detectors` preserves supplied order; `build_network` sorts it.
+Projection uses the gwmock/LAL plus/cross basis and delay sign. Background
+simulation fixes `gmst=0`, recorded in hashed scientific conventions. Right
+ascension and declination must be in the celestial frame compatible with the
+supplied sidereal angle; no GPS, epoch or precession conversion occurs.
+Tensors and locations are stacked outside JIT and passed into the chunk kernel.
 
 The detector strains are projected directly from both polarizations before
 the cross-power is formed. The observation time `T` comes from the population. The
@@ -76,8 +88,11 @@ The background does not model:
 
 Averaged over isotropic sky positions and a uniform polarization angle,
 `<K_ab> = I gamma_ab / 5`. Here `I = |h+|^2 + |hx|^2` and `gamma_ab` is the
-normalized isotropic overlap reduction function. So, for an isotropic and
-unpolarized population, `E[Y_ab] = gamma_ab S_h`.
+normalized isotropic overlap reduction function of the native WGS-84 geometry
+(elevations and arm tilts included), so this relationship,
+`E[Y_ab] = gamma_ab S_h`, and the unit-mean network-response normalization
+are exact.
+The factor-five pair normalization and intrinsic waveform conventions remain unchanged.
 
 Every `[background]` table records this convention as its `normalization`,
 version 1, and `BackgroundArtifact.open` refuses any other version.
@@ -123,9 +138,9 @@ There is one `metadata.toml`, rewritten atomically whenever a stage is added:
 | --- | --- |
 | `[layout]` | `version = 1`, `astrogwb_version` |
 | `[realization]` | `id` (the population key), `seed`, `index`, `rng_key`, `count`, `total_merger_rate` (`1 / s`), `observation_seconds`, `hyperparameters` |
-| `[population]` | `metadata`, `key` |
+| `[population]` | `metadata`, `key`, `schema_version = 3`, `conventions` (celestial coordinates and polarization basis) |
 | `[waveforms]` | `metadata`, `key`, `conventions` (frame, polarization angle, Fourier convention, units, source ordering) |
-| `[background]` | `metadata` (the `networks`, by name), `key`, `normalization`, `units` |
+| `[background]` | `metadata` (the detector pairs per network), `key`, `schema_version = 4`, native projection `conventions`, `normalization`, `units` |
 | `[execution]` | `chunk_size`, `source_chunk_size`; recorded but never hashed |
 
 A stage table means the stage is configured. A product file means it is
@@ -158,10 +173,16 @@ schema version, together with its RNG key. The waveform key hashes the
 population key and the waveform metadata. The background key hashes the
 waveform key, the networks it covers (their members, and the geometry and
 `psd_reference` of the detectors they use, not the labels), the normalization
-version and the schema version (3: per-network spectra, keyed by the registry).
-Population schema version 2 moved the extrinsic draws into the population
-stage, so no earlier spectrum cache is reused. Directories of realization
-layout version 1 are refused and are regenerated.
+version, native projection conventions (including fixed `gmst=0`) and schema
+version 4. Population schema version 3 hashes the celestial coordinate and
+gwmock/LAL polarization conventions. These population changes also re-key
+waveforms and downstream backgrounds.
+
+Population schemas before 3 and background schemas before 4 are rejected with
+a regeneration message before hash validation. Regenerate affected realizations
+in new output directories; existing files are neither converted nor deleted.
+In-memory populations must also supply the new coordinate columns. Older
+realization layout versions remain unsupported.
 
 ## Python
 

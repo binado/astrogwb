@@ -22,7 +22,6 @@ Fast by design -- no NUTS, so these are not marked ``integration``.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
 
 import jax
@@ -38,7 +37,7 @@ from astrogwb_mock_population import (
 )
 
 from astrogwb.constants import SECONDS_PER_YEAR
-from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
+from astrogwb.detector import effective_psd, gaussian_bin_scale, load_detector
 from astrogwb.frequency import frequency_mask
 from astrogwb.gwb import spectral_snr_squared
 from astrogwb.gwb.catalog import (
@@ -119,9 +118,7 @@ def test_subsampling_a_fine_catalog_matches_a_coarse_one(
         )
 
 
-def _analysis_at(
-    frequencies: jax.Array, sensitivities: Mapping[str, Any]
-) -> dict[str, Any]:
+def _analysis_at(frequencies: jax.Array) -> dict[str, Any]:
     """Derive the masked analysis inputs on one observed grid.
 
     The PSD and the mask are rebuilt on each grid rather than subsampled, so
@@ -132,7 +129,9 @@ def _analysis_at(
     the log density.
     """
     network_psd = jnp.asarray(
-        effective_psd(np.asarray(frequencies), DETECTORS, sensitivities)
+        effective_psd(
+            np.asarray(frequencies), [load_detector(name) for name in DETECTORS]
+        )
     )
     mask = frequency_mask(frequencies, fmin=F_MIN, fmax=F_MAX) & jnp.isfinite(
         network_psd
@@ -171,13 +170,9 @@ def resolutions(
     fine_frequencies = jnp.asarray(data["frequencies"])
     fine_frequencies = fine_frequencies[fine_frequencies <= F_MAX]
 
-    # Loaded once: the noise curves are the same at every resolution, and
-    # re-reading them per grid dominated the module's runtime.
-    sensitivities = load_sensitivity_map(DETECTORS)
-
     runs: dict[int, dict[str, Any]] = {}
     for factor in (1, *SUBSAMPLE_FACTORS):
-        run = _analysis_at(fine_frequencies[::factor], sensitivities)
+        run = _analysis_at(fine_frequencies[::factor])
         # One estimator per observed grid, all predicting from the same
         # sources. The injection is its own fiducial prediction, so the
         # chi^2 term vanishes at the fiducials and every log-weight is zero.

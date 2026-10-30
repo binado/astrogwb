@@ -93,17 +93,19 @@ def sample_extrinsic_by_key(
     r"""Isotropic extrinsic angles of events ``start`` to ``start + size``.
 
     Event ``i`` is drawn from ``fold_in(key, i)``, as in
-    :func:`sample_sources_by_key`: ``polar_cosine`` uniform on :math:`[-1, 1]`
-    and ``azimuth`` on :math:`[0, 2\pi)` (an isotropic, Earth-fixed direction),
-    ``polarization`` on :math:`[0, \pi)` and ``coa_phase`` on :math:`[0, 2\pi)`.
+    :func:`sample_sources_by_key`: ``declination`` as arcsin of a uniform draw on :math:`[-1, 1]`
+    and ``right_ascension`` on :math:`[0, 2\pi)` (an isotropic celestial direction),
+    ``polarization_angle`` on :math:`[0, \pi)` and ``coa_phase`` on :math:`[0, 2\pi)`.
     """
 
     def one(event_key: jax.Array) -> dict[str, jax.Array]:
         keys = jax.random.split(event_key, 4)
         return {
-            "polar_cosine": jax.random.uniform(keys[0], minval=-1.0, maxval=1.0),
-            "azimuth": jax.random.uniform(keys[1], maxval=2.0 * jnp.pi),
-            "polarization": jax.random.uniform(keys[2], maxval=jnp.pi),
+            "declination": jnp.arcsin(
+                jax.random.uniform(keys[0], minval=-1.0, maxval=1.0)
+            ),
+            "right_ascension": jax.random.uniform(keys[1], maxval=2.0 * jnp.pi),
+            "polarization_angle": jax.random.uniform(keys[2], maxval=jnp.pi),
             "coa_phase": jax.random.uniform(keys[3], maxval=2.0 * jnp.pi),
         }
 

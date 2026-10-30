@@ -1,4 +1,3 @@
-from ._types import DetectorSpec
 from .config import (
     DETECTOR_DEFAULT_PATHS,
     DetectorConfig,
@@ -14,7 +13,7 @@ from .effective_psd import (
     pair_bin_scale,
     pair_terms,
 )
-from .geometry import load_detector, resolve_detector
+from .geometry import Detector, load_detector
 from .overlap import (
     OrientationReference,
     align_detector,
@@ -33,17 +32,16 @@ from .response import (
 )
 from .sensitivity import (
     Sensitivity,
-    load_sensitivities_for_network,
     load_sensitivity,
     load_sensitivity_map,
 )
 
 __all__ = [
     "DETECTOR_DEFAULT_PATHS",
+    "Detector",
     "DetectorConfig",
     "DetectorGeometry",
     "DetectorRegistry",
-    "DetectorSpec",
     "OrientationReference",
     "PairTerms",
     "Sensitivity",
@@ -53,7 +51,6 @@ __all__ = [
     "isotropic_overlap_reduction_function",
     "load_detector",
     "load_detector_config",
-    "load_sensitivities_for_network",
     "load_sensitivity",
     "load_sensitivity_map",
     "log_frequency_noise_scale",
@@ -64,7 +61,6 @@ __all__ = [
     "pair_terms",
     "pairwise_overlap_reduction_function",
     "relative_orientation",
-    "resolve_detector",
     "resolve_psd_path",
     "sample_network_response",
     "sample_pair_response",

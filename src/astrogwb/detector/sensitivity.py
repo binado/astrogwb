@@ -19,8 +19,6 @@ from typing import Literal
 
 import numpy as np
 from gwmock_noise.spectral import interpolate_real_spectral_series, load_spectral_series
-from gwmock_signal.network import Network
-from gwmock_signal.stochastic.overlap import detector_names
 from numpy.typing import ArrayLike, NDArray
 
 from .psd import NOISE_CURVES_BASE_DIR as NOISE_CURVES_BASE_DIR  # noqa: PLC0414
@@ -93,21 +91,6 @@ def load_sensitivity_map(
     """Load a name -> :class:`Sensitivity` mapping for several detectors."""
     table = _load_sensitivity_table(path)
     return {name: _sensitivity_from_dict(table[name]) for name in names}
-
-
-def load_sensitivities_for_network(
-    network: Network | str, *, path: str | Path | None = None
-) -> Mapping[str, Sensitivity]:
-    """Load sensitivity curves keyed by each detector's public name.
-
-    ``network`` may be a gwmock network alias (see ``Network.list_names()``)
-    or a ready :class:`~gwmock_signal.network.Network`. Every detector must
-    have a row in ``sensitivity.toml``; a gwmock preset whose geometry is
-    supplied upstream therefore needs a ``path=`` table of its own.
-    """
-    if isinstance(network, str):
-        network = Network.from_name(network)
-    return load_sensitivity_map(detector_names(network.detector_names), path=path)
 
 
 def _load_sensitivity_table(path: str | Path | None) -> Mapping[str, dict]:

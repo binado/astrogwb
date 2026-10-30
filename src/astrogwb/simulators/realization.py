@@ -26,6 +26,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Self, TypedDict
 
+import jax
+import jax.numpy as jnp
 import numpy as np
 from numpy.typing import NDArray
 
@@ -43,6 +45,7 @@ from astrogwb.simulators.background import (
     BackgroundSimulator,
     background_pairs,
     background_table,
+    validate_background_schema,
     waveform_table,
 )
 from astrogwb.simulators.population import (
@@ -50,6 +53,7 @@ from astrogwb.simulators.population import (
     PopulationMetadata,
     PopulationSimulator,
     population_key,
+    validate_population_schema,
 )
 from astrogwb.waveform.metadata import WaveformMetadata
 
@@ -161,6 +165,7 @@ class Realization:
         ValueError
             If the sources, read or redrawn, are not the recorded realization.
         """
+        validate_population_schema(self.manifest["population"])
         path = self.directory / SOURCES_FILE
         if path.is_file():
             return PopulationArtifact.from_tables(self.manifest, path)
@@ -168,9 +173,6 @@ class Realization:
             raise FileNotFoundError(
                 f"{path} is missing; pass a PopulationSimulator to redraw it"
             )
-        import jax
-        import jax.numpy as jnp
-
         drawn = simulator(
             jax.random.wrap_key_data(jnp.asarray(self.rng_key, dtype=jnp.uint32))
         )
@@ -203,6 +205,7 @@ class Realization:
         table = self.manifest.get("background")
         if table is None:
             raise ValueError(f"{self.directory} records no background settings")
+        validate_background_schema(table)
         path = self.directory / BACKGROUND_FILE
         if path.is_file():
             return BackgroundArtifact.open(
@@ -246,8 +249,6 @@ class RealizationSimulator:
         chunk_size: int = 1024,
         source_chunk_size: int = 8192,
     ) -> None:
-        import jax
-
         # x64 before the first key: seeds are 64-bit.
         jax.config.update("jax_enable_x64", True)
         if chunk_size <= 0 or source_chunk_size <= 0:
@@ -278,8 +279,6 @@ class RealizationSimulator:
             upstream settings that are neither given nor recorded, or ``seed``
             is missing for a new population or given without one.
         """
-        import jax
-
         directory = Path(directory)
         if (directory / MANIFEST_FILE).is_file():
             manifest = read_realization_manifest(directory)
@@ -296,6 +295,11 @@ class RealizationSimulator:
             for stage in ("population", "waveforms", "background")
         }
         tables: dict[str, Any] = {}
+
+        if recorded["population"] is not None:
+            validate_population_schema(recorded["population"])
+        if recorded["background"] is not None:
+            validate_background_schema(recorded["background"])
 
         # Resolve every stage before running any, so a conflict touches nothing.
         rng_key = None

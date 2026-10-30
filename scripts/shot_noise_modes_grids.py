@@ -197,7 +197,7 @@ def main() -> None:
             minimum_frequency=MINIMUM_FREQUENCY,
             maximum_frequency=MAXIMUM_FREQUENCY,
         )
-        detectors, sensitivities = registry.build_network(name)
+        detectors = registry.build_network(name)
         plain = Network(jnp.asarray(data["scale"]), jnp.asarray(data["frequency_mask"]))
         responsive = plain._replace(
             response=sample_network_response(
@@ -205,7 +205,6 @@ def main() -> None:
                 args.response_draws,
                 frequencies,
                 detectors,
-                sensitivities,
             )
         )
         network = likelihood.with_shot_noise_modes(

@@ -180,15 +180,13 @@ def detector_noise(
     names = select_networks(registry, network_names)
     noise = {}
     for name in names:
-        detectors, sensitivities = registry.build_network(name)
-        psd = effective_psd(grid, detectors, sensitivities)
+        detectors = registry.build_network(name)
+        psd = effective_psd(grid, detectors)
         noise[name] = NetworkNoise(
             pair_overlap=np.stack(
-                [term.overlap for term in pair_terms(grid, detectors, sensitivities)]
+                [term.overlap for term in pair_terms(grid, detectors)]
             ),
-            pair_scale=np.asarray(
-                pair_bin_scale(grid, detectors, sensitivities, observation_time)
-            ),
+            pair_scale=np.asarray(pair_bin_scale(grid, detectors, observation_time)),
             effective_psd=np.asarray(psd),
             scale=np.asarray(
                 gaussian_bin_scale(jnp.asarray(psd), observation_time, grid)

@@ -42,14 +42,16 @@ test-paper:
 # `simulation` -- which test-core deliberately does not have, since core must
 # work without it.
 #
-# The second line is the paper half: its integration-marked tests.
+# The second line is the paper half: its integration-marked tests. Pytest
+# exits 5 if that suite has no integration tests; only that empty selection
+# is accepted in addition to success. Test failures still fail the recipe.
 test-integration:
     uv run --frozen --isolated --no-default-groups \
         --extra cli --extra simulation --extra blackjax --group test \
         pytest tests/core -m integration
     uv run --frozen --isolated --no-default-groups \
         --extra notebook --group test \
-        pytest tests/paper -m integration
+        pytest tests/paper -m integration || test "$?" -eq 5
 
 # Both fast suites.
 test: test-core test-paper

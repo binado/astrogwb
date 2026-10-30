@@ -570,7 +570,7 @@ def _(
     # (L, P, F) draws are then dropped.
     base_networks = {}
     for _name, _data in per_network.items():
-        _detectors, _ = registry.build_network(_name)
+        _detectors = registry.build_network(_name)
         _base = LikelihoodNetwork(
             jnp.asarray(_data["scale"]),
             jnp.asarray(_data["frequency_mask"]),
