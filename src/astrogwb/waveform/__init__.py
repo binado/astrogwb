@@ -11,7 +11,6 @@ from astrogwb.waveform.base import WaveformGenerator
 from astrogwb.waveform.metadata import WaveformMetadata
 from astrogwb.waveform.polarization_power import (
     polarization_power,
-    polarization_stokes,
     quadrupolar_polarizations,
     quadrupolar_stokes_factors,
 )
@@ -26,7 +25,6 @@ __all__ = [
     "inclination_factor",
     "inspiral_polarization_power",
     "polarization_power",
-    "polarization_stokes",
     "quadrupolar_polarizations",
     "quadrupolar_stokes_factors",
     "termination_frequency",

@@ -54,9 +54,8 @@ D[a,b]   = sum_i K[a,b,i]
 Y[a,b]   = 5 D[a,b] / T
 ```
 
-The product is computed through the Stokes contraction
-(`polarization_stokes`, then `stokes_cross_power`), which keeps every
-polarization term. The observation time `T` comes from the population. The
+The detector strains are projected directly from both polarizations before
+the cross-power is formed. The observation time `T` comes from the population. The
 sum is never divided by the realized count. Each network then keeps its own
 rows, `(P_n, F)`, and their combined spectrum, `(F,)` (see below):
 `artifact.spectra[name]` returns both. A network sharing detectors with

@@ -23,7 +23,7 @@ from astrogwb.detector import (
     sample_pair_response,
     stokes_cross_power,
 )
-from astrogwb.waveform import polarization_stokes
+from astrogwb.waveform import quadrupolar_stokes_factors
 
 NUM_DRAWS = 40_000
 #: Standard errors a Monte Carlo mean may sit from its expectation.
@@ -201,11 +201,10 @@ def test_pair_response_has_each_pairs_isotropic_orf_as_its_mean() -> None:
 
 def _random_stokes(key: jax.Array, num_draws: int) -> jax.Array:
     """Stokes parameters ``(4, num_draws, F)`` of random fully polarized sources."""
-    keys = jax.random.split(key, 4)
-    shape = (num_draws, FREQUENCIES.size)
-    plus = jax.random.normal(keys[0], shape) + 1j * jax.random.normal(keys[1], shape)
-    cross = jax.random.normal(keys[2], shape) + 1j * jax.random.normal(keys[3], shape)
-    return jnp.swapaxes(polarization_stokes(plus, cross), 1, 2)
+    inclination = jax.random.uniform(
+        key, (num_draws, FREQUENCIES.size), minval=-1.0, maxval=1.0
+    )
+    return quadrupolar_stokes_factors(inclination)
 
 
 @pytest.mark.parametrize(

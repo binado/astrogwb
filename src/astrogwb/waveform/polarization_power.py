@@ -25,7 +25,6 @@ from jax.typing import ArrayLike
 
 __all__ = [
     "polarization_power",
-    "polarization_stokes",
     "quadrupolar_polarizations",
     "quadrupolar_stokes_factors",
 ]
@@ -41,47 +40,13 @@ def polarization_power(plus: ArrayLike, cross: ArrayLike) -> jax.Array:
     return power.T.astype(jnp.float64)
 
 
-def polarization_stokes(plus: ArrayLike, cross: ArrayLike) -> jax.Array:
-    r"""Reduce ``(n, F)`` complex polarizations to ``(4, F, n)`` Stokes parameters.
-
-    :math:`(I, Q, U, V)` as in the module docstring, each transposed to the
-    ``(frequency, sample)`` layout of :func:`polarization_power`, whose output
-    is the :math:`I` slice.
-
-    Parameters
-    ----------
-    plus, cross:
-        :math:`\tilde h_+` and :math:`\tilde h_\times`, ``(n, F)``.
-
-    Returns
-    -------
-    jax.Array
-        ``(4, F, n)`` float64.
-    """
-    plus = jnp.asarray(plus)
-    cross = jnp.asarray(cross)
-    plus_power = jnp.abs(plus) ** 2
-    cross_power = jnp.abs(cross) ** 2
-    correlation = 2.0 * jnp.conj(plus) * cross
-    stokes = jnp.stack(
-        [
-            plus_power + cross_power,
-            plus_power - cross_power,
-            jnp.real(correlation),
-            jnp.imag(correlation),
-        ]
-    )
-    return jnp.swapaxes(stokes, 1, 2).astype(jnp.float64)
-
-
 def quadrupolar_polarizations(
     amplitude: ArrayLike, inclination: ArrayLike
 ) -> tuple[jax.Array, jax.Array]:
     r"""Polarizations ``(n, F)`` of the quadrupolar :math:`(2, 2)` mode at zero phase.
 
     :math:`h_+ = -\tfrac{1 + c^2}{2} A` and :math:`h_\times = i c A` with
-    :math:`c = \cos\iota`, whose Stokes parameters through
-    :func:`polarization_stokes` are :math:`A^2` times
+    :math:`c = \cos\iota`, whose Stokes parameters are :math:`A^2` times
     :func:`quadrupolar_stokes_factors`. The orbital phase of :math:`h_0` is set
     to zero: it cancels in every product :math:`h^*_a h_b` of one source.
 

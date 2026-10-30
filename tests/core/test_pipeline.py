@@ -27,7 +27,7 @@ from astrogwb.simulators import (
 )
 from astrogwb.simulators.background import background_key
 from astrogwb.simulators.population import EXTRINSIC_COLUMNS
-from astrogwb.waveform import WaveformMetadata, polarization_stokes
+from astrogwb.waveform import WaveformMetadata, polarization_power
 
 #: Standard errors a Monte Carlo mean may sit from its expectation.
 MAX_STANDARD_ERRORS = 5.0
@@ -75,7 +75,7 @@ def test_polarizations_reduce_to_the_generators_power(
 
     power = np.asarray(generator.generate_batch(sources))
     np.testing.assert_allclose(
-        np.asarray(polarization_stokes(plus, cross)[0]),
+        np.asarray(polarization_power(plus, cross)),
         power,
         rtol=1e-10,
         atol=1e-12 * np.abs(power).max(),

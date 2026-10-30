@@ -13,10 +13,8 @@ in the pair :math:`(a, b)` the real cross-power
 
     K_{ab,i} = \mathrm{Re}\left[e^{i\phi_{ab,i}} H_{a,i}^* H_{b,i}\right],
 
-:math:`\phi_{ab,i}` the inter-site delay phase. It is computed through the
-Stokes contraction :func:`~astrogwb.detector.stokes_cross_power` of
-:func:`~astrogwb.waveform.polarization_stokes`, which is the same product with
-every polarization term kept. Sources are summed without cross terms between
+:math:`\phi_{ab,i}` the inter-site delay phase. Detector strains are projected directly from the polarizations. Sources are
+summed without cross terms between
 them (no source interference), :math:`D_{ab} = \sum_i K_{ab,i}`, and normalized
 by the observation time :math:`T` as
 
@@ -35,7 +33,7 @@ is never divided by the realized count.
 The stage is configured by a :class:`~astrogwb.waveform.WaveformMetadata` and
 named networks, a :data:`DetectorRegistry`. Every pair of the union of their
 detectors is projected once per chunk in a single fused kernel (waveform
-evaluation plus Stokes contraction), so a pair two networks share costs one
+evaluation plus detector projection), so a pair two networks share costs one
 projection, and each network keeps its own rows, ``(P_n, F)``, with their
 :func:`combine_pair_spectra`, the optimally weighted network spectrum ``(F,)``.
 The combination weights come from the networks' noise curves, so the background
@@ -435,7 +433,10 @@ class BackgroundSimulator:
             for name in self._network_names
         }
         detectors, _ = registry.build_detectors(names)
-        self._pairs = list(combinations(detectors, 2))
+        from astrogwb.detector.overlap import _detector_frame
+
+        self._frames = tuple(_detector_frame(detector) for detector in detectors)
+        self._pairs = list(combinations(range(len(detectors)), 2))
         self._chunk_size = chunk_size
         self._pair_sums = jax.jit(self._chunk_pair_sums)
 
@@ -468,25 +469,37 @@ class BackgroundSimulator:
         """The ``(P_union, F)`` cross-power summed over one padded chunk's sources."""
         import jax.numpy as jnp
 
-        from astrogwb.detector import stokes_cross_power
-        from astrogwb.waveform.polarization_power import polarization_stokes
+        from astrogwb.detector.overlap import C_LIGHT, _polarization_tensors
 
         plus, cross = self._generator.generate_polarizations_batch(sources)
         real = (jnp.arange(plus.shape[0]) < valid)[:, None]
         plus = jnp.where(real, plus, 0.0)
         cross = jnp.where(real, cross, 0.0)
-        # (4, F, C) -> (4, C, F)
-        stokes = jnp.swapaxes(polarization_stokes(plus, cross), 1, 2)
+        direction, plus_tensor, cross_tensor = _polarization_tensors(
+            sources["polar_cosine"], sources["azimuth"], sources["polarization"]
+        )
+        strains = [
+            jnp.einsum("...ij,ij->...", plus_tensor, tensor)[:, None] * plus
+            + jnp.einsum("...ij,ij->...", cross_tensor, tensor)[:, None] * cross
+            for tensor, _ in self._frames
+        ]
         return jnp.stack(
             [
-                stokes_cross_power(
-                    frequencies,
-                    first,
-                    second,
-                    sources["polar_cosine"],
-                    sources["azimuth"],
-                    sources["polarization"],
-                    stokes,
+                jnp.real(
+                    jnp.exp(
+                        2j
+                        * jnp.pi
+                        * (
+                            direction
+                            @ jnp.asarray(
+                                self._frames[second][1] - self._frames[first][1]
+                            )
+                        )[:, None]
+                        / C_LIGHT
+                        * frequencies
+                    )
+                    * jnp.conj(strains[first])
+                    * strains[second]
                 ).sum(axis=0)
                 for first, second in self._pairs
             ]
