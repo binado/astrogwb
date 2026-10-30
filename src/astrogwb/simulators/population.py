@@ -4,11 +4,13 @@ A realization owns every stochastic property of its sources: the
 hyperparameters (fixed or drawn once), the Poisson count
 :math:`N \\sim \\mathrm{Poisson}(\\mathcal{R}\\, T)`, the intrinsic parameters
 and inclination the population model draws, and the extrinsic angles drawn
-by the joint model -- an isotropic direction (``declination``, ``right_ascension``), the
-polarization angle ``polarization_angle`` and the coalescence phase ``coa_phase``.
-The downstream stages draw nothing.
+by the joint model -- an isotropic direction (``declination``,
+``right_ascension``), the polarization angle ``polarization_angle`` and the
+coalescence phase ``coa_phase``. The downstream stages draw nothing.
 
-One key splits into independent hyperparameter, count and source streams. Sources are drawn in one batch; waveform evaluation may use chunks.
+One key splits into independent hyperparameter, count and source streams.
+Sources are drawn in one batch, so a realization depends on its count; only
+waveform evaluation works in fixed-size chunks.
 """
 
 from __future__ import annotations
@@ -35,7 +37,6 @@ if TYPE_CHECKING:
     import jax
 
 __all__ = [
-    "EXTRINSIC_COLUMNS",
     "Hyperparameter",
     "PopulationArtifact",
     "PopulationMetadata",
@@ -47,9 +48,6 @@ __all__ = [
 #: :func:`population_key`: version 5 samples extrinsics in the joint model, requiring
 #: regeneration of older artifacts.
 SCHEMA_VERSION = 5
-
-#: The extrinsic source columns required by the background projection.
-EXTRINSIC_COLUMNS = EXTRINSIC_SITES
 
 COORDINATE_CONVENTIONS = {
     "sky": "right_ascension uniform [0, 2 pi); declination arcsin(uniform(-1, 1))",
@@ -194,7 +192,7 @@ class PopulationArtifact:
     """One population realization, in memory or read from a realization directory.
 
     ``source_parameters`` holds one ``(count,)`` column per source parameter,
-    the extrinsic columns :data:`EXTRINSIC_COLUMNS` included; source ``i`` has
+    the extrinsic columns :data:`~astrogwb.populations.joint.EXTRINSIC_SITES` included; source ``i`` has
     the stable ID ``i``. ``total_merger_rate`` is the realized
     :math:`\\mathcal{R}` in events per second and ``hyperparameters`` the
     realized values. ``rng_key`` is the key's data, the realization's
@@ -209,7 +207,7 @@ class PopulationArtifact:
 
     def __post_init__(self) -> None:
         """Require the native coordinate columns for in-memory inputs too."""
-        missing = set(EXTRINSIC_COLUMNS) - self.source_parameters.keys()
+        missing = set(EXTRINSIC_SITES) - self.source_parameters.keys()
         if missing:
             raise ValueError(
                 f"population missing coordinate columns {sorted(missing)}; regenerate realizations"

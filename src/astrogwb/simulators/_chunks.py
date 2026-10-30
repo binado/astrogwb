@@ -1,4 +1,4 @@
-"""Fixed-size source chunks: the one shape every stage compiles for.
+"""Fixed-size source chunks: the one shape waveform evaluation compiles for.
 
 A Poisson count differs per realization, and every distinct array shape is a
 compile. So waveform evaluation works through its sources in pieces of one static

@@ -16,6 +16,7 @@ from astrogwb_tiny_pipeline import NETWORKS, WAVEFORM, assert_same_spectra
 from astrogwb_tiny_pipeline import population_metadata as _population
 
 from astrogwb.detector import DetectorRegistry, isotropic_overlap_reduction_function
+from astrogwb.populations.joint import EXTRINSIC_SITES
 from astrogwb.simulators import (
     BackgroundArtifact,
     BackgroundSimulator,
@@ -26,7 +27,6 @@ from astrogwb.simulators import (
     simulate_realization,
 )
 from astrogwb.simulators.background import background_key
-from astrogwb.simulators.population import EXTRINSIC_COLUMNS
 from astrogwb.waveform import WaveformMetadata, polarization_power
 
 #: Standard errors a Monte Carlo mean may sit from its expectation.
@@ -43,7 +43,7 @@ def test_population_is_reproducible(population: PopulationArtifact) -> None:
     redrawn = PopulationSimulator(_population(1e-4))(batch_keys(41, 1)[0])
 
     assert population.count > 0
-    assert set(EXTRINSIC_COLUMNS) <= set(population.source_parameters)
+    assert set(EXTRINSIC_SITES) <= set(population.source_parameters)
     assert redrawn.source_parameters.keys() == population.source_parameters.keys()
     for name, values in population.source_parameters.items():
         np.testing.assert_array_equal(redrawn.source_parameters[name], values)
@@ -326,7 +326,7 @@ def test_noise_curves_are_part_of_the_key() -> None:
 
 def test_native_coordinate_columns_and_ranges(population: PopulationArtifact) -> None:
     columns = population.source_parameters
-    assert set(EXTRINSIC_COLUMNS) == {
+    assert set(EXTRINSIC_SITES) == {
         "right_ascension",
         "declination",
         "polarization_angle",
