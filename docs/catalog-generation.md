@@ -357,10 +357,3 @@ window is narrower — `analysis.population.model_kwargs.minimum_redshift = 0.3`
 in the analysis setup — so the per-sample log density cannot be
 baked into the catalog: it depends on a truncation the run chooses, not on
 anything generation knows.
-
-`restrict_redshift(data, metadata, minimum_redshift, maximum_redshift)` narrows both halves
-together, and that is the whole reason it is one function. Dropping samples without narrowing
-the recorded model would leave the density normalized over a window the samples
-no longer span, and every importance weight would be off by that
-normalization. Draws truncated to a sub-window follow the same law as draws
-made directly from it, so only the support changes.

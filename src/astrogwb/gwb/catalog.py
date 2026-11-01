@@ -6,9 +6,7 @@ into :class:`PolarizationPowerData`, one power column per source; where the
 sources come from is the caller's. :func:`draw_catalog` is the plain catalog --
 the population a record names, drawn at its fiducials from one key -- and
 :func:`~astrogwb.gwb.importance.reference_catalog` draws at the redshift
-window's lower edge. :func:`restrict_redshift` narrows a plain catalog and its
-record together: dropping samples without narrowing the recorded density would
-leave it normalized over a window the samples no longer span.
+window's lower edge.
 
 These are fixed-size draws for importance weighting, not Poisson realizations;
 those are :mod:`astrogwb.simulators`.
@@ -41,7 +39,6 @@ __all__ = [
     "PolarizationPowerData",
     "draw_catalog",
     "polarization_power_data",
-    "restrict_redshift",
 ]
 
 logger = logging.getLogger(__name__)
@@ -161,72 +158,5 @@ def draw_catalog(
 #: excluded.
 REDSHIFT_SITE = "redshift"
 
-#: Construction kwargs a population must take to support
-#: :func:`restrict_redshift`.
+#: Construction kwargs defining a population's redshift window.
 REDSHIFT_WINDOW_KWARGS = ("minimum_redshift", "maximum_redshift")
-
-
-def restrict_redshift(
-    data: PolarizationPowerData,
-    metadata: CatalogMetadata,
-    minimum_redshift: float,
-    maximum_redshift: float,
-) -> tuple[PolarizationPowerData, CatalogMetadata]:
-    """Restrict a draw to sources inside a redshift window, narrowing the population.
-
-    Data and metadata move together: dropping samples without narrowing the
-    model would leave the density normalized over a window the samples do not
-    span. Returns a new ``(data, metadata)`` pair recording the narrowed window
-    and kept sample count.
-
-    Raises
-    ------
-    ValueError
-        If the population takes no redshift window, the window is not inside
-        the generation support, or no sample falls in it.
-    """
-    population = metadata.population
-    model_kwargs = population.model_kwargs
-    missing = [name for name in REDSHIFT_WINDOW_KWARGS if name not in model_kwargs]
-    if missing:
-        raise ValueError(
-            f"population {population.model_name!r} takes no "
-            f"{missing} construction setting(s), so its redshift window cannot "
-            "be narrowed"
-        )
-    generated_min = float(model_kwargs["minimum_redshift"])
-    generated_max = float(model_kwargs["maximum_redshift"])
-    if not generated_min <= minimum_redshift < maximum_redshift <= generated_max:
-        raise ValueError(
-            f"analysis redshift support [{minimum_redshift:.4g}, "
-            f"{maximum_redshift:.4g}] must lie within the catalog generation "
-            f"support [{generated_min:.4g}, {generated_max:.4g}]"
-        )
-
-    redshift = np.asarray(data["source_parameters"][REDSHIFT_SITE])
-    keep = np.flatnonzero(
-        (redshift >= minimum_redshift) & (redshift <= maximum_redshift)
-    )
-    if keep.size == 0:
-        raise ValueError(
-            f"catalog has no samples in the "
-            f"redshift window [{minimum_redshift:.4g}, {maximum_redshift:.4g}]"
-        )
-    restricted = PolarizationPowerData(
-        frequencies=data["frequencies"],
-        polarization_power=np.asarray(data["polarization_power"])[:, keep],
-        source_parameters={
-            name: np.asarray(values)[keep]
-            for name, values in data["source_parameters"].items()
-        },
-    )
-    narrowed = metadata.model_copy(
-        update={
-            "population": population.with_model_kwargs(
-                minimum_redshift=float(minimum_redshift),
-                maximum_redshift=float(maximum_redshift),
-            ),
-            "num_samples": int(keep.size),
-        }
-    )
-    return restricted, narrowed
