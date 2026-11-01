@@ -130,9 +130,8 @@ def test_log_prob_gradient_in_minimum_delay_is_smooth() -> None:
 def test_log_prob_is_continuous_across_the_formation_cutoff() -> None:
     """The cut-off is the integral's upper limit, not a mask on fixed nodes.
 
-    As H0 moves, the delay available before z_cut moves with it. Masking fixed
-    nodes dropped them one at a time, which showed up as isolated second
-    differences of order 1e-3 at z = 10 against a smooth background near 1e-7.
+    As H0 moves, the delay available before z_cut moves with it, so the density's
+    second differences in H0 show no isolated jumps.
     """
     delay = dist.DoublyTruncatedPowerLaw(-1.0, 0.02, 13.0)
     hubble_constants = jnp.linspace(60.0, 80.0, 2001)

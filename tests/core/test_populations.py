@@ -2,15 +2,10 @@
 
 The physics is checked against
 :func:`reference_population.reference_merger_rate_distance_and_logprob`, a
-hand-written grid-level restatement kept deliberately independent of the model
-declaration, so the model cannot drift without a failure here.
+hand-written grid-level restatement independent of the model declaration.
 
-The composition properties get as much attention as the numbers. A source
-model is executed *inside* an outer inference model, and the two boundaries
-that make that safe -- handler isolation, and conditioning the source values --
-fail silently when they are wrong:
-sites leak into the outer joint density, or a factor drops out of one side of a
-ratio. Neither produces a shape error.
+Handler isolation and conditioning are checked too: when wrong, sites leak
+into an outer joint density or a factor drops out of a ratio, silently.
 """
 
 from __future__ import annotations
@@ -338,10 +333,9 @@ def test_modified_propagation_scales_the_distance_by_the_gw_em_ratio() -> None:
 def test_modified_propagation_reduces_exactly_to_the_cosmological_model() -> None:
     """At xi_0 = 1 the modified model must agree with the plain one bit-for-bit.
 
-    Every committed run pins ``xi_0 = 1`` in its fiducials while sampling a
-    modified-propagation target, so the catalogs are drawn without ``xi_0`` and
-    reweighted with it. Anything less than exact here would put a floor under
-    the self-proposal log weights.
+    Catalogs are drawn without ``xi_0`` and reweighted with it at ``xi_0 = 1``,
+    so anything less than exact would put a floor under the self-proposal log
+    weights.
     """
     values = sample_values()
     cosmological_log_prob, cosmological_distance = evaluate(
@@ -472,7 +466,7 @@ def test_generation_is_reproducible(generating: str) -> None:
 
 
 def test_a_smaller_catalog_is_a_prefix_of_a_larger_one() -> None:
-    """The property the variable-catalog-size experiment is a series because of.
+    """Draws are prefix-stable in the sample count.
 
     ``Predictive`` allocates per-draw keys with ``jax.random.split``, whose
     prefix stability is a property of the installed JAX rather than something
@@ -488,15 +482,10 @@ def test_a_smaller_catalog_is_a_prefix_of_a_larger_one() -> None:
 def test_stored_columns_are_bit_identical_to_a_later_recomputation(
     generating: str,
 ) -> None:
-    """What makes both the exact-zero weights and the load check exact.
+    """Stored columns equal a batched recomputation bit for bit.
 
-    ``Predictive`` runs the model under ``vmap``, one draw at a time, while
-    every later evaluation runs it batched. Taking the derived columns from a
-    batched pass rather than from ``Predictive`` is what removes that
-    difference. The Gaussian model is here because its second mass is a
-    ``TruncatedNormal`` whose upper bound is the first mass: a data-dependent
-    support is where running the replay under a plate could plausibly shift a
-    bit.
+    The Gaussian model's data-dependent ``TruncatedNormal`` support is where a
+    plated replay could plausibly shift a bit.
     """
     build, params = GENERATING_POPULATIONS[generating]
     samples = draw(build(), params, jax.random.PRNGKey(7), 32)
@@ -601,8 +590,8 @@ def test_gaussian_draws_are_ordered_and_have_finite_self_density() -> None:
 def test_gaussian_mass_density_stays_finite_when_hyperparameters_move() -> None:
     """The NUTS property: moving (mean, sigma) never zeros a catalog sample.
 
-    The ordered-uniform triangle still drops out the moment a sample exits
-    the support, which is the reviewer's concern this model exists to answer.
+    The ordered-uniform triangle, by contrast, drops a sample as soon as it
+    exits the support.
     """
     values = sample_values()
     shifted = {**GAUSSIAN_PARAMS, "mass_mean": 2.0, "mass_sigma": 0.2}

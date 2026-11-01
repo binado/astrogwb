@@ -45,11 +45,7 @@ def test_check_registered_names_the_unknown_population() -> None:
 
 
 def test_check_registered_rejects_a_kwarg_the_population_does_not_take() -> None:
-    """A record is only valid if its kwargs actually build its population.
-
-    The flat kwargs mapping used to be filtered down to the shared window keys
-    before reaching the rate function, so a stale key travelled unnoticed.
-    """
+    """A record is only valid if its kwargs actually build its population."""
     record = _record(model_kwargs={**MODEL_KWARGS, "no_such_kwarg": 0.1})
     with pytest.raises(TypeError, match="no_such_kwarg"):
         record.check_registered()

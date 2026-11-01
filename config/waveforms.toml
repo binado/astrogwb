@@ -1,17 +1,9 @@
-# Named waveform settings, each a complete astrogwb.metadata.WaveformMetadata.
-# A catalog picks one by reference -- waveform = "${waveforms.default}" -- so a
-# run that draws with another approximant names a variant here rather than
-# patching the default.
+# Named waveform settings, each a complete astrogwb.waveform.WaveformMetadata.
+# A catalog picks one by reference -- waveform = "${waveforms.default}".
 #
 # The frequency grid is frequency_spacing over [minimum_frequency,
-# maximum_frequency]. "loglinear" is linear at frequency_resolution up to
-# turnover_frequency and geometric above it, with the bin width continuous at
-# the turn by default. Optional dlogf bounds the natural-log step
-# of the geometric tail independently; endpoint alignment may reduce that step
-# slightly, and spacing may jump at the turn. "linear" is uniform at
-# frequency_resolution and takes neither turnover_frequency nor dlogf.
-# Most of the signal sits at low frequency, so the loglinear grid spends its
-# bins there.
+# maximum_frequency]; see WaveformMetadata for the spacings. Most of the
+# signal sits at low frequency, so the loglinear grid spends its bins there.
 
 # The waveform every catalog draws with unless its role names another.
 [waveforms.default]

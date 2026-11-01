@@ -371,14 +371,9 @@ def test_ripple_generator_calls_its_kernel_with_the_full_grid_above_dc(
 ) -> None:
     """Ripple sees every bin above DC; the band comes from its output.
 
-    Several supported models do not evaluate pointwise in frequency, so a
-    generator that handed Ripple only the in-band bins would quietly change
-    the in-band values. Mocking the kernel is what pins that direction.
-
-    The DC bin is excluded at the input instead: Ripple evaluates it to NaN,
-    and that NaN cannot be masked out of a gradient afterwards. Dropping it
-    leaves the spacing Ripple reads off the bottom of the grid intact, which
-    is why the exclusion does not perturb the in-band values.
+    Several models read the grid's spacing and top, so slicing the input would
+    change in-band values. The DC bin, which Ripple evaluates to NaN, is dropped
+    from the input; that leaves the spacing intact.
     """
     n_samples = ripple_generator.n_samples
     assert n_samples is not None
@@ -451,10 +446,8 @@ def test_ripple_generate_batch_has_no_nan_gradient(
 ) -> None:
     """No NaN reaches reverse mode, which masking the output could not fix.
 
-    With ``f = 0`` in the input grid the DC bin evaluates to NaN, and its
-    derivative stays NaN however the forward value is masked or sliced --
-    source parameters broadcast across frequency, so their VJP sums every bin
-    and ``0 * NaN`` comes back. Excluding the bin is what makes this finite.
+    A NaN DC bin would leak into the VJP however the output is masked
+    (``0 * NaN``); excluding it from the input keeps gradients finite.
     """
     sources = _ripple_sources()
 
@@ -517,14 +510,7 @@ def test_ripple_generator_rejects_invalid_sampling_frequency(
 
 
 def test_ripple_generator_rejects_non_aligned_minimum_frequency() -> None:
-    """Misalignment is a constructor error, not something a catalog discovers.
-
-    The generator owns Ripple's grid rule, so the effective resolution follows
-    from the configuration alone. Catching this at construction is what keeps
-    a run from drawing a whole catalog before finding out its band never
-    started where it was asked to -- and is why this test no longer needs to
-    generate a waveform, so it is no longer ``integration``.
-    """
+    """Misalignment is a constructor error: the grid follows from the configuration."""
     with pytest.raises(ValueError, match="not on Ripple's frequency grid"):
         RippleGenerator(
             WaveformMetadata(
@@ -540,15 +526,11 @@ def test_ripple_generator_rejects_non_aligned_minimum_frequency() -> None:
 
 @pytest.mark.integration
 def test_ripple_generator_infers_df_from_its_own_5_smooth_grid() -> None:
-    """The regression this whole change exists for.
+    """A minimum frequency off Ripple's 5-smooth grid is rejected.
 
-    At ``sampling_frequency=1234.0, frequency_resolution=1.0`` astrogwb's old
-    power-of-two replica predicted ``n=1234, df=1.0``; Ripple's real
-    ``_next_smooth_even`` rounds to ``n=1250``, giving
-    ``delta_f=1234/1250=0.9872`` -- 1.28% off. The old code accepted
-    ``minimum_frequency=2.0`` silently and stamped the wrong df into the file;
-    this generator must instead reject it at construction, and accept only the
-    frequency that is actually on Ripple's grid.
+    At ``sampling_frequency=1234.0, frequency_resolution=1.0`` Ripple's
+    ``_next_smooth_even`` gives ``n=1250`` and ``delta_f=0.9872``, so
+    ``minimum_frequency=2.0`` is off-grid; only an on-grid frequency is accepted.
     """
     with pytest.raises(ValueError, match="not on Ripple's frequency grid"):
         RippleGenerator(
@@ -577,7 +559,7 @@ def test_ripple_generator_infers_df_from_its_own_5_smooth_grid() -> None:
 
 
 # --------------------------------------------------------------------- #
-# The grid rule astrogwb now owns
+# The grid rule
 # --------------------------------------------------------------------- #
 def _is_smooth_even(value: int) -> bool:
     """Brute-force oracle: even, and no prime factor above 5."""
@@ -625,8 +607,7 @@ def test_ripple_frequencies_are_available_before_generating(
 ) -> None:
     """No warm-up call: the grid follows from the configuration alone.
 
-    This is what lets a reduction over an empty catalog size its accumulator
-    without evaluating a waveform.
+    A reduction over an empty catalog can size its accumulator from it.
     """
     frequencies = ripple_generator.frequencies
 
@@ -678,11 +659,9 @@ def test_check_sources_rejects_negative_tidal_deformability(
 def test_generate_batch_does_not_validate_values(
     ripple_generator: RippleGenerator,
 ) -> None:
-    """The split this design rests on, pinned rather than assumed.
+    """``generate_batch`` lets through what ``check_sources`` rejects.
 
-    Value checks would need a host sync on every chunk, so ``generate_batch``
-    must let through exactly what ``check_sources`` rejects -- otherwise the
-    generator is not usable inside a traced model.
+    Value checks would need a host sync on every chunk, breaking traced use.
     """
     sources = _ripple_sources() | {"lambda_1": np.array([-1.0, 0.0])}
 
@@ -783,7 +762,7 @@ def test_unsupported_approximant_is_rejected_at_construction() -> None:
 
 
 # --------------------------------------------------------------------- #
-# Parity against gwmock-signal, the GPL backend this adapter replaces
+# Parity against gwmock-signal's GPL Ripple backend
 # --------------------------------------------------------------------- #
 def _gwmock_reference(
     approximant: str,
@@ -848,19 +827,10 @@ def _parity_sources(approximant: str) -> dict[str, np.ndarray]:
 @pytest.mark.integration
 @pytest.mark.parametrize("approximant", SUPPORTED_APPROXIMANTS)
 def test_power_matches_the_gwmock_backend(approximant: str) -> None:
-    """Families supported by both adapters, against the GPL backend this replaces.
+    """Families supported by both adapters agree with gwmock-signal's backend.
 
-    Exact on the frequency axis: the grid rule is reimplemented, so any
-    disagreement there is a bug, not rounding.
-
-    Approximate on power, with ``atol=0`` so nothing hides near ``1e-47``. The
-    residual is XLA fusion, not the dropped cutoff window -- this adapter's own
-    kernel differs from itself between an eager and a jitted call by the same
-    order, and the window is separately shown to be the identity in band.
-    ``2e-13`` was the largest deviation measured across these families (on
-    ``IMRPhenomHM``: the multi-mode models accumulate more of it than the
-    single-mode ones), so ``1e-11`` leaves about two decades of headroom while
-    still pinning agreement to eleven significant figures.
+    Exact on the frequency axis. On power, ``rtol=1e-11`` with ``atol=0``: the
+    residual is XLA fusion, at most ~2e-13 (``IMRPhenomHM``).
     """
     settings = {
         "sampling_frequency": 512.0,
@@ -894,17 +864,9 @@ def test_loglinear_power_agrees_with_a_dense_uniform_grid(
 ) -> None:
     """Handing Ripple a lin-log grid instead of the FFT grid changes no power.
 
-    Ripple reads the grid's shape in three places (the cutoff snap in
-    ``IMRPhenomD``, ``f_final`` in ``IMRPhenomXAS_NRTidalv3`` and an unused
-    ``deltaF`` in ``IMRPhenomHM``), so this checks the reading rather than
-    trusting it.
-
     The reference is the same kernel on the union of a dense 0.25 Hz lattice and
-    the lin-log points. It contains every lin-log point exactly, so nothing is
-    interpolated -- interpolation error would swamp the beating of the
-    multi-mode models -- while ``f[1] - f[0]`` is 0.25 Hz there against 1 Hz on
-    the lin-log grid, and the top of the grid is the same. Both places Ripple
-    reads are exercised, so any grid dependence would show at every point.
+    the lin-log points: no interpolation, a different ``f[1] - f[0]`` and the
+    same grid top, so any dependence on the grid shape would show.
     """
     band = {
         "approximant": approximant,
@@ -949,14 +911,7 @@ def test_loglinear_power_agrees_with_a_dense_uniform_grid(
 
 @pytest.mark.integration
 def test_dropping_the_cutoff_window_changes_nothing_in_band() -> None:
-    """The reason this adapter carries no window at all.
-
-    gwmock tapers below ``minimum_frequency`` because it inverse-transforms to
-    the time domain and a hard truncation rings across the buffer. astrogwb
-    never leaves the frequency domain, and the taper reaches exactly 1 at
-    ``minimum_frequency`` -- so on every bin astrogwb keeps, the window is the
-    identity. Asserted here rather than argued in a comment.
-    """
+    """gwmock's cutoff window is the identity on every in-band bin."""
     from gwmock_signal.waveform.backends.ripple import _cutoff_window
 
     generator = RippleGenerator(

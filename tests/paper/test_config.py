@@ -69,9 +69,7 @@ def test_detector_loader_rejects_spectrum_settings(tmp_path: Path) -> None:
 
 
 def test_deep_merge_nested_dicts_and_list_replacement() -> None:
-    # `detector_ids` is a stand-in list key, deliberately not named `networks`:
-    # that is a real config section now, and it is a *mapping*, so reusing the
-    # name here would advertise the wrong merge rule for it.
+    # A stand-in list key; `networks` is a mapping with a different merge rule.
     base = {
         "seed": 1,
         "figures": {"compare": {"var_name": "H0", "figure_dpi": 300}},
@@ -176,12 +174,7 @@ def test_waveform_generator_kwargs_select_the_analytical_inspiral() -> None:
 
 
 def test_waveform_generator_overrides_are_validated_not_trusted() -> None:
-    """Overrides go through ``WaveformMetadata``, so a bad one fails here.
-
-    Before the accessor shared a path with a catalog def, every keyword was
-    coerced with a bare ``float()`` and an override that made no sense for the
-    named approximant was passed straight through.
-    """
+    """Overrides go through ``WaveformMetadata``, so a bad one fails here."""
     generator = waveform_generator(
         REPO_ROOT, approximant="AnalyticInspiral", alpha=0.02
     )
@@ -198,10 +191,8 @@ def test_waveform_generator_overrides_are_validated_not_trusted() -> None:
 def test_a_near_miss_analytical_approximant_is_rejected(approximant: str) -> None:
     """A spelling close to the canonical one must not be read as a Ripple name.
 
-    Anything that is not ``"AnalyticInspiral"`` selects the Ripple backend, so
-    without this the failure is silent in the direction that matters: the
-    closed-form inspiral a caller asked for is quietly swapped for a waveform
-    approximant, and the error -- if any -- surfaces from inside ripple.
+    Anything other than ``"AnalyticInspiral"`` selects Ripple, so a near-miss
+    would silently swap the closed-form inspiral for a Ripple approximant.
     """
     with pytest.raises(ValidationError, match="is not a Ripple approximant"):
         waveform_generator(REPO_ROOT, approximant=approximant)

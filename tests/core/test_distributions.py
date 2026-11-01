@@ -1,12 +1,9 @@
 """Tests for the NumPyro-native population distributions.
 
 The physics is checked against
-:func:`reference_population.reference_merger_rate_distance_and_logprob`, a
-hand-written restatement of the same redshift density kept as a test oracle so
-the class-based path is compared against something other than itself. The rest
-of the module is about JAX plumbing: these classes are auto-registered as
-pytrees, and a wrong ``pytree_data_fields`` is invisible to ``ruff``, to ``ty``
-and to any test that builds the distribution *inside* a model function.
+:func:`reference_population.reference_merger_rate_distance_and_logprob`, an
+independent restatement of the redshift density. The rest checks the pytree
+registration, which no linter or in-model test would catch.
 """
 
 from __future__ import annotations
@@ -22,10 +19,8 @@ import numpyro
 import numpyro.distributions as dist
 import pytest
 
-# The mock population's fiducials and grid, shared with `test_importance.py`:
-# the two tolerance-tight agreement tests below are only licensed because both
-# implementations run on the *same* grid, so a second copy of these would let
-# them drift apart with no visible symptom.
+# The mock population's fiducials and grid: the tight agreement tests below
+# need both implementations on the same grid.
 from astrogwb_mock_population import FIDUCIALS, N_GRID, Z_MAX, Z_MIN, make_redshift_grid
 from jax.typing import ArrayLike
 from numpyro.distributions.transforms import biject_to
@@ -101,9 +96,7 @@ def test_grid_is_bit_identical_to_the_shared_redshift_grid() -> None:
 
 
 def test_log_prob_agrees_with_the_reference_model() -> None:
-    # Bit-exact, not a tolerance: `log_prob` forms `log(u) - log(Z)` in the
-    # reference's operation order precisely so a catalog that is its own
-    # proposal has exactly zero log-weight (see `test_frequency_resolution.py`).
+    # Bit-exact: `log_prob` shares the reference's operation order.
     _, _, reference_logpdf = _reference()
     np.testing.assert_array_equal(
         np.asarray(_distribution().log_prob(SAMPLE_REDSHIFTS)),
@@ -208,18 +201,13 @@ def test_sample_mean_matches_the_density_it_reports() -> None:
 
     draws = np.asarray(distribution.sample(jax.random.PRNGKey(0), (400_000,)))
 
-    # A fixed `rtol` would be unsound here: the Monte Carlo standard error alone
-    # is ~0.09% of the mean, so `rtol=2e-3` is a 2.3-sigma assertion -- a coin
-    # flip against any change to the grid, the sampler, or the fiducials. Five
-    # standard errors *of these draws* is the honest band, and it scales with
-    # the sample size instead of silently going stale.
+    # Five standard errors of these draws, not a fixed rtol.
     standard_error = float(draws.std(ddof=1)) / np.sqrt(draws.size)
     assert abs(float(draws.mean()) - expected) < 5.0 * standard_error
 
 
 def test_support_bijector_round_trips() -> None:
-    """`support` used to be `None`, which fails inside NUTS with
-    `'NoneType' object has no attribute 'is_discrete'`."""
+    """`support` maps through `biject_to`, as NUTS requires."""
     transform = biject_to(_distribution().support)
     unconstrained = jnp.array(0.37)
     constrained = transform(unconstrained)
@@ -402,9 +390,7 @@ def test_redshift_distribution_uses_supplied_source_frame_callable() -> None:
 # Gradients
 # --------------------------------------------------------------------------- #
 def test_normalized_density_is_independent_of_the_hubble_constant() -> None:
-    """`dV_c/dz` is proportional to `H0^-3`, which cancels in the normalization --
-    the fact behind the H0**-3 merger-rate scaling. Measured -9e-19: float noise,
-    not an exact zero, so this is an `atol` assertion."""
+    """`dV_c/dz` is proportional to `H0^-3`, which cancels in the normalization."""
 
     def log_prob_at(name: str, value: float) -> jax.Array:
         return _distribution(**{name: value}).log_prob(jnp.array(1.234))

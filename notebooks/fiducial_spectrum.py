@@ -97,9 +97,7 @@ def _():
     #: the figure scripts and `config/plotting.toml` all agree on.
     BASE_DIR = ROOT_DIR / FIGURES_DIR / "fiducial_spectrum"
 
-    # The whole fiducial point, from the shared [fiducials] table: the hyperparameters
-    # the draw is taken at, and the H0 the Omega_GW conversion reads. `root=`
-    # because the accessors resolve paths against the working directory.
+    # The shared [fiducials]; `root=` because accessors resolve against the cwd.
     FIDUCIALS = fiducials(root=ROOT_DIR)
 
     # Mirrors the shared [analysis] table. The frequency band is [analysis]; the
@@ -116,12 +114,9 @@ def _():
     num_samples = 16_384
     chunk_size = 1024
 
-    # Ordered legend from astrogwb.paper.plotting.DETECTOR_NETWORKS -- a network's
-    # label lives there because nothing reads it without the order it sits in --
-    # with each detector list resolved through the shared [networks] table. Order is
-    # load-bearing: detector_network_styles assigns a color by first appearance of
-    # each base network name, so reordering recolors the curves and breaks the match
-    # with the other network figures.
+    # Ordered legend from astrogwb.paper.plotting.DETECTOR_NETWORKS, detectors from
+    # the shared [networks] table. Order is load-bearing: detector_network_styles
+    # colors by first appearance, matching the other network figures.
     registry = detector_registry(root=ROOT_DIR)
     NETWORKS: tuple[Network, ...] = tuple(
         Network(name, label, registry.networks[name], registry)
@@ -171,9 +166,8 @@ def _():
         value="h_c / h_n",
         label="Plot spectrum",
     )
-    # Notebook-only: the shared [waveform] table is a catalog block, so its 1 Hz
-    # resolution and loglinear grid stay put. Finer uniform grids resolve the SNR peak at ~5-10 Hz,
-    # where 1 Hz bins leave only a handful of points per e-fold.
+    # Notebook-only finer uniform grids resolve the SNR peak at ~5-10 Hz, where
+    # the shared waveform's 1 Hz bins leave few points per e-fold.
     frequency_resolution_choice = mo.ui.dropdown(
         options={"1": 1.0, "0.5": 0.5, "0.25": 0.25, "0.125": 0.125},
         value="0.25",

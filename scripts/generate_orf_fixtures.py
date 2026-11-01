@@ -12,16 +12,13 @@ not runnable via ``uv run`` in the project environment. Run it once in the
 isolated, throwaway environment that ``uv run --script`` builds from the
 inline metadata above::
 
-    uv run --script packages/astrogwb/scripts/generate_orf_fixtures.py
+    uv run --script scripts/generate_orf_fixtures.py
 
 Saves ``tests/fixtures/gwfast_orf_reference.npz`` with arrays:
 ``frequencies``, ``H1_L1``, ``H1_V1``, ``L1_V1`` and
 ``tests/fixtures/gwfast_orf_reference_et_triangle.npz`` with
 ``frequencies``, ``sum_upper_pairs`` (50 points, 20-2048 Hz geomspace grid).
-
-Only regenerate these when intentionally updating the reference (for
-example, to bump the pinned gwfast commit); astrogwb's own tests treat
-them as a fixed external oracle, not a target to chase.
+The tests treat these as a fixed external oracle.
 """
 
 from __future__ import annotations

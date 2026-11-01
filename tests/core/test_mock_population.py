@@ -41,10 +41,8 @@ LARGE_CATALOG_SIZE = 1024
 def test_mock_fiducials_preserve_the_population_support() -> None:
     """The mass bounds the analytic comparison uses are the model's own.
 
-    The analytic spectrum below integrates a uniform component-mass prior over
-    exactly this range, so a change to the declared population that this module
-    did not follow would show up as a spurious convergence failure rather than
-    as a mismatch.
+    The analytic spectrum below integrates a uniform prior over exactly this
+    range.
     """
     assert POPULATION_PARAMS["minimum_mass"] == MOCK_MINIMUM_COMPONENT_MASS
     assert (
@@ -103,13 +101,9 @@ def test_mock_catalog_rejects_more_sources_than_the_population(
 def _source_frame_merger_rate(redshift: jax.Array, hyperparameters) -> jax.Array:
     r"""Return the absolute source-frame merger-rate density in Gpc^-3 yr^-1.
 
-    Deliberately *without* the source-to-detector time dilation.
-    :func:`analytic_spectral_density_from_mass_moments` carries that inside its
-    :math:`(1 + z)^{4/3}` factor, whereas
-    :func:`reference_merger_rate_distance_and_logprob` applies ``/(1 + z)``
-    inside its own density, :math:`p(z) \propto \psi(z)/(1+z)\,dV_c/dz`.
-    Dividing here as well would double-count it -- exactly the class of error
-    the two independent paths are being crossed to detect.
+    Without the time dilation:
+    :func:`analytic_spectral_density_from_mass_moments` carries it in its
+    :math:`(1 + z)^{4/3}` factor.
     """
     return madau_dickinson_rate(
         redshift,
@@ -221,25 +215,16 @@ def _analytic_spectral_density(frequencies: jax.Array) -> jax.Array:
 def test_catalog_omega_gw_matches_the_analytic_spectrum(mock_catalog_factory) -> None:
     r"""The same comparison, carried through into :math:`\Omega_{\rm gw}` units.
 
-    ``omega_gw_from_spectral_density`` and its inverse are the units the
-    stochastic-background literature quotes in, and nothing else in this suite
-    exercises them against a realistic spectrum.
-
-    Three things are asserted, and the second is the interesting one:
+    Three things are asserted:
 
     1. the catalog's :math:`\Omega_{\rm gw}` matches the analytic population's
        on the common support, at the tolerance
        ``test_catalog_contraction_matches_the_analytic_spectrum`` uses for
        :math:`S_h`;
-    2. the *residual is flat across frequency*. Below the smallest sampled
-       cutoff every source contributes at every bin and both spectra are
-       essentially :math:`\propto f^{-7/3}`, so the whole Monte-Carlo error
-       collapses to a single normalization offset. A frequency-dependent
-       residual there would mean the catalog and the analytic path disagree
-       about the *shape*, which no amount of resampling would fix;
-    3. the pair round-trips. :math:`4\pi^2 f^3/(3H_0^2)` and its reciprocal are
-       one multiplication each, so this holds to round-off or one of them is
-       wrong.
+    2. the residual is flat across frequency: below the smallest sampled cutoff
+       both spectra are :math:`\propto f^{-7/3}`, so the Monte Carlo error is a
+       single normalization offset;
+    3. the conversion round-trips to round-off.
     """
     data, _ = mock_catalog_factory(
         num_sources=LARGE_CATALOG_SIZE,

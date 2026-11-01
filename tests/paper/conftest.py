@@ -1,14 +1,8 @@
 """Shared pytest configuration for the paper package.
 
-Enables JAX double precision for the whole suite. Production runs always go
-through :func:`astrogwb.paper.runtime.configure_runtime`, which turns x64 on
-before any array is created, so tests that assert on numerical results are only
-meaningful at the same precision.
-
-Without this, x64 was enabled as a side effect of whichever test happened to
-call ``configure_runtime`` first, making precision depend on collection order:
-``pytest tests/paper`` passed while a single numerical test file failed on
-float32 rounding (``72.99999237`` for a grid node of ``73.0``).
+Enables JAX double precision for the whole suite, as
+:func:`astrogwb.paper.runtime.configure_runtime` does, so precision does not
+depend on test collection order.
 """
 
 from __future__ import annotations

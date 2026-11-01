@@ -1,20 +1,8 @@
 r"""A hand-written restatement of the BNS Madau-Dickinson population's physics.
 
-This used to be production code, kept as "the single source of truth for the
-density formula" and shared by the proposal and the target so the two could
-never drift. That job now belongs to one NumPyro model declaration, evaluated
-by both sides -- so keeping the formula in the library would be the very
-duplication the consolidation removed.
-
-It survives *here*, as a test oracle, because that is what it was always
-actually worth: an independent restatement the class-based path is checked
-against. An expected value produced by the code under test proves nothing.
-
-Written to match ``InterpolatedDistribution.log_prob``'s operation order
-deliberately -- one ``log`` of the ratio rather than a difference of two logs.
-That is what lets the comparison be bit-exact instead of merely close, and the
-same order is what keeps a catalog that is its own proposal at exactly zero log
-weight.
+An independent test oracle for the library's redshift density. It matches
+``InterpolatedDistribution.log_prob``'s operation order (one ``log`` of the
+ratio), so the comparison is bit-exact.
 """
 
 from __future__ import annotations
