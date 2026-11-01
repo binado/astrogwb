@@ -1,16 +1,7 @@
 """Cosmology helpers for the source-population models.
 
-These functions are pure and JAX-traceable: they accept anything JAX accepts
-(:data:`jax.typing.ArrayLike` -- Python scalars, NumPy arrays, JAX arrays,
-concrete or traced) and always return :class:`jax.Array`, so the same code runs
-at catalog-build time and inside the jitted NUTS model.
-
-The grid-based helpers are traceable because they evaluate on the exact
-``z_grid`` array they are given: no static Python scalars (``max_redshift`` /
-``n_grid``) need to be extracted from traced values inside the jitted NUTS
-model. A population model binds its window and grid size as construction
-settings and rebuilds the grid from them; see
-:mod:`astrogwb.populations.bns_madau_dickinson`.
+Pure and JAX-traceable. The grid helpers evaluate on the exact grid they are
+given, so no static scalar is extracted from a traced value.
 """
 
 from __future__ import annotations
@@ -105,10 +96,7 @@ def distance_and_volume_grid(
 ) -> tuple[jax.Array, jax.Array]:
     r"""Luminosity distance and differential comoving volume on a redshift grid.
 
-    Evaluates both quantities on the exact ``redshift`` grid.
-    Currently only supports a flat LCDM cosmology.
-
-    The grid must be sorted ascending and nonnegative.
+    Flat LCDM. The grid must be sorted ascending and nonnegative.
 
     Parameters
     ----------
@@ -128,15 +116,10 @@ def distance_and_volume_grid(
         ``(luminosity_distance, differential_comoving_volume)`` on the grid,
         with the final axis corresponding to ``n_grid`` and any leading axes
         determined by broadcasting. The differential comoving volume is
-        integrated over the full sky to give a value in ``Mpc^3``.
+        all-sky, in ``Mpc^3``.
 
-    The redshift integral is evaluated with a fixed
-    :data:`GAUSS_LEGENDRE_ORDER`-point Gauss-Legendre rule within each grid
-    interval, via :func:`astrogwb.utils.gauss_legendre_nodes_weights`. The order
-    is a module-level Python constant, so no static scalars are extracted from
-    traced values. For the smooth flat-LCDM integrand :math:`1/E(z)` this
-    reaches near machine precision while keeping the computation a single
-    cumulative pass over the grid.
+    Each grid interval is integrated with a
+    :data:`GAUSS_LEGENDRE_ORDER`-point Gauss-Legendre rule.
     """
     redshift = jnp.asarray(redshift)
     omega_m = jnp.asarray(omega_m)
@@ -281,9 +264,8 @@ def redshift_at_lookback_time(
         A = \operatorname{arsinh}\sqrt{\Omega_\Lambda/\Omega_m}
             - \frac{3\sqrt{\Omega_\Lambda}}{2}\,\frac{t}{t_H}.
 
-    Returns ``inf`` at and beyond the age of the universe ($A \le 0$). The
-    masking is gradient-safe: the out-of-range entries never feed a ``nan``
-    into the backward pass.
+    Returns ``inf`` at and beyond the age of the universe ($A \le 0$), with
+    gradient-safe masking.
     """
     sqrt_omega_lambda, ratio = _lambda_matter_ratio(omega_m)
     angle = jnp.arcsinh(ratio) - 1.5 * sqrt_omega_lambda * jnp.asarray(

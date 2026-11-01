@@ -7,16 +7,11 @@ returns a :data:`~astrogwb.populations._types.Population`, a callable
 normalizations of the same law by construction. ``source_model()`` declares the
 intrinsic sample sites and knows nothing about redshift;
 :func:`~astrogwb.populations.joint.joint_model` composes both halves into the
-model a catalog is drawn from. Evaluating or sampling that is the job of
-:func:`astrogwb.populations.evaluation.evaluate_sources` and
-:func:`astrogwb.populations.evaluation.sample_sources`.
+model a catalog is drawn from.
 
-The factory's own signature is the kwargs schema: a construction key no
-population takes raises ``TypeError`` here rather than being filtered away.
-
-Which hyperparameters a population needs, which of them factor out of the
-spectrum, and whether it is a physical population or a proposal density are
-contracts documented on the factory, not checked here.
+The factory's signature is the kwargs schema: an unknown construction key
+raises ``TypeError``. Which hyperparameters a population needs is documented on
+the factory, not checked here.
 """
 
 from __future__ import annotations
@@ -55,10 +50,7 @@ DEFAULT_DENSITY_SITES: tuple[str, ...] = ("redshift", *INTRINSIC_DENSITY_SITES)
 def register_population[F: PopulationFactory](name: str) -> Callable[[F], F]:
     """Register a population factory under ``name``, returning it unchanged.
 
-    Physical and proposal populations share this one registry -- a proposal is
-    just the population a catalog happened to be drawn from. The registered
-    factory takes construction kwargs by keyword and returns a
-    :data:`Population`; :func:`build_population` calls it.
+    Physical and proposal populations share this one registry.
     """
 
     def decorate(fn: F) -> F:
@@ -73,19 +65,12 @@ def register_population[F: PopulationFactory](name: str) -> Callable[[F], F]:
 def build_population(name: str, **kwargs: float | bool | str) -> Population:
     """Build a registered population from its construction kwargs.
 
-    ``kwargs`` is the flat construction mapping a catalog persists, passed
-    whole: the redshift window and grid every population takes, plus whatever
-    else that one takes. An unknown name raises ``KeyError`` listing the
-    registered populations; a kwarg the named population does not take
-    raises ``TypeError`` naming the population and the kwargs it accepts.
+    ``kwargs`` is the flat construction mapping a catalog persists. An unknown
+    name raises ``KeyError`` listing the registered populations; a kwarg the
+    population does not take raises ``TypeError`` listing the ones it accepts.
 
-    The kwargs are bound against the factory's signature before it is
-    called, so a mismatch is reported against the *population* rather than
-    surfacing as a ``TypeError`` about a private factory function.
-
-    The returned callable hashes **by identity**. Build the population once per
-    run and reuse it: closing a jit-compiled function over a freshly built, equal
-    callable forces a recompile.
+    The returned callable hashes by identity: build it once per run, or a
+    jitted function closing over it recompiles.
     """
     try:
         factory = _REGISTRY[name]

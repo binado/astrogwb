@@ -134,10 +134,7 @@ include = [
 extend-select = ["TID"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
-# The one-way dependency the two-package split used to enforce structurally.
-# The `paper` extra keeps core installable without the application's
-# dependencies; this catches the other case -- a pure-stdlib helper drifting
-# from astrogwb.paper into core, which no packaging check would ever see.
+# Core must not import the paper application; no packaging check would catch it.
 "astrogwb.paper".msg = "core must not import the paper application; the dependency runs one way (astrogwb.paper -> astrogwb)"
 
 [tool.ruff.lint.per-file-ignores]

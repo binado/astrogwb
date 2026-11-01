@@ -149,10 +149,7 @@ def test_nodes_weights_follow_the_dtype_of_the_bounds() -> None:
 def test_nodes_weights_promotes_integer_bounds_instead_of_truncating() -> None:
     """Integer bounds cast to a float dtype must not collapse the rule to zeros.
 
-    This is the failure mode guarded in
-    :func:`astrogwb.cosmology.distance_and_volume_grid`: cast to an integer
-    dtype the nodes and weights all truncate to zero and the integral silently
-    evaluates to zeros, with no warning and no NaN.
+    Cast to an integer dtype, the nodes and weights would truncate to zero.
     """
     integer_grid = jnp.arange(0, 5)
     dtype = jnp.result_type(integer_grid, float)

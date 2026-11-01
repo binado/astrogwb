@@ -16,9 +16,8 @@ with :math:`P` the power at reference distance :math:`d^{\mathrm{ref}}`,
 (one when the intrinsic hyperparameters are not varied), and :math:`K` the
 closed-form :func:`phinney_kernel`: the merger rate density times
 :math:`[d^{\mathrm{ref}}/d_{GW}]^2`, in which the comoving distance and the
-redshift density's normalization cancel. Redshift has no
-Monte Carlo variance left: the :math:`1/d_L^2` tail that dominated a
-redshift-sampled proposal is integrated exactly. Inclination is fixed at
+redshift density's normalization cancel, so redshift carries no Monte Carlo
+variance. Inclination is fixed at
 :data:`EFFECTIVE_INCLINATION`, where the quadrupolar factor equals its
 isotropic mean; that is exact only for waveforms carrying the :math:`(2, 2)`
 mode alone.
@@ -34,17 +33,12 @@ power of a draw generated at the reference redshift :math:`z_{\mathrm{ref}}`
     P(f; \theta, z) = s^4 \left[\frac{d^{\mathrm{ref}}}{d_L(z)}\right]^2
         P_{\mathrm{ref}}(f s; \theta), \qquad s = \frac{1 + z}{1 + z_{\mathrm{ref}}},
 
-with :math:`d^{\mathrm{ref}} = d_L(z_{\mathrm{ref}})` at the fiducials. The window's
-lower edge is independent of :math:`z_{\mathrm{ref}}` as long as it is not below it,
-so one catalog at the smallest edge of a scan serves every larger one. The
-reference frequency grid must extend past the detector-frame merger at
-:math:`z_{\mathrm{ref}}`, since the rescaled queries :math:`f s` reach above the
-observed band.
-:func:`reference_catalog` generates one waveform per draw there, and
-:class:`~astrogwb.inference.likelihood.ImportanceGaussianLikelihood` rescales the
-weighted mean of those to the nodes in each call, interpolating it in
-:math:`\ln f`. Its node count is the likelihood's, not the catalog's, so changing
-it needs no new waveforms.
+with :math:`d^{\mathrm{ref}} = d_L(z_{\mathrm{ref}})` at the fiducials. One
+catalog serves every window whose lower edge is at or above
+:math:`z_{\mathrm{ref}}`. :func:`reference_catalog` generates one waveform per
+draw, and :class:`~astrogwb.inference.likelihood.ImportanceGaussianLikelihood`
+rescales their weighted mean to the nodes, interpolating in :math:`\ln f`; the
+node count is the likelihood's, not the catalog's.
 
 A catalog realization over an observation time :math:`T` is a Poisson sum
 :math:`\sum_i P_i / T` over the real mergers, so it scatters about the spectrum
@@ -59,23 +53,18 @@ enters squared:
         \frac{1}{N} \sum_k \omega_k(\Lambda)\, P_{\mathrm{ref}}^2(f s_j; \theta_k),
 
 with :math:`c_\iota` = :data:`INCLINATION_SECOND_MOMENT` restoring the
-inclination scatter the pinned catalog lacks. The likelihood predicts it next to
-the spectrum. Its redshift
-integrand is steeper than the mean's near :math:`z_{\min}`, so its node count
-needs its own convergence check.
+inclination scatter the pinned catalog lacks. Its redshift integrand is steeper
+than the mean's near :math:`z_{\min}`, so its node count needs its own
+convergence check.
 
-Contracts the caller is trusted to honour (nothing here checks them):
+Unchecked contracts:
 
 - The population's source model is independent of inclination, which is
-  isotropic. It is independent of redshift by construction: it never sees it.
+  isotropic.
 - The waveform is :math:`(2, 2)`-mode, aligned-spin and quasi-circular: its
   power is a function of :math:`M_d f` times :math:`M_d^2`.
 - ``density_sites`` names intrinsic sites only: redshift is integrated, never
   weighted.
-- The spectrum reads the rate, the cosmology and both distances off the
-  population's
-  :class:`~astrogwb.distributions.redshift.base.RedshiftDistribution` directly:
-  no model is run at the nodes.
 - The catalog is never narrowed with
   :func:`~astrogwb.gwb.catalog.restrict_redshift`: its
   reference redshift is the population window's lower edge.
@@ -162,8 +151,7 @@ def redshift_quadrature(
     dominated by :math:`1/d_L^2`, and :math:`d_L = \chi / a` makes
     :math:`dz / d_L^2 = da / \chi^2`: the Jacobian cancels the
     :math:`(1 + z)^2` inside :math:`d_L^2`, leaving a smooth integrand in
-    :math:`a`, and the nodes crowd towards low redshift, where that weight
-    is. The nodes are returned in increasing redshift.
+    :math:`a`. Nodes are returned in increasing redshift.
     """
     if num_nodes <= 0:
         raise ValueError("num_nodes must be positive")
@@ -288,21 +276,14 @@ def reference_catalog(
 ) -> PolarizationPowerData:
     """Every draw of ``metadata`` placed at its reference redshift: power ``(F, N)``.
 
-    The model is conditioned on :func:`reference_redshift` (the population's
-    ``minimum_redshift`` unless ``metadata`` sets one) and
-    :data:`EFFECTIVE_INCLINATION` before the draw, and the extrinsic parameters
-    are fixed at zero (:func:`~astrogwb.populations.joint.fix_extrinsic_parameters`),
-    so they consume no Sobol coordinates. When the reference redshift is below
-    the population's, the distance table is extended down to it, so the stored
-    luminosity distance is the one at the reference redshift. The intrinsic
-    parameters are drawn i.i.d., or on a scrambled Sobol net seeded by ``key`` when
-    ``metadata.sampling`` is ``"sobol"``
-    (:func:`~astrogwb.populations.evaluation.sample_sources_qmc`): the only
-    Monte Carlo left in the rescaled spectrum is this intrinsic average, and its
-    integrand is smooth and dominated by the chirp mass. ``chunk_size`` is
+    The model is conditioned on :func:`reference_redshift` and
+    :data:`EFFECTIVE_INCLINATION`, and the extrinsic parameters are fixed at
+    zero, so they consume no Sobol coordinates. The intrinsic parameters are
+    drawn i.i.d. or, with ``metadata.sampling == "sobol"``, on a scrambled
+    Sobol net. ``chunk_size`` is
     :meth:`~astrogwb.waveform.WaveformGenerator.generate_batch`'s.
     """
-    # x64 before the draw, as for a plain catalog: see draw_catalog.
+    # x64 before the draw: see draw_catalog.
     jax.config.update("jax_enable_x64", True)
     if metadata.version != __version__:
         raise ValueError(

@@ -20,12 +20,7 @@ MERGE_KEY = "extends"
 
 
 def require_toml(path: Path) -> None:
-    """Reject a config layer that is not a ``.toml`` file.
-
-    Every layer in ``config/`` is TOML. ``knf`` would merge an all-JSON layer
-    list just as happily, which is exactly why the format is pinned here: a
-    second format should arrive as one deliberate migration, not a stray file.
-    """
+    """Reject a config layer that is not a ``.toml`` file; ``knf`` would accept JSON."""
     if path.suffix.lower() != ".toml":
         raise ValueError(f"config layers are TOML; got {path.suffix!r} for {path}")
 

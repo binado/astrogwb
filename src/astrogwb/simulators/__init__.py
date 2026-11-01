@@ -19,13 +19,11 @@ blocks:
    :meth:`BackgroundArtifact.noise` derives the networks' likelihood inputs, a
    :class:`NetworkNoise` each.
 
-Nothing but the pair spectra is kept: no sources, no intermediate stages. A
-:class:`BackgroundArtifact` writes one HDF5 file carrying its config as JSON and
-the package version, and :meth:`BackgroundArtifact.open` reads the config back;
-:func:`network_spectra_ensemble` reads an ensemble of such files, one per seed
-and index, stacked per network. Only the population stage draws random numbers,
-and the noise of the background stage is a deterministic function of the
-realization's key.
+Only the pair spectra are kept. A :class:`BackgroundArtifact` writes one HDF5
+file carrying its config as JSON and the package version;
+:func:`network_spectra_ensemble` stacks an ensemble of such files per network.
+Only the population stage draws random numbers; the background-stage noise is a
+deterministic function of the realization's key.
 """
 
 from astrogwb.simulators._io import batch_keys, realization_key

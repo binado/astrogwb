@@ -39,9 +39,8 @@ __all__ = [
     "PopulationSimulator",
 ]
 
-#: One hyperparameter's declaration: the value it is fixed at, or the prior it
-#: is sampled from once per realization. Which one is decided by the type alone,
-#: so a parameter cannot be both fixed and sampled.
+#: One hyperparameter: a fixed value, or the prior it is drawn from once per
+#: realization.
 type Hyperparameter = float | DistributionConfig
 
 
@@ -55,8 +54,7 @@ class PopulationMetadata(BaseModel):
     in years and sets the Poisson mean :math:`\\mathcal{R}\\, T` and, downstream,
     the spectrum normalization.
 
-    Neither a seed nor a realization count is part of it: the key is the
-    simulator's input, and a realization depends on its own key alone.
+    The key is the simulator's input, not part of the record.
     """
 
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
@@ -97,7 +95,6 @@ class PopulationMetadata(BaseModel):
         by name, so it composes with ``Predictive``, ``handlers.condition`` and
         ``log_density``.
         """
-        # Deferred like ``DistributionConfig.build``: keeps this model light.
         import jax.numpy as jnp
         import numpyro
 
@@ -145,7 +142,7 @@ class PopulationArtifact:
     source_parameters: dict[str, NDArray[Any]]
 
     def __post_init__(self) -> None:
-        """Require the native coordinate columns for in-memory inputs too."""
+        """Require the extrinsic columns."""
         missing = set(EXTRINSIC_SITES) - self.source_parameters.keys()
         if missing:
             raise ValueError(

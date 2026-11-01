@@ -130,13 +130,9 @@ class Network(NamedTuple):
 
         with :math:`P` the catalog power at the effective inclination. The
         response carries the inclination, so it replaces
-        :data:`~astrogwb.gwb.importance.INCLINATION_SECOND_MOMENT` everywhere
-        rather than multiplying it: in the projected variance, the per-bin
-        variance of the ``"per_frequency"`` mode and the inclination nodes of
-        the compound-Poisson point set. ``None`` keeps the sky-averaged power,
-        which reaches each pair as :math:`\gamma_{ab}` times it. With pairs,
-        the covariance indices run over (pair, bin) and the factor is
-        :math:`\langle r_{ab}(f)\, r_{cd}(f') \rangle`.
+        :data:`~astrogwb.gwb.importance.INCLINATION_SECOND_MOMENT` everywhere.
+        ``None`` keeps the sky-averaged power. With pairs, the covariance
+        indices run over (pair, bin).
     modes:
         The shot-noise basis :math:`U` of the ``"modes"`` mode, ``(D, k)``:
         orthonormal over the counted bins in whitened coordinates
@@ -146,9 +142,8 @@ class Network(NamedTuple):
         The per-node blocks :math:`M_z` of the shot noise in the basis,
         ``(Z, k, k)``
         (:meth:`ImportanceGaussianLikelihood.mode_blocks`), held to skip
-        recomputing them at every point. They do not depend on the parameters
-        while the importance weights do not, that is with no ``density_sites``;
-        the caller is trusted to hold them only then. ``None`` computes them.
+        recomputing them. Valid only with no ``density_sites`` (unchecked).
+        ``None`` computes them.
     mode_covariance:
         The whitened shot-noise covariance in the basis, :math:`B`,
         ``(k, k)``, which
@@ -157,20 +152,14 @@ class Network(NamedTuple):
         ``"amplitude"`` mode.
     observed:
         The data this network recorded, shaped as ``scale``, in place of the
-        likelihood's ``observed``. A network sees each source through its own
-        response, so networks observing one catalog record different spectra;
-        stacked, each is scored against its own while the prediction is
-        shared. ``None`` uses the likelihood's.
+        likelihood's ``observed``; ``None`` uses the likelihood's.
     response_moments:
         The per-node second moments of the power under ``response``, collapsed
         over the pairs, :math:`s_z^4 W_z G W_z^T \circ \bar R`, ``(Z, F, F)``
-        (:meth:`ImportanceGaussianLikelihood.response_moments`). Held, the
-        ``"amplitude"`` mode's :math:`s^2` is one quadratic form per node at
-        every point, instead of one projection of the catalog per response
-        draw. Like ``mode_blocks`` they are exact while the importance weights
-        do not vary, that is with no ``density_sites``, and for the ``scale``
-        and ``mask`` they were formed under; the caller is trusted to hold
-        them only then. ``None`` projects every draw.
+        (:meth:`ImportanceGaussianLikelihood.response_moments`), making the
+        ``"amplitude"`` mode's :math:`s^2` one quadratic form per node. Valid
+        only with no ``density_sites`` and the ``scale`` and ``mask`` they were
+        formed under (unchecked). ``None`` projects every draw.
     pair_overlap:
         The isotropic ORF :math:`\gamma_{ab}(f_k)` of every pair, ``(P, F)``,
         in the order of :func:`~astrogwb.detector.pair_terms`; the gain from
@@ -543,36 +532,27 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
     each network gains a rank-one term from the catalog's Poisson variance
     (:mod:`astrogwb.inference.shot_noise`).
 
-    Every array is a data field, so the instance is a pytree whose catalog is a
-    traced input: one compilation serves every catalog of the same shape.
-    ``population``, ``density_sites`` and ``shot_noise`` are static and compare
-    by value. Build with :meth:`from_catalog`; attach data later, or switch
-    the shot-noise mode, with :func:`dataclasses.replace`. Call outside JAX
-    transformations only to build; every method is traceable.
+    Every array is a data field, so one compilation serves every catalog of the
+    same shape; ``population``, ``density_sites`` and ``shot_noise`` are
+    static. Build with :meth:`from_catalog` and modify with
+    :func:`dataclasses.replace`; every method is traceable.
 
     Attributes
     ----------
     power:
         Reference-catalog polarization power, ``(F_ref, N)``.
     squared_power:
-        ``power`` squared, held once so it is not formed on every evaluation;
-        ``None`` unless ``shot_noise`` is ``"amplitude"`` or ``"per_frequency"``.
+        ``power`` squared; ``None`` unless ``shot_noise`` is ``"amplitude"`` or
+        ``"per_frequency"``.
     mean_power, mean_squared_power:
-        The mean over draws of ``power`` and of ``squared_power``, ``(F_ref,)``.
-        Held only when ``density_sites`` is empty: every importance weight is
-        then one, the mean does not depend on the parameters, and it is formed
-        once here and not on every evaluation. ``mean_squared_power`` is also
-        ``None`` unless a variance is predicted. ``None`` otherwise, and the
-        weighted mean is taken at every evaluation. They are a cache of
-        ``power``: :func:`dataclasses.replace` of ``power`` must replace them
-        too.
+        Means over draws, ``(F_ref,)``, held only when ``density_sites`` is
+        empty (every weight is one); ``mean_squared_power`` also needs a
+        predicted variance. Caches of ``power``: replacing ``power`` must
+        replace them too.
     gram:
-        The Gram matrix of the catalog, :math:`\sum_i P_i P_i^T / N`,
-        ``(F_ref, F_ref)``. Held only when ``density_sites`` is empty and
-        ``shot_noise`` is ``"amplitude"`` or ``"modes"``: the second moment of the projected
-        power is then a quadratic form in it, whose cost does not grow with the
-        catalog, and it is formed once here. ``None`` otherwise, and every
-        source is projected at every evaluation. A cache of ``power`` as well.
+        The catalog Gram matrix :math:`\sum_i P_i P_i^T / N`,
+        ``(F_ref, F_ref)``, held only when ``density_sites`` is empty and
+        ``shot_noise`` is ``"amplitude"`` or ``"modes"``. A cache of ``power``.
     intrinsic, proposal_log_prob, log_reference_frequencies, query_log_frequencies,
     amplitude, redshift, redshift_weights, reference_distance:
         The arrays of :func:`~astrogwb.gwb.importance._rescaling_arrays`.
@@ -615,27 +595,19 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
     ) -> Self:
         """Bind a reference catalog to a target on the observed ``frequencies``.
 
-        The spectrum is predicted on ``frequencies``, which need not be the
-        catalog's own; redshift is integrated on ``num_redshift_nodes`` nodes
-        of :func:`~astrogwb.gwb.importance.redshift_quadrature` over the
-        catalog population's window, whose lower edge is ``minimum_redshift``
-        (the population's own by default). It must not be below the catalog's
-        :func:`~astrogwb.gwb.importance.reference_redshift`, else ``ValueError``,
-        so one catalog generated low serves every window above it.
-        ``density_sites`` names the intrinsic
-        factors the weights include; leave it empty when no intrinsic
-        hyperparameter varies, and every weight is one. Call outside JAX
-        transformations.
+        Redshift is integrated on ``num_redshift_nodes`` nodes of
+        :func:`~astrogwb.gwb.importance.redshift_quadrature` over the
+        population's window, with lower edge ``minimum_redshift`` (default the
+        population's); it must not be below the catalog's
+        :func:`~astrogwb.gwb.importance.reference_redshift`. Leave
+        ``density_sites`` empty when no intrinsic hyperparameter varies. Call
+        outside JAX transformations.
 
-        ``observed`` and ``network`` default to ``None`` for spectrum-only use;
-        :meth:`log_likelihood` and :meth:`__call__` require them, and nothing
-        checks this. ``shot_noise="amplitude"`` or ``"per_frequency"`` stores
-        the squared power and needs ``observation_time`` in years;
-        ``"fixed"`` takes :math:`s^2` from ``network.relative_variance``;
-        ``"modes"`` needs ``observation_time`` and ``network.modes``.
-
-        The caller is trusted to pass a reference catalog of ``metadata`` and a
-        waveform the contracts of :mod:`astrogwb.gwb.importance` hold for.
+        ``observed`` and ``network`` may be ``None`` for spectrum-only use
+        (unchecked). ``"amplitude"``, ``"per_frequency"`` and ``"modes"`` need
+        ``observation_time`` in years; ``"fixed"`` reads
+        ``network.relative_variance``; ``"modes"`` needs ``network.modes``. The
+        contracts of :mod:`astrogwb.gwb.importance` must hold.
         """
         power = np.asarray(data["polarization_power"], dtype=np.float64)
         needs_variance = shot_noise in ("amplitude", "per_frequency")
@@ -684,9 +656,8 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         ``squared_power`` is rescaled with ``amplitude**2`` (:math:`s_j^8`),
         integrated with :meth:`_variance_kernel` and multiplied by
         :data:`~astrogwb.gwb.importance.INCLINATION_SECOND_MOMENT` over
-        ``observation_seconds``; it does not see the network, and
-        :meth:`log_likelihood_from_prediction` swaps that factor for the
-        network's response when one is set. ``extras`` holds ``total_merger_rate``
+        ``observation_seconds``; :meth:`log_likelihood_from_prediction` swaps
+        that factor for the network's response. ``extras`` holds ``total_merger_rate``
         (observer frame, mergers per second) and ``importance_relative_ess``,
         both ``()``.
         """
@@ -755,19 +726,11 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
                 = \frac{\mathbf{c}^T \mathrm{Cov}[\mathbf{S}^{\mathrm{cat}}]\,
                   \mathbf{c}}{(\mathbf{c}^T \mathbf{S})^2},
 
-        the second cumulant of the compound-Poisson amplitude. At node
-        :math:`j` the projection is the transposed interpolation of
-        :math:`\mathbf{c}` contracted with the catalog, ``(Z, F_ref) @ (F_ref, N)``,
-        once per network. Under a ``network.response`` each draw :math:`l`
-        projects the source on :math:`\sum_{ab} c_{ab,f}\, r_{l,ab}(f)`, the
-        projector summed over the pairs under that draw, and the squares are
-        averaged over draws; this is :math:`\mathbf{c}^T \mathrm{Cov}\,
-        \mathbf{c}` of the Hadamard covariance. Since
-        :math:`c_{ab,f} = S_f\, g_{ab,f}` with :math:`g` fixed by the network,
-        held ``network.response_moments`` give it directly as
-        :math:`\mathbf{S}^T K_z \mathbf{S}` per node. Without a response the
-        inclination factor :data:`~astrogwb.gwb.importance.INCLINATION_SECOND_MOMENT`
-        multiplies, and each pair sees the source through :math:`\gamma_{ab}`.
+        the second cumulant of the compound-Poisson amplitude. Under a
+        ``network.response`` each draw projects the source on the
+        pair-summed projector and the squares are averaged over draws; held
+        ``network.response_moments`` give :math:`\mathbf{S}^T K_z \mathbf{S}`
+        per node directly.
         """
         assert self.observation_seconds is not None
         projector = _template_projector(mean, network)
@@ -828,14 +791,10 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         formed once.
 
         The quadratic form along :math:`\mathbf{c}` reproduces
-        :meth:`relative_variance`, and the diagonal is the per-bin variance of
-        :meth:`predict` up to the interpolation order of the square, which it
-        never exceeds. Under ``network`` (the instance's by default) with a
-        ``response``, the inclination factor is replaced by the Hadamard product
-        with :math:`\langle r_f r_{f'} \rangle` (see :class:`Network`). For a
-        network of pairs the moment is tiled over (pair, pair) blocks before
-        the product, so the indices run over the flat data axis.
-        Requires ``observation_seconds``; ``squared_power`` is not used.
+        :meth:`relative_variance`. With a ``network.response`` the inclination
+        factor becomes the Hadamard product with
+        :math:`\langle r_f r_{f'} \rangle`; for pairs the indices run over the
+        flat data axis. Requires ``observation_seconds``.
         """
         assert self.observation_seconds is not None
         shared = self._shared(params)
@@ -965,10 +924,8 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         whitened shot-noise covariance in the basis is
         :math:`B = \sum_z \kappa_z M_z / T`, with :math:`\kappa_z` the
         :meth:`_variance_kernel`, so :math:`U B U^T` is the whitened
-        :meth:`catalog_covariance` restricted to the basis. Hold the result
-        on ``network.mode_blocks`` to skip this at every point; that is exact
-        while the importance weights do not vary. Requires
-        ``observation_seconds`` for :meth:`log_likelihood`.
+        :meth:`catalog_covariance` restricted to the basis. Hold the result on
+        ``network.mode_blocks`` when the importance weights do not vary.
         """
         network = self.network if network is None else network
         assert network is not None
@@ -989,12 +946,10 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
             g_{ab,f} = \gamma_{ab,f} / \sigma_{ab,f}^2,
 
         over the counted entries (:math:`\gamma = 1` for a combined spectrum).
-        The template projector is :math:`c_{ab,f} = S_f\, g_{ab,f}`, so the
-        projected second moment at node :math:`z` is
-        :math:`\mathbf{S}^T K_z \mathbf{S}` whatever the number of draws and
-        pairs. Hold the result on ``network.response_moments``; that is exact
-        while the importance weights do not vary, and for this network's
-        ``scale`` and ``mask``. Requires ``network.response``.
+        The projected second moment at node :math:`z` is
+        :math:`\mathbf{S}^T K_z \mathbf{S}`. Hold the result on
+        ``network.response_moments`` when the importance weights do not vary.
+        Requires ``network.response``.
         """
         network = self.network if network is None else network
         assert network is not None and network.response is not None
@@ -1024,9 +979,8 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         The basis is :func:`~astrogwb.inference.shot_noise.shot_noise_modes` of
         :meth:`catalog_covariance` at ``params`` under ``network`` (with its
         ``response``), padded with zero columns to ``num_modes`` when given, so
-        that networks stack. ``hold_blocks`` also holds :meth:`mode_blocks` at
-        ``params``; by default it does when no importance weight varies (no
-        ``density_sites``), where they are exact at every point. Call outside
+        that networks stack. ``hold_blocks`` also holds :meth:`mode_blocks`;
+        it defaults to true when there are no ``density_sites``. Call outside
         JAX transformations.
         """
         modes = shot_noise_modes(
@@ -1174,11 +1128,9 @@ class ImportanceCompoundPoissonLikelihood(_ImportanceCatalog):
     two moments are one and the Gaussian class's
     :meth:`~ImportanceGaussianLikelihood.relative_variance`.
 
-    The instance is a pytree as :class:`ImportanceGaussianLikelihood` is, and
-    vmaps over stacked networks the same way. It scores a combined spectrum
-    only: a network with ``pair_overlap`` is not supported. ``method`` and the
-    node counts are static. Its cost is a few passes over the
-    :math:`Z \times N \times L` point set per network and evaluation.
+    A pytree like :class:`ImportanceGaussianLikelihood`. Scores a combined
+    spectrum only (no ``pair_overlap``). ``method`` and the node counts are
+    static.
 
     Attributes
     ----------

@@ -41,45 +41,29 @@ class RedshiftDistribution(InterpolatedDistribution):
     sampler. The distribution is normalized over
     ``[minimum_redshift, maximum_redshift]``.
 
-    Note that the default ``minimum_redshift=0.0`` puts a zero-density point
-    inside the support, since :math:`\mathrm{d}V_c/\mathrm{d}z` vanishes at
-    :math:`z = 0`. That is the correct physics rather than a defect, and it is
-    unreachable under NUTS: ``biject_to`` maps the real line onto the *open*
-    interval, so neither endpoint is ever proposed.
+    The density vanishes at :math:`z = 0`, where
+    :math:`\mathrm{d}V_c/\mathrm{d}z` does; NUTS never proposes that endpoint.
 
     Parameters
     ----------
     params:
         Hyperparameters. Must include ``H0`` (in
         :math:`\mathrm{km\,s^{-1}\,Mpc^{-1}}`) and ``Omega_m``, plus whatever
-        ``source_frame_distribution`` reads. The keys match
-        the reference callback's, so one fiducials mapping feeds both with no
-        translation layer.
+        ``source_frame_distribution`` reads.
     source_frame_distribution:
         Callable returning the unnormalized source-frame merger-rate shape
-        :math:`\psi(z)`. It is retained as static pytree metadata.
+        :math:`\psi(z)`, kept as static pytree metadata.
     minimum_redshift, maximum_redshift, n_grid:
         The linear grid the cosmology integrals and the normalization run on.
-        Read back afterwards off :attr:`redshift_grid` rather than stored.
     validate_args:
         Forwarded to :class:`~numpyro.distributions.Distribution`.
     """
 
-    # `x` and `y` are contributed by `InterpolatedDistribution`:
-    # `gather_pytree_data_fields` walks the MRO and unions each base's own
-    # `pytree_data_fields`, so only the two new grids are named here.
-    #
-    # `source_frame_distribution` is Python metadata, not numerical data: JAX
-    # must restore the same callable when the distribution is flattened.
     pytree_aux_fields = ("_source_frame_distribution",)
 
-    # `minimum_redshift` / `maximum_redshift` / `n_grid` were once declared as
-    # aux fields but never assigned, so they flattened to `(None, None, None)`
-    # and `tree_unflatten` faithfully restored three `None`s. They are now
-    # properties over `self.x`, which is strictly better than assigning them:
-    # aux data is hashed into the jit cache key, and the grid endpoints are
-    # traced values under `jax.jit`, where a hashed Python float would either be
-    # wrong or force a retrace per grid.
+    # NumPyro unions `pytree_data_fields` over the MRO, so `x` and `y` come from
+    # the base. The grid bounds are properties over `x`, not aux fields: aux
+    # data is hashed into the jit cache key, and the bounds are traced.
     pytree_data_fields = (
         "params",
         "luminosity_distance_grid",
@@ -96,15 +80,10 @@ class RedshiftDistribution(InterpolatedDistribution):
         n_grid: int = 1000,
         validate_args: bool | None = None,
     ) -> None:
-        # A local, not `self.redshift_grid`: the grid becomes `self.x` in
-        # `super().__init__`, and `redshift_grid` is a read-only alias for it.
-        # Binding it here as well would put the same array in the pytree twice,
-        # where a `tree_unflatten` with mismatched leaves could make the two
-        # copies disagree.
         self._source_frame_distribution = source_frame_distribution
-        # Kept, as a pytree leaf, so `merger_rate` can evaluate the rate off
-        # the grid with the same hyperparameters the table was built from.
         self.params = dict(params)
+        # A local: it becomes `self.x`, and storing it twice would duplicate a
+        # pytree leaf.
         redshift_grid = jnp.linspace(minimum_redshift, maximum_redshift, n_grid)
 
         self.luminosity_distance_grid, self.differential_comoving_volume_grid = (
@@ -137,10 +116,8 @@ class RedshiftDistribution(InterpolatedDistribution):
     def merger_rate(self, redshift: ArrayLike) -> jax.Array:
         r"""The source-frame merger rate :math:`\psi(z)` at any redshift.
 
-        Evaluated pointwise at the hyperparameters the distribution was built
-        with, not interpolated from the grid, so it is the function the table
-        samples. For a subclass that overrides :meth:`_merger_rate` that is
-        the overridden rate.
+        Evaluated pointwise at the distribution's hyperparameters, not
+        interpolated from the grid.
         """
         return self._merger_rate(jnp.asarray(redshift), self.params)
 
@@ -157,17 +134,17 @@ class RedshiftDistribution(InterpolatedDistribution):
 
     @property
     def minimum_redshift(self) -> jax.Array:
-        """Lower grid edge, read back off the grid rather than stored."""
+        """Lower grid edge."""
         return self.x[0]
 
     @property
     def maximum_redshift(self) -> jax.Array:
-        """Upper grid edge, read back off the grid rather than stored."""
+        """Upper grid edge."""
         return self.x[-1]
 
     @property
     def n_grid(self) -> int:
-        """Number of grid nodes. Static even under tracing -- shapes always are."""
+        """Number of grid nodes; static under tracing."""
         return self.x.shape[-1]
 
     def total_merger_rate(self) -> jax.Array:

@@ -45,9 +45,7 @@ assert jax.device_count() == 2, f"backend initialized early: {jax.devices()}"
 def test_the_accessors_hand_back_copies() -> None:
     """`@cache` returns the same object every call; the accessors must not.
 
-    A notebook that does `p = priors(); p['H0'] = ...` would otherwise poison
-    every later reader in the process. Keyword overrides are merged after the
-    cached parse, so they must not reach the cache either.
+    Mutating a returned table, or passing overrides, must not reach the cache.
     """
     from astrogwb.paper.config import fiducials, networks, priors
 

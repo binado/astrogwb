@@ -1,13 +1,13 @@
 """NumPyro ``Distribution`` classes for the population models.
 
-- :mod:`astrogwb.distributions.rates` — dimensionless merger-rate shapes
-- :mod:`astrogwb.distributions.interpolated` — table-driven univariate density
-- :mod:`astrogwb.distributions.redshift` — redshift densities from merger-rate
+- :mod:`astrogwb.distributions.rates` -- dimensionless merger-rate shapes
+- :mod:`astrogwb.distributions.interpolated` -- table-driven univariate density
+- :mod:`astrogwb.distributions.redshift` -- redshift densities from merger-rate
   models
-- :mod:`astrogwb.distributions.mass` — ordered component-mass densities
-- :mod:`astrogwb.distributions.delay` — merger delay-time densities
-- :mod:`astrogwb.distributions.orientation` — isotropic polar-angle densities
-- :mod:`astrogwb.distributions.config` — serializable distribution configurations
+- :mod:`astrogwb.distributions.mass` -- ordered component-mass densities
+- :mod:`astrogwb.distributions.delay` -- merger delay-time densities
+- :mod:`astrogwb.distributions.orientation` -- isotropic polar-angle densities
+- :mod:`astrogwb.distributions.config` -- serializable distribution configurations
 """
 
 from astrogwb.distributions.delay import PowerLawDelayDistribution

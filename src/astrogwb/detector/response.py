@@ -14,11 +14,8 @@ power times the realised network response
 with :math:`\gamma_{ab}(\hat n, \psi, \iota; f)` the per-source
 :func:`~astrogwb.detector.overlap.overlap_reduction_function`. Its mean over an
 isotropic sky, uniform polarization and uniform :math:`\cos\iota` is one at every
-frequency: the denominator is the isotropic ORF of the same native geometry as the
-per-source response. Its scatter adds to
-the shot noise. It carries the inclination too: it replaces the quadrupolar
-factor :math:`g(\iota)` normalized to its mean, which a catalog pinned at the
-effective inclination stands in for.
+frequency, and its scatter adds to the shot noise. It includes the inclination,
+replacing the quadrupolar factor :math:`g(\iota)` normalized to its mean.
 
 Sky position and orientation are independent of distance and masses, so draws
 of :math:`r` enter the catalog covariance as a Hadamard product with the second
@@ -199,7 +196,6 @@ def sample_pair_response(
     r""":func:`pair_response` at isotropic draws, ``(num_draws, P, F)``.
 
     The angles are those :func:`sample_network_response` draws from the same
-    ``key``, so combining these draws with the optimal pair weights gives its
-    draws.
+    ``key``.
     """
     return pair_response(frequencies, detectors, *_isotropic_angles(key, num_draws))

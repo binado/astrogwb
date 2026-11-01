@@ -21,16 +21,13 @@ constrains one direction in parameter space. Per-bin diagonals, or a
 cumulative sum over bins, are meaningful band diagnostics; the inverse of one
 bin's matrix is not.
 
-Any :data:`~astrogwb.inference.protocol.SpectrumFn` works, as long as it is
-differentiable in the requested parameters. The importance spectrum from
-:meth:`~astrogwb.inference.likelihood.ImportanceGaussianLikelihood.spectrum` is: it
-reweights a fixed catalog without drawing anything. Its derivative is still a
-Monte Carlo estimate over the intrinsic draws -- at the catalog's own fiducials
-it reduces to the score-function estimator, with noise that grows as
-:func:`~astrogwb.importance.diagnostics.relative_ess` drops -- so evaluate near
-those fiducials. A hyperparameter that moves a support edge (a hard mass
-cutoff, say) differentiates only the density's normalization, not the sources
-crossing the edge, so its derivative is missing that boundary term.
+Any differentiable :data:`~astrogwb.inference.protocol.SpectrumFn` works. For
+the importance spectrum
+(:meth:`~astrogwb.inference.likelihood.ImportanceGaussianLikelihood.spectrum`)
+the derivative is a score-function Monte Carlo estimate whose noise grows as
+:func:`~astrogwb.importance.diagnostics.relative_ess` drops, so evaluate near
+the catalog's fiducials. A hyperparameter that moves a support edge misses the
+boundary term.
 """
 
 from __future__ import annotations
@@ -81,12 +78,10 @@ def fisher_matrix_per_bin(
 ) -> jax.Array:
     r"""Per-bin Fisher matrices :math:`F_{ab,i}`, shape ``(F, P, P)``.
 
-        ``scale`` is the per-bin standard deviation the likelihood uses, normally
-        ``gaussian_bin_scale(psd, time_years, frequencies)``. ``frequency_mask`` selects
-        bins as in
-    :class:`~astrogwb.inference.likelihood.Network`:
-        an excluded bin contributes exactly zero, even where its scale is
-        infinite. Sum over the leading axis for the total Fisher matrix.
+    ``scale`` is the per-bin standard deviation the likelihood uses, normally
+    ``gaussian_bin_scale(psd, time_years, frequencies)``. ``frequency_mask``
+    selects bins as in :class:`~astrogwb.inference.likelihood.Network`: an
+    excluded bin contributes exactly zero, even where its scale is infinite.
     """
     jacobian = spectral_density_jacobian(spectral_density_fn, params, parameter_names)
     inverse_variance = jnp.asarray(scale) ** -2

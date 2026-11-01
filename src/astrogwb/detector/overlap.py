@@ -1,13 +1,9 @@
 """Frequency-dependent overlap reduction functions.
 
-The frequency-dependent overlap reduction function (ORF) is astrogwb's own
-contribution: gwmock ships only the long-wavelength, co-located limit
-(``gamma = 2 D_i:D_j``). This module provides the analytic isotropic ORF for
-the native detector geometry, :func:`isotropic_overlap_reduction_function`, and
-the response of a pair to one source, :func:`overlap_reduction_function`, whose
-isotropic average it equals.
-Both single-source responses go through :func:`stokes_cross_power`, which
-takes any source's polarization Stokes parameters.
+The analytic isotropic ORF for the native detector geometry,
+:func:`isotropic_overlap_reduction_function`, and the response of a pair to one
+source, :func:`overlap_reduction_function`, whose isotropic average it equals.
+Single-source responses go through :func:`stokes_cross_power`.
 """
 
 from __future__ import annotations
@@ -333,8 +329,7 @@ def relative_orientation(
     Parameters
     ----------
     detector_1, detector_2
-        Site codes resolved through ``geometry.toml``, or owned ``Detector``
-        instances.
+        Owned ``Detector`` instances.
     reference
         ``"great_circle"`` or ``"north"``.
 

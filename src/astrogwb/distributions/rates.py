@@ -1,11 +1,6 @@
 r"""Madau-Dickinson source-frame merger-rate densities.
 
-The canonical home for the rate shapes the distribution classes in
-:mod:`astrogwb.distributions` build on. NumPyro-free by design: it must stay
-importable without loading NumPyro, so a caller that only wants
-:math:`\psi(z)` -- an analytic spectrum, a test oracle -- does not inherit a
-NumPyro import from the distribution subpackage. That is also why
-:mod:`astrogwb.distributions` re-exports nothing from its package root.
+Kept free of NumPyro, so analytic callers of :math:`\psi(z)` do not import it.
 """
 
 from __future__ import annotations
@@ -39,13 +34,10 @@ def madau_dickinson_rate(
         \mathcal{C} = 1 + (1+z_p)^{-(\gamma+\kappa)}.
 
     Same parametrization as ``gwmock_pop.distributions.madau_dickinson``
-    (Leuven Gravity Institute, BSD-3-Clause), restated here so that neither the
-    distribution classes nor the importance-weighting reference callbacks
-    depend on the optional ``simulation`` extra.
+    (Leuven Gravity Institute, BSD-3-Clause).
     """
     one_plus_z = 1.0 + jnp.asarray(redshift)
-    # Promoted rather than added as-is: `ArrayLike` admits `numpy.bool_`, which
-    # has no `__neg__`, so the unary minus below is not well typed otherwise.
+    # Promoted so the unary minus below type-checks (`numpy.bool_` has no `__neg__`).
     exponent = jnp.asarray(gamma) + jnp.asarray(kappa)
     normalization = 1.0 + (1.0 + z_peak) ** (-exponent)
     return jnp.asarray(local_merger_rate) * (

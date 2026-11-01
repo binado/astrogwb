@@ -52,14 +52,8 @@ def test_the_stylesheet_declares_no_savefig_dpi_or_format() -> None:
 def test_committed_latex_labels_survive_the_move_out_of_python() -> None:
     """The guard on TOML string escaping.
 
-    `config/plotting.toml` writes every label as a single-quoted *literal*
-    string, so backslashes are verbatim, exactly as in the `r""` literals the
-    three figure scripts each carried before the move. Switching one to a
-    basic `"..."` string is loud -- `\\,` and `\\m` are invalid escapes, so the
-    file will not parse. Doubling the backslashes inside a literal string is
-    the quiet one: it parses, then emits a literal `\\\\,` into the TeX stream,
-    and with `text.usetex: True` that surfaces as a LaTeX compile failure deep
-    inside a figure job.
+    Labels are single-quoted TOML literal strings, so backslashes are verbatim;
+    doubled backslashes would parse but break the LaTeX compile.
     """
     assert (
         plotting.parameter_label("H0", REPO_ROOT)

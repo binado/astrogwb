@@ -1,15 +1,13 @@
 # Named populations, each a complete astrogwb.populations.PopulationMetadata: a
-# registered model and its construction kwargs. A seed is not part of a
-# population: it picks one realization of the density.
-# A catalog picks one by reference -- population = "${populations.cosmological}".
+# registered model and its construction kwargs. A catalog picks one by
+# reference -- population = "${populations.cosmological}".
 #
 # The redshift window is stated once, in [populations.cosmological]; any other
 # population's model_kwargs should `extends` its model_kwargs, so narrowing it
 # narrows them all.
 
-# Every population is the one registered model "bns_coba"; the variants are its
-# construction kwargs (mass_model, time_delay, ...), and
-# the contracts each one carries are documented on
+# Every population is the registered model "bns_coba"; the variants are its
+# construction kwargs, documented on
 # astrogwb.populations.bns_coba.bns_coba_population_fn.
 
 # The population every catalog is drawn from.

@@ -1,11 +1,9 @@
 r"""Network effective PSD and per-bin Gaussian noise scale.
 
-This module owns the detector/network noise model seen by a stochastic
-background search: the inverse-variance network ``effective_psd`` and the
-per-bin Gaussian scale :math:`\sigma_i = S_{\mathrm{eff},i} / \sqrt{2 T \Delta f_i}`,
-plus its grid-independent plotting counterpart
-:math:`\sigma_{\ln f} = S_{\mathrm{eff}} / \sqrt{2 T f}`. Overlap-reduction
-geometry stays in ``overlap``; GWB signal spectra stay in ``astrogwb.gwb``.
+The inverse-variance network ``effective_psd``, the per-bin Gaussian scale
+:math:`\sigma_i = S_{\mathrm{eff},i} / \sqrt{2 T \Delta f_i}`, and its
+grid-independent plotting counterpart
+:math:`\sigma_{\ln f} = S_{\mathrm{eff}} / \sqrt{2 T f}`.
 """
 
 from __future__ import annotations
@@ -56,11 +54,10 @@ def pair_terms(
 ) -> list[PairTerms]:
     r"""The optimal weight and isotropic ORF of every pair :math:`a < b`.
 
-    The weights of the optimal cross-correlation estimator, shared by
-    :func:`effective_psd` (:math:`S_{\mathrm{eff}}^{-2} \propto \sum w_{ab}
-    \gamma_{ab}`) and :func:`~astrogwb.detector.response.network_response`.
-    Sensitivity curves belong to each resolved detector. Geometry and PSD
-    evaluation happen on the host, outside JIT.
+    Shared by :func:`effective_psd` (:math:`S_{\mathrm{eff}}^{-2} \propto
+    \sum w_{ab} \gamma_{ab}`) and
+    :func:`~astrogwb.detector.response.network_response`. Evaluated on the
+    host, outside JIT.
     """
     frequencies = np.asarray(frequencies, dtype=float)
     det_list = list(detectors)
@@ -149,8 +146,7 @@ def pair_bin_scale(
             \sqrt{2 T \Delta f_i}},
 
     the scale of a pair's cross-power whose mean is :math:`\gamma_{ab} S_h`
-    (the per-pair spectra of
-    :class:`~astrogwb.simulators.spectra.NetworkSpectralDensitySimulator`),
+    (the pair spectra of :class:`~astrogwb.simulators.BackgroundArtifact`),
     pairs in the order of :func:`pair_terms`. It is not divided by
     :math:`\gamma_{ab}`, so it stays finite at the ORF's zeros, and the pairs
     combine to the network: :math:`\sum_{a<b} \gamma_{ab,i}^2 /
@@ -195,13 +191,10 @@ def log_frequency_noise_scale(
 
         \sigma_{\ln f}(f) = \frac{S_{\mathrm{eff}}(f)}{\sqrt{2 T f}}
 
-    This is :func:`gaussian_bin_scale` with the bin width replaced by
-    :math:`f`, so it does not move when the frequency grid is refined. It
-    is a *presentation* scale for sensitivity plots, not the likelihood's
-    noise scale: :math:`(S_h/\sigma_{\ln f})^2` is
-    :math:`d\mathrm{SNR}^2/d\ln f`
-    (:func:`astrogwb.gwb.spectral_snr_squared_per_log_frequency`), so the
-    gap between a spectrum and this curve shows where the SNR accrues.
+    :func:`gaussian_bin_scale` with the bin width replaced by :math:`f`: a
+    presentation scale for sensitivity plots, not the likelihood's.
+    :math:`(S_h/\sigma_{\ln f})^2` is :math:`d\mathrm{SNR}^2/d\ln f`
+    (:func:`astrogwb.gwb.spectral_snr_squared_per_log_frequency`).
 
     Parameters
     ----------

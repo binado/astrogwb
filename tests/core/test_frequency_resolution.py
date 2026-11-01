@@ -9,15 +9,8 @@ Coarsening by subsampling therefore holds the sources fixed and varies only
 ``FINE_DF`` is a negative power of two so that ``k * FINE_DF`` is exact in
 binary and the two grids agree essentially to round-off.
 
-Nothing here tracks a bin width by hand: the SNR and the noise scale take the
-subsampled ``frequencies`` and derive each bin's width from them, so a coarser
-grid is coarser everywhere at once. The band mask is passed alongside the full
-grid rather than used to slice it, because widths belong to the whole axis.
-
-The band stops at 256 Hz to keep the grid manageable while retaining the
-signal contribution used by ``notebooks/catalog_convergence.py``.
-
-Fast by design -- no NUTS, so these are not marked ``integration``.
+Bin widths derive from the subsampled ``frequencies``; the band is a mask on
+the full grid, never a slice.
 """
 
 from __future__ import annotations
@@ -93,10 +86,7 @@ def test_subsampling_a_fine_catalog_matches_a_coarse_one(
 ) -> None:
     """``[::k]`` of a fine catalog *is* the catalog built at ``k * df``.
 
-    The premise of every other test in this module, and of
-    ``notebooks/catalog_convergence.py``. Both grids are formed from integer indices times a
-    power-of-two ``df``, so any real disagreement means the grid construction
-    changed.
+    The premise of every other test in this module.
     """
     fine_data, _ = fine_catalog
     fine_frequencies = np.asarray(fine_data["frequencies"])
@@ -121,12 +111,8 @@ def test_subsampling_a_fine_catalog_matches_a_coarse_one(
 def _analysis_at(frequencies: jax.Array) -> dict[str, Any]:
     """Derive the masked analysis inputs on one observed grid.
 
-    The PSD and the mask are rebuilt on each grid rather than subsampled, so
-    nothing about the coarse analysis is inherited from the fine one except
-    the sources. Every array stays on the full grid and the band is a mask, so
-    bin widths derive from the whole axis; ``noise_scale`` is a placeholder of
-    one wherever the mask excludes a bin, which keeps an infinite PSD out of
-    the log density.
+    The PSD and mask are rebuilt on each grid; only the sources are shared.
+    ``noise_scale`` is one wherever the mask excludes a bin.
     """
     network_psd = jnp.asarray(
         effective_psd(
@@ -209,8 +195,7 @@ def test_log_likelihood_ratio_converges_but_the_absolute_value_does_not(
     \sqrt{2T\Delta f}`, so coarsening by ``k`` grows every :math:`\sigma_i` by
     :math:`\sqrt{k}` while dropping the bin count by ``k``. The normalization
     :math:`-\tfrac{1}{2}\sum_i\log(2\pi\sigma_i^2)` therefore scales with the
-    number of bins and converges to nothing. This test is the executable form
-    of that statement, so that the drift is never mistaken for a bug.
+    number of bins and converges to nothing.
     """
     at_fiducial = {
         factor: _log_likelihood(run, FIDUCIALS["H0"])
@@ -254,10 +239,8 @@ def test_the_log_likelihood_ratio_residual_is_the_snr_squared_residual(
 
     and the relative residual of :math:`\Delta\log\mathcal{L}` under
     coarsening must equal that of :math:`\rho^2`, with no dependence on
-    :math:`H_0` at all. Asserting it ties ``spectral_density``,
-    ``spectral_snr_squared``, and ``gaussian_bin_scale`` to one another: a
-    factor lost in any one of them breaks the identity, whereas each function's
-    own tests would still pass.
+    :math:`H_0` at all. This ties ``spectral_density``,
+    ``spectral_snr_squared`` and ``gaussian_bin_scale`` to one another.
     """
     at_fiducial = {
         factor: _log_likelihood(run, FIDUCIALS["H0"])

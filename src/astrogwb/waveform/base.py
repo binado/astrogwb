@@ -51,13 +51,9 @@ class WaveformGenerator:
     ) -> jax.Array:
         """Generate frequency-first power ``(F, N)`` for a catalog.
 
-        Trace-safe, so it composes inside ``jit`` and NumPyro models; an eager
-        whole-catalog caller should ``jit`` it. With ``chunk_size``, the full
-        chunks are generated one batch at a time under :func:`jax.lax.map` and
-        the remainder in one more batch, bounding peak memory to
-        ``chunk_size`` sources' worth of waveform intermediates; it changes
-        cost, and the output only at rounding level. ``None`` generates every
-        source in one batch.
+        Trace-safe; an eager whole-catalog caller should ``jit`` it.
+        ``chunk_size`` bounds peak memory via :func:`jax.lax.map`, changing the
+        output only at rounding level. ``None`` generates one batch.
         """
         return _chunked(self._generate_batch, source_parameters, chunk_size)
 

@@ -68,10 +68,7 @@ def test_configure_runtime_cpu_threads_pins_all_thread_env_vars(
 ) -> None:
     """--cpu-threads must own every BLAS/vector thread env var.
 
-    A job scheduler may inject OMP/GOTO/OPENBLAS/MKL/VECLIB/NUMEXPR thread
-    counts into the environment. A partial override
-    leaves those pools at the job thread count, oversubscribing the host when
-    several single-threaded chains run concurrently.
+    A partial override would leave scheduler-set pools at the job thread count.
     """
     import jax
 

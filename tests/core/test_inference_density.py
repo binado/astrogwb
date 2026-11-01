@@ -2,13 +2,9 @@
 naive Python loop, single-compilation reuse across differing data shapes and
 and across swept-parameter key sets.
 
-Uses a small analytic ``spectral_density_fn``, the same pattern
-``tests/core/test_spectral_inference.py`` already uses, so these tests stay
-fast and need no catalog. As in the MCMC entrypoints,
-``spectral_density_fn`` and ``priors`` are baked into the model with
-``functools.partial`` -- they are static, not part of the per-call
-``model_kwargs`` a ``LogDensityFn`` sweeps over. Only ``observed_spectral_density``
-and ``scale`` vary between calls.
+Uses a small analytic ``spectral_density_fn`` bound with
+``functools.partial``; only ``observed_spectral_density`` and ``scale`` vary
+between calls.
 """
 
 from collections.abc import Callable, Mapping
@@ -233,13 +229,9 @@ def test_call_reuses_compilation_across_grid_key_sets(
 ) -> None:
     """A single `jax.jit` object already caches per argument pytree structure.
 
-    Revisiting a previously-seen combination of swept parameter names and
-    data shapes is a cache hit with no bookkeeping of our own -- verified
-    here by going back to the first grid/shape after an intervening call
-    with a *different* key set, and confirming it reuses the first compile
-    rather than producing a third one. `chunk_size` stays at its default
-    (`None`, unbatched) throughout so `jax.lax.map`'s own remainder-chunk
-    retracing (see the batched test below) never conflates with this.
+    Revisiting an earlier key set and shape reuses the first compile.
+    `chunk_size` stays `None` so `jax.lax.map`'s remainder retracing does not
+    interfere.
     """
     calls: list[None] = []
 

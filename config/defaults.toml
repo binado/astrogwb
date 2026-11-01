@@ -11,7 +11,7 @@
 # a.b. A reference to a table merges as that table: a later layer that sets a
 # key *under* one overrides just that field and keeps the rest.
 # A table that is a base plus a few additions is written `extends = "${a.b}"`
-# (config.runs.MERGE_KEY): the base's fields, then the local ones on top.
+# (astrogwb.config.MERGE_KEY): the base's fields, then the local ones on top.
 
 # Observing time and frequency band.
 [analysis]

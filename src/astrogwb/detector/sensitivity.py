@@ -1,12 +1,8 @@
 """Detector sensitivity curves backed by gwmock-noise.
 
-gwmock-noise owns PSD loading/interpolation; astrogwb only adds the SGWB
-analysis policy on top. The one numerical wrinkle is out-of-band behavior:
-``gwmock_noise`` clips frequencies outside the curve grid to ``0`` (an
-*infinite* sensitivity contribution in an inverse-variance sum), whereas
-the SGWB analysis wants those bins to contribute *nothing*, i.e. PSD
-``inf``. Calling a ``Sensitivity`` therefore re-applies the ``inf`` policy
-on top of the gwmock interpolation.
+``gwmock_noise`` clips frequencies outside the curve grid to PSD ``0``, an
+infinite contribution to an inverse-variance sum. Calling a ``Sensitivity``
+maps them to ``inf`` instead, so out-of-band bins contribute nothing.
 """
 
 from __future__ import annotations
@@ -97,7 +93,7 @@ def _load_sensitivity_table(path: str | Path | None) -> Mapping[str, dict]:
     if path is not None:
         with Path(path).open("rb") as handle:
             data = tomllib.load(handle)
-        # Keep accepting the flat layout used by existing external tables.
+        # A table may omit the [detectors] wrapper.
         return data.get("detectors", data)
     with SENSITIVITY_FILE.open("rb") as handle:
         return tomllib.load(handle)["detectors"]

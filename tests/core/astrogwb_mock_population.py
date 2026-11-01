@@ -1,19 +1,12 @@
 """The mock BNS population, and what the test suite builds from it.
 
-A plain helper module rather than part of ``conftest.py``. Its
-``astrogwb_mock_population`` name is unique across the workspace, avoiding a
-generic top-level helper name while pytest's default ``prepend`` import mode
-places each unpackaged test directory on ``sys.path``.
+The module name is unique because pytest's ``prepend`` import mode puts each
+test directory on ``sys.path``. ``conftest.py`` re-exports the loaders as
+fixtures; test modules may import the constants and helpers directly.
 
-``conftest.py`` re-exports the loaders here as fixtures; test modules may
-import the constants and helpers directly.
-
-The draw used to be a committed CSV, produced from a gwmock graph by a script,
-because the isolated core suite must not depend on another package's RNG
-details. It is drawn in process now: generation runs the same registered
-NumPyro population the analysis evaluates densities against, so the whole draw
-is astrogwb and JAX, reproducible from a seed, and guaranteed to be a sample
-from exactly the density the tests reweight with.
+The draw runs the same registered NumPyro population the analysis evaluates
+densities against, so it is seeded and a sample from exactly the density the
+tests reweight with.
 """
 
 from __future__ import annotations
@@ -53,13 +46,9 @@ def derived_columns(
 ) -> dict[str, jax.Array]:
     """Replay a population's model at fixed source values, returning declared outputs.
 
-    The test-side counterpart of the batched replay inside
-    :func:`astrogwb.populations.evaluation.sample_sources`, and the same code path:
-    sample sites take the supplied values, deterministic outputs are the
-    model's recomputation. The result is the model's own return mapping -- the
-    mapping that defines the source-output set -- so a stored deterministic is
-    never trusted over the recomputation, and no static site-name list is
-    needed.
+    The same code path as the replay in
+    :func:`astrogwb.populations.evaluation.sample_sources`: sample sites take
+    the supplied values and deterministic outputs are recomputed.
     """
     model = joint_model(*population(params))
     _, outputs = evaluate_sources(model, sources, density_sites=())
@@ -68,10 +57,9 @@ def derived_columns(
 
 #: Hyperparameters the mock injection is drawn at and built at.
 #: ``local_merger_rate`` is in Gpc^-3 yr^-1; the rest feed the Madau-Dickinson
-#: rate shape and the flat-LambdaCDM cosmology. ``xi_0 = 1`` makes the modified
-#: propagation law reduce exactly to the cosmological one, which is what lets a
-#: catalog drawn without ``xi_0`` serve as its own proposal against a target
-#: evaluated with it.
+#: rate shape and the flat-LambdaCDM cosmology. ``xi_0 = 1`` reduces modified
+#: propagation exactly to GR, so a catalog drawn without ``xi_0`` is its own
+#: proposal against a target evaluated with it.
 FIDUCIALS: dict[str, float] = {
     "H0": 67.66,
     "Omega_m": 0.3096,
@@ -91,11 +79,8 @@ POPULATION_PARAMS: dict[str, float] = {
     name: value for name, value in FIDUCIALS.items() if name not in {"xi_0", "xi_n"}
 }
 
-#: Redshift window and grid resolution shared by the catalog factory and every
-#: test that reweights against it. They must agree: ``log w`` is exactly zero
-#: only when the proposal density was evaluated on the *same* grid as the
-#: target, so a test that built its own grid at a different resolution would
-#: silently pick up interpolation-level weights.
+#: Redshift window and grid shared by the catalog factory and every test that
+#: reweights against it: ``log w`` is exactly zero only on the same grid.
 Z_MIN = 0.3
 Z_MAX = 20.0
 N_GRID = 256
@@ -185,10 +170,7 @@ def build_mock_catalog(
 ) -> tuple[PolarizationPowerData, CatalogMetadata]:
     """Build a ``(data, metadata)`` pair from the mock population draw.
 
-    The polarization power comes from
-    :class:`~astrogwb.waveform.AnalyticInspiralGenerator`, so the catalog is
-    a genuine closed-form inspiral bank -- no Ripple backend, no persisted
-    file.
+    The power comes from :class:`~astrogwb.waveform.AnalyticInspiralGenerator`.
 
     """
     available_sources = min(values.shape[0] for values in population.values())
@@ -217,12 +199,7 @@ def build_mock_catalog(
 
 
 def catalog_samples(data: PolarizationPowerData) -> dict[str, jax.Array]:
-    """The draw's source parameters as JAX arrays, keyed by name.
-
-    ``data["source_parameters"]`` is already a ``Mapping[str, NDArray]`` keyed
-    by name, so this only crosses into JAX -- which every model in the suite
-    wants and no test should have to restate.
-    """
+    """The draw's source parameters as JAX arrays, keyed by name."""
     return {
         name: jnp.asarray(values) for name, values in data["source_parameters"].items()
     }
@@ -248,9 +225,8 @@ def build_reference_catalog(
     """A closed-form reference catalog of the mock population.
 
     Every draw sits at the window's lower edge, as
-    :func:`~astrogwb.gwb.importance.reference_catalog` places them, and its power
-    comes from :class:`~astrogwb.waveform.AnalyticInspiralGenerator`: no Ripple
-    backend, no persisted file. The draw is seeded, so it is deterministic.
+    :func:`~astrogwb.gwb.importance.reference_catalog` places them; the power
+    comes from :class:`~astrogwb.waveform.AnalyticInspiralGenerator`.
     """
     generator = AnalyticInspiralGenerator(
         WaveformMetadata(

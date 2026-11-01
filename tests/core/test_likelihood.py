@@ -721,7 +721,7 @@ def test_catalog_covariance_under_a_unit_response_drops_the_inclination_factor(
 def test_a_flat_response_scales_the_relative_variance_by_its_second_moment(
     amplitude_likelihood: ImportanceGaussianLikelihood, networks: Network, index: int
 ) -> None:
-    """Flat in frequency, the response is the old scalar inflation."""
+    """Flat in frequency, the response is a scalar inflation."""
     values = jnp.array([0.2, 0.7, 1.1, 2.0])
     network = _single(networks, index)
 

@@ -1,13 +1,8 @@
 """Shared pytest configuration for the core package.
 
-Enables JAX double precision for the whole suite: numerical assertions are
-written for x64 (e.g. polarization power of order 1e-47 Hz^-2 underflows
-float32's smallest normal), and the ``require_x64``-guarded entry points are
-only meaningful there. Same setup as ``astrogwb.paper.runtime``.
-
-The mock-population fixtures below are thin wrappers over
-:mod:`astrogwb_mock_population`. Test modules should import shared constants
-and builders from that module rather than from ``conftest.py``.
+Enables JAX double precision for the whole suite, as
+``astrogwb.paper.runtime`` does: polarization power underflows float32. The
+mock-population fixtures wrap :mod:`astrogwb_mock_population`.
 """
 
 from __future__ import annotations
@@ -20,11 +15,7 @@ import jax
 import numpy as np
 import pytest
 
-# Must precede any array creation, hence module scope rather than a fixture:
-# pytest imports conftest before collecting test modules. It is kept above the
-# `astrogwb_mock_population` import because that module reaches into astrogwb and JAX;
-# neither builds an array at import time, but the ordering is what makes that
-# irrelevant rather than something to re-check on every edit.
+# Module scope, above the helper import: must precede any array creation.
 jax.config.update("jax_enable_x64", True)
 
 from astrogwb_mock_population import (
@@ -67,14 +58,7 @@ def mock_population() -> dict[str, np.ndarray]:
 def mock_catalog_factory(
     mock_population: dict[str, np.ndarray],
 ) -> Callable[..., tuple[PolarizationPowerData, CatalogMetadata]]:
-    """Build a ``(data, metadata)`` pair from the committed population draw.
+    """Build a ``(data, metadata)`` pair from the mock population draw, once per worker."""
 
-    Session-scoped, so the draw is parsed once. The root ``addopts`` is
-    ``-n auto --dist loadscope``, so this is once *per worker* rather than once
-    globally -- the catalog build is milliseconds, and ``loadscope`` keeps a
-    module on one worker, so the NUTS runs that actually cost are unaffected.
-    """
-
-    # `partial` rather than a **kwargs passthrough, so the returned factory
-    # keeps build_mock_catalog's real keyword signature for type checkers.
+    # `partial` keeps build_mock_catalog's signature for type checkers.
     return partial(build_mock_catalog, mock_population)

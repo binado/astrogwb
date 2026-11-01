@@ -15,8 +15,7 @@ def uniform_mass_pair_model(
     """Ordered pair of i.i.d. uniforms on ``[minimum_mass, minimum_mass + width]``."""
     minimum_mass: jax.Array = jnp.asarray(parameters["minimum_mass"])
     mass_width: jax.Array = jnp.asarray(parameters["mass_width"])
-    # The primary is the larger of the pair; its closed-form inverse CDF lets
-    # the pair be drawn on quasi-random points.
+    # The max's closed-form inverse CDF lets the pair be drawn on QMC points.
     mass_1 = numpyro.sample(
         "source_frame_mass_1",
         MaxOfTwoUniformsDistribution(minimum_mass, mass_width, validate_args=True),

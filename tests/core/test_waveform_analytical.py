@@ -1,10 +1,7 @@
 """Tests for the closed-form quadrupolar inspiral polarization power.
 
-The scaling tests check exponents, so they are all invariant under a wrong
-overall constant: every assertion here is a ratio with the same constant on
-both sides. The absolute scale is pinned in ``test_constants.py``, by
-:func:`test_gwb_and_waveform_alpha_conventions_agree` for
-``SOLAR_MASS_IN_SECONDS``. Nothing covers the amplitude prefactor.
+The scaling tests check exponents through ratios, so they are invariant under
+the overall constant; the amplitude prefactor is not covered.
 """
 
 from __future__ import annotations

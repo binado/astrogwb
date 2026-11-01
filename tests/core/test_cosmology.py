@@ -61,10 +61,8 @@ def _assert_finite_grad(
 def _assert_returns_jax_arrays(fn: Callable, *arrays: npt.ArrayLike) -> None:
     """Assert the public contract: ``ArrayLike`` in, ``jax.Array`` out.
 
-    ``jax.typing.ArrayLike`` covers Python scalars, NumPy arrays and JAX
-    arrays (not lists), so those are the spellings a caller may legitimately
-    pass. None of them may leak a NumPy result back out, and all of them must
-    agree numerically.
+    Python scalars, NumPy arrays and JAX arrays must agree numerically and
+    never return a NumPy result.
     """
     spellings: dict[str, tuple] = {
         "numpy": _as_np(*arrays),
@@ -143,10 +141,7 @@ class TestDistanceAndVolumeGrid:
     def test_integer_redshift_grid_matches_float(self, parameters: dict) -> None:
         """An integer grid must promote through float, not truncate the quadrature.
 
-        The Gauss-Legendre nodes and weights are cast to the working dtype. Cast
-        to an *integer* redshift dtype they all truncate to zero, and the whole
-        integral silently evaluates to zeros -- no warning, no NaN. The same
-        grid spelled as integers and as floats must give the same answer.
+        Cast to an integer dtype, the nodes and weights would truncate to zero.
         """
         integer_grid = np.arange(0, 21)
         float_grid = integer_grid.astype(np.float64)
@@ -163,8 +158,7 @@ class TestDistanceAndVolumeGrid:
         for got, want in zip(from_integers, from_floats, strict=True):
             np.testing.assert_allclose(got, want)
 
-        # Pins the specific failure mode: truncated nodes/weights zero the
-        # integral, so every distance past z=0 collapses to exactly 0.
+        # Truncated nodes would collapse every distance past z=0 to exactly 0.
         assert np.all(np.asarray(from_integers[0][1:]) > 0.0)
 
     @pytest.mark.parametrize(

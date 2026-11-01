@@ -85,9 +85,7 @@ def gauss_legendre_nodes_weights(
         points, weights = gauss_legendre_nodes_weights(a, b, n)
         integral = jnp.sum(weights * f(points), axis=-1)
 
-    ``n`` is a static Python integer and is never extracted from a traced
-    value, so this helper is safe to call inside jitted code, and it is
-    differentiable in ``a`` and ``b``.
+    ``n`` is static; the result is jit-safe and differentiable in ``a`` and ``b``.
 
     Parameters
     ----------
@@ -100,10 +98,8 @@ def gauss_legendre_nodes_weights(
     -------
     tuple[jax.Array, jax.Array]
         ``(points, weights)``, each of shape
-        ``jnp.broadcast_shapes(a.shape, b.shape) + (n,)``. The dtype is
-        ``jnp.result_type(a, b, float)``: float32 bounds stay float32, integer
-        bounds promote to floating point instead of truncating the nodes and
-        weights to zeros, and Python floats need JAX x64 mode for float64.
+        ``jnp.broadcast_shapes(a.shape, b.shape) + (n,)``, with dtype
+        ``jnp.result_type(a, b, float)``.
     """
     dtype = jnp.result_type(a, b, float)
     host_nodes, host_weights = leggauss(n)
