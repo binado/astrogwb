@@ -65,9 +65,7 @@ Unchecked contracts:
   power is a function of :math:`M_d f` times :math:`M_d^2`.
 - ``density_sites`` names intrinsic sites only: redshift is integrated, never
   weighted.
-- The catalog is never narrowed with
-  :func:`~astrogwb.gwb.catalog.restrict_redshift`: its
-  reference redshift is the population window's lower edge.
+- The catalog's reference redshift is the population window's lower edge.
 - The reference catalog's frequency grid starts at or below the observed
   grid's and extends past the highest detector-frame merger frequency at
   :math:`z_{\min}`: power above it is zero.
