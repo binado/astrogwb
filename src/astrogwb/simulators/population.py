@@ -17,20 +17,23 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import Annotated, Any
 
+import jax
+import jax.numpy as jnp
 import numpy as np
+import numpyro
 from numpy.typing import NDArray
+from numpyro import handlers
 from pydantic import BaseModel, ConfigDict, Field
 
 from astrogwb import __version__
 from astrogwb.distributions.config import DistributionConfig
+from astrogwb.populations import joint_model
+from astrogwb.populations.evaluation import sample_sources
 from astrogwb.populations.joint import EXTRINSIC_SITES
 from astrogwb.populations.metadata import PopulationMetadata as PopulationSpec
 from astrogwb.utils import years_to_seconds
-
-if TYPE_CHECKING:
-    import jax
 
 __all__ = [
     "Hyperparameter",
@@ -95,8 +98,6 @@ class PopulationMetadata(BaseModel):
         by name, so it composes with ``Predictive``, ``handlers.condition`` and
         ``log_density``.
         """
-        import jax.numpy as jnp
-        import numpyro
 
         declared = {
             name: self.hyperparameters[name] for name in sorted(self.hyperparameters)
@@ -164,7 +165,6 @@ class PopulationSimulator:
     """Draw a full population realization for each input key."""
 
     def __init__(self, metadata: PopulationMetadata) -> None:
-        import jax
 
         # Set precision before creating arrays or initializing the backend.
         jax.config.update("jax_enable_x64", True)
@@ -184,12 +184,6 @@ class PopulationSimulator:
 
     def __call__(self, key: jax.Array) -> PopulationArtifact:
         """Draw the realization at a single typed JAX key."""
-        import jax
-        import jax.numpy as jnp
-        from numpyro import handlers
-
-        from astrogwb.populations import joint_model
-        from astrogwb.populations.evaluation import sample_sources
 
         if key.shape != ():
             raise ValueError(f"key must be a single key, got shape {key.shape}")

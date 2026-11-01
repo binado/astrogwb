@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+import jax
 import numpy as np
 
 from astrogwb.utils.io import h5py_module
@@ -17,7 +18,6 @@ __all__ = ["atomic_h5", "realization_key"]
 
 
 def _require_x64() -> None:
-    import jax
 
     if not jax.config.jax_enable_x64:
         raise RuntimeError(
@@ -27,7 +27,6 @@ def _require_x64() -> None:
 
 def realization_key(seed: int | np.integer, index: int) -> Any:
     """Derive the key for a realization by folding its index into the seed."""
-    import jax
 
     if index < 0:
         raise ValueError("index must be non-negative")

@@ -30,6 +30,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 import arviz_plots as azp
+import corner
 import matplotlib.pyplot as plt
 import numpy as np
 from arviz_base import from_dict
@@ -268,7 +269,6 @@ def plot_corner_for_posterior_grid(
     matplotlib.figure.Figure
         The figure produced by ``corner.corner()``.
     """
-    import corner
 
     grids = tuple(np.asarray(grid, dtype=np.float64) for grid in grids)
     ndim = len(grids)
@@ -575,7 +575,6 @@ def plot_corner(
     -------
     matplotlib.figure.Figure
     """
-    import corner
 
     names = list(truths if var_names is None else var_names)
     defaults = get_corner_kwargs(

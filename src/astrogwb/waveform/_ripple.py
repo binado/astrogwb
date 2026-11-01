@@ -40,6 +40,8 @@ import jax
 import jax.numpy as jnp
 from numpy.typing import ArrayLike
 
+from astrogwb.waveform.polarization_power import polarization_power
+
 __all__ = [
     "build_polarization_kernel",
     "build_power_kernel",
@@ -332,8 +334,6 @@ def build_power_kernel(
     """
     # Imported here, not at module scope -- see the module docstring.
     from ripplegw.interfaces import AmplitudePhaseWaveform
-
-    from astrogwb.waveform.polarization_power import polarization_power
 
     waveform = _build_ripple_waveform(
         approximant,
