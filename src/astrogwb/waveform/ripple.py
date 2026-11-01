@@ -23,27 +23,17 @@ from astrogwb.waveform.metadata import WaveformMetadata
 
 __all__ = ["RippleGenerator"]
 
-#: How far the first in-band bin may sit from ``minimum_frequency`` and still
-#: count as aligned. Not ``==``: when ``n_samples`` is 5-smooth but not a power
-#: of two, ``delta_f = f_s / n_samples`` is inexact in binary and ``k * delta_f``
-#: need not reproduce ``minimum_frequency`` bit for bit even when the
-#: configuration is valid.
+#: Alignment tolerance, in ulps, of the first in-band bin: ``delta_f`` is
+#: inexact in binary when ``n_samples`` is not a power of two.
 _ALIGNMENT_TOLERANCE_EPS = 64.0
 
 
 class RippleGenerator(WaveformGenerator):
     """Generate waveforms and polarization power with one fixed Ripple frequency grid.
 
-    A run has one approximant, one reference frequency, and one sampling grid.
-    Those fix the frequency axis and the waveform kernel at construction, so
-    :attr:`frequencies` is available before the first generation (including for
-    an empty catalog) and the source parameters are the only thing that varies
-    between calls.
-
-    Generation is trace-safe: it performs no host synchronization and no
-    data-dependent branching, so it composes with :func:`jax.jit`,
-    :func:`jax.lax.scan` and NumPyro inference. The price is that physical
-    values are not validated here -- see :meth:`check_sources`.
+    The frequency axis and kernel are fixed at construction. Generation is
+    trace-safe and does not validate physical values; see
+    :meth:`check_sources`.
     """
 
     __slots__ = (
@@ -74,13 +64,8 @@ class RippleGenerator(WaveformGenerator):
             segment_duration, n_samples, grid = self._fft_grid(metadata)
             band = self._resolve_band(grid)
         else:
-            # The grid is ours to choose: Ripple takes any strictly increasing
-            # array, and the models astrogwb uses read its shape only in ways
-            # that leave |h+|^2 + |hx|^2 alone (see the module docstring of
-            # ``_ripple``). So the kernel sees the band's own grid, built
-            # straight to ``maximum_frequency``, and nothing is sliced. It
-            # starts at ``minimum_frequency > 0`` (the metadata guarantees it),
-            # so there is no DC bin to drop.
+            # The models used leave |h+|^2 + |hx|^2 independent of the grid
+            # shape (see ``_ripple``), so the kernel sees the band itself.
             segment_duration = None
             n_samples = None
             grid = frequency_grid(
@@ -124,45 +109,26 @@ class RippleGenerator(WaveformGenerator):
         """
         resolution = metadata.frequency_resolution
         resolved_sampling_frequency = metadata.sampling_frequency
-        # astrogwb's own power-of-two rounding policy for the segment duration
-        # -- deliberate, and only ever makes the grid finer than asked.
+        # Rounded up to a power of two: only ever finer than asked.
         segment_duration = float(2.0 ** np.ceil(np.log2(1.0 / resolution)))
-        # next_smooth_even floors at 2, so this cannot be empty. A sampling
-        # frequency too low to reach the band is caught by _resolve_band
-        # instead, which can say which band it failed to cover.
         n_samples = next_smooth_even(
             int(np.ceil(segment_duration * resolved_sampling_frequency))
         )
 
-        # NumPy, not JAX: constructing a generator must not touch the XLA
-        # backend, so runtime configuration stays free to run after it.
+        # NumPy, not JAX: construction must not initialize the XLA backend.
         delta_f = resolved_sampling_frequency / n_samples
-        # From bin 1, not bin 0. Ripple evaluates the DC bin to NaN -- the
-        # f^(-7/6) amplitude divergence -- and while nan_to_num keeps that out
-        # of the forward sum, reverse mode cannot be rescued downstream: the
-        # local derivative at f = 0 is NaN, a slice or mask only zeros that
-        # bin's cotangent, and 0 * NaN is NaN. Source parameters broadcast
-        # across frequency, so their VJP sums every bin and the NaN comes back.
-        # Excluding it from the input is the only fix, and it is free: Ripple
-        # reads the bottom of the grid only through the spacing f[1] - f[0],
-        # which dropping one bin leaves at delta_f. Dropping rather than
-        # substituting is what preserves it -- a value patched into the DC bin
-        # would change f[1] - f[0] and so move IMRPhenomXAS_NRTidalv3's
-        # alignment frequency f[-1] + df.
+        # From bin 1: Ripple's DC bin is NaN, and masking its output still
+        # leaks NaN into reverse-mode gradients (0 * NaN). Dropping the bin
+        # keeps the spacing f[1] - f[0] that the models read; substituting a
+        # value would not.
         grid = np.arange(1, n_samples // 2 + 1, dtype=np.float64) * delta_f
         return segment_duration, int(n_samples), grid
 
     def _resolve_band(self, grid: np.ndarray) -> slice:
         """Return the contiguous in-band slice of ``grid``, validating alignment.
 
-        Checked here rather than after a first generation: the grid follows
-        from the configuration alone, so a misaligned ``minimum_frequency`` is
-        a constructor error, not something to discover once a catalog has
-        already been drawn.
-
-        ``grid`` starts at ``delta_f``, so a ``minimum_frequency`` of zero is
-        reported here as a misalignment. That band was never usable: its first
-        bin was Ripple's NaN at DC, zeroed on the way out.
+        ``grid`` starts at ``delta_f``, so ``minimum_frequency = 0`` is
+        reported as a misalignment.
         """
         in_band = np.flatnonzero(
             (grid >= self.metadata.minimum_frequency)
@@ -228,14 +194,9 @@ class RippleGenerator(WaveformGenerator):
     def _generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
         """Generate power in ``(frequency, sample)`` layout via Ripple.
 
-        With ``"linear"`` spacing Ripple sees the whole one-sided grid above DC
-        and the band is taken from its output, never from its input: several
-        supported models -- among them the NRTidal and precessing families --
-        read the grid's spacing and top, so restricting the input could change
-        the in-band values. The DC bin is the one exception, excluded at
-        construction: no model reads it, and the approximants astrogwb uses
-        evaluate it to NaN. With ``"log"`` and ``"loglinear"`` spacing the grid
-        is the band itself and the output is returned whole.
+        With ``"linear"`` spacing the band is sliced from the output, not the
+        input: the NRTidal and precessing models read the grid's spacing and
+        top. Other spacings evaluate the band itself.
         """
         events = ripple_parameters(self.metadata.approximant, source_parameters)
         power = self._kernel(jnp.asarray(self._frequencies), events)

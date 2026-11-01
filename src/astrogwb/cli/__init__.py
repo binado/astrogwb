@@ -19,9 +19,8 @@ Importance-integration catalogs use explicit catalog metadata::
 
     astrogwb model-catalog reference.h5 --catalog-metadata catalog.toml
 
-A reader refuses a file written by another astrogwb version; regenerate it.
-Runtime settings (--platform,
---cpu-threads) are applied before the JAX backend initializes.
+A reader refuses a file written by another astrogwb version. Runtime settings
+(--platform, --cpu-threads) are applied before the JAX backend initializes.
 """
 
 import typer

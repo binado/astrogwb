@@ -24,12 +24,9 @@ _SOURCES_PLATE = "sources"
 class DensityAccumulator(Messenger):
     """Sum ``fn.log_prob(value)`` over selected sample sites in one execution.
 
-    Only sample sites named in ``sites`` are recognised; every other site is
-    ignored, matching the ``handlers.block(hide_fn=...)`` filter this replaces.
-    Applied around a conditioned model, the sum reproduces
-    :func:`numpyro.infer.util.compute_log_probs` operation-for-operation, so
-    values are bit-identical -- including the ``intermediates`` and
-    plate-subsample ``scale`` handling.
+    Other sites are ignored. Around a conditioned model, the sum reproduces
+    :func:`numpyro.infer.util.compute_log_probs` operation for operation,
+    including ``intermediates`` and plate ``scale``, so values are bit-identical.
     """
 
     def __init__(
@@ -71,11 +68,8 @@ def compute_model_and_log_probs(
 ) -> tuple[Any, jax.Array]:
     """Run ``model`` once in isolation; return its result and selected density.
 
-    ``model`` must already be wrapped for whatever the caller needs -- such as
-    ``handlers.condition`` supplying fixed inputs -- because the helper cannot
-    know a model's arguments. Execution is isolated from enclosing handlers
-    with ``handlers.block``, which is what keeps catalog rows out of an
-    enclosing inference trace.
+    ``model`` must already be wrapped as needed, e.g. by ``handlers.condition``.
+    ``handlers.block`` keeps catalog rows out of an enclosing inference trace.
 
     Returns ``(model return value, log_prob)``. ``log_prob`` has one entry per
     source, or is the scalar zero if no ``density_sites`` matched.
@@ -89,10 +83,8 @@ def compute_model_and_log_probs(
 class _RequireObserved(Messenger):
     """Raise ``KeyError`` naming any sample site that no condition supplied.
 
-    Evaluation has no RNG key, so an unconditioned site cannot draw -- but
-    under an enclosing ``seed`` it silently would, turning a missing column
-    into ``N`` fresh latent values. Applied *outside* ``handlers.condition``,
-    this messenger sees ``is_observed`` after conditioning has set it.
+    Under an enclosing ``seed`` a missing column would otherwise silently draw
+    ``N`` fresh values. Must wrap ``handlers.condition`` to see ``is_observed``.
     """
 
     def process_message(self, msg: dict[str, Any]) -> None:
@@ -127,15 +119,11 @@ def evaluate_sources(
 
     ``model`` is a no-argument source model, built from the hyperparameters it
     closes over, so gradients with respect to them flow through its closure.
-    It runs once under a ``sources`` plate of length ``N``, with
-    every column of ``source_parameters`` conditioned in. Conditioning only
-    reaches *sample* sites: a stored deterministic column -- including
-    ``luminosity_distance`` -- is ignored, and the returned mapping holds the
-    model's own recomputation of it. ``density_sites`` names the factors summed
-    into the log density; omitted factors execute but contribute nothing.
-
-    Execution is isolated from enclosing handlers with ``handlers.block``, so
-    no source site reaches an outer trace or potential.
+    It runs once under a ``sources`` plate of length ``N``, with every column
+    of ``source_parameters`` conditioned in. Stored deterministic columns, such
+    as ``luminosity_distance``, are ignored and recomputed. ``density_sites``
+    names the factors summed into the log density. Execution is blocked from
+    enclosing handlers.
 
     Returns ``(log_prob, outputs)``. ``log_prob`` has shape ``(N,)``, zeros when
     ``density_sites`` is empty. ``outputs`` is the model's return mapping.
@@ -168,13 +156,10 @@ def sample_sources(
 ) -> dict[str, jax.Array]:
     """Draw ``num_samples`` sources, then replay them through :func:`evaluate_sources`.
 
-    ``Predictive`` draws the sampled inputs from the unplated model; one
-    batched replay then recomputes every returned column through the same code
-    path evaluation uses. Predictive's per-draw execution can differ from a
-    batched one in its final bits, and a stored column that differs from its
-    later recomputation spoils the exact-zero weights of a catalog used as its
-    own proposal. The replay conditions only the *sample* sites, read off a
-    plain probe trace, so a deterministic is always the model's recomputation.
+    The batched replay recomputes every returned column through the evaluation
+    code path: ``Predictive``'s per-draw execution can differ in the last bits,
+    which would spoil the exact-zero weights of a catalog used as its own
+    proposal.
 
     ``num_samples`` is a Python int, static under JIT. Returns the model's
     output mapping, each column of shape ``(num_samples,)``.
@@ -197,20 +182,10 @@ def sample_sources_qmc(
 ) -> dict[str, jax.Array]:
     """Draw ``num_samples`` sources on a scrambled Sobol net, then replay them.
 
-    The quasi-random counterpart of :func:`sample_sources`. A probe trace names
-    the free sample sites, ``D`` of them; ``key`` seeds one Owen scrambling of a
-    ``D``-dimensional Sobol sequence, whose first ``num_samples`` points (a
-    base-2 net) drive the sites through their inverse CDFs under
-    :class:`~astrogwb.utils.numpyro.InverseCDF`. The model runs once with every
-    point at once, and the draws are then replayed through
-    :func:`evaluate_sources` exactly as :func:`sample_sources` replays its own.
-
-    The sources are distributed as the model's law, so an average over them is
-    an unbiased estimate of the same expectation, with an error that falls
-    faster than ``num_samples ** -0.5`` for a smooth integrand of few effective
-    dimensions. The caller is trusted to pass a model meeting
-    :class:`~astrogwb.utils.numpyro.InverseCDF`'s contracts, with any
-    conditioning already applied; sites it conditions take no coordinate.
+    The quasi-random counterpart of :func:`sample_sources`: ``key`` seeds an
+    Owen scrambling of a Sobol sequence with one dimension per free sample
+    site, driven through :class:`~astrogwb.utils.numpyro.InverseCDF`, whose
+    contracts the model must meet.
 
     Raises
     ------

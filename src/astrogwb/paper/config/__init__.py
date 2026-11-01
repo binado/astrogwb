@@ -1,16 +1,8 @@
-"""Configuration support modules, and the shared scientific values themselves.
+"""Accessors for the tables the shared config layers declare.
 
-The leaf module :mod:`~astrogwb.paper.config.runs` is not re-exported; import
-it explicitly. Detector settings live in :mod:`astrogwb.detector.config`.
-
-What this package *does* expose is the tables the shared layers declare --
-``[fiducials]``, ``[priors]`` and ``[networks]`` -- plus the accessors that build something from the
-default draw every run inherits, ``[catalog]``: :func:`waveform_generator`
-from its waveform, and :func:`population_model` / :func:`population_metadata`
-from its population. Before the tables lived here, the notebook and the figure
-scripts each kept a hand-written copy, and those copies drifted: the notebook
-sampled ``local_merger_rate`` under a prior that excluded its own fiducial.
-Consume them from here instead::
+``[fiducials]``, ``[priors]`` and ``[networks]``, plus builders for the default
+draw ``[catalog]``: :func:`waveform_generator`, :func:`population_model` and
+:func:`population_metadata`::
 
     from astrogwb.paper.config import fiducials, networks, priors, waveform_generator
 
@@ -18,34 +10,16 @@ Consume them from here instead::
     detectors = networks()["ET-2L-aligned-CE-Hanford"]
     generator = waveform_generator()
 
-There is deliberately no accessor for the hyperparameters a catalog is drawn
-at: that is :func:`fiducials`, which the catalogs inherit. One table, one
-place.
-
-Every accessor also takes keyword overrides, merged over the file, so a
-notebook can vary one entry without editing TOML or retyping the table::
+Every accessor takes keyword overrides, merged over the file::
 
     fiducials(H0=70.0)
     priors(xi_0={"dist": "Uniform", "kwargs": {"low": 0.1, "high": 5.0}})
     networks(**{"ET-2L-aligned": ("S1", "R1", "C1")})
 
-**These are functions, not module-level dicts.** Eager dicts would mean file
-I/O at import, failing from any working directory but the repository root, and
-would leave no place for keyword overrides. A subprocess test in
-``tests/paper/test_cli.py`` pins that :func:`priors` leaves the XLA backend
-uninitialized.
-
-Paths are relative to the working directory, which for every script and
-notebook is the repository root -- the same contract as
-:mod:`astrogwb.paper.config.runs`. Tests, which pytest may invoke from
-anywhere, pass ``root=`` explicitly.
-
-Every accessor reads one cached merge of the shared layers, with its
-references resolved, so a table here is exactly what a run inherits. Each
-hands back a fresh copy, so a caller that mutates what it got does not poison
-the cache for everyone else -- overrides are merged *after* the cached parse,
-so they cannot either. A long-lived Jupyter session will not see an edit to a
-shared layer until ``_shared.cache_clear()``.
+They are functions rather than module-level dicts, so importing does no file
+I/O. Paths are relative to the working directory (the repository root); tests
+pass ``root=``. Each accessor returns a fresh copy of one cached merge; a
+long-lived session sees layer edits only after ``_shared.cache_clear()``.
 """
 
 from __future__ import annotations
@@ -102,17 +76,11 @@ def _table(root: Path | None, *path: str) -> dict[str, Any]:
 def fiducials(root: Path | None = None, **kwargs: float) -> dict[str, float]:
     """The fiducial hyperparameter values: the shared ``[fiducials]`` table.
 
-    These are **not** the injection: what was injected is recorded in the
-    injection catalog file, which is where the observed spectrum's rate and
-    density come from. These are the point catalogs are drawn at and spectra are
-    evaluated at. Nothing cross-checks them against a catalog, because nothing
-    needs to.
-
-    Every fiducial carries a prior in :func:`priors`.
+    The point catalogs are drawn at and spectra evaluated at, not the
+    injection. Every fiducial carries a prior in :func:`priors`.
 
     Keyword arguments override the file, and may name a fiducial the file does
-    not declare. An added fiducial is the caller's to keep consistent with
-    :func:`priors` -- nothing cross-checks the two tables.
+    not declare; keeping it consistent with :func:`priors` is the caller's job.
     """
     table = {**_table(root, "fiducials"), **kwargs}
     return {name: float(value) for name, value in table.items()}
@@ -121,12 +89,7 @@ def fiducials(root: Path | None = None, **kwargs: float) -> dict[str, float]:
 def priors(root: Path | None = None, **kwargs: Any) -> dict[str, dist.Distribution]:
     """The prior for each parameter, materialized from the shared ``[priors]``.
 
-    One entry per fiducial. The returned distributions hold plain Python
-    floats and evaluating none of them touches JAX, so calling this does not
-    initialize the XLA backend -- ``configure_runtime`` may still run after it.
-
-    Note this is the *inference* prior. A diagnostic that scans a parameter is
-    free to scan wider; it just has to say so.
+    One entry per fiducial. Calling this does not initialize the XLA backend.
 
     Keyword arguments override the file, and may name a parameter the file does
     not declare. A value may be a wire-format spec
@@ -145,18 +108,9 @@ def priors(root: Path | None = None, **kwargs: Any) -> dict[str, dist.Distributi
 def networks(root: Path | None = None, **kwargs: Any) -> dict[str, tuple[str, ...]]:
     """Detector networks by name: the shared ``[networks]`` table.
 
-    The :func:`detector_registry` resolves the geometry and sensitivity settings.
-
-    Membership and content live here; *order* does not. The ordered legend of
-    the network-comparison figures is
-    :data:`astrogwb.paper.plotting.DETECTOR_NETWORKS`, because order is
-    presentation -- and because a TOML table is not an ordered thing.
-
-    Keyword arguments override the file, and may name a network the file does
-    not declare. Use :func:`detector_registry` with matching overrides when
-    building runtime detectors. Every committed name is hyphenated
-    (``ET-2L-aligned``), so an override has to be unpacked from a mapping
-    rather than written as a literal keyword::
+    Membership only; the figure order is
+    :data:`astrogwb.paper.plotting.DETECTOR_NETWORKS`. Keyword arguments
+    override the file; names are hyphenated, so unpack them from a mapping::
 
         networks(**{"ET-2L-aligned": ("S1", "R1", "C1")})
     """
@@ -181,17 +135,9 @@ def detector_registry(root: Path | None = None, **overrides: Any) -> DetectorReg
 def waveform_generator(root: Path | None = None, **kwargs: Any) -> WaveformGenerator:
     """Build the waveform generator the default draw uses.
 
-    Keyword arguments override the file. ``approximant="AnalyticInspiral"`` selects
-    the closed-form inspiral, and is the only approximant taking an ``alpha``;
-    any other name is a Ripple approximant.
-
-    The settings are validated through
-    :class:`~astrogwb.waveform.WaveformMetadata` rather than coerced
-    field by field here, so this accessor and a catalog request reach a generator
-    down the same path and an override is checked instead of trusted.
-
-    Ripple construction initializes the XLA backend, so this is not safe to
-    call before ``configure_runtime``.
+    Keyword arguments override the file and are validated through
+    :class:`~astrogwb.waveform.WaveformMetadata`. Not safe before
+    ``configure_runtime``.
     """
     return waveform_metadata(root, **kwargs).build()
 
@@ -199,10 +145,7 @@ def waveform_generator(root: Path | None = None, **kwargs: Any) -> WaveformGener
 def waveform_metadata(root: Path | None = None, **kwargs: Any) -> WaveformMetadata:
     """The waveform the default draw, ``[catalog]``, uses, as a record.
 
-    What :func:`waveform_generator` builds, before it is built: the form a
-    catalog request carries.
-    Keyword arguments override the file and are validated, not trusted.
-    Touches no JAX, so it is safe before ``configure_runtime``.
+    Keyword arguments override the file. Safe before ``configure_runtime``.
     """
     settings = {**_table(root, "catalog", "waveform"), **kwargs}
     return WaveformMetadata.model_validate(settings)
@@ -213,18 +156,11 @@ def population_model(
 ) -> Population:
     """Build the population the default draw, ``[catalog]``, is drawn from.
 
-    Returns the registered :class:`~astrogwb.populations.registry.Population` --
-    a callable ``parameters -> (redshift_distribution, source_model)`` -- with its construction
-    settings bound. Keyword arguments override ``model_kwargs``, which is how a notebook
-    studies the committed population on a coarser grid or a narrower redshift
-    window without editing the file::
+    Keyword arguments override ``model_kwargs``; an unknown key raises::
 
         population_model(n_grid=256, minimum_redshift=0.3)
 
-    A key the named population does not take raises here rather than being
-    filtered away, which is the same contract a catalog request gets.
-
-    Building the population is not safe before ``configure_runtime``.
+    Not safe before ``configure_runtime``.
     """
     return population_metadata(root).with_model_kwargs(**kwargs).build()
 
@@ -234,13 +170,8 @@ def population_metadata(
 ) -> PopulationMetadata:
     """The record the default draw, ``[catalog]``, carries for its population.
 
-    Keyword arguments override ``model_kwargs``, validated rather than trusted, so this
-    accessor and :class:`~astrogwb.gwb.catalog.CatalogMetadata` reach a record down
-    the same path. An already-built record is re-derived with
-    :meth:`~astrogwb.populations.PopulationMetadata.with_model_kwargs`.
-
-    Touches no JAX, so it is safe before ``configure_runtime``; building the
-    record's population is not, for the reason :func:`population_model` gives.
+    Keyword arguments override ``model_kwargs``. Safe before
+    ``configure_runtime``; building the record's population is not.
     """
     table = _table(root, "catalog", "population")
     table["model_kwargs"] = {**table.get("model_kwargs", {}), **kwargs}

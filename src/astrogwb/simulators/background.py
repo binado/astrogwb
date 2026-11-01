@@ -13,10 +13,9 @@ in the pair :math:`(a, b)` the real cross-power
 
     K_{ab,i} = \mathrm{Re}\left[e^{i\phi_{ab,i}} H_{a,i}^* H_{b,i}\right],
 
-:math:`\phi_{ab,i}` the inter-site delay phase. Detector strains are projected directly from the polarizations. Sources are
-summed without cross terms between
-them (no source interference), :math:`D_{ab} = \sum_i K_{ab,i}`, and normalized
-by the observation time :math:`T` as
+:math:`\phi_{ab,i}` the inter-site delay phase. Sources are summed without
+cross terms (no source interference), :math:`D_{ab} = \sum_i K_{ab,i}`, and
+normalized by the observation time :math:`T` as
 
 .. math::
 
@@ -29,15 +28,10 @@ reduction function of the native geometry. For an isotropic, unpolarized
 population this gives :math:`E[Y_{ab}] = \gamma_{ab} S_h`. The sum is never
 divided by the realized count.
 
-The stage is configured by a :class:`~astrogwb.waveform.WaveformMetadata` and
-named networks, a :data:`DetectorRegistry`; together with the population and the
-noise segment length they form a :class:`~astrogwb.simulators.SimulationConfig`,
-which the artifact and its file carry. Every pair of the union of their
-detectors is projected once per chunk in a single fused kernel (waveform
-evaluation plus detector projection), so a pair two networks share costs one
-projection, and each network keeps its own rows, ``(P_n, F)``.
-:func:`combine_pair_spectra` weights them optimally into one network spectrum
-``(F,)`` on demand; it is not stored.
+Every pair of the union of the networks' detectors is projected once per chunk
+in one fused kernel, and each network keeps its own rows, ``(P_n, F)``.
+:func:`combine_pair_spectra` weights them into a network spectrum ``(F,)`` on
+demand.
 
 Without a ``segment_duration`` the background is deterministic given its
 inputs and carries no detector noise. With one, :math:`\tau`, the observation is
@@ -59,14 +53,10 @@ the zero-mean part (noise by noise, signal by noise, source interference) is
 scaled by :math:`r_i`, which makes the noise-by-noise term have the standard
 deviation :func:`~astrogwb.detector.pair_bin_scale` for any grid and any
 :math:`\tau`. The model holds while signals are mostly shorter than
-:math:`\tau` and a bin holds at least one segment mode,
-:math:`\tau_\mathrm{eff} \Delta f_i \ge 1`. The segment labels and the noise are
-folded from the realization's key (streams :data:`SEGMENT_STREAM` and
-:data:`NOISE_STREAM`), so the background stays a deterministic function of the
-realization. Bins where a PSD is not finite get no noise.
-``pair_spectral_density`` then holds signal plus noise, and
-:meth:`BackgroundArtifact.noise` gives the matching likelihood inputs.
-Detectors are static: the Earth's rotation during a signal is not modelled.
+:math:`\tau` and :math:`\tau_\mathrm{eff} \Delta f_i \ge 1`. Segment labels
+and noise are folded from the realization's key (streams
+:data:`SEGMENT_STREAM` and :data:`NOISE_STREAM`). Bins where a PSD is not
+finite get no noise. Earth's rotation during a signal is not modelled.
 """
 
 from __future__ import annotations
@@ -134,8 +124,7 @@ class NetworkNoise(NamedTuple):
     :func:`~astrogwb.detector.pair_bin_scale`, ``(P_n, F)``; ``effective_psd``
     the network's :func:`~astrogwb.detector.effective_psd`, ``(F,)``; ``scale``
     its :func:`~astrogwb.detector.gaussian_bin_scale`, ``(F,)``. The pairs are
-    in the order of :meth:`DetectorRegistry.pairs`. Frequency bands and padding
-    are analysis choices and are left to the reader.
+    in the order of :meth:`DetectorRegistry.pairs`.
     """
 
     pair_overlap: NDArray[np.float64]
@@ -149,8 +138,7 @@ def select_networks(
 ) -> tuple[str, ...]:
     """The sorted network names ``names`` (default all) of ``registry``.
 
-    The one place the rule that a network holds at least two detectors is
-    enforced, since a network without a pair has no background.
+    A network needs at least two detectors to have a pair.
 
     Raises
     ------
@@ -214,8 +202,7 @@ class BackgroundArtifact:
     def noise(self) -> dict[str, NetworkNoise]:
         """Each network's :class:`NetworkNoise` on this background's grid.
 
-        Derived from the config's detectors, the grid and the observation
-        time rather than stored.
+        Derived from the config, not stored.
         """
         registry = self.config.detectors
         grid = np.asarray(self.frequencies, dtype=np.float64)
@@ -305,13 +292,9 @@ class BackgroundArtifact:
 class BackgroundSimulator:
     """Generates waveforms chunk by chunk, projects onto networks and sums pair cross-powers.
 
-    ``simulator(population)`` iterates over fixed-size padded source chunks of
-    ``population``, evaluates the radiation-frame polarizations and accumulates
-    their cross-powers over the detector union's pairs in one fused JIT call
-    per chunk, so a pair shared by networks is projected once. Each network then
-    takes its rows, using the registry's resolved geometry and PSD references. One chunk shape is one compile,
-    whatever the realized count, and peak memory is one chunk of polarizations.
-    The observation time comes from the population. Build once and call often.
+    ``simulator(population)`` accumulates cross-powers over fixed-size padded
+    source chunks, one fused JIT call per chunk: one compile whatever the
+    realized count, and peak memory of one chunk. Build once and call often.
 
     A ``segment_duration`` in seconds assigns every source to a segment and
     adds sampled detector noise to the pair spectra, segment by segment (see
@@ -671,7 +654,7 @@ def combine_pair_spectra(
     return zero.
 
     Parameters
-    ------
+    ----------
     pair_spectral_density
         The pair spectra :math:`Y_{ab}`, ``(..., P, F)``.
     frequencies

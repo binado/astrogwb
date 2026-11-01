@@ -24,25 +24,11 @@ The integral runs in the delay's probability variable :math:`u = F(\tau)`,
 with an ``n_delay_nodes``-point Gauss-Legendre rule on that interval, for each
 merger redshift separately.
 
-- **The substitution** takes :math:`p(\tau)` out of the integrand, so the nodes
-  crowd where the delay has its mass -- next to :math:`\tau_{\min}` for
-  :math:`p \propto 1/\tau` -- with no bounds to choose. A node set tied to the
-  redshift grid cannot do this: at :math:`z \approx 0` a
-  :math:`\Delta z = 0.01` step is already :math:`\sim 140` Myr.
-- **The moving upper limit** integrates only the delays that fit before the
-  formation cut-off :math:`z_{\mathrm{cut}}`. The limit and the nodes move
-  continuously with ``H0``, ``Omega_m``, :math:`z` and the delay
-  hyperparameters, so the density has no jumps and autodiff sees the moving
-  boundary. Masking fixed nodes at the cut-off would drop them one at a time.
-- **Gauss-Legendre** converges spectrally for the smooth integrand this leaves:
-  the default 48 nodes reach :math:`\sim 10^{-9}` at :math:`z = 0` (the widest
-  interval) and better at higher :math:`z`, where the midpoint rule needs
-  hundreds of nodes for :math:`10^{-5}`.
-
-An FFT would buy nothing here: the direct evaluation is an
-``(n_grid, n_delay_nodes)`` array, cheap under ``jit``, and it would need a
-uniform time grid that both under-resolves :math:`\tau_{\min}` and forces two
-interpolations.
+The substitution crowds the nodes where the delay has its mass. The upper
+limit moves continuously with the cosmology, :math:`z` and the delay
+hyperparameters, so the density has no jumps for autodiff; masking fixed nodes
+at the cut-off would. The default 48 nodes reach :math:`\sim 10^{-9}` relative
+error at :math:`z = 0`, the widest interval.
 """
 
 from __future__ import annotations
@@ -125,8 +111,7 @@ class TimeDelayedRedshiftDistribution(RedshiftDistribution):
     in the same units.
 
     Formation is cut off above ``maximum_formation_redshift``: :math:`\psi` is
-    treated as zero there, and never evaluated. The cut-off enters as the
-    integral's upper limit rather than a mask, so it is continuous. That window is independent of
+    treated as zero there, and never evaluated. It is independent of
     ``maximum_redshift``, which bounds only the *merger* redshift.
 
     Parameters
@@ -141,9 +126,7 @@ class TimeDelayedRedshiftDistribution(RedshiftDistribution):
         Delay distribution in Gyr. Must implement ``cdf`` and ``icdf``, e.g. the
         canonical :math:`p(\tau) \propto \tau^{-1}` as
         :class:`~astrogwb.distributions.delay.PowerLawDelayDistribution` ``(-1.0,
-        0.02, 13.0)``. Prefer it to ``numpyro.distributions.DoublyTruncatedPowerLaw``
-        when the slope is sampled: that one's gradient in the slope blows up
-        next to :math:`-1`.
+        0.02, 13.0)``, whose slope gradient stays finite near :math:`-1`.
     n_delay_nodes:
         Gauss-Legendre order of the delay integral.
     maximum_formation_redshift:
@@ -152,10 +135,8 @@ class TimeDelayedRedshiftDistribution(RedshiftDistribution):
         As for :class:`RedshiftDistribution`.
     """
 
-    # Both data fields are set before `super().__init__`, which calls
-    # `_merger_rate`. The distribution is itself a pytree, so its
-    # hyperparameters are traced leaves. The Gauss-Legendre order is a shape,
-    # hence static aux data.
+    # Set before `super().__init__`, which calls `_merger_rate`. The
+    # Gauss-Legendre order is a shape, hence static aux data.
     pytree_data_fields = ("time_delay_distribution", "maximum_formation_redshift")
     pytree_aux_fields = ("n_delay_nodes",)
 

@@ -63,11 +63,10 @@ class DetectorConfig(BaseModel):
 
     @property
     def sensitivity(self) -> Sensitivity:
-        """Sensitivity of this detector's PSD reference, shared by reference.
+        """Sensitivity of this detector's PSD reference, cached per reference.
 
-        The curve is read on its first evaluation. The sensitivity is cached
-        per reference, not per instance, so ``model_copy(update=...)`` of a
-        detector cannot carry a stale curve.
+        Caching per reference, not per instance, keeps ``model_copy`` from
+        carrying a stale curve.
         """
         return _sensitivity(self.psd_reference)
 
@@ -79,11 +78,9 @@ class DetectorConfig(BaseModel):
 class DetectorRegistry(BaseModel):
     """A complete resolved registry, trusted and fixed for a dataset's lifetime.
 
-    Network members are kept in the order they were declared in.
-    :meth:`pairs` and :meth:`build_network` use their sorted order instead, the
-    canonical one, so pair axes built from the registry line up with a
-    simulated background's. The ``detectors`` and ``networks`` mappings are not
-    to be edited after construction.
+    Network members keep their declared order; :meth:`pairs` and
+    :meth:`build_network` sort them, so pair axes line up with a simulated
+    background's. Do not mutate ``detectors`` or ``networks``.
     """
 
     model_config = _STRICT
@@ -119,8 +116,8 @@ class DetectorRegistry(BaseModel):
     def select(self, names: Sequence[str]) -> DetectorRegistry:
         """The registry of the networks ``names`` and the detectors they use.
 
-        Network members are sorted and labels dropped, so what remains is the
-        scientific content: it serializes alike for any presentation of it.
+        Members are sorted and labels dropped, so the result serializes alike
+        for any presentation.
         """
         networks = {name: tuple(sorted(self.networks[name])) for name in sorted(names)}
         used = sorted(

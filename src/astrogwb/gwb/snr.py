@@ -51,12 +51,9 @@ def spectral_snr_squared_per_bin(
     trailing ``(batch,)`` shape is expanded at ``axis`` rather than multiplied
     against the frequency bins.
 
-    ``frequencies`` is the whole grid ``axis`` runs over, and the arrays are
-    on that same grid. ``frequency_mask`` selects bins on it: an excluded bin
-    contributes exactly zero, and the widths of the bins that remain are still
-    those of the full grid. Pass the mask rather than slicing the arrays to the
-    band, which would hand this function a grid with gaps and mis-size the
-    bins at their edges.
+    ``frequencies`` is the whole grid ``axis`` runs over. ``frequency_mask``
+    zeroes excluded bins while keeping full-grid widths; pass it rather than
+    slicing, which would mis-size the bins at the band edges.
     """
     ratio_squared = spectral_density**2 / effective_psd**2
     widths = broadcast_along_axis(bin_widths(frequencies), ratio_squared.ndim, axis)
@@ -90,14 +87,9 @@ def spectral_snr_squared(
             = \sum_i \frac{S_{h,i}^2}{\sigma_i^2}
             = \sum_i \Delta\mathrm{SNR}^2_i,
 
-    with per-bin terms from :func:`spectral_snr_squared_per_bin`. The
-    factor :math:`2T` is what makes the result dimensionless --
-    :math:`(S_h|S_h)` carries units of Hz.
-
-    The per-bin scale :math:`\sigma_i = S_{\mathrm{eff},i}/\sqrt{2 T \Delta f_i}`
-    matches :func:`astrogwb.detector.gaussian_bin_scale` for the same
-    ``frequencies`` and ``observation_time_sec`` in seconds -- note that
-    function takes **years**.
+    with per-bin terms from :func:`spectral_snr_squared_per_bin`.
+    :math:`\sigma_i` matches :func:`astrogwb.detector.gaussian_bin_scale`, which
+    takes the observation time in years rather than seconds.
     """
     return jnp.sum(
         spectral_snr_squared_per_bin(

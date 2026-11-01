@@ -18,24 +18,13 @@ from .likelihood import Network
 class LogDensityFn:
     """Grid-evaluate a NumPyro model's constrained log density.
 
-    The model given to :meth:`__init__` can take positional or keyword
-    arguments. Callers supply positional inputs via ``model_args`` and
-    keyword inputs via ``model_kwargs`` (the convention every model in
-    :mod:`astrogwb.inference.models` follows).
-
     Parameters
     ----------
     model:
-        A NumPyro model called as ``model(*model_args, **model_kwargs)``. Every
-        model in :mod:`astrogwb.inference.models` returns ``None``; a
-        ``functools.partial`` or a ``numpyro.handlers.Messenger`` wrapper
-        (e.g. from ``handlers.block``/``handlers.condition``) around one
-        satisfies this too.
+        A NumPyro model called as ``model(*model_args, **model_kwargs)``.
     chunk_size:
         Forwarded to :func:`jax.lax.map` as ``batch_size``, bounding peak
-        memory to ``chunk_size`` grid points' worth of intermediates rather
-        than materializing the whole grid via a single ``vmap``. ``None``
-        (the default) evaluates one point at a time.
+        memory. ``None`` evaluates one point at a time.
     """
 
     def __init__(
@@ -61,8 +50,7 @@ class LogDensityFn:
             flat = jax.lax.map(score, points, batch_size=chunk_size)
             return flat.reshape(tuple(grid.size for grid in grids.values()))
 
-        # Built once: this is what makes a sweep over model_args/model_kwargs
-        # pay for a single compilation instead of one per iteration.
+        # Built once, so sweeping model_args/model_kwargs compiles once.
         self._evaluator = jax.jit(evaluate)
 
     def __call__(
@@ -77,12 +65,8 @@ class LogDensityFn:
 
         Returns an array of shape ``tuple(len(g) for g in grids.values())``,
         axes in ``grids`` insertion order. ``fixed`` pins additional sample
-        sites at every grid point and is threaded through as a *traced*
-        argument, so sweeping its value never triggers a recompile -- only a
-        change to its set of keys does, since that changes the argument
-        pytree's structure.
-
-        ``model_args`` and ``model_kwargs`` are forwarded to ``model``.
+        sites at every grid point; it is traced, so only a change to its keys
+        recompiles.
         """
         fixed_params = dict(fixed) if fixed is not None else {}
         return self._evaluator(grids, fixed_params, tuple(model_args), model_kwargs)
@@ -101,8 +85,8 @@ def _partition(fn: Any) -> tuple[list[Any], _Structure]:
     """Split ``fn`` into its array leaves and a hashable static rest.
 
     A pytree callable (:class:`jax.tree_util.Partial`) yields its arrays; a
-    plain function is one non-array leaf, so it is static whole, as before.
-    Flattening drops ``None``, so ``None`` cannot be a real static leaf.
+    plain function is one static leaf. Flattening drops ``None``, so ``None``
+    cannot be a real static leaf.
     """
     leaves, treedef = jax.tree_util.tree_flatten(fn)
     arrays = [leaf for leaf in leaves if _is_array(leaf)]

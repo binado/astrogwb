@@ -46,10 +46,7 @@ class MaxOfTwoNormalsDistribution(dist.Distribution):
     }
     support = dist.constraints.real
     reparametrized_params = ["loc", "scale"]  # noqa: RUF012
-    # Same layout as numpyro.distributions.HalfNormal: the component lives on
-    # the instance, and is named here so a JIT round-trip restores it.
-    # `tree_flatten` reads ``__dict__`` and `tree_unflatten` does not re-run
-    # ``__init__``.
+    # `_normal` is listed because `tree_unflatten` does not re-run `__init__`.
     pytree_data_fields = ("_normal", "loc", "scale")
 
     def __init__(
@@ -68,8 +65,6 @@ class MaxOfTwoNormalsDistribution(dist.Distribution):
         self, key: jax.Array | None, sample_shape: tuple[int, ...] = ()
     ) -> jax.Array:
         """Two i.i.d. component normals, then the larger of the pair."""
-        # `None` only exists to match the base-class signature; handlers
-        # always pass a real key.
         assert key is not None
         eps = jax.random.normal(key, shape=(2,) + sample_shape + self.batch_shape)
         return jnp.asarray(self.loc + self.scale * jnp.max(eps, axis=0))
@@ -132,8 +127,6 @@ class MaxOfTwoUniformsDistribution(dist.Distribution):
         self, key: jax.Array | None, sample_shape: tuple[int, ...] = ()
     ) -> jax.Array:
         """Inverse-CDF draw from one uniform per element."""
-        # `None` only exists to match the base-class signature; handlers
-        # always pass a real key.
         assert key is not None
         return self.icdf(jax.random.uniform(key, shape=sample_shape + self.batch_shape))
 

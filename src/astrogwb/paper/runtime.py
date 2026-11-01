@@ -15,10 +15,8 @@ from types import ModuleType
 
 logger = logging.getLogger(__name__)
 
-# Every env var that can fan out a BLAS/vector thread pool per chain worker.
-# Job schedulers commonly set these to the job's thread count, so a partial
-# override would leak that count into pools this flag is meant to pin (see
-# --cpu-threads).
+# Every env var that can size a BLAS/vector thread pool. --cpu-threads sets all
+# of them: schedulers often preset some, and a partial override would leak.
 CPU_THREAD_ENV_VARS = (
     "OMP_NUM_THREADS",
     "OPENBLAS_NUM_THREADS",

@@ -1,11 +1,8 @@
 """Setup shared by the posterior notebooks.
 
-The per-network Gaussian data, read from a
-:class:`~astrogwb.simulators.NetworkNoise` and cut to an analysis band, and
-the shot-noise variants: everything a grid or a sampler needs besides its
-catalogs before it evaluates a likelihood. Only NumPy and :mod:`astrogwb` are
-imported at module scope, and ``jax.numpy`` inside the functions that use it,
-so importing this module leaves the XLA backend alone.
+Per-network Gaussian data cut to an analysis band, and the shot-noise variants.
+``jax.numpy`` is imported inside functions, so importing this module leaves the
+XLA backend alone.
 """
 
 from __future__ import annotations
@@ -52,8 +49,7 @@ def network_data(
     """The per-bin Gaussian scale and usable-bin mask of one network.
 
     Bins no detector pair measures have infinite effective PSD; they are
-    dropped from the mask and given a finite scale of one, as
-    ``InferenceInputs.model_kwargs`` does.
+    dropped from the mask and given a finite scale of one.
 
     Parameters
     ----------

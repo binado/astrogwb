@@ -23,12 +23,9 @@ Schwarzschild test-particle ISCO; nothing here defaults to it.
 
 .. warning::
 
-    The power is of order :math:`10^{-47}\,\mathrm{Hz}^{-2}` for a BNS at a
-    few hundred Mpc -- nine orders of magnitude below the smallest normal
-    float32 (:math:`1.2\times10^{-38}`). ``jax_enable_x64`` must be on or the
-    result underflows to zeros *silently*, with no warning and no NaN;
-    :func:`inspiral_polarization_power` therefore raises
-    :class:`RuntimeError` unless it is.
+    The power, about :math:`10^{-47}\,\mathrm{Hz}^{-2}` for a BNS at a few
+    hundred Mpc, silently underflows in float32, so
+    :func:`inspiral_polarization_power` requires ``jax_enable_x64``.
 """
 
 from __future__ import annotations
@@ -84,10 +81,7 @@ def inclination_factor(inclination: JaxArrayLike) -> jax.Array:
 def chirp_mass(mass_1: JaxArrayLike, mass_2: JaxArrayLike) -> jax.Array:
     r"""Chirp mass $M_c = (m_1 m_2)^{3/5} / (m_1 + m_2)^{1/5}$.
 
-    Frame-agnostic and unit-agnostic: the result carries whatever mass unit
-    and frame the components came in. Scaling both components by $(1 + z)$
-    scales $M_c$ by $(1 + z)$, which is how
-    :func:`inspiral_polarization_power` reaches the detector-frame chirp mass.
+    In the frame and unit of the components.
     """
     mass_1, mass_2 = jnp.asarray(mass_1), jnp.asarray(mass_2)
     return (mass_1 * mass_2) ** 0.6 / (mass_1 + mass_2) ** 0.2
@@ -220,10 +214,8 @@ def _single_source_inspiral_power(
         source_frame_mass_1, source_frame_mass_2, redshift, alpha=alpha
     )
 
-    # f = 0 would make f**(-7/3) infinite, and `where` evaluates both branches:
-    # inf * 0 is NaN, and under reverse-mode JAX that NaN propagates into the
-    # gradient even though the bin is masked away. Substitute a safe frequency
-    # before taking the power, then mask.
+    # Substitute before the power: an infinite masked branch still leaks NaN
+    # into reverse-mode gradients.
     inside_band = (frequencies > 0.0) & (frequencies <= cutoff)
     safe_frequency = jnp.where(frequencies > 0.0, frequencies, 1.0)
     power = amplitude_squared * safe_frequency ** (-7.0 / 3.0)
@@ -245,19 +237,10 @@ def inspiral_polarization_power(
 ) -> jax.Array:
     r"""Polarization power $|\tilde h_+|^2 + |\tilde h_\times|^2$ on an ``(N, F)`` grid.
 
-    Evaluates the module's closed form at every ``(source, frequency)`` pair
-    and zeroes the bins above each source's :func:`termination_frequency`.
-    Required source parameters are read from a gwmock-compatible mapping.
-    Each may be a scalar or a one-dimensional ``(N,)`` array; they are jointly
-    broadcast to ``(N,)``. Higher-rank source arrays are rejected, and
-    unrelated mapping entries are ignored. Output is in $\mathrm{Hz}^{-2}$,
-    laid out ``(sample, frequency)``.
-
-    .. warning::
-
-        The truncation is a hard mask, so the power is not differentiable in
-        ``alpha``: its gradient with respect to ``alpha`` is zero wherever it
-        exists.
+    Evaluates the module's closed form and zeroes the bins above each source's
+    :func:`termination_frequency`. Source parameters may be scalars or ``(N,)``
+    and are broadcast jointly; other mapping entries are ignored. The gradient
+    with respect to ``alpha`` is zero: the truncation is a hard mask.
 
     Parameters
     ----------
@@ -265,12 +248,9 @@ def inspiral_polarization_power(
         Frequency grid in Hz, shape ``(F,)``. A zero bin returns zero power
         rather than the divergence of $f^{-7/3}$.
     parameters:
-        Source population mapping with ``source_frame_mass_1``,
-        ``source_frame_mass_2``, ``redshift``, ``luminosity_distance``, and
-        entries. ``inclination`` is optional and defaults to face-on. The component masses are in solar masses,
-        luminosity distance is in Mpc, and inclination is in radians. Redshift
-        enters only by redshifting the masses -- both the chirp mass in the
-        amplitude and the total mass in the cutoff.
+        ``source_frame_mass_1``, ``source_frame_mass_2`` (solar masses),
+        ``redshift``, ``luminosity_distance`` (Mpc) and optional
+        ``inclination`` (radians, default face-on).
     alpha:
         Scalar dimensionless truncation parameter shared by every source; see
         :func:`termination_frequency`.
@@ -322,9 +302,7 @@ class AnalyticInspiralGenerator(WaveformGenerator):
     ) -> tuple[jax.Array, jax.Array]:
         """Quadrupolar polarizations ``(N, F)`` of the closed form, at zero phase.
 
-        The stationary-phase phase is not modelled, so the polarizations carry
-        the amplitude and inclination dependence only; a source's phase cancels
-        from its own cross-powers.
+        The phase is not modelled; it cancels from a source's own cross-powers.
         """
         return quadrupolar_polarizations(*self._face_on_amplitude(source_parameters))
 

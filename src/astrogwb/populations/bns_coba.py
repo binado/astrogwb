@@ -1,18 +1,10 @@
 r"""BNS population: one NumPyro model for every Madau-Dickinson variant.
 
-The redshift law, the mass law and the propagation law are
-construction settings of one model rather than separate registered functions,
-so the variants cannot disagree about the source density they share. A
-population is a callable ``parameters -> (redshift_distribution, source_model)``:
-the redshift distribution is built once per call, so the rate and the redshift
-density come from the same grid. ``source_model()`` is a no-argument NumPyro
-model of the intrinsic parameters alone, in the source frame; redshift, GW
-distance and the detector-frame masses are not its business (the latter are
-derived from source-frame masses and redshift by the waveform layer).
-:func:`~astrogwb.populations.joint.joint_model` composes the halves into the
-model whose returned columns a catalog stores.
+The redshift, mass and propagation laws are construction settings of one model,
+so the variants share one source density. ``source_model()`` covers only the
+source-frame intrinsic parameters.
 
-Contracts the caller is trusted to honour (nothing here checks them):
+Unchecked contracts:
 
 - ``parameters`` carries ``H0``, ``Omega_m``, ``gamma``, ``kappa``,
   ``z_peak`` and ``local_merger_rate`` (:math:`\mathrm{Gpc}^{-3}\,
@@ -20,9 +12,7 @@ Contracts the caller is trusted to honour (nothing here checks them):
   ``mass_model="uniform"`` or ``mass_mean`` and ``mass_sigma`` for
   ``mass_model="gaussian"``, plus ``delay_slope`` when ``time_delay=True``.
 - Modified GW propagation is applied whenever ``xi_0`` is in ``parameters``
-  (``xi_n`` must then be too). At :math:`\Xi_0 = 1` the distance ratio is
-  identically one, so a configuration that always carries the fiducial
-  ``xi_0 = 1`` reproduces plain cosmological propagation exactly.
+  (``xi_n`` must then be too); :math:`\Xi_0 = 1` is plain propagation.
 - ``local_merger_rate`` is a pure overall scaling of the spectrum; ``H0`` is
   too, except when ``time_delay=True``: the delay is in Gyr while lookback time
   scales as :math:`1/H_0`, so the normalized redshift law depends on ``H0``.
@@ -79,13 +69,9 @@ def _time_delayed_redshift_distribution(
 ) -> RedshiftDistribution:
     """The delayed Madau-Dickinson law, its delay slope read from ``parameters``.
 
-    The delay is built inside the model so ``delay_slope`` is a traced
-    hyperparameter like ``z_peak``; the floor and the quadrature are
-    construction settings.
-
-    The delay has no ceiling of its own: its upper bound is the lookback time
-    to ``maximum_formation_redshift``, the longest delay any merger can have. It
-    follows ``H0`` and ``Omega_m``.
+    ``delay_slope`` is traced; the floor and quadrature are construction
+    settings. The delay's upper bound is the lookback time to
+    ``maximum_formation_redshift``, so it follows ``H0`` and ``Omega_m``.
     """
     longest_delay = lookback_time(
         maximum_formation_redshift, parameters["H0"], parameters["Omega_m"]
@@ -149,8 +135,7 @@ def bns_coba_population_fn(
 ) -> Population:
     r"""Build a BNS population from its construction settings.
 
-    The module docstring lists the hyperparameters each setting requires and
-    the contracts the caller is trusted to honour.
+    See the module docstring for the hyperparameters each setting requires.
 
     Parameters
     ----------

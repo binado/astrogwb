@@ -1,26 +1,19 @@
 r"""Analytic Newtonian-inspiral stochastic-background spectrum.
 
-This module evaluates the one-sided strain spectral density implied by
-Eqs. 2, 3, and 9 of Cousins et al., *The Stochastic Siren* (2026), for an
-ordered joint source-frame component-mass population ``p(m1, m2)`` with
-``m1 >= m2``. Integration is performed in total mass ``M = m1 + m2`` and mass
-ratio ``q = m2 / m1``. The mass-ratio integral is evaluated first on a fixed
-total-mass grid, then cumulatively integrated in ``M``. Linear interpolation of
-that cumulative makes the source-frequency cutoff cheap to evaluate and allows
-the mass calculation to be precomputed independently of redshift and cosmology.
-A uniform ordered component-mass density is a closed-form special case: both
-integrals are elementary, so ``uniform_prior_mass_moments`` skips the grid and
-the interpolation entirely.
+The one-sided strain spectral density of Eqs. 2, 3 and 9 of Cousins et al.,
+*The Stochastic Siren* (2026), for an ordered joint source-frame component-mass
+population ``p(m1, m2)``. The mass-ratio integral is evaluated on a fixed
+total-mass grid and cumulatively integrated in ``M``, so the mass part is
+precomputed independently of redshift and cosmology. For a uniform mass density
+both integrals are elementary (``uniform_prior_mass_moments``).
 
 The cutoff coefficient ``alpha`` is dimensionless and shares the convention of
 :func:`astrogwb.waveform.termination_frequency`: a binary of source-frame total
 mass ``M`` in solar masses stops contributing above the observer frequency
 ``alpha / (M (1 + z) t_sun)``, with ``t_sun = G M_sun / c^3``.
 
-All numerical orders and grid sizes are static and JAX-friendly. Double the
-relevant order or refine the interpolation grid until the result is stable to
-the accuracy required by the application. Realistic strain spectra require JAX
-x64 mode because their values underflow in float32.
+All orders and grid sizes are static. Realistic strain spectra need JAX x64
+mode: they underflow in float32.
 """
 
 from __future__ import annotations
@@ -50,12 +43,8 @@ from astrogwb.utils import (
 )
 
 # Converts a rate density in Gpc^-3 yr^-1 and a total-mass moment in
-# solar-mass^(5/3) into the SI coefficient of S_h. Combining these scales
-# here, in Python float64, is deliberate: evaluated separately the pieces are
-# ~3e50 (SOLAR_MASS_IN_KILOGRAMS ** (5/3)) and ~1e-84 (the reciprocal of
-# GPC_IN_METERS**3 * SECONDS_PER_YEAR), which overflow and underflow float32.
-# Only the combined ~1.9e-68 may reach JAX. Grouping the mass and G before
-# the 5/3 power is what keeps the ~3e50 term from being materialized at all.
+# solar-mass^(5/3) into the SI coefficient of S_h. Combined in Python float64:
+# the separate factors overflow and underflow float32.
 _ASTROPHYSICAL_STRAIN_COEFFICIENT: float = (
     2.0
     * (GRAVITATIONAL_CONSTANT * SOLAR_MASS_IN_KILOGRAMS) ** (5.0 / 3.0)
@@ -243,12 +232,8 @@ def _uniform_cumulative_mass_moment(
             & \tilde M\ge T.
         \end{cases}
 
-    This is the exact counterpart of the array tabulated by
-    :func:`_cumulative_mass_moment_grid`, evaluated pointwise at arbitrary
-    ``total_mass`` rather than looked up between grid nodes. Clipping before
-    the branch selection keeps both branches finite wherever they are traced,
-    so reverse-mode gradients stay free of ``NaN`` and an infinite cutoff maps
-    onto the full mass moment.
+    Clipping before the branch selection keeps both branches finite, so
+    gradients stay free of ``NaN`` and an infinite cutoff gives the full moment.
     """
     lower = 2.0 * minimum_component_mass
     transition = minimum_component_mass + maximum_component_mass
@@ -266,9 +251,7 @@ def _uniform_cumulative_mass_moment(
     moment = density * jnp.where(
         clipped <= transition, below_transition, above_transition
     )
-    # Below the support the cancellation is phi(2 m_min) - phi(2 m_min), which
-    # XLA is free to reassociate into a nonzero rounding residual, so the empty
-    # integral is pinned here rather than left to floating point.
+    # Pin the empty integral: XLA may reassociate phi - phi into a residual.
     return jnp.where(total_mass <= lower, 0.0, moment)
 
 
@@ -312,15 +295,9 @@ def uniform_prior_mass_moments(
 
         U_{fa}=\frac{\alpha}{f_f(1+z_a)\,t_\odot}, \qquad M_{fa}=C(U_{fa}),
 
-    where :math:`t_\odot=GM_\odot/c^3` converts the dimensionless
-    :math:`\alpha` into a total mass in solar masses. There is no mass-ratio
-    quadrature, no total-mass grid, and no interpolation.
-    The result is exact to floating-point round-off and carries none of the
-    ``n_interp_grid`` discretization error of the generic path.
-
-    The returned array is accepted unchanged by
-    :func:`analytic_spectral_density_from_mass_moments`; pass the same
-    ``redshift_quadrature_order`` to both so the redshift nodes agree.
+    where :math:`t_\odot=GM_\odot/c^3`. Exact to round-off. Pass the same
+    ``redshift_quadrature_order`` to
+    :func:`analytic_spectral_density_from_mass_moments`.
 
     Parameters
     ----------
@@ -431,8 +408,7 @@ def analytic_spectral_density_from_mass_moments(
         \sum_a w_a\frac{R(z_a;\theta)}
         {E(z_a;\Omega_m)(1+z_a)^{4/3}}M_{fa}.
 
-    This stage contains no mass-population evaluation or cumulative lookup, so
-    a fixed ``(F, Z)`` array can be reused throughout an MCMC over cosmology or
+    A fixed ``(F, Z)`` array can be reused throughout an MCMC over cosmology or
     the redshift distribution.
     """
     frequencies = jnp.asarray(frequencies, dtype=jnp.float64)

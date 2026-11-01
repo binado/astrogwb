@@ -172,12 +172,8 @@ def frequency_grid(
 ) -> np.ndarray:
     """Return the grid ``spacing`` names, validated as a frequency grid.
 
-    The single entry point the waveform generators use, so a
-    ``WaveformMetadata`` record maps to one grid. ``turnover_frequency`` is
-    required for ``"loglinear"`` and must be ``None`` otherwise. The optional
-    ``dlogf`` bounds the tail's natural-log step only for
-    ``"loglinear"`` and must be ``None`` otherwise. Endpoint alignment can
-    reduce that step slightly; spacing may jump at the turnover.
+    ``turnover_frequency`` and ``dlogf`` are used by ``"loglinear"`` only and
+    must be ``None`` otherwise.
     """
     if spacing == "loglinear":
         if turnover_frequency is None:
@@ -207,10 +203,8 @@ def frequency_grid(
 def validate_frequency_grid(frequencies: ArrayLike) -> np.ndarray:
     """Return ``frequencies`` as a float64 array after checking it is a grid.
 
-    A grid is one-dimensional, finite and strictly increasing. Nothing else is
-    required: the spacing may vary from bin to bin, and every quantity that
-    needs a bin width derives it from the grid with :func:`bin_widths`. A
-    one-bin grid is valid; it simply has no width to report.
+    A grid is one-dimensional, finite and strictly increasing; the spacing may
+    vary.
     """
     array = np.asarray(frequencies, dtype=np.float64)
     if array.ndim != 1:
@@ -236,22 +230,9 @@ def bin_widths(frequencies: ArrayLike) -> jax.Array:
         \Delta f_0 = f_1 - f_0, \qquad
         \Delta f_{F-1} = f_{F-1} - f_{F-2}.
 
-    This is the number of Fourier modes per bin divided by the observation
-    time, so it is the width both the Gaussian noise scale and the Riemann sum
-    of an SNR use. On a uniform grid every width equals the grid spacing
-    exactly; on a non-uniform grid the sum over bins is a midpoint-rule
-    quadrature, accurate to second order in the local spacing.
-
-    Widths belong to the *grid*, not to a band inside it: derive them from the
-    catalog's full frequency axis and mask afterwards. Selecting bins first and
-    then calling this on the selection would give the bins at the edge of a gap
-    the wrong width.
-
-    The values are trusted: the grid is assumed strictly increasing, as
-    :func:`validate_frequency_grid` checks where a grid enters the package, so
-    this stays traceable under :func:`jax.jit`. Only the shape is checked,
-    raising ``ValueError`` for a grid that is not one-dimensional or has fewer
-    than two bins, which has no width.
+    Widths belong to the whole grid: compute them on the full axis and mask
+    afterwards, or bins at the edge of a gap get the wrong width. Values are
+    trusted (traceable); only the shape is checked.
     """
     grid = jnp.asarray(frequencies)
     if grid.ndim != 1:
@@ -293,13 +274,8 @@ def apply_frequency_mask(
 ) -> tuple[jax.Array, ...]:
     """Apply a boolean frequency mask along ``axis`` of every array.
 
-    Defaults to ``axis=0`` to match this package's ``(F, ...)`` layout
-    (e.g. polarization power of shape ``(F, N)``).
-
-    The mask need not select a contiguous run. Compress arrays *after* any
-    quantity that depends on the grid has been computed on the full axis: a bin
-    width is :func:`bin_widths` of the catalog's whole grid, so calling it on a
-    masked grid would give the bins at the edge of a gap the wrong width.
+    Compress only after grid-dependent quantities such as :func:`bin_widths`
+    have been computed on the full axis.
     """
     return tuple(jnp.compress(mask, array, axis=axis) for array in arrays)
 
@@ -318,21 +294,14 @@ def noise_weighted_inner_product(
 
         (a|b) = \sum_i \Delta f_i \frac{a_i^* b_i}{S_i^2},
 
-    the Riemann sum approximating :math:`\int \mathrm{d}f\, a(f)\, b(f) /
-    S(f)^2` with the bin widths :math:`\Delta f_i` of the frequency grid.
-    Frequencies are discrete throughout this package, so the sum is the
-    definition and the integral is what it approximates, not the other way
-    round.
-
-    Depends only on the noise curve and the band. The observation time enters
-    separately, in :func:`astrogwb.gwb.spectral_snr_squared`.
+    with the bin widths :math:`\Delta f_i` of the frequency grid. The
+    observation time enters separately, in
+    :func:`astrogwb.gwb.spectral_snr_squared`.
 
     Parameters
     ----------
     a, b:
-        Arrays whose ``axis`` runs over frequency bins. ``a`` is conjugated, so
-        the product is the Hermitian one and complex strain enters correctly;
-        for real inputs this is a no-op.
+        Arrays whose ``axis`` runs over frequency bins; ``a`` is conjugated.
     psd:
         Power spectral density :math:`S_i`, broadcastable against ``a`` and
         ``b``.

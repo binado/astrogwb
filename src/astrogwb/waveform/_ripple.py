@@ -1,35 +1,19 @@
 """Ripple adapter: grid arithmetic, parameter mapping, and the waveform kernel.
 
-Everything that knows about ``ripplegw`` lives here so
-:mod:`astrogwb.waveform.ripple` stays a thin descriptor. The split is
-also a licensing boundary: ``gwmock-signal`` ships a GPL-3 Ripple backend, and
-this module reimplements the parts astrogwb needs from Ripple's public API, so
-the package stays MIT. ``gwmock-signal`` remains the parity reference the tests
-compare against.
+Everything that knows about ``ripplegw`` lives here. It reimplements what
+astrogwb needs from Ripple's public API rather than using ``gwmock-signal``'s
+GPL-3 backend, so the package stays MIT; ``gwmock-signal`` is the tests' parity
+reference.
 
-Two deliberate differences from a time-domain backend:
+No cutoff window is applied: the usual raised cosine is exactly 1 on every
+in-band bin, and astrogwb never inverse-transforms.
 
-*No cutoff window.* A backend that inverse-transforms has to taper the
-amplitude below ``minimum_frequency``, because truncating a nonzero function
-rings across the buffer. astrogwb never leaves the frequency domain -- it forms
-:math:`|h_+|^2 + |h_\\times|^2` on the in-band slice -- and the usual raised
-cosine reaches exactly 1 at ``minimum_frequency``, so on every retained bin the
-window is the identity. Applying it would be arithmetic with no effect;
-``tests/core/test_waveform_generator.py`` pins that against gwmock rather than
-leaving it as a claim here.
-
-*Which grid Ripple sees depends on ``frequency_spacing``.* With the default
-``"linear"`` spacing the full one-sided grid above DC reaches Ripple and the
-caller slices the result, never the input. Several models --
-``IMRPhenomXAS_NRTidalv3`` and ``IMRPhenomXPHM`` among them -- were assumed not
-to evaluate pointwise in the frequency argument, so handing Ripple only the
-in-band bins was avoided. NRTidalv3 shows why: it reads the top of the grid as
-``f_final = f[-1] + df`` and the spacing as ``df = f[1] - f[0]``.
-
-The ``"log"`` and ``"loglinear"`` spacings do hand Ripple only the band's own
-grid, built straight to ``maximum_frequency``. Reading ``ripplegw`` (see
-``tests/core/test_waveform_generator.py`` for the empirical check), the only
-reads of the grid's shape are:
+With ``"linear"`` spacing Ripple sees the full one-sided grid above DC and the
+caller slices the result, not the input: ``IMRPhenomXAS_NRTidalv3`` reads
+``f_final = f[-1] + df`` and ``df = f[1] - f[0]``. The ``"log"`` and
+``"loglinear"`` spacings hand Ripple the band itself; the only reads of the
+grid's shape that affect the power are (see
+``tests/core/test_waveform_generator.py``):
 
 * ``IMRPhenomD`` and ``IMRPhenomD_NRTidalv2`` snap the merger cutoff to
   ``floor(f_cut / df) * df`` with ``df = f[1] - f[0]``. On a lin-log grid that is
@@ -40,18 +24,11 @@ reads of the grid's shape are:
   :math:`|h_+|^2 + |h_\times|^2` drops the phase.
 * ``IMRPhenomHM`` passes ``f[1] - f[0]`` on as ``deltaF`` and never reads it.
 
-The DC bin is the one exception on the linear path, and it is dropped at the input rather than
-sliced from the output: Ripple evaluates ``f = 0`` to NaN, and while
-``nan_to_num`` keeps that out of the forward sum, no output-side treatment
-rescues reverse mode (see :func:`build_power_kernel`). Dropping it is safe precisely
-because the quantities above are read off the *top* of the grid and off the
-spacing, both of which one fewer leading bin leaves untouched. The other
-spacings start at ``minimum_frequency > 0`` and have no DC bin.
+On the linear path the DC bin, which Ripple evaluates to NaN, is dropped from
+the input; the top of the grid and its spacing are unchanged.
 
-``ripplegw`` is imported inside function bodies, never at module scope:
-importing it enables JAX x64 globally, and ``import astrogwb`` must not carry
-that side effect (see the runtime-configuration rule in ``CLAUDE.md`` and
-``tests/paper/test_cli.py``).
+``ripplegw`` is imported inside function bodies: importing it enables JAX x64
+globally, a side effect ``import astrogwb`` must not have.
 """
 
 from __future__ import annotations
@@ -110,7 +87,6 @@ _CBC_FILTERS = {"domain": "FD", "source_type": "cbc"}
 #: from every supported-approximant view.
 _EXCLUDED_APPROXIMANTS = frozenset({"IMRPhenomXP_NRTidalv3"})
 
-# Compatibility views for callers that used the former module-level groups.
 SUPPORTED_APPROXIMANTS = _WaveformNames(**_CBC_FILTERS)
 ALIGNED_SPIN_MODELS = _WaveformNames(
     **_CBC_FILTERS, is_precessing=False, is_tidal=False
@@ -171,20 +147,11 @@ def _approximant_metadata(approximant: str) -> dict[str, Any]:
 def next_smooth_even(minimum: int) -> int:
     """Return the smallest even integer at least ``minimum`` that is 5-smooth.
 
-    5-smooth means no prime factor above 5, which is what transform libraries
-    are efficient at; even, because a real transform of ``n`` samples has
-    ``n // 2 + 1`` one-sided bins. This is the rule Ripple applies to size its
-    segment, so astrogwb has to agree with it bin for bin.
-
-    Every 5-smooth candidate below ``2 * minimum`` is enumerated and the
-    smallest admissible one wins. The bound is safe because doubling any
-    candidate below ``minimum`` lands below it, so a valid answer always exists
-    inside the range.
+    Ripple sizes its segment by this rule, so astrogwb must agree bin for bin.
     """
     if minimum <= _SMOOTH_FACTORS[0]:
         return _SMOOTH_FACTORS[0]
-    # The power-of-two ceiling: 5-smooth and even by construction, so the
-    # search always starts from an admissible answer and only improves on it.
+    # Start from the power-of-two ceiling, admissible by construction.
     best = 2
     while best < minimum:
         best *= 2
@@ -212,8 +179,7 @@ def _as_batch(
 ) -> jax.Array:
     """Return one parameter as a 1-D float64 array, validating name and shape.
 
-    Name and shape are static under tracing, so these checks cost nothing in a
-    traced call and are the only ones this module performs on the hot path.
+    Name and shape are static, so these checks are free under tracing.
     """
     if name not in source_parameters:
         if default is None:
@@ -237,11 +203,8 @@ def _canonical_arrays(
 ) -> dict[str, jax.Array]:
     """Return every canonical parameter as a 1-D float64 array, zeros included.
 
-    Ripple only needs detector-frame masses, so those are the one place the
-    mapping may be given in either form. A detector-frame column that is present
-    is used as is and takes precedence; one that is absent is derived as
-    :math:`m_{\\mathrm{det}} = m_{\\mathrm{src}} (1 + z)` from the matching
-    ``source_frame_mass_*`` and ``redshift``.
+    An absent detector-frame mass is derived as
+    :math:`m_{\\mathrm{det}} = m_{\\mathrm{src}} (1 + z)`.
 
     Raises
     ------
@@ -289,13 +252,8 @@ def ripple_parameters(
 ) -> dict[str, jax.Array]:
     """Map canonical source names onto the Ripple parameters ``approximant`` takes.
 
-    Validates names and shapes only. Physical values are checked by
-    :func:`check_sources`, which a caller runs eagerly -- a traced call cannot
-    raise on a value, and forcing one would put a host sync on the hot path.
-
-    The component masses become ``(M_c, eta)`` through
-    ``ripplegw.conversions.ms_to_Mc_eta``, which stays in JAX so the mapping is
-    differentiable and traceable.
+    Validates names and shapes only; physical values are checked eagerly by
+    :func:`check_sources`.
     """
     # Imported here, not at module scope -- see the module docstring.
     from ripplegw.conversions import ms_to_Mc_eta
@@ -333,16 +291,13 @@ def ripple_parameters(
 def check_sources(approximant: str, source_parameters: Mapping[str, ArrayLike]) -> None:
     """Check source *values* against what ``approximant`` can represent.
 
-    Eager only, and never called from the generate path: a traced array cannot
-    drive a Python exception, and converting one to decide would sync the host
-    on every batch. Call it once on a concrete catalog or an eager draw from a
-    population before handing the model to inference.
+    Eager only; call it on a concrete catalog before inference.
 
-    Raises:
-        ValueError: If a value is unphysical, or names a degree of freedom the
-            approximant does not carry. Silently ignoring the latter is the
-            failure this guards: an aligned-spin model hands back a waveform
-            for a precessing binary without ever seeing its in-plane spins.
+    Raises
+    ------
+    ValueError
+        If a value is unphysical, or names a degree of freedom the approximant
+        does not carry (which generation would silently ignore).
     """
     metadata = _approximant_metadata(approximant)
     arrays = _canonical_arrays(approximant, source_parameters)
@@ -366,37 +321,14 @@ def build_power_kernel(
 ) -> Callable[[jax.Array, Mapping[str, jax.Array]], jax.Array]:
     """Return a vmapped ``(frequencies, events) -> power`` evaluator.
 
-    Constructs the Ripple waveform once; a run has one approximant and one
-    reference frequency, so the returned callable is built per generator
-    instance and there is nothing left to key a cache on. The callable returns
-    frequency-first power with shape ``(F, N)``.
+    The callable returns frequency-first power ``(F, N)``. For a Ripple
+    :class:`~ripplegw.interfaces.AmplitudePhaseWaveform` the phase cancels from
+    the power, so only ``amplitude`` is evaluated; other models evaluate full
+    polarizations.
 
-    Ripple's :class:`~ripplegw.interfaces.AmplitudePhaseWaveform` marks models
-    whose pre-polarization strain has one real amplitude and the standard
-    quadrupolar inclination factors. For those models the phase cancels from
-    polarization power exactly, so the selected kernel evaluates only
-    ``amplitude``. Other models -- including higher-mode and precessing
-    families -- retain the full plus/cross evaluation. The ``isinstance``
-    dispatch happens here, before a caller traces the selected array function.
-
-    Deliberately **not** wrapped in :func:`jax.jit`. This is a building block
-    called from inside a NumPyro model, which NumPyro already jits under
-    inference, so an inner jit would only add a boundary for XLA to inline.
-    Callers that evaluate eagerly at catalog scale supply their own jit, where
-    it is visible.
-
-    ``nan_to_num`` guards the summed spectrum against a NaN from one event.
-    It is not what makes the gradient finite, and it never was: a NaN reaching
-    it has a NaN derivative, and masking or slicing the result only zeros that
-    bin's cotangent, which leaves ``0 * NaN``. Because source parameters
-    broadcast across frequency, their VJP sums every bin and the NaN returns.
-    The one NaN astrogwb actually provoked was the DC bin, and
-    :class:`~astrogwb.waveform.RippleGenerator` now keeps it out of the input
-    grid; this stays as a guard, not as a cure.
-
-    Above a model's cutoff Ripple returns exact zeros, not NaNs -- checked for
-    ``IMRPhenomD``, ``TaylorF2``, ``IMRPhenomXAS_NRTidalv3`` and
-    ``IMRPhenomXPHM`` across the production band.
+    Not jitted: it runs inside NumPyro models, which are already jitted; eager
+    callers supply their own jit. ``nan_to_num`` guards the forward sum only;
+    it cannot make a NaN gradient finite.
     """
     # Imported here, not at module scope -- see the module docstring.
     from ripplegw.interfaces import AmplitudePhaseWaveform

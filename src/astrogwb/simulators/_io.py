@@ -28,13 +28,9 @@ def _require_x64() -> None:
 def batch_keys(seed: int | np.integer, n: int) -> Any:
     """``n`` keys of ``seed``: ``fold_in(key(seed), arange(n))``.
 
-    Key ``i`` depends on ``(seed, i)`` alone, so asking for more keys extends
-    the batch without changing the ones already there (prefix-stable): draw
-    ``i`` of an ensemble is the same whatever the ensemble size.
-
-    Seeds are 64-bit, so this needs ``jax_enable_x64``: without it JAX would
-    silently truncate the seed to 32 bits, and two different seeds could share a
-    realization.
+    Key ``i`` depends on ``(seed, i)`` alone, so the batch is prefix-stable.
+    Seeds are 64-bit, so this needs ``jax_enable_x64``; JAX would otherwise
+    truncate the seed and two seeds could share a realization.
     """
     import jax
 

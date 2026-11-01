@@ -24,10 +24,9 @@ class InverseCDF(Messenger):
     :func:`numpyro.handlers.condition` *inside* this handler observes consume
     no coordinate. A conditional site is filled after its parents, so its
     inverse CDF is the conditional one (the Rosenblatt transform): uniform
-    points on the unit cube map to the model's joint law. Low-discrepancy
-    points (a scrambled Sobol net) thus give a quasi-Monte Carlo sample.
+    points on the unit cube map to the model's joint law.
 
-    Contracts the caller is trusted to honour (nothing here checks them):
+    Unchecked contracts:
 
     - ``points`` has one trailing coordinate per free site, in ``(0, 1)``.
     - Every free site's distribution has an ``icdf`` that broadcasts over the
