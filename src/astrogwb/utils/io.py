@@ -1,11 +1,10 @@
-"""Content keys and HDF5 array trees for persisted artifacts.
+"""HDF5 array trees for persisted artifacts.
 
 A *tree* is a nested mapping whose leaves are arrays, written as an HDF5 group:
 a mapping becomes a subgroup, a leaf a dataset. :func:`write` stores one tree
 with the metadata record that produced it as a JSON attribute; :func:`load`
-reads both back. :func:`content_key` is the one way a record's canonical JSON
-becomes the hash it is cached under. Where a file lives and what it is called
-are the caller's -- nothing here addresses by content.
+reads both back. Where a file lives and what it is called are the caller's --
+nothing here addresses by content.
 
 h5py is imported when a file is touched, not when this module is, and nothing
 here imports JAX.
@@ -13,15 +12,13 @@ here imports JAX.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import os
 import platform
 import tempfile
 from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -31,9 +28,6 @@ from astrogwb import __version__
 
 __all__ = [
     "Arrays",
-    "ContentKeyed",
-    "Keyed",
-    "content_key",
     "h5py_module",
     "load",
     "read_tree",
@@ -41,43 +35,11 @@ __all__ = [
     "write_tree",
 ]
 
-#: Hex characters of the SHA-256 digest kept as a key. 64 bits is far beyond
-#: collision range for a cache of tens of files, and short enough to read in a
-#: path.
-_KEY_LENGTH = 16
-
 #: What a node is handed: nested mappings with array-like leaves.
 type Tree = Mapping[str, ArrayLike | Tree]
 
 #: What a reader returns: nested dicts of NumPy arrays.
 type Arrays = dict[str, NDArray[Any] | Arrays]
-
-
-def content_key(payload: dict[str, Any]) -> str:
-    """The content address of one artifact's canonical JSON record.
-
-    ``payload`` is a record's ``model_dump(mode="json")``. Sorted keys and fixed
-    separators make the JSON canonical, so every artifact type hashes the same
-    way and none can drift.
-    """
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(canonical.encode()).hexdigest()[:_KEY_LENGTH]
-
-
-class ContentKeyed(BaseModel):
-    """A record whose key is the content hash of its JSON dump."""
-
-    def key(self) -> str:
-        """The content hash of the record."""
-        return content_key(self.model_dump(mode="json"))
-
-
-class Keyed(Protocol):
-    """A metadata record: everything that determines an artifact, and its hash."""
-
-    def key(self) -> str: ...
-
-    def model_dump_json(self) -> str: ...
 
 
 def h5py_module() -> Any:
@@ -134,7 +96,7 @@ def read_tree(group: Any) -> Arrays:
 def write(
     path: str | Path,
     data: Mapping[str, object],
-    metadata: Keyed,
+    metadata: BaseModel,
     *,
     seed: int | None = None,
     batch_size: int | None = None,
@@ -172,7 +134,7 @@ def write(
     return target
 
 
-def load[M: Keyed](
+def load[M: BaseModel](
     path: str | Path, metadata_type: type[M]
 ) -> tuple[Arrays, M, Mapping[str, Any]]:
     """Read a file :func:`write` made: ``(data, metadata, attrs)``.
@@ -190,5 +152,5 @@ def load[M: Keyed](
         }
         recorded = str(attrs.pop("metadata"))
         data = read_tree(file)
-    metadata = metadata_type.model_validate_json(recorded)  # ty: ignore[unresolved-attribute]
+    metadata = metadata_type.model_validate_json(recorded)
     return data, metadata, attrs

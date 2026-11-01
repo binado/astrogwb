@@ -48,10 +48,7 @@ from astrogwb.detector import (
 )
 from astrogwb.frequency import frequency_mask
 from astrogwb.gwb.catalog import CatalogMetadata
-from astrogwb.gwb.importance import (
-    reference_catalog,
-    reference_catalog_stem,
-)
+from astrogwb.gwb.importance import reference_catalog
 from astrogwb.inference import ImportanceGaussianLikelihood, Network
 from astrogwb.paper.config import (
     detector_registry,
@@ -102,9 +99,14 @@ def _likelihood() -> tuple[ImportanceGaussianLikelihood, NDArray[np.float64], di
         num_samples=NUM_SAMPLES,
         sampling="sobol",
     )
-    path = CATALOGS_ROOT / f"{reference_catalog_stem(metadata, CATALOG_SEED)}.h5"
+    path = CATALOGS_ROOT / f"common-shape-response-{CATALOG_SEED}.h5"
     if path.is_file():
-        data, _, _ = load(path, CatalogMetadata)
+        data, recorded, attrs = load(path, CatalogMetadata)
+        if recorded != metadata or attrs.get("seed") != CATALOG_SEED:
+            raise ValueError(
+                f"{path} was drawn for a different request (seed "
+                f"{attrs.get('seed')}); delete it and rerun"
+            )
     else:
         data = reference_catalog(metadata, batch_keys(CATALOG_SEED, 1)[0])
         write(path, data, metadata, seed=CATALOG_SEED)
