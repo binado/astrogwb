@@ -75,24 +75,6 @@ def test_polarization_power_round_trips_through_a_file(tmp_path: Path) -> None:
     assert attrs["seed"] == 41
 
 
-def test_catalog_key_tells_reference_redshifts_apart() -> None:
-    keys = {
-        CatalogMetadata.model_validate(
-            {**CATALOG.model_dump(), "reference_redshift": reference}
-        ).key()
-        for reference in (None, 0.0, 0.1, 0.2)
-    }
-    assert len(keys) == 4
-
-
-def test_catalog_key_tells_sobol_from_random() -> None:
-    sobol = CatalogMetadata.model_validate(
-        {**CATALOG.model_dump(), "num_samples": 8, "sampling": "sobol"}
-    )
-    random = CatalogMetadata.model_validate({**CATALOG.model_dump(), "num_samples": 8})
-    assert sobol.key() != random.key()
-
-
 def test_sobol_catalog_needs_a_power_of_two_size() -> None:
     with pytest.raises(ValueError, match="power-of-two"):
         CatalogMetadata.model_validate({**CATALOG.model_dump(), "sampling": "sobol"})
@@ -151,21 +133,3 @@ def test_nested_dlogf_round_trips_through_hdf5(
     _, restored, _ = load(path, CatalogMetadata)
     assert restored == metadata
     assert restored.waveform.model_dump()["dlogf"] == resolution
-
-
-def test_dlogf_changes_artifact_keys() -> None:
-    keys = []
-    for resolution in [None, 0.1, 0.2]:
-        waveform = WaveformMetadata.model_validate(
-            {
-                **WAVEFORM.model_dump(),
-                "frequency_spacing": "loglinear",
-                "turnover_frequency": 30.0,
-                "dlogf": resolution,
-            }
-        )
-        metadata = CatalogMetadata.model_validate(
-            {**CATALOG.model_dump(), "waveform": waveform.model_dump()}
-        )
-        keys.append(metadata.key())
-    assert len(set(keys)) == 3

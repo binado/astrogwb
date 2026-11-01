@@ -2,21 +2,22 @@
 
 A **catalog** is one persisted waveform draw: a population drawn from a
 registered NumPyro model, with its frequency-domain polarization power reduced
-and written to `outputs/catalogs/polarization_power-<key>-<digest>.h5`.
+and written to an explicit path.
 Catalogs are the expensive artifact of the analysis.
 
-## Catalogs are content-addressed
+## Catalogs are written to explicit paths
 
-A catalog is named by a hash of what it draws, and at which seed:
+The caller names the file: `astrogwb model-catalog OUTPUT.h5`, or the names the
+Snakefile uses. The file describes itself -- it records the `CatalogMetadata`
+JSON, the seed and the `astrogwb` version -- so a reader gets the request back
+from the file with `astrogwb.utils.io.load`.
 
 ```text
-(CatalogMetadata, seed)
-    -> outputs/catalogs/polarization_power-<metadata.key()>-<digest of seed>.h5
+(CatalogMetadata, seed) -> caller-chosen path.h5
 ```
 
-There is no catalog config tree and no name for a catalog. Two callers that ask
-for the same draw resolve to the same file name and share one file; changing
-anything about a draw -- a seed, a kwarg, a fiducial -- gives a new one.
+There is no catalog config tree and no catalog naming scheme. Two draws at different
+settings or seeds need different paths; the recorded metadata tells which is which.
 
 ### What a catalog declares
 
@@ -33,7 +34,7 @@ anything about a draw -- a seed, a kwarg, a fiducial -- gives a new one.
    2--2048 Hz at 1 Hz and 100 Hz against 2047 for `"linear"`. `"log"` is
    geometric throughout, `frequency_resolution` wide at `minimum_frequency`.
    `turnover_frequency` belongs to `"loglinear"` alone: required there and
-   rejected elsewhere, so one grid has one record and one key. The turn falls on
+   rejected elsewhere, so one grid has one record. The turn falls on
    the last uniform point not above `turnover_frequency`. Optional
    `dlogf` independently bounds the natural-log step of the geometric
    tail; endpoint alignment may make the actual step slightly smaller. Linear
@@ -62,18 +63,17 @@ The shared default draw is `[catalog]` in `config/defaults.toml`;
 `astrogwb.paper.config.waveform_metadata()` and `population_metadata()` return
 its records.
 
-### The key, and what invalidates it
+### What the record holds, and the version
 
 `CatalogMetadata` is the waveform settings, the population record, the
-fiducials, the sample count, and the `astrogwb` version. Its `key()` is the
-first 16 hex digits of a SHA-256 over its canonical JSON; the file name adds
-the same 16 digits of a SHA-256 over the seed input. Anything in the record or
-the seed invalidates the file by renaming it.
+fiducials, the sample count, and the `astrogwb` version. All of it is stored in
+the file next to the seed.
 
-The version is in the key so that *code* changes invalidate catalogs too -- but
-only if it is bumped. **Bump `version` in `pyproject.toml` whenever a change
-alters what a population draw or a waveform generator produces.** Every key
-changes with it, and the next draw regenerates everything.
+The version is recorded so that *code* changes are caught too -- but only if it
+is bumped. **Bump `version` in `pyproject.toml` whenever a change alters what a
+population draw or a waveform generator produces.** `draw_catalog` and
+`reference_catalog` refuse to draw if the metadata's version differs from the
+installed one; regenerate the catalog.
 
 ## The population is a registered model
 
@@ -297,24 +297,20 @@ Persistence and cache locations belong to the callers. The core `write` and
 | catalogs | `draw_catalog` | `CatalogMetadata` | one JAX key | `PolarizationPowerData` |
 | reference catalogs | `reference_catalog` | `CatalogMetadata` | one JAX key | `PolarizationPowerData` |
 
-Catalog files are `polarization_power-<key>-<seed>.h5`. A miss generates data
-and writes atomically; a hit is loaded and its recorded metadata compared with
-the request. Settings such as `chunk_size` are bound in the call and kept out
-of the path.
+Catalog files are written to caller-chosen paths, atomically, with the metadata,
+seed and version recorded inside. Settings such as `chunk_size` are bound in the
+call and are not recorded.
 
 Seeds are inputs because they pick a realization rather than describe a
 distribution: `batch_keys(seed, n)` folds the draw indices into a JAX key,
 producing prefix-stable draw keys. Build a simulator once and call it for each
 key so its compiled stages are reused.
 
-The version is in the key so that code changes invalidate the cache -- but
-only if it is bumped. Bump `version` in `pyproject.toml` whenever a change
-alters what a population draw or a waveform generator produces. Version
-**0.4.0** moved the seed out of the metadata and changed the file layout, so
-every file from earlier versions is unreachable; remove the old
-`outputs/catalogs/` and `outputs/spectra/` files and regenerate. The spectra
-simulator's later split into a population draw and a packed reduction changes
-the spectra record, hence its keys, but no catalog draw, so it did not bump.
+Bump `version` in `pyproject.toml` whenever a change alters what a population
+draw or a waveform generator produces. Version **0.4.0** moved the seed out of
+the metadata and changed the file layout, so files from earlier versions are
+unusable; remove the old `outputs/catalogs/` and `outputs/spectra/` files and
+regenerate.
 
 The waveform metadata records `frequency_spacing`, `frequency_resolution`,
 `turnover_frequency` and `dlogf` -- what was *requested* of the
@@ -326,13 +322,11 @@ the two can differ. The grid need only be strictly increasing: each bin's width
 is half the distance between its neighbours, which is the grid spacing on a
 uniform grid and grows with frequency above the turn of a `"loglinear"` one.
 
-`dlogf` is serialized even when unset (`null`). Its addition changes
-metadata hashes and may regenerate cached catalogs and spectra; no cache
-migration is provided. Configured defaults and notebook grids are unchanged.
+`dlogf` is serialized even when unset (`null`). Catalogs written
+before it existed lack the field; no migration is provided. Configured defaults and notebook grids are unchanged.
 
-Adding the grid fields re-keyed every catalog and spectra file, and the version
-was bumped with them (0.2.0), so files from earlier versions are never served;
-regenerate them.
+The version was bumped with the grid fields (0.2.0), so files from earlier
+versions are refused; regenerate them.
 
 ## Inclination convention
 
@@ -351,11 +345,10 @@ Earlier versions could omit the inclination site and column
 (`sample_inclination = false`) and rescale face-on power by the analytic `2/5`
 factor. That path is gone: inclination is always sampled, and contraction never
 rescales. Catalogs drawn without the column are not reused, since the
-population record and the version are part of the key.
+population record and the version are part of the metadata.
 
-Version **0.6.0** replaces the `bns_md_*` populations with `bns_coba`. Both
-catalog and spectrum artifacts therefore receive new keys; older artifacts are
-not reused.
+Version **0.6.0** replaces the `bns_md_*` populations with `bns_coba`. Older
+catalog and spectrum artifacts are not compatible and must be regenerated.
 
 ## What is *not* in the file: the analysis window
 

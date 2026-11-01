@@ -48,6 +48,6 @@ def model_catalog(
     write(output, data, metadata, seed=seed)
     elapsed = time.perf_counter() - began
     typer.echo(
-        f"reference catalog {metadata.key()} at seed {seed}: "
+        f"reference catalog at seed {seed}: "
         f"{metadata.num_samples} draws -> {output} ({elapsed:.0f} s)"
     )

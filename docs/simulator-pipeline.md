@@ -233,6 +233,7 @@ mixed.
 | one artifact directory per stage (`metadata.toml` + `data.h5`, `[parent]` references), then realization directories (`metadata.toml` + `source_parameters.h5` + `background.h5`) | one HDF5 file per draw carrying its `SimulationConfig` and version |
 | `PopulationArtifact.write(dir)` / `.open(path)`, `Realization`, `RealizationSimulator`, `simulate_realization` | `simulate(config, key)`; no sources file |
 | `WaveformSimulator`, `Waveforms`, `WaveformArtifact`, `polarization.h5` | removed; `BackgroundSimulator(waveform_metadata, registry)(population)` fuses waveform evaluation and pair projection |
+| `content_key`, `ContentKeyed`, `Keyed`, `catalog_stem`, `reference_catalog_stem` | removed; files are named by the caller |
 | `BackgroundArtifact.upstream`, `.manifest_path`, `.waveform_key`, `.key()`, `population_key`, `waveform_key`, `background_key` | `BackgroundArtifact.config`; no content keys |
 | `astrogwb simulate population` / `waveforms` / `background`, then `astrogwb simulate DIRECTORY --background --keep-sources` | `astrogwb simulate OUTPUT.h5` with `--population-metadata`, `--waveform-metadata`, `--detector-config`, `--seed` |
 | per-run network metadata snapshots | core `DetectorRegistry`, supplied to simulation and readers |

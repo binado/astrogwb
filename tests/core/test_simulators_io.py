@@ -13,17 +13,14 @@ from pydantic import BaseModel
 
 from astrogwb.simulators import batch_keys, realization_key
 from astrogwb.simulators._io import atomic_h5
-from astrogwb.utils.io import content_key, load, write
+from astrogwb.utils.io import load, write
 
 
 class Record(BaseModel):
-    """A stand-in metadata record: anything with ``key()`` and JSON."""
+    """A stand-in metadata record: anything with JSON."""
 
     name: str
     size: int
-
-    def key(self) -> str:
-        return content_key(self.model_dump(mode="json"))
 
 
 TREE: dict[str, Any] = {
