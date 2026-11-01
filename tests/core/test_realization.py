@@ -257,8 +257,7 @@ def test_network_spectra_ensemble_reads_each_stored_network_spectrum(
 
     stored = Realization.open(ensemble / f"{SEED}-{index}").background()
     np.testing.assert_array_equal(
-        triangle["spectral_density"][index],
-        stored.spectra["triangle"].spectral_density,
+        triangle["pair_spectral_density"][index], stored.spectra["triangle"]
     )
 
 
@@ -267,7 +266,7 @@ def test_network_spectra_ensemble_from_start_is_a_suffix(ensemble: Path) -> None
     (second,) = network_spectra_ensemble(ensemble, SEED, 2, ["triangle"], start=1)
 
     np.testing.assert_array_equal(
-        second["spectral_density"], full["spectral_density"][1:]
+        second["pair_spectral_density"], full["pair_spectral_density"][1:]
     )
 
 

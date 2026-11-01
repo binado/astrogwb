@@ -53,7 +53,12 @@ with app.setup(hide_code=True):
     from astrogwb.paper.config.runs import ENSEMBLES_ROOT, FIGURES_DIR, SPECTRA_ROOT
     from astrogwb.gwb.catalog import CatalogMetadata, draw_catalog
     from astrogwb.paper.plotting import save_figures, use_paper_style
-    from astrogwb.simulators import Realization, batch_keys, network_spectra_ensemble
+    from astrogwb.simulators import (
+        Realization,
+        batch_keys,
+        combine_pair_spectra,
+        network_spectra_ensemble,
+    )
     from astrogwb.utils.io import content_key
     from astrogwb.utils import years_to_seconds
 
@@ -623,8 +628,6 @@ def draw_spectra(
     spectra are served from ``settings.cache_dir`` or drawn there.
     """
     if metadata.count == "poisson":
-        from astrogwb.paper.config import detector_registry
-
         (drawn,) = network_spectra_ensemble(
             settings.ensemble_root,
             seed,
@@ -633,7 +636,12 @@ def draw_spectra(
         )
         return {
             "frequencies": drawn["frequencies"],
-            "spectral_density": drawn["spectral_density"],
+            "spectral_density": combine_pair_spectra(
+                drawn["pair_spectral_density"],
+                drawn["frequencies"],
+                settings.registry,
+                settings.network,
+            ),
             "n_events": drawn["n_events"],
         }, metadata
     path = (

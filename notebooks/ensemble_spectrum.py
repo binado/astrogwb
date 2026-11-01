@@ -60,7 +60,11 @@ with app.setup(hide_code=True):
     )
     from astrogwb.populations import build_population
     from astrogwb.populations.metadata import PopulationMetadata
-    from astrogwb.simulators import Realization, network_spectra_ensemble
+    from astrogwb.simulators import (
+        Realization,
+        combine_pair_spectra,
+        network_spectra_ensemble,
+    )
     from astrogwb.utils import years_to_seconds
 
     # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes.
@@ -560,12 +564,14 @@ def _():
 
 
 @app.cell
-def _(ensemble_root, network_names, num_draws, seed):
+def _(ensemble_root, network_names, num_draws, registry, seed):
     _ensembles = network_spectra_ensemble(ensemble_root, seed, num_draws, network_names)
     frequencies = np.asarray(_ensembles[0]["frequencies"], dtype=np.float64)
-    # Each network's spectra (M, F), by network name.
+    # Each network's optimally weighted spectra (M, F), by network name.
     draws = {
-        _name: _ensemble["spectral_density"]
+        _name: combine_pair_spectra(
+            _ensemble["pair_spectral_density"], frequencies, registry, _name
+        )
         for _name, _ensemble in zip(network_names, _ensembles, strict=True)
     }
     mean = {_name: _draws.mean(axis=0) for _name, _draws in draws.items()}

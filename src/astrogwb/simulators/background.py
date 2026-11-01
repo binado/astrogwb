@@ -34,10 +34,10 @@ The stage is configured by a :class:`~astrogwb.waveform.WaveformMetadata` and
 named networks, a :data:`DetectorRegistry`. Every pair of the union of their
 detectors is projected once per chunk in a single fused kernel (waveform
 evaluation plus detector projection), so a pair two networks share costs one
-projection, and each network keeps its own rows, ``(P_n, F)``, with their
-:func:`combine_pair_spectra`, the optimally weighted network spectrum ``(F,)``.
-The combination weights come from the networks' noise curves, so the background
-depends on them and they are part of its key.
+projection, and each network keeps its own rows, ``(P_n, F)``.
+:func:`combine_pair_spectra` weights them optimally into one network spectrum
+``(F,)`` on demand; it is not stored. The detectors' noise curves are part of
+the background's key.
 
 Without a ``segment_duration`` the background is deterministic given its
 inputs and carries no detector noise. With one, :math:`\tau`, the observation is
@@ -109,7 +109,6 @@ __all__ = [
     "BackgroundArtifact",
     "BackgroundSimulator",
     "NetworkNoise",
-    "NetworkSpectrum",
     "background_key",
     "background_pairs",
     "background_table",
@@ -158,19 +157,6 @@ _NORMALIZATION = {
     "factor": PAIR_RESPONSE_DENOMINATOR,
     "version": NORMALIZATION_VERSION,
 }
-
-
-class NetworkSpectrum(NamedTuple):
-    """One network's background: its pair spectra and their combination.
-
-    ``pair_spectral_density`` is :math:`Y_{ab}` in :math:`\\mathrm{Hz}^{-1}`,
-    ``(P_n, F)``, the pairs in the order of
-    :meth:`DetectorRegistry.pairs`; ``spectral_density`` is their
-    :func:`combine_pair_spectra`, ``(F,)``.
-    """
-
-    pair_spectral_density: NDArray[np.float64]
-    spectral_density: NDArray[np.float64]
 
 
 class NetworkNoise(NamedTuple):
@@ -313,7 +299,6 @@ def background_table(
         "units": {
             "frequency": "Hz",
             "pair_spectral_density": "1 / Hz",
-            "spectral_density": "1 / Hz",
         },
     }
     if segment_duration is not None:
@@ -348,16 +333,16 @@ def background_pairs(
 class BackgroundArtifact:
     """The per-network spectra of one realization, in memory or read from disk.
 
-    ``spectra`` holds each network's :class:`NetworkSpectrum`, keyed by
-    network name in sorted order, and ``pairs`` the detector pairs of its pair
-    axis. ``count``, ``total_merger_rate`` (per second) and
+    ``spectra`` holds each network's pair spectra :math:`Y_{ab}` in
+    :math:`\\mathrm{Hz}^{-1}`, ``(P_n, F)``, keyed by network name in sorted
+    order, and ``pairs`` the detector pairs of its pair axis. ``count``, ``total_merger_rate`` (per second) and
     ``hyperparameters`` are the realization's, carried over from its
     population. ``waveform_key`` names the polarizations the spectra were
     projected from.
     """
 
     frequencies: NDArray[np.float64]
-    spectra: dict[str, NetworkSpectrum]
+    spectra: dict[str, NDArray[np.float64]]
     pairs: dict[str, tuple[tuple[str, str], ...]]
     observation_seconds: float
     count: int
@@ -417,18 +402,14 @@ class BackgroundArtifact:
         """Write the spectra to the HDF5 file ``path``, atomically.
 
         Datasets ``frequencies`` and, per network,
-        ``networks/<name>/pair_spectral_density`` and
-        ``networks/<name>/spectral_density``. The pair axis is in the order of
-        ``pairs``.
+        ``networks/<name>/pair_spectral_density``. The pair axis is in the
+        order of ``pairs``.
         """
         with atomic_h5(path) as file:
             file.create_dataset("frequencies", data=self.frequencies)
             for name, spectrum in self.spectra.items():
                 group = file.create_group(f"networks/{name}")
-                group.create_dataset(
-                    "pair_spectral_density", data=spectrum.pair_spectral_density
-                )
-                group.create_dataset("spectral_density", data=spectrum.spectral_density)
+                group.create_dataset("pair_spectral_density", data=spectrum)
         return Path(path)
 
     @classmethod
@@ -465,11 +446,8 @@ class BackgroundArtifact:
             frequencies = np.asarray(file["frequencies"][()], dtype=np.float64)
             stored = file["networks"]
             spectra = {
-                name: NetworkSpectrum(
-                    np.asarray(
-                        stored[name]["pair_spectral_density"][()], dtype=np.float64
-                    ),
-                    np.asarray(stored[name]["spectral_density"][()], dtype=np.float64),
+                name: np.asarray(
+                    stored[name]["pair_spectral_density"][()], dtype=np.float64
                 )
                 for name in pairs
             }
@@ -497,8 +475,7 @@ class BackgroundSimulator:
     ``population``, evaluates the radiation-frame polarizations and accumulates
     their cross-powers over the detector union's pairs in one fused JIT call
     per chunk, so a pair shared by networks is projected once. Each network then
-    takes its rows and their :func:`combine_pair_spectra`, using the registry's
-    resolved geometry and PSD references. One chunk shape is one compile,
+    takes its rows, using the registry's resolved geometry and PSD references. One chunk shape is one compile,
     whatever the realized count, and peak memory is one chunk of polarizations.
     The observation time comes from the population. Build once and call often.
 
@@ -678,13 +655,7 @@ class BackgroundSimulator:
             union = self._noiseless(population, grid)
         else:
             union = self._segmented(population, grid)
-        spectra = {}
-        for name in self._network_names:
-            pairs = union[self._rows[name]]
-            spectra[name] = NetworkSpectrum(
-                pairs,
-                combine_pair_spectra(pairs, frequencies, self._registry, name),
-            )
+        spectra = {name: union[self._rows[name]] for name in self._network_names}
         wf_key = waveform_key(self._waveform, population.key())
         return BackgroundArtifact(
             frequencies=frequencies,

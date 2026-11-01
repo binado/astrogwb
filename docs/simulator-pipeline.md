@@ -70,8 +70,7 @@ Tensors and locations are stacked outside JIT and passed into the chunk kernel.
 The detector strains are projected directly from both polarizations before
 the cross-power is formed. The observation time `T` comes from the population. The
 sum is never divided by the realized count. Each network then keeps its own
-rows, `(P_n, F)`, and their combined spectrum, `(F,)` (see below):
-`artifact.spectra[name]` returns both. A network sharing detectors with
+rows, `(P_n, F)`: `artifact.spectra[name]` returns them. A network sharing detectors with
 another costs no extra projection.
 
 Detectors are stored sorted, whatever order they are declared in, so a
@@ -98,10 +97,10 @@ The factor-five pair normalization and intrinsic waveform conventions remain unc
 Every `[background]` table records this convention as its `normalization`,
 version 1, and `BackgroundArtifact.open` refuses any other version.
 `combine_pair_spectra(Y, frequencies, registry, network_name)` weights a
-network's pairs optimally into one spectrum, using the `psd_reference` of each
-detector in the registry. The background stage stores it per network, so every
-detector needs a noise curve, and the noise curves are part of the
-background's key. The mean of the
+network's pairs optimally into one spectrum `(F,)`, using the `psd_reference`
+of each detector in the registry. It is computed on demand and not stored;
+the likelihood scores the pair spectra directly. Every detector needs a noise
+curve, and the noise curves are part of the background's key. The mean of the
 combined spectrum is `S_h`.
 
 ## Detector noise
@@ -171,7 +170,7 @@ an interrupted run never leaves a partial product at its final path.
 | Product | Datasets |
 | --- | --- |
 | `source_parameters.h5` | `source_id` `(N,)`, `source_parameters/<name>` `(N,)` |
-| `background.h5` | `frequencies` `(F,)`; per network, `networks/<name>/pair_spectral_density` `(P_n, F)` and `networks/<name>/spectral_density` `(F,)` |
+| `background.h5` | `frequencies` `(F,)`; per network, `networks/<name>/pair_spectral_density` `(P_n, F)` |
 
 `RealizationSimulator(population, waveform, background)` applies one rule per
 stage:

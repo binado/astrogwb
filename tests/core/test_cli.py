@@ -78,7 +78,7 @@ def test_a_fused_simulate_run_writes_the_manifest_sources_and_background(
     background = realization.background()
     assert background.pairs == {"ET": (("R1", "S1"),)}
     assert background.count > 0
-    assert np.any(background.spectra["ET"].pair_spectral_density)
+    assert np.any(background.spectra["ET"])
     assert sorted(path.name for path in realization.directory.iterdir()) == [
         "background.h5",
         "metadata.toml",

@@ -29,7 +29,6 @@ from astrogwb.simulators.background import (
     BackgroundArtifact,
     BackgroundSimulator,
     NetworkNoise,
-    NetworkSpectrum,
     combine_pair_spectra,
     waveform_key,
 )
@@ -52,7 +51,6 @@ __all__ = [
     "BackgroundSimulator",
     "NetworkNoise",
     "NetworkSpectra",
-    "NetworkSpectrum",
     "PopulationArtifact",
     "PopulationMetadata",
     "PopulationSimulator",

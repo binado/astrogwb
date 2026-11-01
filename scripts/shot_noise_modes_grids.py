@@ -57,7 +57,7 @@ from astrogwb.paper.config.runs import CATALOGS_ROOT, ENSEMBLES_ROOT
 from astrogwb.paper.plotting import DETECTOR_NETWORKS
 from astrogwb.paper.posteriors import network_data
 from astrogwb.populations import build_population
-from astrogwb.simulators import NetworkNoise, Realization, network_spectra_ensemble
+from astrogwb.simulators import NetworkNoise, Realization, combine_pair_spectra
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "notebooks"))
 import cosmology_grid_posteriors as cosmology
@@ -85,14 +85,16 @@ def _setup(
     params = fiducials()
     names = [name for name, _ in DETECTOR_NETWORKS]
     # Draw 0 of DATA_SEED: one catalog, as each network records it.
-    drawn = network_spectra_ensemble(ensemble, DATA_SEED, 1, names)
-    observed = {
-        name: np.asarray(data["spectral_density"][0])
-        for name, data in zip(names, drawn, strict=True)
-    }
     injection = Realization.open(ensemble / f"{DATA_SEED}-0")
     background = injection.background()
-    noise = background.noise(detector_registry())
+    registry = detector_registry()
+    observed = {
+        name: combine_pair_spectra(
+            background.spectra[name], background.frequencies, registry, name
+        )
+        for name in names
+    }
+    noise = background.noise(registry)
     catalog, catalog_metadata, _ = read_reference_catalog(catalog_path)
     population = catalog_metadata.population
     likelihood = ImportanceGaussianLikelihood.from_catalog(

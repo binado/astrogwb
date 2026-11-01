@@ -426,16 +426,15 @@ def simulate_realization(
 class NetworkSpectra(TypedDict):
     """One network's draws, stacked along the leading draw axis.
 
-    ``frequencies`` ``(F,)``; ``spectral_density`` ``(D, F)``, the
-    :func:`~astrogwb.simulators.combine_pair_spectra` of
-    ``pair_spectral_density`` ``(D, P, F)``; ``n_events`` and
+    ``frequencies`` ``(F,)``; ``pair_spectral_density`` ``(D, P, F)``, which
+    :func:`~astrogwb.simulators.combine_pair_spectra` weights into a network
+    spectrum ``(D, F)``; ``n_events`` and
     ``total_merger_rate`` ``(D,)``; each ``hyperparameters`` value ``(D,)``.
     ``n_events`` is each draw's ``count``, named as the Poisson-count model's
     site is.
     """
 
     frequencies: NDArray[np.float64]
-    spectral_density: NDArray[np.float64]
     pair_spectral_density: NDArray[np.float64]
     n_events: NDArray[np.int64]
     total_merger_rate: NDArray[np.float64]
@@ -492,11 +491,9 @@ def network_spectra_ensemble(
 
 def _stack(draws: Sequence[BackgroundArtifact], name: str) -> NetworkSpectra:
     """One network's spectra of every draw, stacked."""
-    spectra = [draw.spectra[name] for draw in draws]
     return {
         "frequencies": draws[0].frequencies,
-        "spectral_density": np.stack([s.spectral_density for s in spectra]),
-        "pair_spectral_density": np.stack([s.pair_spectral_density for s in spectra]),
+        "pair_spectral_density": np.stack([draw.spectra[name] for draw in draws]),
         "n_events": np.asarray([draw.count for draw in draws], dtype=np.int64),
         "total_merger_rate": np.asarray(
             [draw.total_merger_rate for draw in draws], dtype=np.float64
