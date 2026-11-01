@@ -176,7 +176,7 @@ config = SimulationConfig(
     segment_duration=None,  # or seconds, for sampled detector noise
 )
 
-# Key (41, 7) is batch_keys(41, 8)[7]; at most one chunk of polarizations
+# At most one chunk of polarizations is held in memory.
 background = simulate(config, realization_key(41, 7), chunk_size=1024)
 background.write("root/41-7.h5")
 
@@ -213,7 +213,7 @@ astrogwb simulate root/41-0.h5 --population-metadata population.toml \
 The population and waveform files hold the fields of `PopulationMetadata` and
 `WaveformMetadata` at their top level. Repeat `--detector-config PATH` to merge
 registry layers in argument order. Draw `i` of a seed is `--index i`, the key
-`batch_keys(seed, i + 1)[i]` that ensembles use. The runtime options
+`realization_key(seed, i)` that ensembles use. The runtime options
 (`--platform cpu --cpu-threads 8`) are applied before the JAX backend
 initializes. To change a setting, regenerate: files are neither converted nor
 mixed.

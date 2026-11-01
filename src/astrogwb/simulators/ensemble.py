@@ -48,7 +48,7 @@ def network_spectra_ensemble(
 
     Draw ``i`` is the background file ``<root>/<seed>-<i>.h5``,
     as ``Snakefile`` lays them out, draw ``i`` keyed by
-    ``batch_keys(seed, i + 1)[i]``.
+    ``realization_key(seed, i)``.
 
     Parameters
     ----------

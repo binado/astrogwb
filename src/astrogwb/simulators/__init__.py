@@ -26,7 +26,7 @@ Only the population stage draws random numbers; the background-stage noise is a
 deterministic function of the realization's key.
 """
 
-from astrogwb.simulators._io import batch_keys, realization_key
+from astrogwb.simulators._io import realization_key
 from astrogwb.simulators.background import (
     BackgroundArtifact,
     BackgroundSimulator,
@@ -51,7 +51,6 @@ __all__ = [
     "PopulationMetadata",
     "PopulationSimulator",
     "SimulationConfig",
-    "batch_keys",
     "combine_pair_spectra",
     "network_spectra_ensemble",
     "realization_key",

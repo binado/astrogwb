@@ -21,8 +21,8 @@ from astrogwb.simulators import (
     BackgroundSimulator,
     PopulationArtifact,
     PopulationSimulator,
-    batch_keys,
     combine_pair_spectra,
+    realization_key,
 )
 from astrogwb.waveform import WaveformMetadata, polarization_power
 
@@ -33,11 +33,11 @@ MAX_STANDARD_ERRORS = 5.0
 @pytest.fixture(scope="module")
 def population() -> PopulationArtifact:
     """About fifty sources."""
-    return PopulationSimulator(_population(1e-4))(batch_keys(41, 1)[0])
+    return PopulationSimulator(_population(1e-4))(realization_key(41, 0))
 
 
 def test_population_is_reproducible(population: PopulationArtifact) -> None:
-    redrawn = PopulationSimulator(_population(1e-4))(batch_keys(41, 1)[0])
+    redrawn = PopulationSimulator(_population(1e-4))(realization_key(41, 0))
 
     assert population.count > 0
     assert set(EXTRINSIC_SITES) <= set(population.source_parameters)
@@ -47,7 +47,7 @@ def test_population_is_reproducible(population: PopulationArtifact) -> None:
 
 
 def test_population_changes_with_seed(population: PopulationArtifact) -> None:
-    other = PopulationSimulator(population.metadata)(batch_keys(42, 1)[0])
+    other = PopulationSimulator(population.metadata)(realization_key(42, 0))
     assert other.rng_key != population.rng_key
     assert not np.array_equal(
         other.source_parameters["redshift"], population.source_parameters["redshift"]
@@ -86,7 +86,7 @@ def test_population_hyperparameters(sample_prior: bool) -> None:
                 }
             }
         )
-    drawn = PopulationSimulator(metadata)(batch_keys(41, 1)[0])
+    drawn = PopulationSimulator(metadata)(realization_key(41, 0))
     if sample_prior:
         assert 60.0 < drawn.hyperparameters["H0"] < 80.0
     else:
@@ -131,7 +131,7 @@ def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum() -> No
     spectrum to the group's sky-averaged spectrum :math:`\sum_i I_i / T`
     isolates the response, and its mean over groups is :math:`\gamma_{ab}`.
     """
-    realization = PopulationSimulator(_population(4e-3))(batch_keys(7, 1)[0])
+    realization = PopulationSimulator(_population(4e-3))(realization_key(7, 0))
     background = BackgroundSimulator(
         WAVEFORM,
         DetectorRegistry(
@@ -168,7 +168,7 @@ def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum() -> No
 
 
 def test_an_empty_realization_has_zero_spectra() -> None:
-    empty = PopulationSimulator(_population(1e-12))(batch_keys(41, 1)[0])
+    empty = PopulationSimulator(_population(1e-12))(realization_key(41, 0))
 
     simulator = BackgroundSimulator(WAVEFORM, NETWORKS)
     background = simulator(empty)

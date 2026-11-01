@@ -42,7 +42,7 @@ with app.setup(hide_code=True):
     from astrogwb.paper.config.runs import CATALOGS_ROOT, FIGURES_DIR
     from astrogwb.paper.plotting import parameter_label, save_figures, use_paper_style
     from astrogwb.populations import Population, build_population
-    from astrogwb.simulators import batch_keys
+    from astrogwb.simulators import realization_key
 
     # One compiled spectrum for every catalog: the likelihood is a pytree
     # argument, so its catalog is a traced input, not a constant, and catalogs
@@ -690,7 +690,7 @@ def catalog_ladder(
     spectra, variances = [], []
     for seed in seeds:
         data = reference_catalog(
-            metadata, batch_keys(seed, 1)[0], chunk_size=chunk_size
+            metadata, realization_key(seed, 0), chunk_size=chunk_size
         )
         row_spectra, row_variances = [], []
         for size in sizes:

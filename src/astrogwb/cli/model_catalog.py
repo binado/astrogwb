@@ -37,13 +37,13 @@ def model_catalog(
     from astrogwb.config import merge_layers
     from astrogwb.gwb.catalog import CatalogMetadata
     from astrogwb.gwb.importance import reference_catalog as draw_reference_catalog
-    from astrogwb.simulators import batch_keys
+    from astrogwb.simulators import realization_key
     from astrogwb.utils.io import write
 
     metadata = CatalogMetadata.model_validate(merge_layers(catalog_metadata))
     began = time.perf_counter()
     data = draw_reference_catalog(
-        metadata, batch_keys(seed, 1)[0], chunk_size=chunk_size
+        metadata, realization_key(seed, 0), chunk_size=chunk_size
     )
     write(output, data, metadata, seed=seed)
     elapsed = time.perf_counter() - began

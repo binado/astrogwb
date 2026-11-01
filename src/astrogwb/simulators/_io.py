@@ -13,7 +13,7 @@ import numpy as np
 
 from astrogwb.utils.io import h5py_module
 
-__all__ = ["atomic_h5", "batch_keys", "realization_key"]
+__all__ = ["atomic_h5", "realization_key"]
 
 
 def _require_x64() -> None:
@@ -25,26 +25,8 @@ def _require_x64() -> None:
         )
 
 
-def batch_keys(seed: int | np.integer, n: int) -> Any:
-    """``n`` keys of ``seed``: ``fold_in(key(seed), arange(n))``.
-
-    Key ``i`` depends on ``(seed, i)`` alone, so the batch is prefix-stable.
-    Seeds are 64-bit, so this needs ``jax_enable_x64``; JAX would otherwise
-    truncate the seed and two seeds could share a realization.
-    """
-    import jax
-
-    if n < 0:
-        raise ValueError("n must be non-negative")
-    _require_x64()
-    base = jax.random.key(np.uint64(seed))
-    return jax.vmap(lambda i: jax.random.fold_in(base, i))(
-        jax.numpy.arange(n, dtype=jax.numpy.uint32)
-    )
-
-
 def realization_key(seed: int | np.integer, index: int) -> Any:
-    """Key ``index`` of :func:`batch_keys` of ``seed``, without the batch."""
+    """Derive the key for a realization by folding its index into the seed."""
     import jax
 
     if index < 0:
