@@ -14,7 +14,7 @@ import pytest
 
 from astrogwb.gwb.catalog import CatalogMetadata, draw_catalog
 from astrogwb.populations import PopulationMetadata
-from astrogwb.simulators import batch_keys
+from astrogwb.simulators import realization_key
 from astrogwb.utils.io import Arrays, load, write
 from astrogwb.waveform import WaveformMetadata
 
@@ -65,7 +65,7 @@ def _same(first: Arrays, second: Arrays) -> None:
 
 @pytest.mark.integration
 def test_polarization_power_round_trips_through_a_file(tmp_path: Path) -> None:
-    fresh = draw_catalog(CATALOG, batch_keys(41, 1)[0])
+    fresh = draw_catalog(CATALOG, realization_key(41, 0))
     path = write(tmp_path / "catalog.h5", fresh, CATALOG, seed=41)
 
     data, metadata, attrs = load(path, CatalogMetadata)
@@ -82,9 +82,9 @@ def test_sobol_catalog_needs_a_power_of_two_size() -> None:
 
 @pytest.mark.integration
 def test_polarization_power_key_picks_the_realization() -> None:
-    one = draw_catalog(CATALOG, batch_keys(41, 1)[0])
-    again = draw_catalog(CATALOG, batch_keys(41, 1)[0])
-    other = draw_catalog(CATALOG, batch_keys(42, 1)[0])
+    one = draw_catalog(CATALOG, realization_key(41, 0))
+    again = draw_catalog(CATALOG, realization_key(41, 0))
+    other = draw_catalog(CATALOG, realization_key(42, 0))
 
     np.testing.assert_array_equal(
         one["polarization_power"], again["polarization_power"]
@@ -95,7 +95,7 @@ def test_polarization_power_key_picks_the_realization() -> None:
 @pytest.mark.integration
 @pytest.mark.parametrize("chunk_size", [1, 4, 6, 100])
 def test_polarization_power_is_independent_of_chunk_size(chunk_size: int) -> None:
-    key = batch_keys(41, 1)[0]
+    key = realization_key(41, 0)
     whole = draw_catalog(CATALOG, key, chunk_size=None)
     chunked = draw_catalog(CATALOG, key, chunk_size=chunk_size)
 

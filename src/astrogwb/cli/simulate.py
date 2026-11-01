@@ -30,7 +30,7 @@ def simulate(
     detector_config: Annotated[list[Path], DETECTOR_CONFIG_OPTION],
     seed: Annotated[int, typer.Option(help="Seed of the realization.")],
     index: Annotated[
-        int, typer.Option(min=0, help="Realization index i of batch_keys(seed, i + 1).")
+        int, typer.Option(min=0, help="Realization index for the given seed.")
     ] = 0,
     chunk_size: Annotated[int, typer.Option(min=1, help="Waveforms per chunk.")] = 1024,
     segment_duration: Annotated[

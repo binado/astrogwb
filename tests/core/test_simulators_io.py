@@ -1,4 +1,4 @@
-"""Batched keys and the HDF5 write/load pair."""
+"""Realization keys and the HDF5 write/load pair."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 from pydantic import BaseModel
 
-from astrogwb.simulators import batch_keys, realization_key
+from astrogwb.simulators import realization_key
 from astrogwb.simulators._io import atomic_h5
 from astrogwb.utils.io import load, write
 
@@ -30,24 +30,17 @@ TREE: dict[str, Any] = {
 }
 
 
-def test_batch_keys_are_distinct_and_prefix_stable() -> None:
-    keys = np.asarray(jax.random.key_data(batch_keys(41, 4)))
-    assert len({tuple(row) for row in keys.tolist()}) == 4
-    np.testing.assert_array_equal(
-        np.asarray(jax.random.key_data(batch_keys(41, 2))), keys[:2]
-    )
+def test_realization_keys_are_deterministic_and_distinct() -> None:
+    keys = [
+        tuple(np.asarray(jax.random.key_data(realization_key(41, i)))) for i in range(4)
+    ]
+    assert len(set(keys)) == 4
+    np.testing.assert_array_equal(jax.random.key_data(realization_key(41, 3)), keys[3])
 
 
-def test_realization_key_is_the_batch_key_at_its_index() -> None:
-    keys = np.asarray(jax.random.key_data(batch_keys(41, 4)))
-    np.testing.assert_array_equal(
-        np.asarray(jax.random.key_data(realization_key(41, 3))), keys[3]
-    )
-
-
-def test_batch_keys_reject_a_negative_count() -> None:
+def test_realization_key_rejects_a_negative_index() -> None:
     with pytest.raises(ValueError, match="non-negative"):
-        batch_keys(41, -1)
+        realization_key(41, -1)
 
 
 def test_write_then_load_round_trips_data_metadata_and_attrs(tmp_path: Path) -> None:

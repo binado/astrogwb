@@ -302,8 +302,8 @@ seed and version recorded inside. Settings such as `chunk_size` are bound in the
 call and are not recorded.
 
 Seeds are inputs because they pick a realization rather than describe a
-distribution: `batch_keys(seed, n)` folds the draw indices into a JAX key,
-producing prefix-stable draw keys. Build a simulator once and call it for each
+distribution: `realization_key(seed, index)` folds a draw index into a JAX
+key, producing a deterministic key for each realization. Build a simulator once and call it for each
 key so its compiled stages are reused.
 
 Bump `version` in `pyproject.toml` whenever a change alters what a population

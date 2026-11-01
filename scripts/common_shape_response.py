@@ -59,7 +59,7 @@ from astrogwb.paper.config import (
 from astrogwb.paper.config.runs import CATALOGS_ROOT
 from astrogwb.paper.plotting import DETECTOR_NETWORKS
 from astrogwb.populations import build_population
-from astrogwb.simulators import batch_keys
+from astrogwb.simulators import realization_key
 from astrogwb.utils.io import load, write
 
 # The configuration of notebooks/shot_noise_coverage.py.
@@ -108,7 +108,7 @@ def _likelihood() -> tuple[ImportanceGaussianLikelihood, NDArray[np.float64], di
                 f"{attrs.get('seed')}); delete it and rerun"
             )
     else:
-        data = reference_catalog(metadata, batch_keys(CATALOG_SEED, 1)[0])
+        data = reference_catalog(metadata, realization_key(CATALOG_SEED, 0))
         write(path, data, metadata, seed=CATALOG_SEED)
     likelihood = ImportanceGaussianLikelihood.from_catalog(
         data,  # ty: ignore[invalid-argument-type]

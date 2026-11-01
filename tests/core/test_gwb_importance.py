@@ -33,7 +33,7 @@ from astrogwb.gwb.importance import (
 from astrogwb.inference import ImportanceGaussianLikelihood
 from astrogwb.populations import PopulationMetadata, build_population, joint_model
 from astrogwb.populations.evaluation import evaluate_sources, sample_sources
-from astrogwb.simulators import batch_keys
+from astrogwb.simulators import realization_key
 from astrogwb.utils import gauss_legendre_nodes_weights
 from astrogwb.waveform import WaveformMetadata, inclination_factor
 
@@ -143,7 +143,7 @@ def test_redshift_quadrature_without_nodes_raises() -> None:
 def test_reference_catalog_places_every_draw_at_the_minimum_redshift(
     reference_metadata: CatalogMetadata,
 ) -> None:
-    data = reference_catalog(reference_metadata, batch_keys(41, 1)[0])
+    data = reference_catalog(reference_metadata, realization_key(41, 0))
 
     columns = data["source_parameters"]
     assert data["polarization_power"].shape == (data["frequencies"].size, 6)
@@ -161,7 +161,7 @@ def test_sobol_reference_catalog_stratifies_the_primary_mass(
     metadata = CatalogMetadata.model_validate(
         {**reference_metadata.model_dump(), "num_samples": 8, "sampling": "sobol"}
     )
-    data = reference_catalog(metadata, batch_keys(41, 1)[0])
+    data = reference_catalog(metadata, realization_key(41, 0))
 
     columns = data["source_parameters"]
     np.testing.assert_array_equal(columns["redshift"], np.full(8, 0.1))
@@ -250,7 +250,7 @@ def _rescaled_and_brute_force(
     variance: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Rescaled and brute-force spectra, or variances, on the same draws and nodes."""
-    key = batch_keys(41, 1)[0]
+    key = realization_key(41, 0)
     reference = reference_catalog(metadata, key)
     target = build_population(
         metadata.population.model_name, **metadata.population.model_kwargs
@@ -338,7 +338,7 @@ def test_rescaled_shot_noise_reweights_like_waveforms_generated_at_every_node(
 @pytest.fixture
 def shot_noise_builder(reference_metadata: CatalogMetadata) -> Any:
     """``observation_time -> likelihood`` on one reference catalog."""
-    data = reference_catalog(reference_metadata, batch_keys(41, 1)[0])
+    data = reference_catalog(reference_metadata, realization_key(41, 0))
     target = build_population(
         reference_metadata.population.model_name,
         **reference_metadata.population.model_kwargs,
@@ -390,7 +390,7 @@ def test_rescaled_shot_noise_grows_linearly_with_the_hubble_constant(
 def test_rescaled_log_weights_vanish_at_the_fiducials(
     reference_metadata: CatalogMetadata,
 ) -> None:
-    data = reference_catalog(reference_metadata, batch_keys(41, 1)[0])
+    data = reference_catalog(reference_metadata, realization_key(41, 0))
     target = build_population(
         reference_metadata.population.model_name,
         **reference_metadata.population.model_kwargs,
@@ -441,7 +441,7 @@ def test_rescaled_spectrum_as_a_jit_argument_traces_once_per_shape(
     spectrum = jax.jit(body)
     results = []
     for seed in (41, 42):
-        data = reference_catalog(reference_metadata, batch_keys(seed, 1)[0])
+        data = reference_catalog(reference_metadata, realization_key(seed, 0))
         fn = ImportanceGaussianLikelihood.from_catalog(
             data,
             reference_metadata,
@@ -473,7 +473,7 @@ def test_rescaled_shot_noise_as_a_jit_argument_traces_once_per_shape(
 
     variance = jax.jit(body)
     for seed in (41, 42):
-        data = reference_catalog(reference_metadata, batch_keys(seed, 1)[0])
+        data = reference_catalog(reference_metadata, realization_key(seed, 0))
         fn = ImportanceGaussianLikelihood.from_catalog(
             data,
             reference_metadata,
@@ -580,7 +580,7 @@ def test_low_reference_catalog_matches_one_generated_at_the_window_edge(
     reference_metadata: CatalogMetadata, window_edge: float
 ) -> None:
     """Same key, hence same intrinsic draws: only the interpolation differs."""
-    key = batch_keys(41, 1)[0]
+    key = realization_key(41, 0)
     low = reference_catalog(reference_metadata, key)
     direct_metadata = _at_window_edge(reference_metadata, window_edge)
     direct = reference_catalog(direct_metadata, key)
@@ -602,7 +602,7 @@ def test_low_reference_catalog_matches_one_generated_at_the_window_edge(
 def test_default_window_edge_is_the_population_minimum_redshift(
     reference_metadata: CatalogMetadata,
 ) -> None:
-    low = reference_catalog(reference_metadata, batch_keys(41, 1)[0])
+    low = reference_catalog(reference_metadata, realization_key(41, 0))
 
     default = _bound_predictions(low, reference_metadata)
     explicit = _bound_predictions(
@@ -617,7 +617,7 @@ def test_default_window_edge_is_the_population_minimum_redshift(
 def test_window_edge_below_the_reference_redshift_is_rejected(
     reference_metadata: CatalogMetadata,
 ) -> None:
-    low = reference_catalog(reference_metadata, batch_keys(41, 1)[0])
+    low = reference_catalog(reference_metadata, realization_key(41, 0))
 
     with pytest.raises(ValueError, match="below the reference redshift"):
         _bound_predictions(low, reference_metadata, minimum_redshift=0.05)
@@ -639,7 +639,7 @@ def test_reference_catalog_distance_is_at_the_reference_redshift(
 ) -> None:
     """Below the population's minimum redshift the distance must not be clamped."""
     metadata = reference_metadata.model_copy(update={"reference_redshift": reference})
-    columns = reference_catalog(metadata, batch_keys(41, 1)[0])["source_parameters"]
+    columns = reference_catalog(metadata, realization_key(41, 0))["source_parameters"]
     fiducials = metadata.fiducials
 
     expected = luminosity_distance(reference, fiducials["H0"], fiducials["Omega_m"])
