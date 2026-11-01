@@ -15,10 +15,9 @@ waveform evaluation works in fixed-size chunks.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Self
+from typing import TYPE_CHECKING, Annotated, Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -28,9 +27,7 @@ from astrogwb import __version__
 from astrogwb.distributions.config import DistributionConfig
 from astrogwb.populations.joint import EXTRINSIC_SITES
 from astrogwb.populations.metadata import PopulationMetadata as PopulationSpec
-from astrogwb.simulators._io import atomic_h5
 from astrogwb.utils import years_to_seconds
-from astrogwb.utils.io import content_key, h5py_module, read_tree, write_tree
 
 if TYPE_CHECKING:
     import jax
@@ -40,15 +37,7 @@ __all__ = [
     "PopulationArtifact",
     "PopulationMetadata",
     "PopulationSimulator",
-    "population_key",
 ]
-
-COORDINATE_CONVENTIONS = {
-    "sky": "right_ascension uniform [0, 2 pi); declination arcsin(uniform(-1, 1))",
-    "polarization_angle": "uniform [0, pi); gwmock/LAL projection basis",
-    "units": "radians; celestial frame compatible with supplied gmst",
-}
-
 
 #: One hyperparameter's declaration: the value it is fixed at, or the prior it
 #: is sampled from once per realization. Which one is decided by the type alone,
@@ -57,13 +46,12 @@ type Hyperparameter = float | DistributionConfig
 
 
 class PopulationMetadata(BaseModel):
-    """Everything that determines a population realization, but its key.
+    """Everything that determines a population realization, but its draw.
 
     ``hyperparameters`` holds, per name, either a number -- every realization
     is made at that value -- or a
     :class:`~astrogwb.distributions.config.DistributionConfig` it is drawn
-    from, once per realization. Priors are data rather than code, so editing a
-    bound re-keys the artifact without a version bump. ``observation_time`` is
+    from, once per realization. ``observation_time`` is
     in years and sets the Poisson mean :math:`\\mathcal{R}\\, T` and, downstream,
     the spectrum normalization.
 
@@ -138,29 +126,16 @@ class PopulationMetadata(BaseModel):
         return model
 
 
-def population_key(metadata: PopulationMetadata, rng_key: Sequence[int]) -> str:
-    """The content hash of the realization of ``metadata`` at the key data ``rng_key``.
-
-    It is the realization's ID, known before anything is drawn.
-    """
-    return content_key(
-        {
-            "metadata": metadata.model_dump(mode="json"),
-            "rng_key": [int(v) for v in rng_key],
-        }
-    )
-
-
 @dataclass(frozen=True)
 class PopulationArtifact:
-    """One population realization, in memory or read from a realization directory.
+    """One population realization, in memory.
 
     ``source_parameters`` holds one ``(count,)`` column per source parameter,
     the extrinsic columns :data:`~astrogwb.populations.joint.EXTRINSIC_SITES` included; source ``i`` has
     the stable ID ``i``. ``total_merger_rate`` is the realized
     :math:`\\mathcal{R}` in events per second and ``hyperparameters`` the
     realized values. ``rng_key`` is the key's data, the realization's
-    provenance and part of its :meth:`key`.
+    provenance.
     """
 
     metadata: PopulationMetadata
@@ -174,7 +149,7 @@ class PopulationArtifact:
         missing = set(EXTRINSIC_SITES) - self.source_parameters.keys()
         if missing:
             raise ValueError(
-                f"population missing coordinate columns {sorted(missing)}; regenerate realizations"
+                f"population missing coordinate columns {sorted(missing)}; regenerate with astrogwb simulate"
             )
 
     @property
@@ -183,84 +158,9 @@ class PopulationArtifact:
         return int(next(iter(self.source_parameters.values())).shape[0])
 
     @property
-    def source_ids(self) -> NDArray[np.int64]:
-        """The stable source IDs, ``arange(count)``."""
-        return np.arange(self.count, dtype=np.int64)
-
-    @property
     def observation_seconds(self) -> float:
         """The observation time in seconds."""
         return self.metadata.observation_seconds
-
-    def key(self) -> str:
-        """The content hash of this realization: its record and its key."""
-        return population_key(self.metadata, self.rng_key)
-
-    def tables(self) -> dict[str, dict[str, Any]]:
-        """The ``[population]`` and ``[realization]`` manifest tables.
-
-        ``[realization]`` holds what this realization knows of itself; the
-        seed and index it was keyed by are the caller's to add.
-        """
-        return {
-            "population": {
-                "conventions": COORDINATE_CONVENTIONS,
-                "metadata": self.metadata.model_dump(mode="json"),
-                "key": self.key(),
-            },
-            "realization": {
-                "id": self.key(),
-                "rng_key": list(self.rng_key),
-                "count": self.count,
-                "total_merger_rate": self.total_merger_rate,
-                "total_merger_rate_unit": "1 / s",
-                "observation_seconds": self.observation_seconds,
-                "hyperparameters": self.hyperparameters,
-            },
-        }
-
-    def write_sources(self, path: str | Path) -> Path:
-        """Write the source IDs and parameters to the HDF5 file ``path``, atomically."""
-        with atomic_h5(path) as file:
-            file.create_dataset("source_id", data=self.source_ids)
-            write_tree(file.create_group("source_parameters"), self.source_parameters)
-        return Path(path)
-
-    @classmethod
-    def from_tables(cls, tables: Mapping[str, Any], sources_path: str | Path) -> Self:
-        """A realization from its manifest ``tables`` and the sources file it wrote.
-
-        Raises
-        ------
-        ValueError
-            If the recorded key is not the hash of the recorded metadata and
-            rng key, or the sources do not match the recorded count.
-        """
-        population, realization = tables["population"], tables["realization"]
-        h5py = h5py_module()
-        with h5py.File(sources_path, "r") as file:
-            source_parameters = read_tree(file["source_parameters"])
-            source_ids = np.asarray(file["source_id"][()])
-        artifact = cls(
-            metadata=PopulationMetadata.model_validate(population["metadata"]),
-            rng_key=tuple(int(value) for value in realization["rng_key"]),
-            total_merger_rate=float(realization["total_merger_rate"]),
-            hyperparameters={
-                name: float(value)
-                for name, value in realization["hyperparameters"].items()
-            },
-            source_parameters=source_parameters,  # ty: ignore[invalid-argument-type]
-        )
-        if artifact.key() != population["key"]:
-            raise ValueError(
-                f"the manifest records population {population['key']}, but its "
-                f"metadata and rng key hash to {artifact.key()}"
-            )
-        if artifact.count != int(realization["count"]) or not np.array_equal(
-            source_ids, artifact.source_ids
-        ):
-            raise ValueError(f"{sources_path}: sources do not match the manifest")
-        return artifact
 
 
 class PopulationSimulator:
@@ -274,7 +174,7 @@ class PopulationSimulator:
         if metadata.version != __version__:
             raise ValueError(
                 f"metadata is for astrogwb {metadata.version}, but {__version__} "
-                "is installed; realizations are generated by the code their key names"
+                "is installed"
             )
         self._metadata = metadata
         self._population = metadata.population.build()

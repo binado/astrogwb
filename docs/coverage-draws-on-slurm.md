@@ -7,36 +7,35 @@ input, per ensemble:
 
 | Output | Command | Read by |
 | --- | --- | --- |
-| `outputs/ensembles/<name>/<seed>-<i>/` | `astrogwb simulate`, one realization per job | every notebook with Poisson draws |
+| `outputs/ensembles/<name>/<seed>-<i>.h5` | `astrogwb simulate`, one file per job | every notebook with Poisson draws |
 | `outputs/catalogs/reference-*.h5` | `astrogwb model-catalog` | the posterior notebooks, `importance_convergence`, `ensemble_spectrum` |
 
 The one ensemble is `fiducial`, the default waveform and grid: the grid
 notebooks' injection, `shot_noise_coverage`'s injections and the draws of
-`ensemble_spectrum` (and the deprecated `spectrum_snrs`). Its settings are the committed
+`ensemble_spectrum`. Its settings are the committed
 `config/ensembles/fiducial/{population,waveform}.toml` and
 `config/detectors.toml`, which supplies the shared frozen detector registry.
 
-Every realization's background records network names and holds each network's
-pair spectra and combined spectrum. The pairs are projected once per draw, so
+Every file holds each network's pair spectra and carries its configuration. The pairs are projected once per draw, so
 adding a network that shares their detectors costs no waveforms. Draw `i` of a
 seed is fixed by `(seed, i)` alone, so any split of the indices across
-machines gives the same directories, and they merge by copying.
+machines gives the same files, and they merge by copying.
 
 ## Regenerating after a change
 
 Nothing is migrated. If you change a detector, a noise curve, the fiducials,
 the population or the waveform, edit the committed simulation inputs to match
-and regenerate the ensemble. The registry is trusted when reading outputs and
-must remain fixed for the dataset lifetime:
+and regenerate the ensemble:
 
 ```bash
 rm -r outputs/ensembles/fiducial
 uv run --no-sync snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm
 ```
 
-Rerunning against a realization recorded with other settings fails on the
-conflict (`ValueError: ... holds background ...`) rather than mixing
-settings. Ensembles of earlier layouts are not read; regenerate them as above.
+A file records the configuration it was simulated with, but nothing compares
+it with the committed inputs: an existing file is never redrawn. After editing
+them, delete the outputs and rerun, as above. Files of another astrogwb
+version are refused when read; regenerate them too.
 
 ## Job sizing
 
@@ -129,7 +128,7 @@ tail -f logs/ensembles/fiducial/41-510.log
 
 SLURM's own logs land under `.snakemake/slurm_logs/`. Rerunning the same
 command after an interruption, a failure or a killed controller resubmits only
-the draws with a missing `background.h5`; it is written last and atomically,
+the draws with a missing file; each is written atomically,
 and Snakemake deletes a failed job's outputs, so no half-written draw
 survives.
 
@@ -149,6 +148,6 @@ the Macs' own draws untouched.
 
 Draws on Linux x86 and macOS arm64 take the same random keys and the same
 sources, but XLA's CPU kernels differ between the two, so spectra can differ
-in their last floating-point digits. That is acceptable: a realization's key
-names its settings, not its floating-point output, and a coverage test does not
+in their last floating-point digits. That is acceptable: a draw's key and
+config fix its settings, not its floating-point output, and a coverage test does not
 resolve differences at that level.

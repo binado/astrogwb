@@ -13,8 +13,7 @@ from astrogwb_tiny_pipeline import WAVEFORM, population_metadata
 from typer.testing import CliRunner
 
 from astrogwb.cli import app
-from astrogwb.detector.config import load_detector_config
-from astrogwb.simulators import Realization
+from astrogwb.simulators import BackgroundArtifact
 
 POPULATION = population_metadata()
 
@@ -55,95 +54,67 @@ def metadata_files(tmp_path: Path) -> dict[str, Path]:
     return paths
 
 
-def _simulate(directory: Path, *options: str) -> None:
+def _simulate(output: Path, *options: str) -> None:
     result = CliRunner().invoke(
-        app, ["simulate", str(directory), "--chunk-size", "8", *options]
+        app, ["simulate", str(output), "--chunk-size", "8", *options]
     )
     assert result.exit_code == 0, result.output
 
 
-def test_a_fused_simulate_run_writes_the_manifest_sources_and_background(
-    tmp_path: Path, metadata_files: dict[str, Path]
-) -> None:
-    _simulate(
-        tmp_path / "realization",
+@pytest.fixture
+def required(metadata_files: dict[str, Path]) -> list[str]:
+    """Every required option of ``simulate``, but the output."""
+    return [
         *("--population-metadata", str(metadata_files["population"])),
-        *("--seed", "41"),
         *("--waveform-metadata", str(metadata_files["waveform"])),
-        "--background",
         *("--detector-config", str(metadata_files["detector"])),
-    )
-
-    realization = Realization.open(tmp_path / "realization")
-    background = realization.background()
-    assert background.pairs == {"ET": (("R1", "S1"),)}
-    assert background.count > 0
-    assert np.any(background.spectra["ET"])
-    assert sorted(path.name for path in realization.directory.iterdir()) == [
-        "background.h5",
-        "metadata.toml",
-        "source_parameters.h5",
+        *("--seed", "41"),
     ]
 
 
-def test_a_background_run_adds_to_an_existing_realization(
-    tmp_path: Path, metadata_files: dict[str, Path]
+def test_a_simulate_run_writes_one_file(tmp_path: Path, required: list[str]) -> None:
+    output = tmp_path / "41-0.h5"
+
+    _simulate(output, *required)
+
+    background = BackgroundArtifact.open(output)
+    assert background.pairs == {"ET": (("R1", "S1"),)}
+    assert background.count > 0
+    assert background.segment_duration is None
+    assert np.any(background.spectra["ET"])
+    assert [path.name for path in tmp_path.glob("*.h5")] == ["41-0.h5"]
+    assert sorted(path.name for path in tmp_path.iterdir()) == [
+        "41-0.h5",
+        "detector.toml",
+        "population.toml",
+        "waveform.toml",
+    ]
+
+
+def test_segment_duration_is_recorded_with_the_noise(
+    tmp_path: Path, required: list[str]
 ) -> None:
-    directory = tmp_path / "realization"
-    _simulate(
-        directory,
-        *("--population-metadata", str(metadata_files["population"])),
-        *("--seed", "41"),
-        *("--waveform-metadata", str(metadata_files["waveform"])),
-    )
-    assert not (directory / "background.h5").exists()
+    output = tmp_path / "41-0.h5"
 
-    _simulate(
-        directory, "--background", "--detector-config", str(metadata_files["detector"])
-    )
+    _simulate(output, *required, "--segment-duration", "600")
 
-    assert tuple(Realization.open(directory).background().spectra) == ("ET",)
-
-
-def test_a_seed_without_population_metadata_is_refused(tmp_path: Path) -> None:
-    result = CliRunner().invoke(app, ["simulate", str(tmp_path), "--seed", "41"])
-
-    assert result.exit_code != 0
-    assert "go together" in result.output
-
-
-def test_segment_duration_records_noise_in_the_background(
-    tmp_path: Path, metadata_files: dict[str, Path]
-) -> None:
-    directory = tmp_path / "41-0"
-    _simulate(
-        directory,
-        *("--population-metadata", str(metadata_files["population"])),
-        *("--seed", "41"),
-        *("--waveform-metadata", str(metadata_files["waveform"])),
-        "--background",
-        *("--detector-config", str(metadata_files["detector"])),
-        *("--segment-duration", "600"),
-    )
-
-    background = Realization.open(directory).background()
-
+    background = BackgroundArtifact.open(output)
     assert background.segment_duration == 600.0
-    registry = load_detector_config([metadata_files["detector"]])
-    noise = background.noise(registry)
+    noise = background.noise()
     assert noise["ET"].pair_scale.shape == (1, background.frequencies.size)
 
 
-def test_segment_duration_without_background_is_refused(tmp_path: Path) -> None:
-    result = CliRunner().invoke(
-        app, ["simulate", str(tmp_path), "--segment-duration", "10"]
-    )
+@pytest.mark.parametrize(
+    "missing",
+    ["--population-metadata", "--waveform-metadata", "--detector-config", "--seed"],
+)
+def test_a_missing_required_option_is_refused(
+    tmp_path: Path, required: list[str], missing: str
+) -> None:
+    at = required.index(missing)
+    options = required[:at] + required[at + 2 :]
+
+    result = CliRunner().invoke(app, ["simulate", str(tmp_path / "41-0.h5"), *options])
 
     assert result.exit_code != 0
-
-
-def test_background_without_detector_config_is_refused(tmp_path: Path) -> None:
-    result = CliRunner().invoke(app, ["simulate", str(tmp_path), "--background"])
-
-    assert result.exit_code != 0
-    assert "together" in result.output
+    assert not (tmp_path / "41-0.h5").exists()

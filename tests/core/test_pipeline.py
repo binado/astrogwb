@@ -8,7 +8,6 @@ sample's own standard error, so it holds for any seed.
 from __future__ import annotations
 
 import dataclasses
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -24,9 +23,7 @@ from astrogwb.simulators import (
     PopulationSimulator,
     batch_keys,
     combine_pair_spectra,
-    simulate_realization,
 )
-from astrogwb.simulators.background import background_key
 from astrogwb.waveform import WaveformMetadata, polarization_power
 
 #: Standard errors a Monte Carlo mean may sit from its expectation.
@@ -51,7 +48,7 @@ def test_population_is_reproducible(population: PopulationArtifact) -> None:
 
 def test_population_changes_with_seed(population: PopulationArtifact) -> None:
     other = PopulationSimulator(population.metadata)(batch_keys(42, 1)[0])
-    assert other.key() != population.key()
+    assert other.rng_key != population.rng_key
     assert not np.array_equal(
         other.source_parameters["redshift"], population.source_parameters["redshift"]
     )
@@ -170,23 +167,6 @@ def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum() -> No
     assert np.all(np.abs(ratios.mean(axis=0) - expected) < MAX_STANDARD_ERRORS * errors)
 
 
-def test_a_staged_realization_reads_back_the_fused_background(
-    tmp_path: Path, population: PopulationArtifact
-) -> None:
-    fused = BackgroundSimulator(WAVEFORM, NETWORKS, chunk_size=8)(population)
-
-    simulate_realization(tmp_path, population=_population(1e-4), seed=41)
-    simulate_realization(tmp_path, waveform=WAVEFORM, chunk_size=8)
-    staged = simulate_realization(
-        tmp_path, background=NETWORKS, chunk_size=8
-    ).background()
-
-    assert_same_spectra(staged, fused)
-    assert staged.key() == fused.key()
-    assert staged.count == population.count
-    assert tuple(staged.spectra) == tuple(sorted(NETWORKS.networks))
-
-
 def test_an_empty_realization_has_zero_spectra() -> None:
     empty = PopulationSimulator(_population(1e-12))(batch_keys(41, 1)[0])
 
@@ -226,7 +206,7 @@ def test_combining_pair_spectra_of_a_pure_signal_recovers_its_spectrum(
     projected: BackgroundArtifact, name: str
 ) -> None:
     spectrum = 1e-47 * (1.0 + np.arange(projected.frequencies.size))
-    overlap = projected.noise(NETWORKS)[name].pair_overlap
+    overlap = projected.noise()[name].pair_overlap
 
     combined = combine_pair_spectra(
         overlap * spectrum, projected.frequencies, NETWORKS, name
@@ -292,33 +272,13 @@ def test_psd_override_preserves_pair_spectra_and_changes_combination(
 @pytest.mark.parametrize(
     "detectors", [["S1", "R1", "C1"], ["C1", "R1", "S1"], ["R1", "C1", "S1"]]
 )
-def test_declaration_order_changes_neither_pairs_nor_key(
-    detectors: list[str],
-) -> None:
+def test_declaration_order_does_not_change_the_pairs(detectors: list[str]) -> None:
     reordered = DetectorRegistry(
         detectors=NETWORKS.detectors,
         networks={"triangle": tuple(detectors), "pair": NETWORKS.networks["pair"]},
     )
 
     assert reordered.pairs("triangle") == [("C1", "R1"), ("C1", "S1"), ("R1", "S1")]
-    assert background_key("w", reordered, ["triangle"]) == background_key(
-        "w", NETWORKS, ["triangle"]
-    )
-
-
-def test_noise_curves_are_part_of_the_key() -> None:
-    other = NETWORKS.model_copy(
-        update={
-            "detectors": {
-                **NETWORKS.detectors,
-                "C1": NETWORKS.detectors["C1"].model_copy(
-                    update={"psd_reference": "ET_COBA_15km_psd.txt"}
-                ),
-            }
-        }
-    )
-
-    assert background_key("w", other) != background_key("w", NETWORKS)
 
 
 def test_native_coordinate_columns_and_ranges(population: PopulationArtifact) -> None:
@@ -363,31 +323,30 @@ def test_noise_is_reproducible_for_the_same_population(
     assert_same_spectra(simulator(population), simulator(population))
 
 
-def test_noise_changes_the_spectra_and_the_key(
+def test_noise_changes_the_spectra(
     population: PopulationArtifact, projected: BackgroundArtifact
 ) -> None:
     noisy = BackgroundSimulator(
         WAVEFORM, NETWORKS, chunk_size=8, segment_duration=60.0
     )(population)
 
-    assert noisy.key() != projected.key()
     assert not np.array_equal(
         noisy.spectra["pair"],
         projected.spectra["pair"],
     )
 
 
-def test_noise_key_depends_on_the_segment_duration(
+def test_noise_depends_on_the_segment_duration(
     population: PopulationArtifact,
 ) -> None:
-    keys = {
+    short, long = (
         BackgroundSimulator(
             WAVEFORM, NETWORKS, chunk_size=8, segment_duration=duration
-        )(population).key()
+        )(population)
         for duration in (60.0, 600.0)
-    }
+    )
 
-    assert len(keys) == 2
+    assert not np.array_equal(short.spectra["pair"], long.spectra["pair"])
 
 
 @pytest.mark.parametrize("segment_duration", [60.0, 600.0])
@@ -400,7 +359,7 @@ def test_pure_noise_matches_the_pair_scale_whatever_the_segment_duration(
     residuals = []
     for draw in range(120):
         background = simulator(dataclasses.replace(empty, rng_key=(0, draw)))
-        noise = background.noise(NETWORKS)
+        noise = background.noise()
         for name, spectrum in background.spectra.items():
             scale = noise[name].pair_scale
             residuals.append((spectrum / scale).ravel())
@@ -484,19 +443,3 @@ def test_noisy_background_averages_to_the_incoherent_signal(
 def test_a_nonpositive_segment_duration_raises() -> None:
     with pytest.raises(ValueError, match="positive"):
         BackgroundSimulator(WAVEFORM, NETWORKS, segment_duration=0.0)
-
-
-def test_noise_of_another_registry_raises(projected: BackgroundArtifact) -> None:
-    other = NETWORKS.model_copy(
-        update={
-            "detectors": {
-                **NETWORKS.detectors,
-                "C1": NETWORKS.detectors["C1"].model_copy(
-                    update={"psd_reference": "ET_COBA_15km_psd.txt"}
-                ),
-            }
-        }
-    )
-
-    with pytest.raises(ValueError, match="registry"):
-        projected.noise(other)

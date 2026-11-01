@@ -35,8 +35,6 @@ dependencies = [
     # that gwmock-noise is free to drop.
     "pydantic>=2.11",
     "pyknf>=0.6,<0.8",
-    # Writes the TOML manifests of the simulator stages (astrogwb.simulators).
-    "tomli-w>=1.2",
 ]
 
 [project.scripts]
@@ -89,7 +87,8 @@ build-backend = "uv_build"
 
 # Groups are tooling: never imported by shipped code, never part of a wheel.
 [dependency-groups]
-test = ["pytest>=9.0.2", "pytest-xdist>=3.8.0"]
+# tomli-w writes the TOML inputs of the CLI tests.
+test = ["pytest>=9.0.2", "pytest-xdist>=3.8.0", "tomli-w>=1.2"]
 # Notebook editor/runner (marimo). The `notebook` extra, by contrast, is the
 # library stack notebooks import.
 notebook = [

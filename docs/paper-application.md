@@ -2,7 +2,7 @@
 
 The reproducibility application for the `astrogwb` research project. It owns
 the shared configuration and the notebooks that produce the paper's figures and
-tables. Spectrum realizations are realization directories, written by the
+tables. Spectrum realizations are one HDF5 file each, written by the
 package's `astrogwb simulate` command (see
 [the simulator pipeline](simulator-pipeline.md)).
 

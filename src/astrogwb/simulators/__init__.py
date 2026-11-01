@@ -1,4 +1,9 @@
-"""Poisson realizations of the background, in two stages.
+"""Poisson realizations of the background, simulated in one pass.
+
+A :class:`SimulationConfig` holds everything that determines a run: the
+population, the waveform, the detector registry and an optional noise segment
+length. :func:`simulate` draws it at a key in one pass, with two building
+blocks:
 
 1. :class:`PopulationSimulator` draws one realization -- hyperparameters, a
    Poisson count, every source's intrinsic and extrinsic parameters -- as a
@@ -8,20 +13,19 @@
    projects them onto the named networks of a
    :class:`~astrogwb.detector.DetectorRegistry`, and sums the per-pair
    cross-powers into a :class:`BackgroundArtifact` holding each network's pair
-   spectra and their :func:`combine_pair_spectra`. With a ``segment_duration``
-   it assigns sources to segments and cross-correlates each segment's coherent
-   strain plus fresh detector noise;
+   spectra; :func:`combine_pair_spectra` weights them into a network spectrum.
+   With a ``segment_duration`` it assigns sources to segments and
+   cross-correlates each segment's coherent strain plus fresh detector noise;
    :meth:`BackgroundArtifact.noise` derives the networks' likelihood inputs, a
-   :class:`NetworkNoise` each, from the background's metadata and the registry.
+   :class:`NetworkNoise` each.
 
-Fused in memory, ``BackgroundSimulator(...)(population)`` never holds more than
-one chunk of polarizations. On disk, a realization is one directory, a
-:class:`Realization`: one ``metadata.toml`` and at most one product per stage,
-which :class:`RealizationSimulator` adds to stage by stage;
-:func:`network_spectra_ensemble` reads an ensemble of realizations, one
-directory per seed and index, back stacked per network. Only the population
-stage draws random numbers, and the noise of the background stage is a
-deterministic function of the realization's key.
+Nothing but the pair spectra is kept: no sources, no intermediate stages. A
+:class:`BackgroundArtifact` writes one HDF5 file carrying its config as JSON and
+the package version, and :meth:`BackgroundArtifact.open` reads the config back;
+:func:`network_spectra_ensemble` reads an ensemble of such files, one per seed
+and index, stacked per network. Only the population stage draws random numbers,
+and the noise of the background stage is a deterministic function of the
+realization's key.
 """
 
 from astrogwb.simulators._io import batch_keys, realization_key
@@ -30,21 +34,15 @@ from astrogwb.simulators.background import (
     BackgroundSimulator,
     NetworkNoise,
     combine_pair_spectra,
-    waveform_key,
 )
+from astrogwb.simulators.config import SimulationConfig
+from astrogwb.simulators.ensemble import NetworkSpectra, network_spectra_ensemble
 from astrogwb.simulators.population import (
     PopulationArtifact,
     PopulationMetadata,
     PopulationSimulator,
-    population_key,
 )
-from astrogwb.simulators.realization import (
-    NetworkSpectra,
-    Realization,
-    RealizationSimulator,
-    network_spectra_ensemble,
-    simulate_realization,
-)
+from astrogwb.simulators.simulation import simulate
 
 __all__ = [
     "BackgroundArtifact",
@@ -54,13 +52,10 @@ __all__ = [
     "PopulationArtifact",
     "PopulationMetadata",
     "PopulationSimulator",
-    "Realization",
-    "RealizationSimulator",
+    "SimulationConfig",
     "batch_keys",
     "combine_pair_spectra",
     "network_spectra_ensemble",
-    "population_key",
     "realization_key",
-    "simulate_realization",
-    "waveform_key",
+    "simulate",
 ]

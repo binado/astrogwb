@@ -26,18 +26,18 @@ Over an isotropic sky and uniform polarization angle
 :math:`\langle K_{ab} \rangle = I \gamma_{ab} / 5`, with :math:`I` the
 polarization power and :math:`\gamma_{ab}` the normalized isotropic overlap
 reduction function of the native geometry. For an isotropic, unpolarized
-population this gives :math:`E[Y_{ab}] = \gamma_{ab} S_h`. This is convention version
-:data:`NORMALIZATION_VERSION`, recorded in every ``[background]`` table. The sum
-is never divided by the realized count.
+population this gives :math:`E[Y_{ab}] = \gamma_{ab} S_h`. The sum is never
+divided by the realized count.
 
 The stage is configured by a :class:`~astrogwb.waveform.WaveformMetadata` and
-named networks, a :data:`DetectorRegistry`. Every pair of the union of their
+named networks, a :data:`DetectorRegistry`; together with the population and the
+noise segment length they form a :class:`~astrogwb.simulators.SimulationConfig`,
+which the artifact and its file carry. Every pair of the union of their
 detectors is projected once per chunk in a single fused kernel (waveform
 evaluation plus detector projection), so a pair two networks share costs one
 projection, and each network keeps its own rows, ``(P_n, F)``.
 :func:`combine_pair_spectra` weights them optimally into one network spectrum
-``(F,)`` on demand; it is not stored. The detectors' noise curves are part of
-the background's key.
+``(F,)`` on demand; it is not stored.
 
 Without a ``segment_duration`` the background is deterministic given its
 inputs and carries no detector noise. With one, :math:`\tau`, the observation is
@@ -71,17 +71,19 @@ Detectors are static: the Earth's rotation during a signal is not modelled.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from itertools import combinations
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple, Self
+from typing import TYPE_CHECKING, NamedTuple, Self
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from astrogwb import __version__
 from astrogwb.detector import (
     effective_psd,
     gaussian_bin_scale,
@@ -93,9 +95,10 @@ from astrogwb.detector.projection import project_polarizations_fd
 from astrogwb.frequency import bin_widths
 from astrogwb.simulators._chunks import iter_rows, pad_rows
 from astrogwb.simulators._io import atomic_h5
+from astrogwb.simulators.config import SimulationConfig
 from astrogwb.simulators.population import PopulationArtifact
 from astrogwb.utils import years_to_seconds
-from astrogwb.utils.io import content_key, h5py_module
+from astrogwb.utils.io import h5py_module
 from astrogwb.waveform.metadata import WaveformMetadata
 
 if TYPE_CHECKING:
@@ -103,60 +106,24 @@ if TYPE_CHECKING:
 
 __all__ = [
     "NOISE_STREAM",
-    "NORMALIZATION_VERSION",
     "SEGMENT_STREAM",
-    "WAVEFORM_CONVENTIONS",
     "BackgroundArtifact",
     "BackgroundSimulator",
     "NetworkNoise",
-    "background_key",
-    "background_pairs",
-    "background_table",
     "combine_pair_spectra",
     "select_networks",
-    "waveform_key",
-    "waveform_table",
 ]
 
-
-PROJECTION_CONVENTIONS = {
-    "geometry": "WGS-84 geodetic; tilted arms; metres",
-    "polarization_basis": "gwmock/LAL",
-    "coordinates": "right_ascension, declination; radians; compatible with gmst",
-    "gmst_rad": 0.0,
-    "projection": "(F_plus * plus + F_cross * cross) * exp(-2 pi i f delay)",
-    "delay": "-dot(source_direction, location) / c",
-    "isotropic_orf": "native WGS-84 geometry; exact invariant factorization",
-}
-
-#: The conventions a waveform manifest records, so a reader can check them.
-WAVEFORM_CONVENTIONS = {
-    "frame": "radiation",
-    "polarization_angle": "applied_at_projection",
-    "fourier": "h(f) = int h(t) exp(-2 pi i f t) dt",
-    "strain_unit": "1 / Hz",
-    "frequency_unit": "Hz",
-}
 
 #: :math:`\langle K_{ab} \rangle = I \gamma_{ab}` over this, the factor in
 #: :math:`Y_{ab} = 5 D_{ab} / T`.
 PAIR_RESPONSE_DENOMINATOR = 5.0
-
-#: The version of the pair-spectrum convention :math:`E[Y_{ab}] = \gamma_{ab} S_h`.
-NORMALIZATION_VERSION = 1
 
 #: The stream folded into a realization's key for the detector noise.
 NOISE_STREAM = 1
 
 #: The stream folded into a realization's key for the segment of each source.
 SEGMENT_STREAM = 2
-
-_NORMALIZATION = {
-    "convention": "E[Y_ab] = gamma_ab * S_h",
-    "pair_spectrum": "Y_ab = 5 * D_ab / T",
-    "factor": PAIR_RESPONSE_DENOMINATOR,
-    "version": NORMALIZATION_VERSION,
-}
 
 
 class NetworkNoise(NamedTuple):
@@ -175,25 +142,6 @@ class NetworkNoise(NamedTuple):
     pair_scale: NDArray[np.float64]
     effective_psd: NDArray[np.float64]
     scale: NDArray[np.float64]
-
-
-def waveform_key(metadata: WaveformMetadata, population_key: str) -> str:
-    """The content hash of the waveforms of the population ``population_key``."""
-    return content_key(
-        {
-            "population": population_key,
-            "waveform": metadata.model_dump(mode="json"),
-        }
-    )
-
-
-def waveform_table(metadata: WaveformMetadata, population_key: str) -> dict[str, Any]:
-    """The ``[waveforms]`` manifest table of a population's waveforms."""
-    return {
-        "metadata": metadata.model_dump(mode="json"),
-        "key": waveform_key(metadata, population_key),
-        "conventions": {**WAVEFORM_CONVENTIONS, "source_ordering": "source_id"},
-    }
 
 
 def select_networks(
@@ -227,165 +175,53 @@ def used_detectors(registry: DetectorRegistry, names: Sequence[str]) -> tuple[st
     return tuple(sorted(registry.select(names).detectors))
 
 
-def background_key(
-    waveform_key: str,
-    registry: DetectorRegistry,
-    names: Sequence[str] | None = None,
-    segment_duration: float | None = None,
-) -> str:
-    """The content hash of the spectra of the waveforms ``waveform_key``.
-
-    Parameters
-    ----------
-    waveform_key
-        The key of the polarizations the spectra are projected from.
-    registry
-        The detector registry.
-    names
-        The networks of ``registry`` the spectra cover; defaults to all.
-    segment_duration
-        The noise segment length in seconds; ``None`` for no noise.
-
-    Returns
-    -------
-    str
-        Only the membership, geometry and PSD references of the detectors those
-        networks use, and the segment duration if there is noise, affect it.
-    """
-    identity: dict[str, Any] = {
-        "waveforms": waveform_key,
-        "detectors": registry.select(select_networks(registry, names)).key(),
-    }
-    if segment_duration is not None:
-        identity["noise"] = {"segment_duration": float(segment_duration)}
-    return content_key(identity)
-
-
-def background_table(
-    waveform_key: str,
-    registry: DetectorRegistry,
-    names: Sequence[str] | None = None,
-    segment_duration: float | None = None,
-) -> dict[str, Any]:
-    """The ``[background]`` manifest table of the spectra :func:`background_key` names.
-
-    Parameters
-    ----------
-    waveform_key
-        The key of the polarizations the spectra are projected from.
-    registry
-        The detector registry.
-    names
-        The networks of ``registry`` the spectra cover; defaults to all.
-    segment_duration
-        The noise segment length in seconds; ``None`` for no noise.
-
-    Returns
-    -------
-    dict
-        The pairs of each network, the key, the normalization convention and
-        the units, and the noise settings if there is noise.
-    """
-    table = {
-        "metadata": {
-            "pairs": {
-                name: [list(pair) for pair in registry.pairs(name)]
-                for name in select_networks(registry, names)
-            }
-        },
-        "key": background_key(waveform_key, registry, names, segment_duration),
-        "conventions": PROJECTION_CONVENTIONS,
-        "normalization": _NORMALIZATION,
-        "units": {
-            "frequency": "Hz",
-            "pair_spectral_density": "1 / Hz",
-        },
-    }
-    if segment_duration is not None:
-        table["noise"] = {
-            "segment_duration": float(segment_duration),
-            "streams": {"noise": NOISE_STREAM, "segment": SEGMENT_STREAM},
-        }
-    return table
-
-
-def background_pairs(
-    table: Mapping[str, Any],
-) -> dict[str, tuple[tuple[str, str], ...]]:
-    """The detector pairs of each network recorded in a ``[background]`` table.
-
-    The pairs are in the order of the pair axis of the network's spectra.
-
-    Raises
-    ------
-    ValueError
-        If the table predates the recording of pairs.
-    """
-    if "pairs" not in table["metadata"]:
-        raise ValueError("background metadata format is old; regenerate realizations")
-    return {
-        name: tuple((first, second) for first, second in members)
-        for name, members in table["metadata"]["pairs"].items()
-    }
-
-
 @dataclass(frozen=True)
 class BackgroundArtifact:
-    """The per-network spectra of one realization, in memory or read from disk.
+    """The per-network spectra of one simulation, in memory or read from disk.
 
     ``spectra`` holds each network's pair spectra :math:`Y_{ab}` in
     :math:`\\mathrm{Hz}^{-1}`, ``(P_n, F)``, keyed by network name in sorted
-    order, and ``pairs`` the detector pairs of its pair axis. ``count``, ``total_merger_rate`` (per second) and
-    ``hyperparameters`` are the realization's, carried over from its
-    population. ``waveform_key`` names the polarizations the spectra were
-    projected from.
+    order; the pair axis follows :meth:`pairs`. ``config`` is the
+    :class:`~astrogwb.simulators.SimulationConfig` it was simulated from and
+    ``rng_key`` the data of the key it was drawn at. ``count``,
+    ``total_merger_rate`` (per second) and ``hyperparameters`` are the
+    realization's, carried over from its population.
     """
 
     frequencies: NDArray[np.float64]
     spectra: dict[str, NDArray[np.float64]]
-    pairs: dict[str, tuple[tuple[str, str], ...]]
-    observation_seconds: float
+    config: SimulationConfig
+    rng_key: tuple[int, ...]
     count: int
     total_merger_rate: float
     hyperparameters: dict[str, float]
-    waveform_key: str
-    identity: str | None = None
-    chunk_size: int | None = None
-    segment_duration: float | None = None
 
-    def key(self) -> str:
-        """The recorded background identity."""
-        if self.identity is None:
-            raise ValueError("background identity has not been assigned")
-        return self.identity
+    @property
+    def pairs(self) -> dict[str, tuple[tuple[str, str], ...]]:
+        """The detector pairs of each network's pair axis."""
+        return {name: tuple(self.config.detectors.pairs(name)) for name in self.spectra}
 
-    def table(self, registry: DetectorRegistry) -> dict[str, Any]:
-        """The ``[background]`` table using the supplied registry."""
-        return background_table(
-            self.waveform_key, registry, tuple(self.spectra), self.segment_duration
-        )
+    @property
+    def observation_seconds(self) -> float:
+        """The observation time in seconds."""
+        return self.config.population.observation_seconds
 
-    def noise(self, registry: DetectorRegistry) -> dict[str, NetworkNoise]:
+    @property
+    def segment_duration(self) -> float | None:
+        """The noise segment length in seconds; ``None`` for no noise."""
+        return self.config.segment_duration
+
+    def noise(self) -> dict[str, NetworkNoise]:
         """Each network's :class:`NetworkNoise` on this background's grid.
 
-        Derived from the registry, the grid and the observation time rather
-        than stored.
-
-        Raises
-        ------
-        ValueError
-            If ``registry`` is not the one the background was simulated with.
+        Derived from the config's detectors, the grid and the observation
+        time rather than stored.
         """
-        names = tuple(self.spectra)
-        key = background_key(self.waveform_key, registry, names, self.segment_duration)
-        if key != self.key():
-            raise ValueError(
-                f"registry gives background {key}, not the recorded {self.key()}"
-            )
+        registry = self.config.detectors
         grid = np.asarray(self.frequencies, dtype=np.float64)
         years = self.observation_seconds / years_to_seconds(1.0)
         noise = {}
-        for name in names:
+        for name in self.spectra:
             detectors = registry.build_network(name)
             psd = effective_psd(grid, detectors)
             noise[name] = NetworkNoise(
@@ -402,10 +238,22 @@ class BackgroundArtifact:
         """Write the spectra to the HDF5 file ``path``, atomically.
 
         Datasets ``frequencies`` and, per network,
-        ``networks/<name>/pair_spectral_density``. The pair axis is in the
-        order of ``pairs``.
+        ``networks/<name>/pair_spectral_density``. The root attributes are
+        ``metadata``, the config as JSON, ``version``, the package version,
+        and ``realization``, a JSON of ``rng_key``, ``count``,
+        ``total_merger_rate`` and ``hyperparameters``.
         """
         with atomic_h5(path) as file:
+            file.attrs["metadata"] = self.config.model_dump_json()
+            file.attrs["version"] = __version__
+            file.attrs["realization"] = json.dumps(
+                {
+                    "rng_key": list(self.rng_key),
+                    "count": self.count,
+                    "total_merger_rate": self.total_merger_rate,
+                    "hyperparameters": self.hyperparameters,
+                }
+            )
             file.create_dataset("frequencies", data=self.frequencies)
             for name, spectrum in self.spectra.items():
                 group = file.create_group(f"networks/{name}")
@@ -413,58 +261,44 @@ class BackgroundArtifact:
         return Path(path)
 
     @classmethod
-    def open(
-        cls,
-        path: str | Path,
-        *,
-        table: Mapping[str, Any],
-        realization: Mapping[str, Any],
-        waveform_key: str,
-    ) -> Self:
-        """Read the spectra at ``path`` with their manifest tables.
-
-        ``table`` is the ``[background]`` table, ``realization`` the
-        ``[realization]`` table and ``waveform_key`` the ``[waveforms]`` key.
-        The recorded identity and noise segment duration are kept as is, and the file is trusted to hold
-        the networks and pairs of ``table``.
+    def open(cls, path: str | Path) -> Self:
+        """Read the background at ``path``, config included.
 
         Raises
         ------
         ValueError
-            If the table uses another normalization convention or predates
-            the recording of pairs.
+            If the file's ``version`` attribute is missing or is not the
+            installed astrogwb version.
         """
-        version = table["normalization"].get("version")
-        if version != NORMALIZATION_VERSION:
-            raise ValueError(
-                f"{path} uses pair-spectrum normalization version {version}, "
-                f"not {NORMALIZATION_VERSION}"
-            )
-        pairs = background_pairs(table)
         h5py = h5py_module()
         with h5py.File(path, "r") as file:
+            version = file.attrs.get("version")
+            if version != __version__:
+                raise ValueError(
+                    f"{path} was written by astrogwb {version}, but {__version__} "
+                    "is installed; regenerate it with astrogwb simulate"
+                )
+            config = SimulationConfig.model_validate_json(file.attrs["metadata"])
+            realization = json.loads(file.attrs["realization"])
             frequencies = np.asarray(file["frequencies"][()], dtype=np.float64)
             stored = file["networks"]
             spectra = {
                 name: np.asarray(
                     stored[name]["pair_spectral_density"][()], dtype=np.float64
                 )
-                for name in pairs
+                for name in sorted(stored)
             }
         return cls(
             frequencies=frequencies,
             spectra=spectra,
-            pairs=pairs,
-            observation_seconds=float(realization["observation_seconds"]),
+            config=config,
+            rng_key=tuple(int(v) for v in realization["rng_key"]),
             count=int(realization["count"]),
             total_merger_rate=float(realization["total_merger_rate"]),
             hyperparameters={
                 name: float(value)
                 for name, value in realization["hyperparameters"].items()
             },
-            waveform_key=waveform_key,
-            identity=str(table["key"]),
-            segment_duration=table.get("noise", {}).get("segment_duration"),
         )
 
 
@@ -656,23 +490,19 @@ class BackgroundSimulator:
         else:
             union = self._segmented(population, grid)
         spectra = {name: union[self._rows[name]] for name in self._network_names}
-        wf_key = waveform_key(self._waveform, population.key())
         return BackgroundArtifact(
             frequencies=frequencies,
             spectra=spectra,
-            pairs={
-                name: tuple(self._registry.pairs(name)) for name in self._network_names
-            },
-            observation_seconds=population.observation_seconds,
+            config=SimulationConfig(
+                population=population.metadata,
+                waveform=self._waveform,
+                detectors=self._registry,
+                segment_duration=self._segment_duration,
+            ),
+            rng_key=population.rng_key,
             count=population.count,
             total_merger_rate=population.total_merger_rate,
             hyperparameters=dict(population.hyperparameters),
-            waveform_key=wf_key,
-            identity=background_key(
-                wf_key, self._registry, self._network_names, self._segment_duration
-            ),
-            chunk_size=self._chunk_size,
-            segment_duration=self._segment_duration,
         )
 
     def _noiseless(

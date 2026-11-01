@@ -1,26 +1,30 @@
 # The simulator pipeline
 
-`astrogwb.simulators` draws Poisson realizations of the background in two
-stages. The stages run fused in memory, or one at a time into a single
-realization directory that each later stage adds to.
+`astrogwb.simulators` draws a Poisson realization of the background in one
+pass: a `SimulationConfig` and a key in, one `BackgroundArtifact` out, written
+to one HDF5 file.
 
 ```text
+SimulationConfig = PopulationMetadata + WaveformMetadata + DetectorRegistry
+                   (+ segment_duration)
+
 PopulationMetadata                     --PopulationSimulator(key)--> PopulationArtifact
 WaveformMetadata + DetectorRegistry    --BackgroundSimulator(pop)--> BackgroundArtifact
+simulate(config, key)                  = both, composed
 ```
 
+`SimulationConfig` is a frozen pydantic model: everything that determines the
+run, nothing about the draw. The draw, a seed and an index, is the key the
+config is simulated at. Execution details (`chunk_size`, `segment_batch_size`)
+change cost, never the result, and are arguments of `simulate`, not config.
+
 `DetectorRegistry` resolves detector geometry and PSD references once for
-simulation and noise generation. Background and noise metadata record each
-network's detector pairs, in the order of the pair axis of its arrays, so
-readers need no registry.
+simulation and noise generation. The artifact derives each network's detector
+pairs, in the order of the pair axis of its arrays, from the registry in its
+config, so a reader needs nothing else.
 
-The registry is frozen for the lifetime of an output dataset. Readers trust the
-files they open and preserve the recorded artifact identity. Changing geometry,
-PSD references, or membership requires regenerating affected realizations and
-noise files.
-
-Only the population stage draws random numbers. The waveform and background
-stages are deterministic, given their inputs.
+Only the population stage draws random numbers. The background stage is
+deterministic given the population and its config.
 
 ## Stages
 
@@ -36,7 +40,7 @@ hyperparameters (fixed, or drawn from their priors), a Poisson count
 All sources are drawn in one batch through `sample_sources`, with independent
 random streams for hyperparameters, count, and the joint source model.
 The joint model samples intrinsic parameters and extrinsic angles together.
-Source `i` has the stable ID `i`. Counts are Poisson only; the
+Counts are Poisson only; the
 fixed-count mode was removed. A fixed-size Monte Carlo sample of a population
 is a reference catalog for importance weighting (`astrogwb.gwb.catalog`), not
 a realization.
@@ -62,7 +66,7 @@ response tensors computed from local north/east/up vectors. `Detector` owns a
 name, geometry and lazy sensitivity. Registry builders return tuples of these
 objects: `build_detectors` preserves supplied order; `build_network` sorts it.
 Projection uses the gwmock/LAL plus/cross basis and delay sign. Background
-simulation fixes `gmst=0`, recorded in the manifest's conventions. Right
+simulation fixes `gmst=0`. Right
 ascension and declination must be in the celestial frame compatible with the
 supplied sidereal angle; no GPS, epoch or precession conversion occurs.
 Tensors and locations are stacked outside JIT and passed into the chunk kernel.
@@ -75,13 +79,13 @@ another costs no extra projection.
 
 Detectors are stored sorted, whatever order they are declared in, so a
 network's pairs are always `a < b` in site-code order. That order is the pair
-axis of every product and of `astrogwb.detector.pair_terms` on the same
+axis of every spectrum and of `astrogwb.detector.pair_terms` on the same
 detectors.
 
 The background does not model:
 
-- interference between sources;
-- detector noise;
+- interference between sources (outside the noisy mode below);
+- detector noise, unless `segment_duration` is set;
 - the Earth's rotation during a signal.
 
 ## The pair-spectrum convention
@@ -94,19 +98,19 @@ normalized isotropic overlap reduction function of the native WGS-84 geometry
 are exact.
 The factor-five pair normalization and intrinsic waveform conventions remain unchanged.
 
-Every `[background]` table records this convention as its `normalization`,
-version 1, and `BackgroundArtifact.open` refuses any other version.
+A change of this convention ships with a new package version, which
+`BackgroundArtifact.open` checks (see below).
 `combine_pair_spectra(Y, frequencies, registry, network_name)` weights a
 network's pairs optimally into one spectrum `(F,)`, using the `psd_reference`
 of each detector in the registry. It is computed on demand and not stored;
 the likelihood scores the pair spectra directly. Every detector needs a noise
-curve, and the noise curves are part of the background's key. The mean of the
+curve. The mean of the
 combined spectrum is `S_h`.
 
 ## Detector noise
 
 By default the background carries no noise. With `segment_duration` (seconds,
-e.g. 2048; `--segment-duration` of `astrogwb simulate`, with `--background`)
+e.g. 2048; `--segment-duration` of `astrogwb simulate`)
 the `BackgroundSimulator` cuts the observation into `N = floor(T / tau)`
 segments of length `tau_eff = T / N` and assigns every source to a uniformly
 drawn segment (sources are Poisson in time). Each segment has its own coherent
@@ -123,158 +127,96 @@ grid and any `tau`. The model is valid while signals are mostly shorter than
 `tau` and bins hold `tau * df >= 1` modes (shorter segments raise). The segment
 labels and noise are folded from the realization's key (streams 2 and 1), so
 the background stays a deterministic function of it, and
-`pair_spectral_density` then holds signal plus noise. The segment duration is
-part of the background's key. The cost is about 0.2 ms per segment, so
+`pair_spectral_density` then holds signal plus noise. The cost is about 0.2 ms per segment, so
 `tau = 2048` s (about 1.5e4 segments a year) adds seconds to the waveforms'
 tens of seconds; `segment_batch_size` only trades memory for speed.
 
-The likelihood inputs are not stored. `BackgroundArtifact.noise(registry)`
+The likelihood inputs are not stored. `BackgroundArtifact.noise()`
 derives, per network, the pair ORFs and per-pair Gaussian scales `(P_n, F)` and
 the effective PSD and its Gaussian scale `(F,)`, as a `NetworkNoise`, from the
-background's grid, pairs and observation time. It raises if `registry` is not
-the one the background was simulated with.
+background's grid, the registry of its config and its observation time.
 
 The expected, sky-averaged spectrum is the likelihood's model prediction. No
 simulator draws it.
 
-## Realization directories
+## The file
 
-A realization is one directory. It holds one manifest and at most one product
-of each stage:
+One run writes one HDF5 file, atomically (a temporary file renamed into
+place, so a file at its final path is complete):
 
-```text
-<directory>/
-  metadata.toml
-  source_parameters.h5   # unless keep_sources=False / --no-keep-sources
-  background.h5          # when a background is configured
-```
-
-The caller chooses the directory. Ensembles use `<root>/<seed>-<index>/`, so
-paths can be computed without JAX. The realization ID is the population key.
-
-There is one `metadata.toml`, rewritten atomically whenever a stage is added:
-
-| Table | Contents |
+| Item | Contents |
 | --- | --- |
-| `[layout]` | `version = 1`, `astrogwb_version` |
-| `[realization]` | `id` (the population key), `seed`, `index`, `rng_key`, `count`, `total_merger_rate` (`1 / s`), `observation_seconds`, `hyperparameters` |
-| `[population]` | `metadata`, `key`, `conventions` (celestial coordinates and polarization basis) |
-| `[waveforms]` | `metadata`, `key`, `conventions` (frame, polarization angle, Fourier convention, units, source ordering) |
-| `[background]` | `metadata` (the detector pairs per network), `key`, native projection `conventions`, `normalization`, `units` |
-| `[execution]` | `chunk_size`; recorded but never hashed |
+| `frequencies` | `(F,)`, Hz |
+| `networks/<name>/pair_spectral_density` | `(P_n, F)`, `1 / Hz`, the pairs in the order of `DetectorRegistry.pairs(name)` |
+| attr `metadata` | `SimulationConfig` as JSON |
+| attr `version` | the astrogwb version that wrote it |
+| attr `realization` | JSON of `rng_key`, `count`, `total_merger_rate` (`1 / s`) and `hyperparameters` |
 
-A stage table means the stage is configured. A product file means it is
-complete. Products are written to a temporary file and renamed into place, so
-an interrupted run never leaves a partial product at its final path.
+`BackgroundArtifact.open(path)` rebuilds the artifact, config included, from
+the file alone. It raises `ValueError` ("regenerate with astrogwb simulate") if
+the `version` attr is missing or is not the installed version: a release that
+changes a convention invalidates the files of the one before it, and nothing is
+converted. There are no content keys, no manifest and no sources file; the
+sources are drawn, projected and discarded in the same pass.
 
-| Product | Datasets |
-| --- | --- |
-| `source_parameters.h5` | `source_id` `(N,)`, `source_parameters/<name>` `(N,)` |
-| `background.h5` | `frequencies` `(F,)`; per network, `networks/<name>/pair_spectral_density` `(P_n, F)` |
-
-`RealizationSimulator(population, waveform, background)` applies one rule per
-stage:
-
-| Settings given | Recorded | Result |
-| --- | --- | --- |
-| yes | no | record them; run the stage if its product is wanted |
-| yes | same key | no rerun; regenerate the product only if it is wanted and missing |
-| yes | other key | `ValueError` |
-| no | yes | use the recorded settings when a later stage needs them |
-| no | no | the stage does not run; a later stage that needs it raises `ValueError` |
-
-Upstream data that is not on disk is regenerated in memory. The sources come
-from the recorded metadata and `rng_key`, and the polarizations are generated
-chunk by chunk from the `[waveforms]` metadata. A directory without a manifest
-needs population settings, or raises `FileNotFoundError`.
-
-Keys are content hashes of each record's JSON dump. The population key hashes
-its metadata, which carries the astrogwb version, together with its RNG key. The
-waveform key hashes the population key and the waveform metadata. The background
-key hashes the waveform key and the networks it covers (their members, and the
-geometry and `psd_reference` of the detectors they use, not the labels). Because
-the astrogwb version is part of the population metadata, a release that changes
-a convention re-keys the waveforms and backgrounds downstream of it. The
-conventions recorded in the manifest are not hashed.
-
-Manifests carry no schema version. A population without the extrinsic
-coordinate columns raises a `ValueError` asking to regenerate; regenerate in a
-new output directory, as existing files are neither converted nor deleted.
+Ensembles use `<root>/<seed>-<index>.h5`, so paths can be computed without
+JAX.
 
 ## Python
 
 ```python
 from astrogwb.simulators import (
-    BackgroundSimulator, PopulationSimulator, RealizationSimulator,
-    batch_keys,
+    BackgroundArtifact, SimulationConfig, realization_key, simulate,
 )
 
-# Fused in memory: at most one chunk of polarizations
-key = batch_keys(41, 1)[0]
-population = PopulationSimulator(population_metadata)(key)
-spectra = BackgroundSimulator(waveform_metadata, registry, chunk_size=1024)(population)
-
-# One realization directory, stage by stage
-RealizationSimulator(population_metadata)("draw/", seed=41)
-realization = RealizationSimulator(waveform=waveform_metadata, background=registry)(
-    "draw/"
+config = SimulationConfig(
+    population=population_metadata,
+    waveform=waveform_metadata,
+    detectors=registry,
+    segment_duration=None,  # or seconds, for sampled detector noise
 )
-spectra = realization.background()
 
-# An ensemble draw: root/41-i, keyed by batch_keys(41, i + 1)[i]
-simulator = RealizationSimulator(
-    population_metadata, waveform_metadata, registry, keep_sources=False
-)
-simulator("root/41-7", seed=41, index=7)
+# Key (41, 7) is batch_keys(41, 8)[7]; at most one chunk of polarizations
+background = simulate(config, realization_key(41, 7), chunk_size=1024)
+background.write("root/41-7.h5")
+
+background = BackgroundArtifact.open("root/41-7.h5")
+background.config.population.observation_time
+background.noise()  # likelihood inputs, from the config's detectors
 ```
 
-`RealizationSimulator` builds the stage simulators of each realization it
-runs, so a stage that is already recorded builds none. `Realization.population()` and
-`.background()` read a stage's product. When the product is missing, pass the
-stage simulators to regenerate it.
+`simulate` composes `PopulationSimulator(config.population)(key)` and
+`BackgroundSimulator(config.waveform, config.detectors, ...)(population)`,
+which remain available as building blocks.
 
-`astrogwb.simulators.network_spectra_ensemble(root, seed, n, names)` reads
-an ensemble's draws and stacks each network's spectra. It never simulates;
+`astrogwb.simulators.network_spectra_ensemble(root, seed, n, names)` reads an
+ensemble's files and stacks each network's spectra. It never simulates;
 `workflow/coverage_draws.smk` writes the paper's ensembles (see
 `docs/coverage-draws-on-slurm.md`).
 
 ## Command line
 
-The `cli` extra installs `astrogwb`. A single `astrogwb simulate DIRECTORY`
-runs every stage whose metadata is given:
+The `cli` extra installs `astrogwb`. `astrogwb simulate OUTPUT.h5` simulates
+one draw; every config option is required:
 
 ```bash
-# Fused: manifest, sources and background
-astrogwb simulate root/41-0 --population-metadata population.toml --seed 41 \
-    --index 0 --waveform-metadata waveform.toml \
-    --background --detector-config config/detectors.toml
-
-# Stage by stage into the same directory
-astrogwb simulate draw/ --population-metadata population.toml --seed 41
-astrogwb simulate draw/ --waveform-metadata waveform.toml
-astrogwb simulate draw/ --background --detector-config config/detectors.toml
+astrogwb simulate root/41-0.h5 --population-metadata population.toml \
+    --waveform-metadata waveform.toml --detector-config config/detectors.toml \
+    --seed 41 --index 0
 
 # With sampled detector noise, in segments of 2048 s
-astrogwb simulate draw/ --background --detector-config config/detectors.toml \
-    --segment-duration 2048
+astrogwb simulate root/41-0.h5 --population-metadata population.toml \
+    --waveform-metadata waveform.toml --detector-config config/detectors.toml \
+    --seed 41 --segment-duration 2048
 ```
 
 The population and waveform files hold the fields of `PopulationMetadata` and
 `WaveformMetadata` at their top level. Repeat `--detector-config PATH` to merge
-registry layers in argument order. `simulate` runs the background stage with
-`--background`, which goes with `--detector-config`; the background manifest records each network's detector
-pairs. Noise uses the same option and selects the networks recorded in the
-realization. The supplied registry is treated as frozen. Readers trust the
-files they open and preserve the recorded artifact identity. Changing a
-registry does not migrate old outputs; regenerate affected realizations and
-noise files.
-
-`--seed` goes with
-`--population-metadata` and is refused without it. Realization `i` of a seed
-is `--index i`, the key `batch_keys(seed, i + 1)[i]` that ensembles use.
-`--no-keep-sources` skips `source_parameters.h5`. The runtime options
+registry layers in argument order. Draw `i` of a seed is `--index i`, the key
+`batch_keys(seed, i + 1)[i]` that ensembles use. The runtime options
 (`--platform cpu --cpu-threads 8`) are applied before the JAX backend
-initializes.
+initializes. To change a setting, regenerate: files are neither converted nor
+mixed.
 
 ## Migration
 
@@ -288,17 +230,17 @@ initializes.
 | `astrogwb.simulators.core.{write,load,content_key}` | `astrogwb.utils.io` |
 | `spectra_ensemble`, `network_spectra_ensemble(EnsembleRecord, ...)` | `workflow/coverage_draws.smk` writes the ensemble; `network_spectra_ensemble(root, seed, n, names)` reads it |
 | `scripts/simulate_spectra.py`, `config/simulations/spectrum/` | `astrogwb simulate` |
-| one artifact directory per stage (`metadata.toml` + `data.h5`, `[parent]` references) | one realization directory: `metadata.toml` + `source_parameters.h5`, `polarization.h5`, `background.h5` |
-| `PopulationArtifact.write(dir)` / `.open(path)` | `RealizationSimulator`, `Realization.population()`; `write_sources`, `from_tables` |
+| one artifact directory per stage (`metadata.toml` + `data.h5`, `[parent]` references), then realization directories (`metadata.toml` + `source_parameters.h5` + `background.h5`) | one HDF5 file per draw carrying its `SimulationConfig` and version |
+| `PopulationArtifact.write(dir)` / `.open(path)`, `Realization`, `RealizationSimulator`, `simulate_realization` | `simulate(config, key)`; no sources file |
 | `WaveformSimulator`, `Waveforms`, `WaveformArtifact`, `polarization.h5` | removed; `BackgroundSimulator(waveform_metadata, registry)(population)` fuses waveform evaluation and pair projection |
-| `BackgroundArtifact.upstream`, `.manifest_path` | `BackgroundArtifact.waveform_key`; the manifest belongs to the `Realization` |
-| `astrogwb simulate population` / `waveforms` / `background` | `astrogwb simulate DIRECTORY` with `--population-metadata`, `--waveform-metadata`, `--detector-config` |
+| `BackgroundArtifact.upstream`, `.manifest_path`, `.waveform_key`, `.key()`, `population_key`, `waveform_key`, `background_key` | `BackgroundArtifact.config`; no content keys |
+| `astrogwb simulate population` / `waveforms` / `background`, then `astrogwb simulate DIRECTORY --background --keep-sources` | `astrogwb simulate OUTPUT.h5` with `--population-metadata`, `--waveform-metadata`, `--detector-config`, `--seed` |
 | per-run network metadata snapshots | core `DetectorRegistry`, supplied to simulation and readers |
 | `astrogwb.paper.ensemble.network_spectra_ensemble`, `NetworkSpectra` | `astrogwb.simulators.network_spectra_ensemble`, `NetworkSpectra` |
 | `scripts/write_ensemble_configs.py`, `paper_networks`, `ensemble_metadata` | `config/detectors.toml` and `config/ensembles/<name>/`, edited by hand |
 | ensemble caches of #389 and #390 (`<cache>/ensembles/<key>/<seed>-<i>/`) | not read; regenerate them with the workflow |
 | one background over the detector union; `BackgroundArtifact.pair_spectra(network)`, `.detectors`, `.pairs` | per-network spectra; `BackgroundArtifact.spectra[name]`, `.pairs[name]` |
-| `Realization.detectors` | `Realization.networks` |
+| `Realization.open(dir).background()`, `background.noise(registry)` | `BackgroundArtifact.open(file)`, `background.noise()` |
 | `--detector-config` with network and detector layers | repeated `--detector-config PATH` options |
 | `ensure_reference_catalog`, `settings_digest`, `noise_digest`, posterior grid caches | `astrogwb model-catalog`; grids are computed on every run |
 | `astrogwb.paper.cache.default_cache_dir` | explicit paths under `outputs/` |
