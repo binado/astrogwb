@@ -61,7 +61,7 @@ with app.setup(hide_code=True):
     from astrogwb.populations import build_population
     from astrogwb.populations.metadata import PopulationMetadata
     from astrogwb.simulators import (
-        Realization,
+        BackgroundArtifact,
         combine_pair_spectra,
         network_spectra_ensemble,
     )
@@ -174,9 +174,9 @@ def _():
     # shot_noise_coverage.py: the default waveform and grid. Its population is
     # draw 0's record.
     ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / "fiducial"
-    ensemble_population = Realization.open(
-        ensemble_root / f"{seed}-0"
-    ).population_metadata
+    ensemble_population = BackgroundArtifact.open(
+        ensemble_root / f"{seed}-0.h5"
+    ).config.population
     registry = detector_registry(root=ROOT_DIR)
 
     network_rows = DETECTOR_NETWORKS

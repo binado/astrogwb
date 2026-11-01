@@ -344,8 +344,8 @@ excluded from the default importance-weight factors. The common,
 hyperparameter-independent inclination law cancels in those weights.
 
 Poisson realizations of the background -- a population, its waveforms and the
-spectra a network records -- are not catalogs: they are the three stages of
-`astrogwb.simulators`, described in [the simulator pipeline](simulator-pipeline.md).
+spectra a network records -- are not catalogs: `astrogwb.simulators` simulates
+them in one pass into one file, described in [the simulator pipeline](simulator-pipeline.md).
 
 Earlier versions could omit the inclination site and column
 (`sample_inclination = false`) and rescale face-on power by the analytic `2/5`

@@ -52,7 +52,7 @@ with app.setup(hide_code=True):
     )
     from astrogwb.populations import build_population
     from astrogwb.simulators import (
-        Realization,
+        BackgroundArtifact,
         network_spectra_ensemble,
     )
 
@@ -233,9 +233,8 @@ def _():
     # population and approximant.
     ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / "fiducial"
     reference_catalog_path = ROOT_DIR / CATALOGS_ROOT / "reference-fiducial.h5"
-    injection = Realization.open(ensemble_root / f"{data_seed}-0")
-    background = injection.background()
-    noise = background.noise(registry)
+    background = BackgroundArtifact.open(ensemble_root / f"{data_seed}-0.h5")
+    noise = background.noise()
     frequencies = background.frequencies
 
     write_figures = mo.ui.switch(value=True, label="Write figures")
@@ -258,8 +257,8 @@ def _():
         max_modes,
         maximum_frequency,
         minimum_frequency,
+        background,
         ensemble_root,
-        injection,
         modes_tolerance,
         network_names,
         noise,
@@ -632,7 +631,7 @@ def _(frequencies, observation_time, redshift_nodes, reference_catalog_path):
 
 
 @app.cell
-def _(data_seed, ensemble_root, frequencies, injection, network_names):
+def _(background, data_seed, ensemble_root, frequencies, network_names):
     # Draw 0 of `data_seed`: the key of the sky-averaged injection, so the
     # networks record the same sources it summed.
     _drawn = network_spectra_ensemble(ensemble_root, data_seed, 1, network_names)
@@ -643,7 +642,7 @@ def _(data_seed, ensemble_root, frequencies, injection, network_names):
     print(
         f"injection: {int(_drawn[0]['n_events'][0]):,} Poisson events, "
         f"recorded by {len(observed)} networks over "
-        f"{injection.population_metadata.observation_time:g} yr"
+        f"{background.config.population.observation_time:g} yr"
     )
     return (observed,)
 
@@ -725,8 +724,8 @@ def _():
     The relative amplitude scatter $s$ of one catalog realization, with the
     network's response, and the optimal SNR $\rho$ of the expected spectrum,
     per network. $\rho s$ is the shot noise in units of the detector's
-    amplitude error; it does not depend on the observation time. `notebooks/spectrum_snrs.py` measures it
-    empirically from Poisson ensembles, about 0.48 for the fiducial network.
+    amplitude error; it does not depend on the observation time. Measured
+    empirically from Poisson ensembles it is about 0.48 for the fiducial network.
     """)
     return
 

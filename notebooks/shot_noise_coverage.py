@@ -50,7 +50,7 @@ with app.setup(hide_code=True):
     )
     from astrogwb.populations import build_population
     from astrogwb.simulators import (
-        Realization,
+        BackgroundArtifact,
         network_spectra_ensemble,
     )
 
@@ -349,10 +349,9 @@ def _():
     # independent of the injections (importance_convergence.py sizes it).
     ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / "fiducial"
     reference_catalog_path = ROOT_DIR / CATALOGS_ROOT / "reference-fiducial.h5"
-    injected = Realization.open(ensemble_root / f"{ensemble_seed}-0")
-    injected_metadata = injected.population_metadata
-    background = injected.background()
-    noise = background.noise(registry)
+    background = BackgroundArtifact.open(ensemble_root / f"{ensemble_seed}-0.h5")
+    injected_metadata = background.config.population
+    noise = background.noise()
     frequencies = background.frequencies
 
     write_figures = mo.ui.switch(value=True, label="Write figures")

@@ -50,7 +50,7 @@ from astrogwb.paper.config.runs import CATALOGS_ROOT, ENSEMBLES_ROOT, FIGURES_DI
 from astrogwb.paper.plotting import DETECTOR_NETWORKS
 from astrogwb.paper.posteriors import network_pair_data
 from astrogwb.populations import build_population
-from astrogwb.simulators import Realization
+from astrogwb.simulators import BackgroundArtifact
 from astrogwb.waveform import quadrupolar_stokes_factors
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -220,14 +220,13 @@ def main() -> None:
         return
     fiducial = fiducials(root=ROOT_DIR)
     registry = detector_registry(root=ROOT_DIR)
-    injection = Realization.open(args.ensemble / f"{DATA_SEED}-0")
-    background = injection.background()
-    noise = background.noise(registry)
+    background = BackgroundArtifact.open(args.ensemble / f"{DATA_SEED}-0.h5")
+    noise = background.noise()
     frequencies = background.frequencies
     likelihood = build_likelihood(
         args.reference_catalog,
         frequencies,
-        injection.population_metadata.observation_time,
+        background.config.population.observation_time,
     )
     spectrum, _, extras = likelihood.predict(fiducial)
     num_sources = float(extras["total_merger_rate"]) * float(

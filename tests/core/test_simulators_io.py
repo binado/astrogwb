@@ -12,12 +12,7 @@ import pytest
 from pydantic import BaseModel
 
 from astrogwb.simulators import batch_keys, realization_key
-from astrogwb.simulators._io import (
-    MANIFEST_FILE,
-    atomic_h5,
-    read_realization_manifest,
-    write_realization_manifest,
-)
+from astrogwb.simulators._io import atomic_h5
 from astrogwb.utils.io import content_key, load, write
 
 
@@ -84,31 +79,6 @@ def test_a_failed_write_leaves_no_file_behind(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="without '/'"):
         write(tmp_path / "file.h5", {"a/b": np.zeros(1)}, Record(name="a", size=2))
     assert list(tmp_path.iterdir()) == []
-
-
-def test_a_realization_manifest_round_trips_without_nones(tmp_path: Path) -> None:
-    manifest = {
-        "realization": {"id": "abc", "seed": 41, "index": None},
-        "population": {"key": "abc", "metadata": {"hyperparameters": {"H0": 67.0}}},
-    }
-
-    write_realization_manifest(tmp_path, manifest)
-    read = read_realization_manifest(tmp_path)
-
-    assert read["layout"]["version"] == 2
-    assert read["realization"] == {"id": "abc", "seed": 41}
-    assert read["population"] == manifest["population"]
-    assert [path.name for path in tmp_path.iterdir()] == [MANIFEST_FILE]
-
-
-@pytest.mark.parametrize(
-    "document", ["[layout]\nversion = 99\n", '[artifact]\nkind = "background"\n']
-)
-def test_a_manifest_of_another_layout_is_refused(tmp_path: Path, document: str) -> None:
-    (tmp_path / MANIFEST_FILE).write_text(document)
-
-    with pytest.raises(ValueError, match="layout version"):
-        read_realization_manifest(tmp_path)
 
 
 def test_a_failed_atomic_h5_leaves_the_previous_file(tmp_path: Path) -> None:

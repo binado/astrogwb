@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'linux'",
@@ -151,7 +151,6 @@ dependencies = [
     { name = "pydantic" },
     { name = "pyknf" },
     { name = "ripplegw" },
-    { name = "tomli-w" },
 ]
 
 [package.optional-dependencies]
@@ -204,6 +203,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-xdist" },
     { name = "ruff" },
+    { name = "tomli-w" },
     { name = "ty" },
 ]
 notebook = [
@@ -212,6 +212,7 @@ notebook = [
 test = [
     { name = "pytest" },
     { name = "pytest-xdist" },
+    { name = "tomli-w" },
 ]
 
 [package.metadata]
@@ -242,7 +243,6 @@ requires-dist = [
     { name = "pyknf", specifier = ">=0.6,<0.8" },
     { name = "ripplegw", specifier = ">=0.3.1" },
     { name = "scipy", marker = "extra == 'notebook'", specifier = ">=1.10" },
-    { name = "tomli-w", specifier = ">=1.2" },
     { name = "typer", marker = "extra == 'cli'", specifier = ">=0.16" },
 ]
 provides-extras = ["cuda", "io", "cli", "simulation", "tpu", "paper", "notebook", "blackjax"]
@@ -257,12 +257,14 @@ dev = [
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "ruff", specifier = ">=0.16.1" },
+    { name = "tomli-w", specifier = ">=1.2" },
     { name = "ty", specifier = ">=0.0.69" },
 ]
 notebook = [{ name = "marimo", specifier = ">=0.25.1" }]
 test = [
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
+    { name = "tomli-w", specifier = ">=1.2" },
 ]
 
 [[package]]

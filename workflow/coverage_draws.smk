@@ -7,19 +7,17 @@
 # FileNotFoundError when it is missing. Per ensemble <name> (the committed
 # config/ensembles/<name>/{population,waveform}.toml and config/detectors.toml):
 #
-#   outputs/ensembles/<name>/<seed>-<index>/   one realization per
-#       `astrogwb simulate` job, its manifest and background.h5: every paper
-#       network's pair spectra and combined spectrum;
+#   outputs/ensembles/<name>/<seed>-<index>.h5   one file per `astrogwb
+#       simulate` job: every paper network's pair spectra, with the
+#       configuration it was simulated from;
 #
 # and the reference catalogs the notebooks name, by
 # `astrogwb model-catalog`, under outputs/catalogs/.
 #
-# A realization is fixed by (seed, index) alone, so jobs are independent,
-# finished directories merge by copying, and a background that exists is not
-# redrawn. The background is written last and atomically, so its file is the
-# job's output. Editing a committed config does not migrate anything: a rerun
-# against a realization recorded with other settings fails on the conflict, so
-# delete the ensemble and regenerate it.
+# A draw is fixed by (seed, index) alone, so jobs are independent, finished
+# files merge by copying, and a file that exists is not redrawn. Each file is
+# written atomically, so a file at its path is the job's output. Editing a
+# committed config does not migrate anything: delete the outputs and rerun.
 #
 # Draw jobs share the `draws` group; the profile's group-components packs
 # several into one SLURM job. Snakemake comes from the project venv, synced
@@ -41,8 +39,8 @@ CATALOGS_ROOT = f"{OUTPUTS}/catalogs"
 
 # Draws per seed of each ensemble: what the notebooks read.
 #   fiducial: the grid notebooks' injection (41-0), shot_noise_coverage's
-#             injections and the draws of ensemble_spectrum and spectrum_snrs
-#             (41), and spectrum_snrs' independent reference (42-0).
+#             injections and the draws of ensemble_spectrum (41), and an
+#             independent reference draw (42-0).
 DRAWS = {
     "fiducial": {41: 1000, 42: 1},
 }
@@ -88,7 +86,7 @@ localrules:
 rule all:
     input:
         [
-            f"{ENSEMBLES_ROOT}/{name}/{seed}-{index}/background.h5"
+            f"{ENSEMBLES_ROOT}/{name}/{seed}-{index}.h5"
             for name in SELECTED
             for seed, index in draws(name)
         ],
@@ -117,22 +115,20 @@ rule simulate:
         waveform="config/ensembles/{ensemble}/waveform.toml",
         detectors="config/detectors.toml",
     output:
-        f"{ENSEMBLES_ROOT}/{{ensemble}}/{{seed}}-{{index}}/background.h5",
+        f"{ENSEMBLES_ROOT}/{{ensemble}}/{{seed}}-{{index}}.h5",
     log:
         "logs/ensembles/{ensemble}/{seed}-{index}.log",
-    params:
-        directory=f"{ENSEMBLES_ROOT}/{{ensemble}}/{{seed}}-{{index}}",
     group:
         "draws"
     threads: THREADS
     shell:
         _RUN
-        + """ astrogwb simulate {params.directory:q} \
+        + """ astrogwb simulate {output:q} \
             --population-metadata {input.population:q} \
             --seed {wildcards.seed} --index {wildcards.index} \
             --waveform-metadata {input.waveform:q} \
-            --background --detector-config {input.detectors:q} \
-            --no-keep-sources --chunk-size 8192 \
+            --detector-config {input.detectors:q} \
+            --chunk-size 8192 \
             --cpu-threads {threads} > {log:q} 2>&1
         """
 

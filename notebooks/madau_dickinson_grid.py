@@ -50,7 +50,7 @@ with app.setup(hide_code=True):
         shot_noise_variant,
     )
     from astrogwb.populations import build_population
-    from astrogwb.simulators import Realization, network_spectra_ensemble
+    from astrogwb.simulators import BackgroundArtifact, network_spectra_ensemble
 
     # Points of the coarse scan that locates the ridge, Newton iterations that
     # polish it, points of the integration window, and its half width in
@@ -227,8 +227,8 @@ def _():
     # its detector noise and the reference catalog.
     ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / "fiducial"
     reference_catalog_path = ROOT_DIR / CATALOGS_ROOT / "reference-fiducial.h5"
-    background = Realization.open(ensemble_root / f"{data_seed}-0").background()
-    noise = background.noise(registry)
+    background = BackgroundArtifact.open(ensemble_root / f"{data_seed}-0.h5")
+    noise = background.noise()
     frequencies = background.frequencies
 
     write_figures = mo.ui.switch(value=True, label="Write figures")

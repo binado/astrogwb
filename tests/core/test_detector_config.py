@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import dataclasses
 import subprocess
 import sys
 from pathlib import Path
 
 from astrogwb.detector.config import DetectorRegistry, load_detector_config
-from astrogwb.simulators.background import background_key
 
 ROOT = Path(__file__).parents[2]
 
@@ -51,34 +49,6 @@ def test_pairs_are_canonical_for_reordered_and_overlapping_networks() -> None:
         ("E2", "E3"),
     ]
     assert registry.pairs("pair") == [("E1", "E2")]
-
-
-def test_background_identity_uses_only_referenced_scientific_settings() -> None:
-    registry = _registry()
-    key = background_key("waveforms", registry)
-    detectors = dict(registry.detectors)
-    detectors["E1"] = detectors["E1"].model_copy(update={"label": "presentation"})
-    detectors["K1"] = detectors["K1"].model_copy(
-        update={"psd_reference": "AplusDesign_psd.txt"}
-    )
-    changed_presentation = DetectorRegistry(
-        detectors=detectors,
-        networks={"pair": ("E2", "E1"), "triangle": ("E3", "E2", "E1")},
-    )
-    assert background_key("waveforms", changed_presentation) == key
-
-    geometry = dataclasses.replace(
-        registry.detectors["E1"].geometry,
-        longitude_rad=registry.detectors["E1"].geometry.longitude_rad + 0.1,
-    )
-    changed_geometry = DetectorRegistry(
-        detectors={
-            **registry.detectors,
-            "E1": registry.detectors["E1"].model_copy(update={"geometry": geometry}),
-        },
-        networks=registry.networks,
-    )
-    assert background_key("waveforms", changed_geometry) != key
 
 
 def test_owned_registry_build_order_and_serialization() -> None:

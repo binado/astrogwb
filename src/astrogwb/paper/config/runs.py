@@ -63,10 +63,9 @@ PLOTTING_PATH = CONFIG_DIR / "plotting.toml"
 BASE_OUT_DIR = Path("outputs")
 
 CATALOGS_ROOT = BASE_OUT_DIR / "catalogs"
-#: Ensemble roots, ``<name>/<seed>-<index>/`` realizations, written by
+#: Ensemble roots, ``<name>/<seed>-<index>.h5`` backgrounds, written by
 #: ``workflow/coverage_draws.smk``.
 ENSEMBLES_ROOT = BASE_OUT_DIR / "ensembles"
-SPECTRA_ROOT = BASE_OUT_DIR / "spectra"
 FIGURES_DIR = BASE_OUT_DIR / "figures"
 
 #: The one exception to a deep merge, as a ``knf`` key-path glob: each

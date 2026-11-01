@@ -11,7 +11,7 @@ cell names its inputs, all under `outputs/`:
 
 | Input | Read by |
 | --- | --- |
-| `ensembles/fiducial/` | `cosmology_grid_posteriors`, `madau_dickinson_grid`, `shot_noise_coverage`, `ensemble_spectrum`, `spectrum_snrs` (deprecated) |
+| `ensembles/fiducial/` | `cosmology_grid_posteriors`, `madau_dickinson_grid`, `shot_noise_coverage`, `ensemble_spectrum` |
 | `catalogs/reference-fiducial.h5` | `cosmology_grid_posteriors`, `madau_dickinson_grid`, `shot_noise_coverage`, `ensemble_spectrum` |
 | `catalogs/reference-ladder.h5` | `importance_convergence` |
 
@@ -26,16 +26,6 @@ A missing input is a `FileNotFoundError`, never a simulation.
   cumulative per-network SNR, with sliders for approximant, resolution and
   observation time. No catalog file, and no paper SNR table: a single draw is
   not the quoted number (see `ensemble_spectrum.py`).
-- **`spectrum_snrs.py`** — **deprecated**: it depends on the removed
-  amplitude-marginalized model and fails at import; to be resolved in a
-  follow-up. Marimo notebook for the appendix's shot-noise
-  argument. A physics-first walkthrough of how catalog shot noise scales with
-  the number of injections $N$ and the minimum redshift $z_{\min}$, judged
-  against the expected $\sigma(H_0)$. It fits every template to a common
-  reference spectrum, measures the MAP offset in units of a fixed
-  $\sigma_{\mathrm{ref}}$ with bootstrap errors, and ends with a pass/fail
-  verdict against a tolerance on $\mathrm{sd}(r)$. Writes three paper figures
-  (A1-A3) and eleven supporting figures.
 - **`cosmology_grid_posteriors.py`** — marimo notebook. Grid posteriors for
   $H_0$, $(H_0, \Omega_m)$ and $(\Xi_0, n)$ across the six detector networks,
   from a zero-noise Poisson injection as each network records it
@@ -115,7 +105,7 @@ Open a notebook from the repository root:
 uv sync --extra notebook --group notebook
 uv run --extra notebook --group notebook marimo edit notebooks/fiducial_spectrum.py
 # Or through the just recipe, which runs the same editor:
-just run-notebook notebooks/spectrum_snrs.py
+just run-notebook notebooks/ensemble_spectrum.py
 ```
 
 The shared fiducials, detector registry, and default draw's waveform and
