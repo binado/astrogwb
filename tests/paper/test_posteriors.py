@@ -9,6 +9,12 @@ import numpy as np
 import pytest
 from repo import REPO_ROOT
 
+from astrogwb.detector import (
+    effective_psd,
+    gaussian_bin_scale,
+    pair_bin_scale,
+    pair_terms,
+)
 from astrogwb.detector.config import load_detector_config
 from astrogwb.paper.posteriors import (
     MAX_PAIRS,
@@ -16,7 +22,7 @@ from astrogwb.paper.posteriors import (
     network_pair_data,
     shot_noise_variant,
 )
-from astrogwb.simulators import DetectorNoise, detector_noise
+from astrogwb.simulators import NetworkNoise
 
 NETWORK = "ET-2L-aligned-CE-Hanford"
 
@@ -29,54 +35,74 @@ class _Likelihood:
 
 
 @pytest.fixture(scope="module")
-def noise() -> DetectorNoise:
-    """The fiducial network's noise on a grid straddling the band's edges."""
+def frequencies() -> np.ndarray:
+    """A grid straddling the band's edges."""
+    return np.array([0.5, 1.0, 10.0, 50.0, 100.0, 5000.0])
+
+
+@pytest.fixture(scope="module")
+def noise(frequencies: np.ndarray) -> NetworkNoise:
+    """The fiducial network's noise on ``frequencies``."""
     registry = load_detector_config([REPO_ROOT / "config/detectors.toml"])
-    frequencies = np.array([0.5, 1.0, 10.0, 50.0, 100.0, 5000.0])
-    return detector_noise(frequencies, registry, 1.0, network_names=[NETWORK])
+    detectors = registry.build_network(NETWORK)
+    psd = effective_psd(frequencies, detectors)
+    return NetworkNoise(
+        pair_overlap=np.stack(
+            [term.overlap for term in pair_terms(frequencies, detectors)]
+        ),
+        pair_scale=np.asarray(pair_bin_scale(frequencies, detectors, 1.0)),
+        effective_psd=np.asarray(psd),
+        scale=np.asarray(gaussian_bin_scale(jnp.asarray(psd), 1.0, frequencies)),
+    )
 
 
-def test_network_data_masks_out_of_band_bins(noise: DetectorNoise) -> None:
+def test_network_data_masks_out_of_band_bins(
+    frequencies: np.ndarray, noise: NetworkNoise
+) -> None:
     mask = np.asarray(
-        network_data(noise, NETWORK, minimum_frequency=2.0, maximum_frequency=2048.0)[
-            "frequency_mask"
-        ]
+        network_data(
+            frequencies, noise, minimum_frequency=2.0, maximum_frequency=2048.0
+        )["frequency_mask"]
     )
 
     np.testing.assert_array_equal(mask, [False, False, True, True, True, False])
 
 
-def test_network_data_gives_masked_bins_unit_scale(noise: DetectorNoise) -> None:
-    data = network_data(noise, NETWORK, minimum_frequency=2.0, maximum_frequency=2048.0)
+def test_network_data_gives_masked_bins_unit_scale(
+    frequencies: np.ndarray, noise: NetworkNoise
+) -> None:
+    data = network_data(
+        frequencies, noise, minimum_frequency=2.0, maximum_frequency=2048.0
+    )
     mask, scale = np.asarray(data["frequency_mask"]), np.asarray(data["scale"])
 
     np.testing.assert_array_equal(scale[~mask], 1.0)
-    np.testing.assert_array_equal(scale[mask], noise.noise[NETWORK].scale[mask])
+    np.testing.assert_array_equal(scale[mask], noise.scale[mask])
 
 
 def test_network_pair_data_pads_to_max_pairs_with_masked_rows(
-    noise: DetectorNoise,
+    frequencies: np.ndarray, noise: NetworkNoise
 ) -> None:
     data = network_pair_data(
-        noise, NETWORK, minimum_frequency=2.0, maximum_frequency=2048.0
+        frequencies, noise, minimum_frequency=2.0, maximum_frequency=2048.0
     )
     mask = np.asarray(data["frequency_mask"])
 
-    assert mask.shape == (MAX_PAIRS, noise.frequencies.size)
+    assert mask.shape == (MAX_PAIRS, frequencies.size)
     assert not mask[3:].any()
     np.testing.assert_array_equal(np.asarray(data["pair_overlap"])[3:], 0.0)
     np.testing.assert_array_equal(np.asarray(data["scale"])[3:], 1.0)
 
 
-def test_network_pair_data_keeps_the_noise_files_overlaps(
-    noise: DetectorNoise,
+def test_network_pair_data_keeps_the_networks_overlaps(
+    frequencies: np.ndarray, noise: NetworkNoise
 ) -> None:
     data = network_pair_data(
-        noise, NETWORK, minimum_frequency=2.0, maximum_frequency=2048.0
+        frequencies, noise, minimum_frequency=2.0, maximum_frequency=2048.0
     )
 
     np.testing.assert_array_equal(
-        np.asarray(data["pair_overlap"])[:3], noise.noise[NETWORK].pair_overlap
+        np.asarray(data["pair_overlap"])[:3], noise.pair_overlap
     )
 
 

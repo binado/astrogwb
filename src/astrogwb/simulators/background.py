@@ -34,14 +34,39 @@ The stage is configured by a :class:`~astrogwb.waveform.WaveformMetadata` and
 named networks, a :data:`DetectorRegistry`. Every pair of the union of their
 detectors is projected once per chunk in a single fused kernel (waveform
 evaluation plus detector projection), so a pair two networks share costs one
-projection, and each network keeps its own rows, ``(P_n, F)``, with their
-:func:`combine_pair_spectra`, the optimally weighted network spectrum ``(F,)``.
-The combination weights come from the networks' noise curves, so the background
-depends on them and they are part of its key.
+projection, and each network keeps its own rows, ``(P_n, F)``.
+:func:`combine_pair_spectra` weights them optimally into one network spectrum
+``(F,)`` on demand; it is not stored. The detectors' noise curves are part of
+the background's key.
 
-The background is deterministic given its inputs and carries no detector
-noise. Detectors are static: the Earth's rotation during a signal is not
-modelled.
+Without a ``segment_duration`` the background is deterministic given its
+inputs and carries no detector noise. With one, :math:`\tau`, the observation is
+cut into :math:`N_\mathrm{seg} = \lfloor T/\tau \rfloor` segments of length
+:math:`\tau_\mathrm{eff} = T / N_\mathrm{seg}`. Sources are Poisson in time, so
+each is assigned to a uniformly drawn segment :math:`s`, which holds its own
+coherent strain :math:`h_a^s = \sum_{i \in s} H_{a,i}` and fresh independent
+noise :math:`n_a^s \sim \mathcal{CN}(0, \tau_\mathrm{eff} S_a / 2)` in each
+detector and bin; empty segments still carry noise. With the segment
+cross-power :math:`C_{ab} = \sum_s \mathrm{Re}[(h_a^s + n_a^s)^* (h_b^s + n_b^s)]`
+and :math:`r_i = 1 / \sqrt{\tau_\mathrm{eff} \Delta f_i}`, the pair spectrum is
+
+.. math::
+
+    Y_{ab} = \frac{5}{T} \left[ (1 - r_i) \sum_i K_{ab,i} + r_i C_{ab} \right].
+
+:math:`E[C_{ab}] = \sum_i K_{ab,i}`, so the mean stays the incoherent signal;
+the zero-mean part (noise by noise, signal by noise, source interference) is
+scaled by :math:`r_i`, which makes the noise-by-noise term have the standard
+deviation :func:`~astrogwb.detector.pair_bin_scale` for any grid and any
+:math:`\tau`. The model holds while signals are mostly shorter than
+:math:`\tau` and a bin holds at least one segment mode,
+:math:`\tau_\mathrm{eff} \Delta f_i \ge 1`. The segment labels and the noise are
+folded from the realization's key (streams :data:`SEGMENT_STREAM` and
+:data:`NOISE_STREAM`), so the background stays a deterministic function of the
+realization. Bins where a PSD is not finite get no noise.
+``pair_spectral_density`` then holds signal plus noise, and
+:meth:`BackgroundArtifact.noise` gives the matching likelihood inputs.
+Detectors are static: the Earth's rotation during a signal is not modelled.
 """
 
 from __future__ import annotations
@@ -57,12 +82,19 @@ import jax.numpy as jnp
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from astrogwb.detector import pair_terms
+from astrogwb.detector import (
+    effective_psd,
+    gaussian_bin_scale,
+    pair_bin_scale,
+    pair_terms,
+)
 from astrogwb.detector.config import DetectorRegistry
 from astrogwb.detector.projection import project_polarizations_fd
+from astrogwb.frequency import bin_widths
 from astrogwb.simulators._chunks import iter_rows, pad_rows
 from astrogwb.simulators._io import atomic_h5
 from astrogwb.simulators.population import PopulationArtifact
+from astrogwb.utils import years_to_seconds
 from astrogwb.utils.io import content_key, h5py_module
 from astrogwb.waveform.metadata import WaveformMetadata
 
@@ -70,11 +102,13 @@ if TYPE_CHECKING:
     from astrogwb.waveform import WaveformGenerator
 
 __all__ = [
+    "NOISE_STREAM",
     "NORMALIZATION_VERSION",
+    "SEGMENT_STREAM",
     "WAVEFORM_CONVENTIONS",
     "BackgroundArtifact",
     "BackgroundSimulator",
-    "NetworkSpectrum",
+    "NetworkNoise",
     "background_key",
     "background_pairs",
     "background_table",
@@ -111,6 +145,12 @@ PAIR_RESPONSE_DENOMINATOR = 5.0
 #: The version of the pair-spectrum convention :math:`E[Y_{ab}] = \gamma_{ab} S_h`.
 NORMALIZATION_VERSION = 1
 
+#: The stream folded into a realization's key for the detector noise.
+NOISE_STREAM = 1
+
+#: The stream folded into a realization's key for the segment of each source.
+SEGMENT_STREAM = 2
+
 _NORMALIZATION = {
     "convention": "E[Y_ab] = gamma_ab * S_h",
     "pair_spectrum": "Y_ab = 5 * D_ab / T",
@@ -119,17 +159,22 @@ _NORMALIZATION = {
 }
 
 
-class NetworkSpectrum(NamedTuple):
-    """One network's background: its pair spectra and their combination.
+class NetworkNoise(NamedTuple):
+    """One network's noise on the background's grid, the likelihood inputs.
 
-    ``pair_spectral_density`` is :math:`Y_{ab}` in :math:`\\mathrm{Hz}^{-1}`,
-    ``(P_n, F)``, the pairs in the order of
-    :meth:`DetectorRegistry.pairs`; ``spectral_density`` is their
-    :func:`combine_pair_spectra`, ``(F,)``.
+    ``pair_overlap`` is the isotropic ORF :math:`\\gamma_{ab}` of each pair,
+    ``(P_n, F)``; ``pair_scale`` the per-pair Gaussian scale of
+    :func:`~astrogwb.detector.pair_bin_scale`, ``(P_n, F)``; ``effective_psd``
+    the network's :func:`~astrogwb.detector.effective_psd`, ``(F,)``; ``scale``
+    its :func:`~astrogwb.detector.gaussian_bin_scale`, ``(F,)``. The pairs are
+    in the order of :meth:`DetectorRegistry.pairs`. Frequency bands and padding
+    are analysis choices and are left to the reader.
     """
 
-    pair_spectral_density: NDArray[np.float64]
-    spectral_density: NDArray[np.float64]
+    pair_overlap: NDArray[np.float64]
+    pair_scale: NDArray[np.float64]
+    effective_psd: NDArray[np.float64]
+    scale: NDArray[np.float64]
 
 
 def waveform_key(metadata: WaveformMetadata, population_key: str) -> str:
@@ -183,7 +228,10 @@ def used_detectors(registry: DetectorRegistry, names: Sequence[str]) -> tuple[st
 
 
 def background_key(
-    waveform_key: str, registry: DetectorRegistry, names: Sequence[str] | None = None
+    waveform_key: str,
+    registry: DetectorRegistry,
+    names: Sequence[str] | None = None,
+    segment_duration: float | None = None,
 ) -> str:
     """The content hash of the spectra of the waveforms ``waveform_key``.
 
@@ -195,23 +243,29 @@ def background_key(
         The detector registry.
     names
         The networks of ``registry`` the spectra cover; defaults to all.
+    segment_duration
+        The noise segment length in seconds; ``None`` for no noise.
 
     Returns
     -------
     str
         Only the membership, geometry and PSD references of the detectors those
-        networks use affect it.
+        networks use, and the segment duration if there is noise, affect it.
     """
-    return content_key(
-        {
-            "waveforms": waveform_key,
-            "detectors": registry.select(select_networks(registry, names)).key(),
-        }
-    )
+    identity: dict[str, Any] = {
+        "waveforms": waveform_key,
+        "detectors": registry.select(select_networks(registry, names)).key(),
+    }
+    if segment_duration is not None:
+        identity["noise"] = {"segment_duration": float(segment_duration)}
+    return content_key(identity)
 
 
 def background_table(
-    waveform_key: str, registry: DetectorRegistry, names: Sequence[str] | None = None
+    waveform_key: str,
+    registry: DetectorRegistry,
+    names: Sequence[str] | None = None,
+    segment_duration: float | None = None,
 ) -> dict[str, Any]:
     """The ``[background]`` manifest table of the spectra :func:`background_key` names.
 
@@ -223,29 +277,36 @@ def background_table(
         The detector registry.
     names
         The networks of ``registry`` the spectra cover; defaults to all.
+    segment_duration
+        The noise segment length in seconds; ``None`` for no noise.
 
     Returns
     -------
     dict
         The pairs of each network, the key, the normalization convention and
-        the units.
+        the units, and the noise settings if there is noise.
     """
-    return {
+    table = {
         "metadata": {
             "pairs": {
                 name: [list(pair) for pair in registry.pairs(name)]
                 for name in select_networks(registry, names)
             }
         },
-        "key": background_key(waveform_key, registry, names),
+        "key": background_key(waveform_key, registry, names, segment_duration),
         "conventions": PROJECTION_CONVENTIONS,
         "normalization": _NORMALIZATION,
         "units": {
             "frequency": "Hz",
             "pair_spectral_density": "1 / Hz",
-            "spectral_density": "1 / Hz",
         },
     }
+    if segment_duration is not None:
+        table["noise"] = {
+            "segment_duration": float(segment_duration),
+            "streams": {"noise": NOISE_STREAM, "segment": SEGMENT_STREAM},
+        }
+    return table
 
 
 def background_pairs(
@@ -272,16 +333,16 @@ def background_pairs(
 class BackgroundArtifact:
     """The per-network spectra of one realization, in memory or read from disk.
 
-    ``spectra`` holds each network's :class:`NetworkSpectrum`, keyed by
-    network name in sorted order, and ``pairs`` the detector pairs of its pair
-    axis. ``count``, ``total_merger_rate`` (per second) and
+    ``spectra`` holds each network's pair spectra :math:`Y_{ab}` in
+    :math:`\\mathrm{Hz}^{-1}`, ``(P_n, F)``, keyed by network name in sorted
+    order, and ``pairs`` the detector pairs of its pair axis. ``count``, ``total_merger_rate`` (per second) and
     ``hyperparameters`` are the realization's, carried over from its
     population. ``waveform_key`` names the polarizations the spectra were
     projected from.
     """
 
     frequencies: NDArray[np.float64]
-    spectra: dict[str, NetworkSpectrum]
+    spectra: dict[str, NDArray[np.float64]]
     pairs: dict[str, tuple[tuple[str, str], ...]]
     observation_seconds: float
     count: int
@@ -290,6 +351,7 @@ class BackgroundArtifact:
     waveform_key: str
     identity: str | None = None
     chunk_size: int | None = None
+    segment_duration: float | None = None
 
     def key(self) -> str:
         """The recorded background identity."""
@@ -299,24 +361,55 @@ class BackgroundArtifact:
 
     def table(self, registry: DetectorRegistry) -> dict[str, Any]:
         """The ``[background]`` table using the supplied registry."""
-        return background_table(self.waveform_key, registry, tuple(self.spectra))
+        return background_table(
+            self.waveform_key, registry, tuple(self.spectra), self.segment_duration
+        )
+
+    def noise(self, registry: DetectorRegistry) -> dict[str, NetworkNoise]:
+        """Each network's :class:`NetworkNoise` on this background's grid.
+
+        Derived from the registry, the grid and the observation time rather
+        than stored.
+
+        Raises
+        ------
+        ValueError
+            If ``registry`` is not the one the background was simulated with.
+        """
+        names = tuple(self.spectra)
+        key = background_key(self.waveform_key, registry, names, self.segment_duration)
+        if key != self.key():
+            raise ValueError(
+                f"registry gives background {key}, not the recorded {self.key()}"
+            )
+        grid = np.asarray(self.frequencies, dtype=np.float64)
+        years = self.observation_seconds / years_to_seconds(1.0)
+        noise = {}
+        for name in names:
+            detectors = registry.build_network(name)
+            psd = effective_psd(grid, detectors)
+            noise[name] = NetworkNoise(
+                pair_overlap=np.stack(
+                    [term.overlap for term in pair_terms(grid, detectors)]
+                ),
+                pair_scale=np.asarray(pair_bin_scale(grid, detectors, years)),
+                effective_psd=np.asarray(psd),
+                scale=np.asarray(gaussian_bin_scale(jnp.asarray(psd), years, grid)),
+            )
+        return noise
 
     def write(self, path: str | Path) -> Path:
         """Write the spectra to the HDF5 file ``path``, atomically.
 
         Datasets ``frequencies`` and, per network,
-        ``networks/<name>/pair_spectral_density`` and
-        ``networks/<name>/spectral_density``. The pair axis is in the order of
-        ``pairs``.
+        ``networks/<name>/pair_spectral_density``. The pair axis is in the
+        order of ``pairs``.
         """
         with atomic_h5(path) as file:
             file.create_dataset("frequencies", data=self.frequencies)
             for name, spectrum in self.spectra.items():
                 group = file.create_group(f"networks/{name}")
-                group.create_dataset(
-                    "pair_spectral_density", data=spectrum.pair_spectral_density
-                )
-                group.create_dataset("spectral_density", data=spectrum.spectral_density)
+                group.create_dataset("pair_spectral_density", data=spectrum)
         return Path(path)
 
     @classmethod
@@ -332,7 +425,7 @@ class BackgroundArtifact:
 
         ``table`` is the ``[background]`` table, ``realization`` the
         ``[realization]`` table and ``waveform_key`` the ``[waveforms]`` key.
-        The recorded identity is kept as is, and the file is trusted to hold
+        The recorded identity and noise segment duration are kept as is, and the file is trusted to hold
         the networks and pairs of ``table``.
 
         Raises
@@ -353,11 +446,8 @@ class BackgroundArtifact:
             frequencies = np.asarray(file["frequencies"][()], dtype=np.float64)
             stored = file["networks"]
             spectra = {
-                name: NetworkSpectrum(
-                    np.asarray(
-                        stored[name]["pair_spectral_density"][()], dtype=np.float64
-                    ),
-                    np.asarray(stored[name]["spectral_density"][()], dtype=np.float64),
+                name: np.asarray(
+                    stored[name]["pair_spectral_density"][()], dtype=np.float64
                 )
                 for name in pairs
             }
@@ -374,6 +464,7 @@ class BackgroundArtifact:
             },
             waveform_key=waveform_key,
             identity=str(table["key"]),
+            segment_duration=table.get("noise", {}).get("segment_duration"),
         )
 
 
@@ -384,10 +475,15 @@ class BackgroundSimulator:
     ``population``, evaluates the radiation-frame polarizations and accumulates
     their cross-powers over the detector union's pairs in one fused JIT call
     per chunk, so a pair shared by networks is projected once. Each network then
-    takes its rows and their :func:`combine_pair_spectra`, using the registry's
-    resolved geometry and PSD references. One chunk shape is one compile,
+    takes its rows, using the registry's resolved geometry and PSD references. One chunk shape is one compile,
     whatever the realized count, and peak memory is one chunk of polarizations.
     The observation time comes from the population. Build once and call often.
+
+    A ``segment_duration`` in seconds assigns every source to a segment and
+    adds sampled detector noise to the pair spectra, segment by segment (see
+    the module docstring); ``None`` leaves them noiseless. ``segment_batch_size``
+    is the number of segments whose strains are held at once; like
+    ``chunk_size`` it changes cost, never the result.
     """
 
     def __init__(
@@ -397,10 +493,18 @@ class BackgroundSimulator:
         *,
         chunk_size: int = 1024,
         validate_sources: bool = True,
+        segment_duration: float | None = None,
+        segment_batch_size: int = 1024,
     ) -> None:
         jax.config.update("jax_enable_x64", True)
         if chunk_size <= 0:
             raise ValueError("chunk_size must be positive")
+        if segment_batch_size <= 0:
+            raise ValueError("segment_batch_size must be positive")
+        if segment_duration is not None and segment_duration <= 0:
+            raise ValueError("segment_duration must be positive")
+        self._segment_duration = segment_duration
+        self._segment_batch_size = segment_batch_size
         self._waveform = waveform
         self._validate_sources = validate_sources
         self._generator: WaveformGenerator = waveform.build()
@@ -417,8 +521,14 @@ class BackgroundSimulator:
         self._tensors = np.stack([det.geometry.response_tensor for det in detectors])
         self._locations = np.stack([det.geometry.location for det in detectors])
         self._pairs = list(combinations(range(len(detectors)), 2))
+        self._psds = np.stack(
+            [np.asarray(det.sensitivity(self._frequencies)) for det in detectors]
+        )
         self._chunk_size = chunk_size
         self._pair_sums = jax.jit(self._chunk_pair_sums)
+        self._segment_sums = jax.jit(
+            self._chunk_segment_sums, static_argnames="num_segments"
+        )
 
     @property
     def waveform(self) -> WaveformMetadata:
@@ -436,11 +546,16 @@ class BackgroundSimulator:
         return self._registry
 
     @property
+    def segment_duration(self) -> float | None:
+        """The noise segment length in seconds; ``None`` for no noise."""
+        return self._segment_duration
+
+    @property
     def chunk_size(self) -> int:
         """The number of sources evaluated per chunk."""
         return self._chunk_size
 
-    def _chunk_pair_sums(
+    def _chunk_strains(
         self,
         frequencies: jax.Array,
         sources: Mapping[str, jax.Array],
@@ -448,12 +563,15 @@ class BackgroundSimulator:
         tensors: jax.Array,
         locations: jax.Array,
     ) -> jax.Array:
-        """The ``(P_union, F)`` cross-power summed over one padded chunk's sources."""
+        """The ``(D, n, F)`` complex detector strains of one padded chunk.
+
+        Padding rows have zero strain.
+        """
         plus, cross = self._generator.generate_polarizations_batch(sources)
         real = (jnp.arange(plus.shape[0]) < valid)[:, None]
         plus = jnp.where(real, plus, 0.0)
         cross = jnp.where(real, cross, 0.0)
-        strains = jax.vmap(
+        return jax.vmap(
             lambda tensor, location: project_polarizations_fd(
                 tensor,
                 location,
@@ -466,12 +584,51 @@ class BackgroundSimulator:
                 polarization_angle=sources["polarization_angle"],
             )
         )(tensors, locations)
+
+    def _pair_cross(self, strains: jax.Array) -> jax.Array:
+        """The ``(P_union, F)`` real cross-powers summed over the sources."""
         return jnp.stack(
             [
                 jnp.real(jnp.conj(strains[first]) * strains[second]).sum(axis=0)
                 for first, second in self._pairs
             ]
         )
+
+    def _chunk_pair_sums(
+        self,
+        frequencies: jax.Array,
+        sources: Mapping[str, jax.Array],
+        valid: jax.Array,
+        tensors: jax.Array,
+        locations: jax.Array,
+    ) -> jax.Array:
+        """The ``(P_union, F)`` cross-power summed over one padded chunk's sources."""
+        strains = self._chunk_strains(frequencies, sources, valid, tensors, locations)
+        return self._pair_cross(strains)
+
+    def _chunk_segment_sums(
+        self,
+        frequencies: jax.Array,
+        sources: Mapping[str, jax.Array],
+        valid: jax.Array,
+        local_ids: jax.Array,
+        tensors: jax.Array,
+        locations: jax.Array,
+        *,
+        num_segments: int,
+    ) -> tuple[jax.Array, jax.Array]:
+        """The incoherent cross-power and per-segment strain of one padded chunk.
+
+        Returns the ``(P_union, F)`` real cross-powers and the
+        ``(num_segments, D, F)`` complex strain summed over the sources of each
+        segment, ``local_ids`` being the segment of each row relative to the
+        batch.
+        """
+        strains = self._chunk_strains(frequencies, sources, valid, tensors, locations)
+        coherent = jax.ops.segment_sum(
+            jnp.moveaxis(strains, 1, 0), local_ids, num_segments=num_segments
+        )
+        return self._pair_cross(strains), coherent
 
     def __call__(self, population: PopulationArtifact) -> BackgroundArtifact:
         """The per-network spectra of ``population``.
@@ -482,7 +639,8 @@ class BackgroundSimulator:
             If the sources carry no sky position or polarization angle.
         ValueError
             If ``validate_sources`` and a source value is outside what the
-            approximant represents.
+            approximant represents, or the observation is shorter than
+            ``segment_duration``.
         """
         missing = {"declination", "right_ascension", "polarization_angle"} - set(
             population.source_parameters
@@ -492,31 +650,12 @@ class BackgroundSimulator:
         if self._validate_sources and population.count:
             self._generator.check_sources(population.source_parameters)
         frequencies = self._frequencies
-        total = jnp.zeros((len(self._pairs), frequencies.shape[0]))
         grid = jnp.asarray(frequencies)
-        for start, _ in iter_rows(population.count, self._chunk_size):
-            rows, valid = pad_rows(
-                population.source_parameters, start, self._chunk_size
-            )
-            total = total + self._pair_sums(
-                grid,
-                rows,
-                jnp.asarray(valid),
-                jnp.asarray(self._tensors),
-                jnp.asarray(self._locations),
-            )
-        union = (
-            PAIR_RESPONSE_DENOMINATOR
-            * np.asarray(total, dtype=np.float64)
-            / population.observation_seconds
-        )
-        spectra = {}
-        for name in self._network_names:
-            pairs = union[self._rows[name]]
-            spectra[name] = NetworkSpectrum(
-                pairs,
-                combine_pair_spectra(pairs, frequencies, self._registry, name),
-            )
+        if self._segment_duration is None:
+            union = self._noiseless(population, grid)
+        else:
+            union = self._segmented(population, grid)
+        spectra = {name: union[self._rows[name]] for name in self._network_names}
         wf_key = waveform_key(self._waveform, population.key())
         return BackgroundArtifact(
             frequencies=frequencies,
@@ -529,9 +668,153 @@ class BackgroundSimulator:
             total_merger_rate=population.total_merger_rate,
             hyperparameters=dict(population.hyperparameters),
             waveform_key=wf_key,
-            identity=background_key(wf_key, self._registry, self._network_names),
+            identity=background_key(
+                wf_key, self._registry, self._network_names, self._segment_duration
+            ),
             chunk_size=self._chunk_size,
+            segment_duration=self._segment_duration,
         )
+
+    def _noiseless(
+        self, population: PopulationArtifact, grid: jax.Array
+    ) -> NDArray[np.float64]:
+        """The ``(P_union, F)`` incoherent pair spectra, ``5 K / T``."""
+        total = jnp.zeros((len(self._pairs), grid.shape[0]))
+        for start, _ in iter_rows(population.count, self._chunk_size):
+            rows, valid = pad_rows(
+                population.source_parameters, start, self._chunk_size
+            )
+            total = total + self._pair_sums(
+                grid,
+                rows,
+                jnp.asarray(valid),
+                jnp.asarray(self._tensors),
+                jnp.asarray(self._locations),
+            )
+        return (
+            PAIR_RESPONSE_DENOMINATOR
+            * np.asarray(total, dtype=np.float64)
+            / population.observation_seconds
+        )
+
+    def _segmented(
+        self, population: PopulationArtifact, grid: jax.Array
+    ) -> NDArray[np.float64]:
+        """The ``(P_union, F)`` pair spectra with per-segment sources and noise."""
+        assert self._segment_duration is not None
+        seconds = population.observation_seconds
+        segments = int(seconds // self._segment_duration)
+        if segments < 1:
+            raise ValueError(
+                f"segment_duration {self._segment_duration} s exceeds the "
+                f"observation time {seconds} s"
+            )
+        effective = seconds / segments
+        widths = np.asarray(bin_widths(grid), dtype=np.float64)
+        if effective * widths.min() < 1.0:
+            raise ValueError(
+                f"segment_duration {self._segment_duration} s is shorter than "
+                "1 / bin width"
+            )
+        wrapped = jax.random.wrap_key_data(
+            jnp.asarray(population.rng_key, dtype=jnp.uint32)
+        )
+        labels = np.asarray(
+            jax.random.randint(
+                jax.random.fold_in(wrapped, SEGMENT_STREAM),
+                (population.count,),
+                0,
+                segments,
+            )
+        )
+        order = np.argsort(labels, kind="stable")
+        labels = labels[order]
+        columns = {
+            name: np.asarray(values)[order]
+            for name, values in population.source_parameters.items()
+        }
+        noise_key = jax.random.fold_in(wrapped, NOISE_STREAM)
+        first, second = (jnp.asarray(index) for index in zip(*self._pairs, strict=True))
+        psds = jnp.asarray(self._psds)
+        tensors = jnp.asarray(self._tensors)
+        locations = jnp.asarray(self._locations)
+        batch = min(self._segment_batch_size, segments)
+        incoherent = jnp.zeros((len(self._pairs), grid.shape[0]))
+        coherent = jnp.zeros((len(self._pairs), grid.shape[0]))
+        for low in range(0, segments, batch):
+            lo, hi = np.searchsorted(labels, [low, low + batch])
+            rows = {name: values[lo:hi] for name, values in columns.items()}
+            strain = jnp.zeros((batch, self._psds.shape[0], grid.shape[0]), complex)
+            for start, _ in iter_rows(int(hi - lo), self._chunk_size):
+                chunk, valid = pad_rows(rows, start, self._chunk_size)
+                ids = np.zeros(self._chunk_size, dtype=np.int32)
+                ids[:valid] = labels[lo + start : lo + start + valid] - low
+                chunk_total, chunk_strain = self._segment_sums(
+                    grid,
+                    chunk,
+                    jnp.asarray(valid),
+                    jnp.asarray(ids),
+                    tensors,
+                    locations,
+                    num_segments=batch,
+                )
+                incoherent = incoherent + chunk_total
+                strain = strain + chunk_strain
+            coherent = coherent + _segment_power(
+                noise_key,
+                jnp.arange(low, low + batch),
+                strain,
+                psds,
+                first,
+                second,
+                effective,
+                segments,
+            )
+        ratio = 1.0 / np.sqrt(effective * widths)
+        return (
+            PAIR_RESPONSE_DENOMINATOR
+            / seconds
+            * (
+                (1.0 - ratio) * np.asarray(incoherent, dtype=np.float64)
+                + ratio * np.asarray(coherent, dtype=np.float64)
+            )
+        )
+
+
+@jax.jit
+def _segment_power(
+    noise_key: jax.Array,
+    segment_ids: jax.Array,
+    strain: jax.Array,
+    psds: jax.Array,
+    first: jax.Array,
+    second: jax.Array,
+    segment_seconds: jax.Array | float,
+    num_segments: jax.Array | int,
+) -> jax.Array:
+    """The cross-power of signal plus noise summed over a batch of segments, ``(P, F)``.
+
+    ``segment_ids`` are the global segment indices of the batch, which key
+    its noise, ``strain`` the ``(B, D, F)`` coherent signal strain of each,
+    ``psds`` the ``(D, F)`` noise curves and ``first``, ``second`` the
+    detector indices of each pair. Segments at or beyond ``num_segments``
+    (the padding of the last batch) add nothing.
+    """
+    amplitude = jnp.sqrt(
+        segment_seconds * jnp.where(jnp.isfinite(psds), psds, 0.0) / 4.0
+    )
+
+    def draw(segment: jax.Array) -> jax.Array:
+        real_key, imag_key = jax.random.split(jax.random.fold_in(noise_key, segment))
+        return amplitude * jax.lax.complex(
+            jax.random.normal(real_key, psds.shape),
+            jax.random.normal(imag_key, psds.shape),
+        )
+
+    total = strain + jax.vmap(draw)(segment_ids)
+    power = jnp.real(jnp.conj(total[:, first]) * total[:, second])
+    real = (segment_ids < num_segments)[:, None, None]
+    return jnp.where(real, power, 0.0).sum(axis=0)
 
 
 def _combine(

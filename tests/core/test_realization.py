@@ -257,8 +257,7 @@ def test_network_spectra_ensemble_reads_each_stored_network_spectrum(
 
     stored = Realization.open(ensemble / f"{SEED}-{index}").background()
     np.testing.assert_array_equal(
-        triangle["spectral_density"][index],
-        stored.spectra["triangle"].spectral_density,
+        triangle["pair_spectral_density"][index], stored.spectra["triangle"]
     )
 
 
@@ -267,10 +266,37 @@ def test_network_spectra_ensemble_from_start_is_a_suffix(ensemble: Path) -> None
     (second,) = network_spectra_ensemble(ensemble, SEED, 2, ["triangle"], start=1)
 
     np.testing.assert_array_equal(
-        second["spectral_density"], full["spectral_density"][1:]
+        second["pair_spectral_density"], full["pair_spectral_density"][1:]
     )
 
 
 def test_network_spectra_ensemble_of_a_missing_draw_raises(ensemble: Path) -> None:
     with pytest.raises(FileNotFoundError):
         network_spectra_ensemble(ensemble, SEED, 3, ["triangle"])
+
+
+def test_a_noisy_background_round_trips_its_segment_duration(tmp_path: Path) -> None:
+    written = _simulator(
+        population=POPULATION,
+        waveform=WAVEFORM,
+        background=NETWORKS,
+        segment_duration=60.0,
+    )(tmp_path, seed=SEED).background()
+
+    reopened = Realization.open(tmp_path).background()
+
+    assert reopened.segment_duration == 60.0
+    assert reopened.key() == written.key()
+    assert set(reopened.noise(NETWORKS)) == set(NETWORKS.networks)
+
+
+def test_a_noisy_background_conflicts_with_a_noiseless_rerun(tmp_path: Path) -> None:
+    _simulator(
+        population=POPULATION,
+        waveform=WAVEFORM,
+        background=NETWORKS,
+        segment_duration=60.0,
+    )(tmp_path, seed=SEED)
+
+    with pytest.raises(ValueError, match="holds background"):
+        _simulator(background=NETWORKS)(tmp_path)

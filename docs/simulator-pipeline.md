@@ -70,8 +70,7 @@ Tensors and locations are stacked outside JIT and passed into the chunk kernel.
 The detector strains are projected directly from both polarizations before
 the cross-power is formed. The observation time `T` comes from the population. The
 sum is never divided by the realized count. Each network then keeps its own
-rows, `(P_n, F)`, and their combined spectrum, `(F,)` (see below):
-`artifact.spectra[name]` returns both. A network sharing detectors with
+rows, `(P_n, F)`: `artifact.spectra[name]` returns them. A network sharing detectors with
 another costs no extra projection.
 
 Detectors are stored sorted, whatever order they are declared in, so a
@@ -98,22 +97,42 @@ The factor-five pair normalization and intrinsic waveform conventions remain unc
 Every `[background]` table records this convention as its `normalization`,
 version 1, and `BackgroundArtifact.open` refuses any other version.
 `combine_pair_spectra(Y, frequencies, registry, network_name)` weights a
-network's pairs optimally into one spectrum, using the `psd_reference` of each
-detector in the registry. The background stage stores it per network, so every
-detector needs a noise curve, and the noise curves are part of the
-background's key. The mean of the
+network's pairs optimally into one spectrum `(F,)`, using the `psd_reference`
+of each detector in the registry. It is computed on demand and not stored;
+the likelihood scores the pair spectra directly. Every detector needs a noise
+curve, and the noise curves are part of the background's key. The mean of the
 combined spectrum is `S_h`.
 
 ## Detector noise
 
-The background carries no noise. `detector_noise(frequencies, registry,
-observation_time, network_names=None)` evaluates, per network, the pair ORFs and per-pair Gaussian
-scales `(P_n, F)` and the effective PSD and its Gaussian scale `(F,)`, as a
-`DetectorNoise`. `astrogwb noise REALIZATION OUTPUT` writes it for the
-networks, frequencies and observation time a realization's background was
-simulated with, so the two cannot drift apart. It is one file per ensemble:
-`DetectorNoise.write`/`open`, datasets `frequencies` and
-`networks/<name>/{pair_overlap,pair_scale,effective_psd,scale}`.
+By default the background carries no noise. With `segment_duration` (seconds,
+e.g. 2048; `--segment-duration` of `astrogwb simulate`, with `--background`)
+the `BackgroundSimulator` cuts the observation into `N = floor(T / tau)`
+segments of length `tau_eff = T / N` and assigns every source to a uniformly
+drawn segment (sources are Poisson in time). Each segment has its own coherent
+strain `h_a^s = sum_{i in s} H_{a,i}` and fresh independent noise
+`n_a^s ~ CN(0, tau_eff S_a / 2)` per detector and bin; empty segments still
+carry noise. With `C_ab = sum_s Re[conj(h_a^s + n_a^s)(h_b^s + n_b^s)]` and
+`r = 1 / sqrt(tau_eff * df)`,
+
+    Y_ab = (5 / T) * [(1 - r) K_ab + r C_ab],   K_ab = sum_i K_ab,i.
+
+The mean is the incoherent signal; the zero-mean part is scaled by `r`, so the
+noise-by-noise term has the standard deviation of `pair_bin_scale` for any
+grid and any `tau`. The model is valid while signals are mostly shorter than
+`tau` and bins hold `tau * df >= 1` modes (shorter segments raise). The segment
+labels and noise are folded from the realization's key (streams 2 and 1), so
+the background stays a deterministic function of it, and
+`pair_spectral_density` then holds signal plus noise. The segment duration is
+part of the background's key. The cost is about 0.2 ms per segment, so
+`tau = 2048` s (about 1.5e4 segments a year) adds seconds to the waveforms'
+tens of seconds; `segment_batch_size` only trades memory for speed.
+
+The likelihood inputs are not stored. `BackgroundArtifact.noise(registry)`
+derives, per network, the pair ORFs and per-pair Gaussian scales `(P_n, F)` and
+the effective PSD and its Gaussian scale `(F,)`, as a `NetworkNoise`, from the
+background's grid, pairs and observation time. It raises if `registry` is not
+the one the background was simulated with.
 
 The expected, sky-averaged spectrum is the likelihood's model prediction. No
 simulator draws it.
@@ -151,7 +170,7 @@ an interrupted run never leaves a partial product at its final path.
 | Product | Datasets |
 | --- | --- |
 | `source_parameters.h5` | `source_id` `(N,)`, `source_parameters/<name>` `(N,)` |
-| `background.h5` | `frequencies` `(F,)`; per network, `networks/<name>/pair_spectral_density` `(P_n, F)` and `networks/<name>/spectral_density` `(F,)` |
+| `background.h5` | `frequencies` `(F,)`; per network, `networks/<name>/pair_spectral_density` `(P_n, F)` |
 
 `RealizationSimulator(population, waveform, background)` applies one rule per
 stage:
@@ -235,9 +254,9 @@ astrogwb simulate draw/ --population-metadata population.toml --seed 41
 astrogwb simulate draw/ --waveform-metadata waveform.toml
 astrogwb simulate draw/ --background --detector-config config/detectors.toml
 
-# The ensemble's detector noise, from one of its realizations
-astrogwb noise root/41-0 root/detector_noise.h5 \
-    --detector-config config/detectors.toml
+# With sampled detector noise, in segments of 2048 s
+astrogwb simulate draw/ --background --detector-config config/detectors.toml \
+    --segment-duration 2048
 ```
 
 The population and waveform files hold the fields of `PopulationMetadata` and
