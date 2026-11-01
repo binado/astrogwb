@@ -9,11 +9,11 @@ with app.setup(hide_code=True):
     from collections.abc import Mapping, Sequence
     from pathlib import Path
 
-    from astrogwb.paper.runtime import configure_runtime
+    from astrogwb.runtime import configure_runtime
 
     # A grid has no chains, so one host device. This precedes waveform
     # construction and array creation: the XLA backend is fixed once it starts.
-    configure_runtime(num_chains=1)
+    configure_runtime()
 
     import arviz_stats
     import jax

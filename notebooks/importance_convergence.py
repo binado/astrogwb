@@ -7,10 +7,10 @@ with app.setup(hide_code=True):
     from collections.abc import Mapping
     from pathlib import Path
 
-    from astrogwb.paper.runtime import configure_runtime
+    from astrogwb.runtime import configure_runtime
 
     # Backend configuration precedes waveform construction and array creation.
-    configure_runtime(num_chains=1)
+    configure_runtime()
 
     import jax
     import jax.numpy as jnp

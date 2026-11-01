@@ -6,10 +6,10 @@ app = marimo.App()
 with app.setup(hide_code=True):
     from pathlib import Path
 
-    from astrogwb.paper.runtime import configure_runtime
+    from astrogwb.runtime import configure_runtime
 
     # Backend configuration precedes waveform construction and array creation.
-    configure_runtime(num_chains=1)
+    configure_runtime()
 
     import arviz as az
     import jax

@@ -33,10 +33,11 @@ from __future__ import annotations
 
 import argparse
 
-from astrogwb.paper.runtime import configure_runtime
+from astrogwb.runtime import configure_runtime
 
-jax, _ = configure_runtime(num_chains=1)
+configure_runtime()
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 from numpy.typing import NDArray

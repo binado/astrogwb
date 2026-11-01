@@ -1,7 +1,7 @@
 """Shared pytest configuration for the core package.
 
 Enables JAX double precision for the whole suite, as
-``astrogwb.paper.runtime`` does: polarization power underflows float32. The
+``astrogwb.runtime`` does: polarization power underflows float32. The
 mock-population fixtures wrap :mod:`astrogwb_mock_population`.
 """
 
