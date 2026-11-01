@@ -3,6 +3,8 @@
 from pathlib import Path
 from urllib.parse import urlparse
 
+from gwmock_noise.gaussian.psd import resolve_bundled_psd_preset
+
 NOISE_CURVES_BASE_DIR = Path(__file__).parent / "noise_curves"
 
 
@@ -20,8 +22,6 @@ def resolve_psd_path(reference: str | Path) -> Path | str:
     if not Path(reference_str).suffix and not any(
         separator in reference_str for separator in ("/", "\\")
     ):
-        from gwmock_noise.gaussian.psd import resolve_bundled_psd_preset
-
         bundled = resolve_bundled_psd_preset(reference_str)
         if bundled is not None:
             return bundled

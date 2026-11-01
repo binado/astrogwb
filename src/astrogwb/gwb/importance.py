@@ -109,6 +109,7 @@ from astrogwb.populations.evaluation import (
 from astrogwb.populations.joint import fix_extrinsic_parameters, joint_model
 from astrogwb.populations.metadata import PopulationMetadata
 from astrogwb.utils import gauss_legendre_nodes_weights
+from astrogwb.waveform.factory import waveform_generator
 
 __all__ = [
     "EFFECTIVE_INCLINATION",
@@ -315,7 +316,7 @@ def reference_catalog(
         num_samples=metadata.num_samples,
     )
     return polarization_power_data(
-        metadata.waveform.build(), samples, chunk_size=chunk_size
+        waveform_generator(metadata.waveform), samples, chunk_size=chunk_size
     )
 
 

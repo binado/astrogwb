@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 
+import jax.numpy as jnp
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
@@ -28,7 +29,6 @@ def _band(
     frequencies: ArrayLike, minimum_frequency: float, maximum_frequency: float
 ) -> NDArray[np.bool_]:
     """The bins of ``frequencies`` inside ``[minimum_frequency, maximum_frequency]``."""
-    import jax.numpy as jnp
 
     return np.asarray(
         frequency_mask(
@@ -67,7 +67,6 @@ def network_data(
         ``scale`` and ``frequency_mask``, shape ``(F,)`` on ``frequencies``,
         as model keyword arguments.
     """
-    import jax.numpy as jnp
 
     psd = noise.effective_psd
     mask = (
@@ -120,7 +119,6 @@ def network_pair_data(
         ``scale``, ``frequency_mask`` and ``pair_overlap``, ``(num_pairs, F)``
         on ``frequencies``, as :class:`~astrogwb.inference.Network` fields.
     """
-    import jax.numpy as jnp
 
     scale = noise.pair_scale
     band = _band(frequencies, minimum_frequency, maximum_frequency)

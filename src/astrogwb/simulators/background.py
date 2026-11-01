@@ -84,11 +84,11 @@ from astrogwb.detector.config import DetectorRegistry
 from astrogwb.detector.projection import project_polarizations_fd
 from astrogwb.frequency import bin_widths
 from astrogwb.simulators._chunks import iter_rows, pad_rows
-from astrogwb.simulators._io import atomic_h5
 from astrogwb.simulators.config import SimulationConfig
 from astrogwb.simulators.population import PopulationArtifact
 from astrogwb.utils import years_to_seconds
-from astrogwb.utils.io import h5py_module
+from astrogwb.utils.io import atomic_h5, h5py
+from astrogwb.waveform.factory import waveform_generator
 from astrogwb.waveform.metadata import WaveformMetadata
 
 if TYPE_CHECKING:
@@ -257,7 +257,6 @@ class BackgroundArtifact:
             If the file's ``version`` attribute is missing or is not the
             installed astrogwb version.
         """
-        h5py = h5py_module()
         with h5py.File(path, "r") as file:
             version = file.attrs.get("version")
             if version != __version__:
@@ -324,7 +323,7 @@ class BackgroundSimulator:
         self._segment_batch_size = segment_batch_size
         self._waveform = waveform
         self._validate_sources = validate_sources
-        self._generator: WaveformGenerator = waveform.build()
+        self._generator: WaveformGenerator = waveform_generator(waveform)
         self._frequencies = np.asarray(self._generator.frequencies, dtype=np.float64)
         self._registry = registry
         self._network_names = select_networks(registry)

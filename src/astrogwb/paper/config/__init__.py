@@ -41,6 +41,7 @@ from astrogwb.waveform import (
     WaveformGenerator,
     WaveformMetadata,
 )
+from astrogwb.waveform import waveform_generator as build_waveform_generator
 
 __all__ = [
     "detector_registry",
@@ -139,7 +140,7 @@ def waveform_generator(root: Path | None = None, **kwargs: Any) -> WaveformGener
     :class:`~astrogwb.waveform.WaveformMetadata`. Not safe before
     ``configure_runtime``.
     """
-    return waveform_metadata(root, **kwargs).build()
+    return build_waveform_generator(waveform_metadata(root, **kwargs))
 
 
 def waveform_metadata(root: Path | None = None, **kwargs: Any) -> WaveformMetadata:

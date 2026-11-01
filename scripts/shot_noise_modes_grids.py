@@ -40,9 +40,9 @@ import dataclasses
 import sys
 from pathlib import Path
 
-from astrogwb.paper.runtime import configure_runtime
+from astrogwb.runtime import configure_runtime
 
-configure_runtime(num_chains=1)
+configure_runtime()
 
 import jax
 import jax.numpy as jnp

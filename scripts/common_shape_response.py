@@ -33,10 +33,11 @@ from __future__ import annotations
 
 import argparse
 
-from astrogwb.paper.runtime import configure_runtime
+from astrogwb.runtime import configure_runtime
 
-jax, _ = configure_runtime(num_chains=1)
+configure_runtime()
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 from numpy.typing import NDArray
@@ -61,6 +62,7 @@ from astrogwb.paper.plotting import DETECTOR_NETWORKS
 from astrogwb.populations import build_population
 from astrogwb.simulators import realization_key
 from astrogwb.utils.io import load, write
+from astrogwb.waveform import waveform_generator
 
 # The configuration of notebooks/shot_noise_coverage.py.
 APPROXIMANT = "IMRPhenomXAS_NRTidalv3"
@@ -81,7 +83,7 @@ def _likelihood() -> tuple[ImportanceGaussianLikelihood, NDArray[np.float64], di
         turnover_frequency=100.0,
         dlogf=0.01266,
     )
-    frequencies = np.asarray(waveform.build().frequencies)
+    frequencies = np.asarray(waveform_generator(waveform).frequencies)
     population = population_metadata(
         minimum_redshift=MINIMUM_REDSHIFT, maximum_redshift=MAXIMUM_REDSHIFT
     )

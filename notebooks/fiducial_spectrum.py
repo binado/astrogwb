@@ -7,6 +7,10 @@ with app.setup(hide_code=True):
     from collections.abc import Mapping, Sequence
     from pathlib import Path
 
+    from astrogwb.runtime import configure_runtime
+
+    configure_runtime()
+
     import jax
     import jax.numpy as jnp
     import marimo as mo
@@ -90,7 +94,6 @@ def _():
     # detector utilities.
     register_projection(MplAxes)
 
-    jax.config.update("jax_enable_x64", True)
     use_paper_style(root=ROOT_DIR)
 
     #: Where this notebook's figures go: under the one output root the workflow,

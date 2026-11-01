@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Self
 
+import numpyro.distributions as dist
 from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
@@ -40,7 +41,6 @@ class DistributionConfig(BaseModel):
         ``BeforeValidator``, which converts only ``ValueError`` and
         ``AssertionError`` into a ``ValidationError``.
         """
-        import numpyro.distributions as dist
 
         cls = getattr(dist, self.dist, None)
         # Restrict a config-supplied `getattr` to distribution classes.
@@ -66,7 +66,6 @@ class DistributionConfig(BaseModel):
 
         Constructor keyword names are the class's ``arg_constraints``.
         """
-        import numpyro.distributions as dist
 
         if not isinstance(distribution, dist.Distribution):
             raise TypeError(

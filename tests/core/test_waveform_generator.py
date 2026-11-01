@@ -16,7 +16,9 @@ from astrogwb.constants import ISCO_ALPHA
 from astrogwb.waveform import (
     AnalyticInspiralGenerator,
     RippleGenerator,
+    WaveformGenerator,
     WaveformMetadata,
+    waveform_generator,
 )
 from astrogwb.waveform._ripple import (
     PRECESSING_MODELS,
@@ -311,9 +313,15 @@ def test_json_rejects_a_non_numeric_alpha() -> None:
         WaveformMetadata.model_validate_json(json.dumps(attrs))
 
 
-def test_waveform_metadata_builds_a_concrete_generator() -> None:
+@pytest.mark.parametrize(
+    ("approximant", "generator_type"),
+    [("AnalyticInspiral", AnalyticInspiralGenerator), ("TaylorF2", RippleGenerator)],
+)
+def test_waveform_factory_selects_generator(
+    approximant: str, generator_type: type[WaveformGenerator]
+) -> None:
     metadata = WaveformMetadata(
-        approximant="TaylorF2",
+        approximant=approximant,
         minimum_frequency=10.0,
         maximum_frequency=12.0,
         reference_frequency=10.0,
@@ -321,8 +329,8 @@ def test_waveform_metadata_builds_a_concrete_generator() -> None:
         frequency_resolution=2.0,
     )
 
-    generator = metadata.build()
-    assert isinstance(generator, RippleGenerator)
+    generator = waveform_generator(metadata)
+    assert isinstance(generator, generator_type)
     assert generator.metadata is metadata
 
 

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Self
+from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field
 
-if TYPE_CHECKING:
-    from astrogwb.populations.registry import Population
+from astrogwb.populations.registry import Population, build_population
 
 __all__ = ["ModelKwargs", "PopulationMetadata"]
 
@@ -35,11 +34,8 @@ class PopulationMetadata(BaseModel):
 
         The result hashes by identity, so each call forces a fresh jit trace:
         call once and reuse it. An unknown name raises, listing what is
-        registered. The registry is imported lazily to keep this module free of
-        JAX.
+        registered.
         """
-        from astrogwb.populations import build_population
-
         return build_population(self.model_name, **self.model_kwargs)
 
     def check_registered(self) -> None:

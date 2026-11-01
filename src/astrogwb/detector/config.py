@@ -187,3 +187,9 @@ def load_detector_config(paths: Sequence[Path]) -> DetectorRegistry:
     )
     merged = merge_layers([*DETECTOR_DEFAULT_PATHS, *paths])
     return DetectorRegistry.model_validate(merged)
+
+
+@cache
+def load_detector(name: str) -> Detector:
+    """Load packaged geometry and sensitivity without reading the PSD curve."""
+    return load_detector_config([]).detectors[name].to_detector(name)

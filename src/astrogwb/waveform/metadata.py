@@ -112,11 +112,3 @@ class WaveformMetadata(BaseModel):
                 "tidal approximants"
             )
         return self
-
-    def build(self) -> Any:
-        """Build the concrete generator described by this record."""
-        from astrogwb.waveform import AnalyticInspiralGenerator, RippleGenerator
-
-        if self.approximant == ANALYTIC_APPROXIMANT:
-            return AnalyticInspiralGenerator(self)
-        return RippleGenerator(self)

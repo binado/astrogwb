@@ -23,6 +23,7 @@ Every check is a `just` recipe, and CI runs the same string:
 
 ## Code conventions and styleguide
 
+- Keep imports at the top level of the module, except where required for optional dependencies, circular imports, or execution ordering.
 - Use numpy-style docstrings
 - Don't use unicode symbols in comments or docstrings. Prefer rst math directives for the latter
 - Use jax.typing.ArrayLike for annotating array inputs and jax.Array for array outputs

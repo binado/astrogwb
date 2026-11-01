@@ -1,7 +1,7 @@
 """Shared pytest configuration for the paper package.
 
 Enables JAX double precision for the whole suite, as
-:func:`astrogwb.paper.runtime.configure_runtime` does, so precision does not
+:func:`astrogwb.runtime.configure_runtime` does, so precision does not
 depend on test collection order.
 """
 
