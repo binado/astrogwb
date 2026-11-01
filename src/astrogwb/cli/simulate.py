@@ -47,8 +47,8 @@ def simulate(
         float | None,
         typer.Option(
             min=0.0,
-            help="Noise segment length in seconds; samples detector noise "
-            "(with --background).",
+            help="Segment length in seconds (e.g. 2048); assigns sources to "
+            "segments and samples per-segment detector noise (with --background).",
         ),
     ] = None,
     platform: Annotated[

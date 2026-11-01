@@ -9,7 +9,8 @@
    :class:`~astrogwb.detector.DetectorRegistry`, and sums the per-pair
    cross-powers into a :class:`BackgroundArtifact` holding each network's pair
    spectra and their :func:`combine_pair_spectra`. With a ``segment_duration``
-   it also samples detector noise and adds it before cross-correlating;
+   it assigns sources to segments and cross-correlates each segment's coherent
+   strain plus fresh detector noise;
    :meth:`BackgroundArtifact.noise` derives the networks' likelihood inputs, a
    :class:`NetworkNoise` each, from the background's metadata and the registry.
 

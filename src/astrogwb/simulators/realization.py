@@ -230,7 +230,8 @@ class RealizationSimulator:
     Each argument is a stage's settings, ``None`` to leave the stage as
     recorded. ``keep_sources`` writes ``source_parameters.h5``; a configured
     background is always written. ``chunk_size`` controls waveforms per chunk, and
-    ``segment_duration`` (seconds) adds sampled detector noise to the background.
+    ``segment_duration`` (seconds) assigns sources to segments and adds
+    per-segment sampled detector noise to the background.
 
     The stage simulators are built for each realization that needs them.
     """

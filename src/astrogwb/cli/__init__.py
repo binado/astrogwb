@@ -16,8 +16,8 @@ with --keep-polarizations. For example::
 
 The registry contains [detectors.<name>] definitions and [networks]
 memberships. Background manifests record each network's detector pairs.
---segment-duration SECONDS (with --background) also samples detector noise in
-segments of that length and adds it to the background.
+--segment-duration SECONDS (with --background) assigns sources to segments of
+that length and adds fresh per-segment detector noise to the background.
 
 Importance-integration catalogs use explicit catalog metadata::
 

@@ -430,6 +430,62 @@ def test_a_segment_longer_than_the_observation_raises(
         simulator(population)
 
 
+def test_a_segment_shorter_than_one_over_the_bin_width_raises(
+    population: PopulationArtifact,
+) -> None:
+    simulator = BackgroundSimulator(
+        WAVEFORM, NETWORKS, chunk_size=8, segment_duration=0.01
+    )
+
+    with pytest.raises(ValueError, match="bin width"):
+        simulator(population)
+
+
+@pytest.mark.parametrize("batch_size", [1, 7])
+def test_spectra_do_not_depend_on_the_segment_batch_size(
+    population: PopulationArtifact, batch_size: int
+) -> None:
+    reference = BackgroundSimulator(
+        WAVEFORM, NETWORKS, chunk_size=8, segment_duration=60.0, segment_batch_size=64
+    )(population)
+    batched = BackgroundSimulator(
+        WAVEFORM,
+        NETWORKS,
+        chunk_size=8,
+        segment_duration=60.0,
+        segment_batch_size=batch_size,
+    )(population)
+
+    for name, spectrum in reference.spectra.items():
+        np.testing.assert_allclose(
+            batched.spectra[name].pair_spectral_density, spectrum.pair_spectral_density
+        )
+
+
+@pytest.mark.parametrize("segment_duration", [60.0, 3000.0])
+def test_noisy_background_averages_to_the_incoherent_signal(
+    population: PopulationArtifact,
+    projected: BackgroundArtifact,
+    segment_duration: float,
+) -> None:
+    """New labels and noise per key, same sources: the mean is ``5 K / T``."""
+    simulator = BackgroundSimulator(
+        WAVEFORM, NETWORKS, chunk_size=8, segment_duration=segment_duration
+    )
+    draws = np.stack(
+        [
+            simulator(dataclasses.replace(population, rng_key=(0, draw)))
+            .spectra["pair"]
+            .pair_spectral_density
+            for draw in range(150)
+        ]
+    )
+    expected = projected.spectra["pair"].pair_spectral_density
+    error = draws.std(axis=0, ddof=1) / np.sqrt(len(draws))
+
+    assert np.all(abs(draws.mean(axis=0) - expected) < MAX_STANDARD_ERRORS * error)
+
+
 def test_a_nonpositive_segment_duration_raises() -> None:
     with pytest.raises(ValueError, match="positive"):
         BackgroundSimulator(WAVEFORM, NETWORKS, segment_duration=0.0)

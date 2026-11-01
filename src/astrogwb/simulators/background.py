@@ -42,27 +42,30 @@ depends on them and they are part of its key.
 Without a ``segment_duration`` the background is deterministic given its
 inputs and carries no detector noise. With one, :math:`\tau`, the observation is
 cut into :math:`N_\mathrm{seg} = \lfloor T/\tau \rfloor` segments of length
-:math:`\tau_\mathrm{eff} = T / N_\mathrm{seg}`, and per segment :math:`s`
-Gaussian noise :math:`n_a^s \sim \mathcal{CN}(0, \tau_\mathrm{eff} S_a / 2)` is
-drawn in each detector and bin, together with the segment's coherent signal
-strain :math:`h_a = \sqrt{\tau_\mathrm{eff}/T} \sum_i H_{a,i}`. The pair
-spectrum becomes
+:math:`\tau_\mathrm{eff} = T / N_\mathrm{seg}`. Sources are Poisson in time, so
+each is assigned to a uniformly drawn segment :math:`s`, which holds its own
+coherent strain :math:`h_a^s = \sum_{i \in s} H_{a,i}` and fresh independent
+noise :math:`n_a^s \sim \mathcal{CN}(0, \tau_\mathrm{eff} S_a / 2)` in each
+detector and bin; empty segments still carry noise. With the segment
+cross-power :math:`C_{ab} = \sum_s \mathrm{Re}[(h_a^s + n_a^s)^* (h_b^s + n_b^s)]`
+and :math:`r_i = 1 / \sqrt{\tau_\mathrm{eff} \Delta f_i}`, the pair spectrum is
 
 .. math::
 
-    Y_{ab} = \frac{5}{T} \sum_i K_{ab,i}
-    + \frac{1}{\sqrt{\tau_\mathrm{eff} \Delta f_i}} \frac{1}{N_\mathrm{seg}}
-    \sum_s \frac{5}{\tau_\mathrm{eff}}
-    \mathrm{Re}\left[h_a^* n_b^s + n_a^{s*} h_b + n_a^{s*} n_b^s\right].
+    Y_{ab} = \frac{5}{T} \left[ (1 - r_i) \sum_i K_{ab,i} + r_i C_{ab} \right].
 
-The mean stays the incoherent signal; the strain enters only through the
-zero-mean cross terms. The per-bin factor rescales the averaged fluctuation to
-the :math:`\Delta f_i` of the grid, so the noise-by-noise term has the standard
+:math:`E[C_{ab}] = \sum_i K_{ab,i}`, so the mean stays the incoherent signal;
+the zero-mean part (noise by noise, signal by noise, source interference) is
+scaled by :math:`r_i`, which makes the noise-by-noise term have the standard
 deviation :func:`~astrogwb.detector.pair_bin_scale` for any grid and any
-:math:`\tau`. The noise stream is folded from the realization's key, so the
-background stays a deterministic function of the realization. Bins where a PSD
-is not finite get no noise. ``pair_spectral_density`` then holds signal plus
-noise, and :meth:`BackgroundArtifact.noise` gives the matching likelihood inputs.
+:math:`\tau`. The model holds while signals are mostly shorter than
+:math:`\tau` and a bin holds at least one segment mode,
+:math:`\tau_\mathrm{eff} \Delta f_i \ge 1`. The segment labels and the noise are
+folded from the realization's key (streams :data:`SEGMENT_STREAM` and
+:data:`NOISE_STREAM`), so the background stays a deterministic function of the
+realization. Bins where a PSD is not finite get no noise.
+``pair_spectral_density`` then holds signal plus noise, and
+:meth:`BackgroundArtifact.noise` gives the matching likelihood inputs.
 Detectors are static: the Earth's rotation during a signal is not modelled.
 """
 
@@ -70,7 +73,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from functools import partial
 from itertools import combinations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, Self
@@ -102,6 +104,7 @@ if TYPE_CHECKING:
 __all__ = [
     "NOISE_STREAM",
     "NORMALIZATION_VERSION",
+    "SEGMENT_STREAM",
     "WAVEFORM_CONVENTIONS",
     "BackgroundArtifact",
     "BackgroundSimulator",
@@ -145,6 +148,9 @@ NORMALIZATION_VERSION = 1
 
 #: The stream folded into a realization's key for the detector noise.
 NOISE_STREAM = 1
+
+#: The stream folded into a realization's key for the segment of each source.
+SEGMENT_STREAM = 2
 
 _NORMALIZATION = {
     "convention": "E[Y_ab] = gamma_ab * S_h",
@@ -313,7 +319,7 @@ def background_table(
     if segment_duration is not None:
         table["noise"] = {
             "segment_duration": float(segment_duration),
-            "stream": NOISE_STREAM,
+            "streams": {"noise": NOISE_STREAM, "segment": SEGMENT_STREAM},
         }
     return table
 
@@ -496,9 +502,11 @@ class BackgroundSimulator:
     whatever the realized count, and peak memory is one chunk of polarizations.
     The observation time comes from the population. Build once and call often.
 
-    A ``segment_duration`` in seconds adds sampled detector noise to the pair
-    spectra, segment by segment (see the module docstring); ``None`` leaves
-    them noiseless.
+    A ``segment_duration`` in seconds assigns every source to a segment and
+    adds sampled detector noise to the pair spectra, segment by segment (see
+    the module docstring); ``None`` leaves them noiseless. ``segment_batch_size``
+    is the number of segments whose strains are held at once; like
+    ``chunk_size`` it changes cost, never the result.
     """
 
     def __init__(
@@ -509,13 +517,17 @@ class BackgroundSimulator:
         chunk_size: int = 1024,
         validate_sources: bool = True,
         segment_duration: float | None = None,
+        segment_batch_size: int = 1024,
     ) -> None:
         jax.config.update("jax_enable_x64", True)
         if chunk_size <= 0:
             raise ValueError("chunk_size must be positive")
+        if segment_batch_size <= 0:
+            raise ValueError("segment_batch_size must be positive")
         if segment_duration is not None and segment_duration <= 0:
             raise ValueError("segment_duration must be positive")
         self._segment_duration = segment_duration
+        self._segment_batch_size = segment_batch_size
         self._waveform = waveform
         self._validate_sources = validate_sources
         self._generator: WaveformGenerator = waveform.build()
@@ -537,6 +549,9 @@ class BackgroundSimulator:
         )
         self._chunk_size = chunk_size
         self._pair_sums = jax.jit(self._chunk_pair_sums)
+        self._segment_sums = jax.jit(
+            self._chunk_segment_sums, static_argnames="num_segments"
+        )
 
     @property
     def waveform(self) -> WaveformMetadata:
@@ -563,24 +578,23 @@ class BackgroundSimulator:
         """The number of sources evaluated per chunk."""
         return self._chunk_size
 
-    def _chunk_pair_sums(
+    def _chunk_strains(
         self,
         frequencies: jax.Array,
         sources: Mapping[str, jax.Array],
         valid: jax.Array,
         tensors: jax.Array,
         locations: jax.Array,
-    ) -> tuple[jax.Array, jax.Array]:
-        """The cross-power and strain summed over one padded chunk's sources.
+    ) -> jax.Array:
+        """The ``(D, n, F)`` complex detector strains of one padded chunk.
 
-        Returns the ``(P_union, F)`` real cross-powers and the ``(D, F)``
-        complex strain of the detector union.
+        Padding rows have zero strain.
         """
         plus, cross = self._generator.generate_polarizations_batch(sources)
         real = (jnp.arange(plus.shape[0]) < valid)[:, None]
         plus = jnp.where(real, plus, 0.0)
         cross = jnp.where(real, cross, 0.0)
-        strains = jax.vmap(
+        return jax.vmap(
             lambda tensor, location: project_polarizations_fd(
                 tensor,
                 location,
@@ -593,13 +607,51 @@ class BackgroundSimulator:
                 polarization_angle=sources["polarization_angle"],
             )
         )(tensors, locations)
-        cross = jnp.stack(
+
+    def _pair_cross(self, strains: jax.Array) -> jax.Array:
+        """The ``(P_union, F)`` real cross-powers summed over the sources."""
+        return jnp.stack(
             [
                 jnp.real(jnp.conj(strains[first]) * strains[second]).sum(axis=0)
                 for first, second in self._pairs
             ]
         )
-        return cross, strains.sum(axis=1)
+
+    def _chunk_pair_sums(
+        self,
+        frequencies: jax.Array,
+        sources: Mapping[str, jax.Array],
+        valid: jax.Array,
+        tensors: jax.Array,
+        locations: jax.Array,
+    ) -> jax.Array:
+        """The ``(P_union, F)`` cross-power summed over one padded chunk's sources."""
+        strains = self._chunk_strains(frequencies, sources, valid, tensors, locations)
+        return self._pair_cross(strains)
+
+    def _chunk_segment_sums(
+        self,
+        frequencies: jax.Array,
+        sources: Mapping[str, jax.Array],
+        valid: jax.Array,
+        local_ids: jax.Array,
+        tensors: jax.Array,
+        locations: jax.Array,
+        *,
+        num_segments: int,
+    ) -> tuple[jax.Array, jax.Array]:
+        """The incoherent cross-power and per-segment strain of one padded chunk.
+
+        Returns the ``(P_union, F)`` real cross-powers and the
+        ``(num_segments, D, F)`` complex strain summed over the sources of each
+        segment, ``local_ids`` being the segment of each row relative to the
+        batch.
+        """
+        strains = self._chunk_strains(frequencies, sources, valid, tensors, locations)
+        coherent = jax.ops.segment_sum(
+            jnp.moveaxis(strains, 1, 0), local_ids, num_segments=num_segments
+        )
+        return self._pair_cross(strains), coherent
 
     def __call__(self, population: PopulationArtifact) -> BackgroundArtifact:
         """The per-network spectra of ``population``.
@@ -621,29 +673,11 @@ class BackgroundSimulator:
         if self._validate_sources and population.count:
             self._generator.check_sources(population.source_parameters)
         frequencies = self._frequencies
-        total = jnp.zeros((len(self._pairs), frequencies.shape[0]))
-        strain = jnp.zeros((self._psds.shape[0], frequencies.shape[0]), complex)
         grid = jnp.asarray(frequencies)
-        for start, _ in iter_rows(population.count, self._chunk_size):
-            rows, valid = pad_rows(
-                population.source_parameters, start, self._chunk_size
-            )
-            chunk_total, chunk_strain = self._pair_sums(
-                grid,
-                rows,
-                jnp.asarray(valid),
-                jnp.asarray(self._tensors),
-                jnp.asarray(self._locations),
-            )
-            total = total + chunk_total
-            strain = strain + chunk_strain
-        union = (
-            PAIR_RESPONSE_DENOMINATOR
-            * np.asarray(total, dtype=np.float64)
-            / population.observation_seconds
-        )
-        if self._segment_duration is not None:
-            union = union + self._noise(population, grid, strain)
+        if self._segment_duration is None:
+            union = self._noiseless(population, grid)
+        else:
+            union = self._segmented(population, grid)
         spectra = {}
         for name in self._network_names:
             pairs = union[self._rows[name]]
@@ -670,81 +704,146 @@ class BackgroundSimulator:
             segment_duration=self._segment_duration,
         )
 
-    def _noise(
-        self, population: PopulationArtifact, grid: jax.Array, strain: jax.Array
+    def _noiseless(
+        self, population: PopulationArtifact, grid: jax.Array
     ) -> NDArray[np.float64]:
-        """The ``(P_union, F)`` sampled noise terms of the pair spectra."""
+        """The ``(P_union, F)`` incoherent pair spectra, ``5 K / T``."""
+        total = jnp.zeros((len(self._pairs), grid.shape[0]))
+        for start, _ in iter_rows(population.count, self._chunk_size):
+            rows, valid = pad_rows(
+                population.source_parameters, start, self._chunk_size
+            )
+            total = total + self._pair_sums(
+                grid,
+                rows,
+                jnp.asarray(valid),
+                jnp.asarray(self._tensors),
+                jnp.asarray(self._locations),
+            )
+        return (
+            PAIR_RESPONSE_DENOMINATOR
+            * np.asarray(total, dtype=np.float64)
+            / population.observation_seconds
+        )
+
+    def _segmented(
+        self, population: PopulationArtifact, grid: jax.Array
+    ) -> NDArray[np.float64]:
+        """The ``(P_union, F)`` pair spectra with per-segment sources and noise."""
         assert self._segment_duration is not None
-        segments = int(population.observation_seconds // self._segment_duration)
+        seconds = population.observation_seconds
+        segments = int(seconds // self._segment_duration)
         if segments < 1:
             raise ValueError(
                 f"segment_duration {self._segment_duration} s exceeds the "
-                f"observation time {population.observation_seconds} s"
+                f"observation time {seconds} s"
             )
-        key = jax.random.fold_in(
-            jax.random.wrap_key_data(jnp.asarray(population.rng_key, dtype=jnp.uint32)),
-            NOISE_STREAM,
+        effective = seconds / segments
+        widths = np.asarray(bin_widths(grid), dtype=np.float64)
+        if effective * widths.min() < 1.0:
+            raise ValueError(
+                f"segment_duration {self._segment_duration} s is shorter than "
+                "1 / bin width"
+            )
+        wrapped = jax.random.wrap_key_data(
+            jnp.asarray(population.rng_key, dtype=jnp.uint32)
         )
+        labels = np.asarray(
+            jax.random.randint(
+                jax.random.fold_in(wrapped, SEGMENT_STREAM),
+                (population.count,),
+                0,
+                segments,
+            )
+        )
+        order = np.argsort(labels, kind="stable")
+        labels = labels[order]
+        columns = {
+            name: np.asarray(values)[order]
+            for name, values in population.source_parameters.items()
+        }
+        noise_key = jax.random.fold_in(wrapped, NOISE_STREAM)
         first, second = (jnp.asarray(index) for index in zip(*self._pairs, strict=True))
-        return np.asarray(
-            _sample_noise(
-                key,
+        psds = jnp.asarray(self._psds)
+        tensors = jnp.asarray(self._tensors)
+        locations = jnp.asarray(self._locations)
+        batch = min(self._segment_batch_size, segments)
+        incoherent = jnp.zeros((len(self._pairs), grid.shape[0]))
+        coherent = jnp.zeros((len(self._pairs), grid.shape[0]))
+        for low in range(0, segments, batch):
+            lo, hi = np.searchsorted(labels, [low, low + batch])
+            rows = {name: values[lo:hi] for name, values in columns.items()}
+            strain = jnp.zeros((batch, self._psds.shape[0], grid.shape[0]), complex)
+            for start, _ in iter_rows(int(hi - lo), self._chunk_size):
+                chunk, valid = pad_rows(rows, start, self._chunk_size)
+                ids = np.zeros(self._chunk_size, dtype=np.int32)
+                ids[:valid] = labels[lo + start : lo + start + valid] - low
+                chunk_total, chunk_strain = self._segment_sums(
+                    grid,
+                    chunk,
+                    jnp.asarray(valid),
+                    jnp.asarray(ids),
+                    tensors,
+                    locations,
+                    num_segments=batch,
+                )
+                incoherent = incoherent + chunk_total
+                strain = strain + chunk_strain
+            coherent = coherent + _segment_power(
+                noise_key,
+                jnp.arange(low, low + batch),
                 strain,
-                jnp.asarray(self._psds),
-                bin_widths(grid),
+                psds,
                 first,
                 second,
-                population.observation_seconds,
-                num_segments=segments,
-            ),
-            dtype=np.float64,
+                effective,
+                segments,
+            )
+        ratio = 1.0 / np.sqrt(effective * widths)
+        return (
+            PAIR_RESPONSE_DENOMINATOR
+            / seconds
+            * (
+                (1.0 - ratio) * np.asarray(incoherent, dtype=np.float64)
+                + ratio * np.asarray(coherent, dtype=np.float64)
+            )
         )
 
 
-@partial(jax.jit, static_argnames="num_segments")
-def _sample_noise(
-    key: jax.Array,
-    signal_strain: jax.Array,
+@jax.jit
+def _segment_power(
+    noise_key: jax.Array,
+    segment_ids: jax.Array,
+    strain: jax.Array,
     psds: jax.Array,
-    widths: jax.Array,
     first: jax.Array,
     second: jax.Array,
-    observation_seconds: jax.Array | float,
-    *,
-    num_segments: int,
+    segment_seconds: jax.Array | float,
+    num_segments: jax.Array | int,
 ) -> jax.Array:
-    """The noise terms of the pair spectra, ``(P, F)``; see the module docstring.
+    """The cross-power of signal plus noise summed over a batch of segments, ``(P, F)``.
 
-    ``signal_strain`` is the ``(D, F)`` complex strain summed over sources,
-    ``psds`` the ``(D, F)`` noise curves, ``widths`` the ``(F,)`` bin widths
-    and ``first``, ``second`` the detector indices of each pair. One compile
-    per ``num_segments``.
+    ``segment_ids`` are the global segment indices of the batch, which key
+    its noise, ``strain`` the ``(B, D, F)`` coherent signal strain of each,
+    ``psds`` the ``(D, F)`` noise curves and ``first``, ``second`` the
+    detector indices of each pair. Segments at or beyond ``num_segments``
+    (the padding of the last batch) add nothing.
     """
-    segment = observation_seconds / num_segments
-    finite = jnp.isfinite(psds)
-    amplitude = jnp.sqrt(segment * jnp.where(finite, psds, 0.0) / 4.0)
-    coherent = jnp.sqrt(segment / observation_seconds) * signal_strain
+    amplitude = jnp.sqrt(
+        segment_seconds * jnp.where(jnp.isfinite(psds), psds, 0.0) / 4.0
+    )
 
-    def accumulate(total: jax.Array, segment_key: jax.Array) -> tuple[jax.Array, None]:
-        real_key, imag_key = jax.random.split(segment_key)
-        noise = amplitude * jax.lax.complex(
+    def draw(segment: jax.Array) -> jax.Array:
+        real_key, imag_key = jax.random.split(jax.random.fold_in(noise_key, segment))
+        return amplitude * jax.lax.complex(
             jax.random.normal(real_key, psds.shape),
             jax.random.normal(imag_key, psds.shape),
         )
-        cross = (
-            jnp.conj(coherent[first]) * noise[second]
-            + jnp.conj(noise[first]) * coherent[second]
-            + jnp.conj(noise[first]) * noise[second]
-        )
-        return total + jnp.real(cross), None
 
-    zero = jnp.zeros((first.shape[0], psds.shape[1]))
-    total, _ = jax.lax.scan(accumulate, zero, jax.random.split(key, num_segments))
-    return (
-        PAIR_RESPONSE_DENOMINATOR
-        * total
-        / (num_segments * segment * jnp.sqrt(segment * widths))
-    )
+    total = strain + jax.vmap(draw)(segment_ids)
+    power = jnp.real(jnp.conj(total[:, first]) * total[:, second])
+    real = (segment_ids < num_segments)[:, None, None]
+    return jnp.where(real, power, 0.0).sum(axis=0)
 
 
 def _combine(
