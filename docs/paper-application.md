@@ -7,7 +7,7 @@ package's `astrogwb simulate` command (see
 [the simulator pipeline](simulator-pipeline.md)).
 
 Generating data and reading it are separate steps. The notebooks never
-simulate: [`workflow/coverage_draws.smk`](../workflow/coverage_draws.smk)
+simulate: [`Snakefile`](../Snakefile)
 writes the ensembles, their detector noise and the reference catalogs under
 `outputs/` (see [simulation inputs on SLURM](coverage-draws-on-slurm.md)), and
 each notebook's configuration cell names the paths it reads. A missing input
@@ -104,7 +104,7 @@ layer: fiducial sets `reference_redshift = 1e-4` and serves the posterior,
 coverage, and minimum-redshift-scan calculations; ladder changes the sample
 count and sampling method. These files do not
 inherit changes from the shared paper configuration. Regenerate affected
-outputs after editing the base or variant. `workflow/coverage_draws.smk`
+outputs after editing the base or variant. `Snakefile`
 tracks both files as inputs and runs the command with the appropriate seeds;
 notebooks read `reference-fiducial.h5` or `reference-ladder.h5`.
 Regenerate `outputs/catalogs/reference-fiducial.h5` before running the notebooks

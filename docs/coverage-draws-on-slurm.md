@@ -2,7 +2,7 @@
 
 The paper notebooks read their simulation inputs and never generate them. A
 missing input is a `FileNotFoundError`, not a simulation.
-[`workflow/coverage_draws.smk`](../workflow/coverage_draws.smk) writes every
+[`Snakefile`](../Snakefile) writes every
 input, per ensemble:
 
 | Output | Command | Read by |
@@ -29,7 +29,7 @@ and regenerate the ensemble:
 
 ```bash
 rm -r outputs/ensembles/fiducial
-uv run --no-sync snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm
+uv run --no-sync snakemake --profile workflow/profiles/slurm
 ```
 
 A file records the configuration it was simulated with, but nothing compares
@@ -91,17 +91,17 @@ it in `tmux` (or `screen`). Calibrate on a few draws first (`stop` caps the
 draws of the ensemble's first seed), and check them with `sacct`:
 
 ```bash
-uv run --no-sync snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm --config stop=10
+uv run --no-sync snakemake --profile workflow/profiles/slurm --config stop=10
 ```
 
 Then dry-run and submit the rest:
 
 ```bash
-uv run --no-sync snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm --dry-run
+uv run --no-sync snakemake --profile workflow/profiles/slurm --dry-run
 ```
 
 ```bash
-uv run --no-sync snakemake -s workflow/coverage_draws.smk --profile workflow/profiles/slurm
+uv run --no-sync snakemake --profile workflow/profiles/slurm
 ```
 
 The default is `ensembles=fiducial`. `threads=<n>` and

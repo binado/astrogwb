@@ -88,7 +88,7 @@ def _():
     the mean.
 
     The ensemble is read, never drawn: the fiducial ensemble of
-    `workflow/coverage_draws.smk`, one background per draw holding every
+    `Snakefile`, one background per draw holding every
     network's spectra (`astrogwb.simulators.network_spectra_ensemble`),
     shared with `notebooks/shot_noise_coverage.py`, which uses its draws as
     injections. So is the reference catalog of the minimum-redshift scan. A
@@ -170,7 +170,7 @@ def _():
     # Percentiles of the plotted bands (16-84%).
     percentiles = (16.0, 50.0, 84.0)
 
-    # The fiducial ensemble of workflow/coverage_draws.smk, shared with
+    # The fiducial ensemble of Snakefile, shared with
     # shot_noise_coverage.py: the default waveform and grid. Its population is
     # draw 0's record.
     ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / "fiducial"
@@ -886,7 +886,7 @@ def _():
 
 @app.cell
 def _(ROOT_DIR):
-    # The shared fiducial catalog, written by workflow/coverage_draws.smk:
+    # The shared fiducial catalog, written by Snakefile:
     # 2^14 draws on a Sobol net at the default waveform, as in
     # cosmology_grid_posteriors.py, each generated at reference redshift 1e-4,
     # below every window of the scan,

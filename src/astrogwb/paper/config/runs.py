@@ -64,7 +64,7 @@ BASE_OUT_DIR = Path("outputs")
 
 CATALOGS_ROOT = BASE_OUT_DIR / "catalogs"
 #: Ensemble roots, ``<name>/<seed>-<index>.h5`` backgrounds, written by
-#: ``workflow/coverage_draws.smk``.
+#: ``Snakefile``.
 ENSEMBLES_ROOT = BASE_OUT_DIR / "ensembles"
 FIGURES_DIR = BASE_OUT_DIR / "figures"
 

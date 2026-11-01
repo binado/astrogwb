@@ -191,7 +191,7 @@ which remain available as building blocks.
 
 `astrogwb.simulators.network_spectra_ensemble(root, seed, n, names)` reads an
 ensemble's files and stacks each network's spectra. It never simulates;
-`workflow/coverage_draws.smk` writes the paper's ensembles (see
+`Snakefile` writes the paper's ensembles (see
 `docs/coverage-draws-on-slurm.md`).
 
 ## Command line
@@ -228,7 +228,7 @@ mixed.
 | `PopulationDrawMetadata` (`count`, `num_events`) | `astrogwb.simulators.PopulationMetadata`, Poisson only |
 | `astrogwb.simulators.polarization_power` | `astrogwb.gwb.catalog` |
 | `astrogwb.simulators.core.{write,load,content_key}` | `astrogwb.utils.io` |
-| `spectra_ensemble`, `network_spectra_ensemble(EnsembleRecord, ...)` | `workflow/coverage_draws.smk` writes the ensemble; `network_spectra_ensemble(root, seed, n, names)` reads it |
+| `spectra_ensemble`, `network_spectra_ensemble(EnsembleRecord, ...)` | `Snakefile` writes the ensemble; `network_spectra_ensemble(root, seed, n, names)` reads it |
 | `scripts/simulate_spectra.py`, `config/simulations/spectrum/` | `astrogwb simulate` |
 | one artifact directory per stage (`metadata.toml` + `data.h5`, `[parent]` references), then realization directories (`metadata.toml` + `source_parameters.h5` + `background.h5`) | one HDF5 file per draw carrying its `SimulationConfig` and version |
 | `PopulationArtifact.write(dir)` / `.open(path)`, `Realization`, `RealizationSimulator`, `simulate_realization` | `simulate(config, key)`; no sources file |
