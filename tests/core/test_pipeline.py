@@ -24,7 +24,7 @@ from astrogwb.simulators import (
     combine_pair_spectra,
     realization_key,
 )
-from astrogwb.waveform import WaveformMetadata, polarization_power
+from astrogwb.waveform import WaveformMetadata, polarization_power, waveform_generator
 
 #: Standard errors a Monte Carlo mean may sit from its expectation.
 MAX_STANDARD_ERRORS = 5.0
@@ -104,13 +104,15 @@ def test_polarizations_reduce_to_the_generators_power(
     population: PopulationArtifact, approximant: str
 ) -> None:
     # A 1 Hz grid puts the band's edges on Ripple's FFT grid.
-    generator = WaveformMetadata.model_validate(
-        {
-            **WAVEFORM.model_dump(exclude={"alpha"}),
-            "approximant": approximant,
-            "frequency_resolution": 1.0,
-        }
-    ).build()
+    generator = waveform_generator(
+        WaveformMetadata.model_validate(
+            {
+                **WAVEFORM.model_dump(exclude={"alpha"}),
+                "approximant": approximant,
+                "frequency_resolution": 1.0,
+            }
+        )
+    )
     sources = population.source_parameters
 
     plus, cross = generator.generate_polarizations_batch(sources)
@@ -140,7 +142,7 @@ def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum() -> No
         ),
         chunk_size=8,
     )
-    generator = WAVEFORM.build()
+    generator = waveform_generator(WAVEFORM)
     group = 16
     ratios = []
     for start in range(0, realization.count - group + 1, group):

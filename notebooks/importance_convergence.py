@@ -43,6 +43,7 @@ with app.setup(hide_code=True):
     from astrogwb.paper.plotting import parameter_label, save_figures, use_paper_style
     from astrogwb.populations import Population, build_population
     from astrogwb.simulators import realization_key
+    from astrogwb.waveform import waveform_generator
 
     # One compiled spectrum for every catalog: the likelihood is a pytree
     # argument, so its catalog is a traced input, not a constant, and catalogs
@@ -164,7 +165,7 @@ def _():
         frequency_resolution=0.02,
         turnover_frequency=None,
     )
-    frequencies = np.asarray(waveform.build().frequencies)
+    frequencies = np.asarray(waveform_generator(waveform).frequencies)
     population = population_metadata(root=ROOT_DIR)
     target = build_population(population.model_name, **population.model_kwargs)
     registry = detector_registry(root=ROOT_DIR)
@@ -1082,7 +1083,7 @@ def _(
     _rows = quadrature[quadrature["Z"] == mc_nodes]
     _quadrature = float(_rows[_b_columns].abs().max().max()) if len(_rows) else 0.0
     _mc = float(_mc_worst[mc_sizes.index(chosen_samples)])
-    _bins = reference_waveform.build().frequencies.size
+    _bins = waveform_generator(reference_waveform).frequencies.size
     recommendation = pd.DataFrame(
         [
             {

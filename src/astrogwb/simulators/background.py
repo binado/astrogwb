@@ -88,6 +88,7 @@ from astrogwb.simulators.config import SimulationConfig
 from astrogwb.simulators.population import PopulationArtifact
 from astrogwb.utils import years_to_seconds
 from astrogwb.utils.io import atomic_h5, h5py
+from astrogwb.waveform.factory import waveform_generator
 from astrogwb.waveform.metadata import WaveformMetadata
 
 if TYPE_CHECKING:
@@ -322,7 +323,7 @@ class BackgroundSimulator:
         self._segment_batch_size = segment_batch_size
         self._waveform = waveform
         self._validate_sources = validate_sources
-        self._generator: WaveformGenerator = waveform.build()
+        self._generator: WaveformGenerator = waveform_generator(waveform)
         self._frequencies = np.asarray(self._generator.frequencies, dtype=np.float64)
         self._registry = registry
         self._network_names = select_networks(registry)

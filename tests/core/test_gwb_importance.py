@@ -35,7 +35,7 @@ from astrogwb.populations import PopulationMetadata, build_population, joint_mod
 from astrogwb.populations.evaluation import evaluate_sources, sample_sources
 from astrogwb.simulators import realization_key
 from astrogwb.utils import gauss_legendre_nodes_weights
-from astrogwb.waveform import WaveformMetadata, inclination_factor
+from astrogwb.waveform import WaveformMetadata, inclination_factor, waveform_generator
 
 #: The observed grid of the comparisons: four 10 Hz bins from 20 Hz.
 OBSERVED_WAVEFORM = WaveformMetadata(
@@ -216,7 +216,7 @@ def _spectrum_on_nodes(
     tiled["inclination"] = np.full(count * redshift.size, EFFECTIVE_INCLINATION)
     _, outputs = evaluate_sources(fiducial_model, tiled, density_sites=())
     rows = {name: np.asarray(values) for name, values in outputs.items()}
-    power = polarization_power_data(OBSERVED_WAVEFORM.build(), rows)
+    power = polarization_power_data(waveform_generator(OBSERVED_WAVEFORM), rows)
     power = np.asarray(power["polarization_power"]).reshape(-1, NUM_NODES, 6)
 
     redshift_distribution, source_model = population.build()(params)
@@ -257,7 +257,7 @@ def _rescaled_and_brute_force(
     )
     settings: dict[str, Any] = {
         "population": target,
-        "frequencies": OBSERVED_WAVEFORM.build().frequencies,
+        "frequencies": waveform_generator(OBSERVED_WAVEFORM).frequencies,
         "num_redshift_nodes": NUM_NODES,
         "density_sites": density_sites,
     }
@@ -349,7 +349,7 @@ def shot_noise_builder(reference_metadata: CatalogMetadata) -> Any:
             data,
             reference_metadata,
             population=target,
-            frequencies=OBSERVED_WAVEFORM.build().frequencies,
+            frequencies=np.asarray(waveform_generator(OBSERVED_WAVEFORM).frequencies),
             num_redshift_nodes=NUM_NODES,
             density_sites=(),
             shot_noise="amplitude",
@@ -399,7 +399,7 @@ def test_rescaled_log_weights_vanish_at_the_fiducials(
         data,
         reference_metadata,
         population=target,
-        frequencies=OBSERVED_WAVEFORM.build().frequencies,
+        frequencies=np.asarray(waveform_generator(OBSERVED_WAVEFORM).frequencies),
         num_redshift_nodes=NUM_NODES,
         density_sites=("source_frame_mass_1", "source_frame_mass_2"),
     )
@@ -563,7 +563,7 @@ def _bound_predictions(
         population=build_population(
             metadata.population.model_name, **metadata.population.model_kwargs
         ),
-        frequencies=OBSERVED_WAVEFORM.build().frequencies,
+        frequencies=np.asarray(waveform_generator(OBSERVED_WAVEFORM).frequencies),
         num_redshift_nodes=NUM_NODES,
         density_sites=(),
         shot_noise="amplitude",

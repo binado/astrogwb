@@ -3,6 +3,7 @@ from .config import (
     DetectorConfig,
     DetectorGeometry,
     DetectorRegistry,
+    load_detector,
     load_detector_config,
 )
 from .effective_psd import (
@@ -13,7 +14,7 @@ from .effective_psd import (
     pair_bin_scale,
     pair_terms,
 )
-from .geometry import Detector, load_detector
+from .geometry import Detector
 from .overlap import (
     OrientationReference,
     align_detector,

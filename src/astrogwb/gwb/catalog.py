@@ -31,6 +31,7 @@ from astrogwb.populations.evaluation import sample_sources
 from astrogwb.populations.joint import fix_extrinsic_parameters, joint_model
 from astrogwb.populations.metadata import PopulationMetadata
 from astrogwb.waveform.base import WaveformGenerator
+from astrogwb.waveform.factory import waveform_generator
 from astrogwb.waveform.metadata import WaveformMetadata
 
 __all__ = [
@@ -152,7 +153,7 @@ def draw_catalog(
     )
     samples = sample_sources(model, key, num_samples=metadata.num_samples)
     return polarization_power_data(
-        metadata.waveform.build(), samples, chunk_size=chunk_size
+        waveform_generator(metadata.waveform), samples, chunk_size=chunk_size
     )
 
 

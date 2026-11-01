@@ -7,7 +7,7 @@ Construction and cached NumPy geometry never initialize the XLA backend.
 from __future__ import annotations
 
 import math
-from functools import cache, cached_property
+from functools import cached_property
 from typing import Annotated
 
 import jax
@@ -143,11 +143,3 @@ class Detector:
             declination=declination,
             polarization_angle=polarization_angle,
         )
-
-
-@cache
-def load_detector(name: str) -> Detector:
-    """Load packaged geometry and sensitivity without reading the PSD curve."""
-    from .config import load_detector_config
-
-    return load_detector_config([]).detectors[name].to_detector(name)

@@ -8,6 +8,7 @@ from astrogwb.waveform.analytical import (
     termination_frequency,
 )
 from astrogwb.waveform.base import WaveformGenerator
+from astrogwb.waveform.factory import waveform_generator
 from astrogwb.waveform.metadata import WaveformMetadata
 from astrogwb.waveform.polarization_power import (
     polarization_power,
@@ -28,4 +29,5 @@ __all__ = [
     "quadrupolar_polarizations",
     "quadrupolar_stokes_factors",
     "termination_frequency",
+    "waveform_generator",
 ]
