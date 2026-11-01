@@ -48,7 +48,7 @@ reweighting. The log densities are computed on every run. The notebook reads
 its inputs and never generates them: the injection ensemble
 (`outputs/ensembles/fiducial/`, whose background gives the detector noise) and
 the reference catalog (`outputs/catalogs/reference-fiducial.h5`), all written by
-`workflow/coverage_draws.smk` (see `docs/coverage-draws-on-slurm.md`).
+`Snakefile` (see `docs/coverage-draws-on-slurm.md`).
 Figures go to `outputs/figures/cosmology_grid_posteriors/` when the
 `Write figures` switch is on:
 

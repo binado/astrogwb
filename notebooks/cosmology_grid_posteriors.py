@@ -66,7 +66,7 @@ def _():
     Gaussian spectrum likelihood is evaluated at every grid point.
 
     The notebook reads its inputs and never simulates them:
-    `workflow/coverage_draws.smk` writes the injection ensemble, its detector
+    `Snakefile` writes the injection ensemble, its detector
     noise and the reference catalog (see the configuration cell for the
     paths). A missing input is a `FileNotFoundError`.
 
@@ -224,7 +224,7 @@ def _():
     PRIORS = priors(root=ROOT_DIR)
     registry = detector_registry(root=ROOT_DIR)
 
-    # The inputs, written by workflow/coverage_draws.smk and only read here:
+    # The inputs, written by Snakefile and only read here:
     # the injection ensemble (draw 0 of `data_seed` is the injection, the
     # one Poisson catalog as each network records it), its detector noise,
     # and the reference catalog, 2^14 intrinsic draws on a scrambled Sobol

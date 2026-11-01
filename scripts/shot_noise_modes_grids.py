@@ -27,7 +27,7 @@ fiducials. The (H0, Omega_m) corners are checked the same way::
 
 It reads, never draws: draw 0 of seed 41 of the ensemble, whose
 background gives the detector noise, and the reference catalog, all written by
-``workflow/coverage_draws.smk``.
+``Snakefile``.
 
 The notebooks' helpers are imported from their setup blocks, so the grids are
 the notebooks' own.

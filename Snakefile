@@ -1,6 +1,6 @@
 # The simulation inputs the paper notebooks read, generated explicitly.
 #
-#   uv run --no-sync snakemake -s workflow/coverage_draws.smk \
+#   uv run --no-sync snakemake \
 #       --profile workflow/profiles/slurm --dry-run
 #
 # Notebooks never simulate: they read what this writes and fail with a

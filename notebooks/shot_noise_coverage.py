@@ -298,7 +298,7 @@ def _():
     - Every error is a bootstrap over injections.
 
     The injections, their detector noise and the reference catalog are read,
-    never drawn: `workflow/coverage_draws.smk` writes them (see the
+    never drawn: `Snakefile` writes them (see the
     configuration cell for the paths).
     """)
 
@@ -343,7 +343,7 @@ def _():
     PRIORS = priors(root=ROOT_DIR)
     registry = detector_registry(root=ROOT_DIR)
 
-    # The inputs, written by workflow/coverage_draws.smk and only read here:
+    # The inputs, written by Snakefile and only read here:
     # the fiducial ensemble, its detector noise, and the reference catalog of
     # the same waveform, 2^14 draws on a scrambled Sobol net at seed 42,
     # independent of the injections (importance_convergence.py sizes it).

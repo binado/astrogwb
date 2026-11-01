@@ -1,6 +1,6 @@
 """Read an ensemble of simulated backgrounds back, stacked per network.
 
-``workflow/coverage_draws.smk`` writes one file per draw,
+``Snakefile`` writes one file per draw,
 ``<root>/<seed>-<index>.h5``, each a :class:`BackgroundArtifact`.
 """
 
@@ -47,7 +47,7 @@ def network_spectra_ensemble(
     """Draws ``start .. num_draws - 1`` of the networks ``names``, stacked per network.
 
     Draw ``i`` is the background file ``<root>/<seed>-<i>.h5``,
-    as ``workflow/coverage_draws.smk`` lays them out, draw ``i`` keyed by
+    as ``Snakefile`` lays them out, draw ``i`` keyed by
     ``batch_keys(seed, i + 1)[i]``.
 
     Parameters

@@ -6,7 +6,7 @@ The paper writes the floor of the stacked per-pair data as three factors,
 moment as intensity, linear and circular terms (eq. ``response-moment-main``).
 This script evaluates both per network at the fiducials, on the grid
 notebook's reference catalog and the fiducial ensemble's detector noise, both
-written by ``workflow/coverage_draws.smk``:
+written by ``Snakefile``:
 
 - :math:`\\sigma_{\\rm shot}` under the per-pair response, and under the
   sky-averaged response, for which :math:`\\langle \\bar r^2 \\rangle = 355/252`;

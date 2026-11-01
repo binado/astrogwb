@@ -15,7 +15,7 @@ cell names its inputs, all under `outputs/`:
 | `catalogs/reference-fiducial.h5` | `cosmology_grid_posteriors`, `madau_dickinson_grid`, `shot_noise_coverage`, `ensemble_spectrum` |
 | `catalogs/reference-ladder.h5` | `importance_convergence` |
 
-`workflow/coverage_draws.smk` writes them (`docs/coverage-draws-on-slurm.md`).
+`Snakefile` writes them (`docs/coverage-draws-on-slurm.md`).
 A missing input is a `FileNotFoundError`, never a simulation.
 
 ## Notebooks

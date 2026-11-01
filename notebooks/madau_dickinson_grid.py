@@ -223,7 +223,7 @@ def _():
     registry = detector_registry(root=ROOT_DIR)
 
     # The same inputs as cosmology_grid_posteriors.py, written by
-    # workflow/coverage_draws.smk and only read here: the injection ensemble,
+    # Snakefile and only read here: the injection ensemble,
     # its detector noise and the reference catalog.
     ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / "fiducial"
     reference_catalog_path = ROOT_DIR / CATALOGS_ROOT / "reference-fiducial.h5"
