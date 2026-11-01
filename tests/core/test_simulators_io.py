@@ -12,8 +12,7 @@ import pytest
 from pydantic import BaseModel
 
 from astrogwb.simulators import realization_key
-from astrogwb.simulators._io import atomic_h5
-from astrogwb.utils.io import load, write
+from astrogwb.utils.io import atomic_h5, load, write
 
 
 class Record(BaseModel):
