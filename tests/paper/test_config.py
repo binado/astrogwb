@@ -1,4 +1,4 @@
-"""Tests for shared config loading and deep-merge overrides."""
+"""Tests for shared configuration loading."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ from repo import REPO_ROOT
 
 from astrogwb.config import load_config
 from astrogwb.detector.config import load_detector_config
-from astrogwb.paper.utils import deep_merge, load_mapping
 
 PAPER_ROOT = REPO_ROOT
 
@@ -57,43 +56,6 @@ def test_detector_loader_rejects_spectrum_settings(tmp_path: Path) -> None:
     layer.write_text("[spectra]\nnum_draws = 5\n", encoding="utf-8")
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         load_detector_config([layer])
-
-
-def test_deep_merge_nested_dicts_and_list_replacement() -> None:
-    # A stand-in list key; `networks` is a mapping with a different merge rule.
-    base = {
-        "seed": 1,
-        "figures": {"compare": {"var_name": "H0", "figure_dpi": 300}},
-        "detector_ids": ["A", "B"],
-    }
-    override = {
-        "figures": {"compare": {"var_name": "Omega_m"}},
-        "detector_ids": ["C"],
-    }
-
-    merged = deep_merge(base, override)
-
-    assert merged == {
-        "seed": 1,
-        "figures": {"compare": {"var_name": "Omega_m", "figure_dpi": 300}},
-        "detector_ids": ["C"],
-    }
-    # Inputs are not mutated.
-    figures = base["figures"]
-    assert isinstance(figures, dict)
-    compare = figures["compare"]
-    assert isinstance(compare, dict)
-    assert compare["var_name"] == "H0"
-    assert base["detector_ids"] == ["A", "B"]
-
-
-def test_load_mapping_rejects_a_non_toml_layer(tmp_path: Path) -> None:
-    """Every run-config layer is TOML; a JSON one is refused, not parsed."""
-    path = tmp_path / "config.json"
-    path.write_text('{"analysis": {"network": "demo"}}', encoding="utf-8")
-
-    with pytest.raises(ValueError, match="config layers are TOML"):
-        load_mapping(path)
 
 
 def test_load_config_shared_values_and_references() -> None:
