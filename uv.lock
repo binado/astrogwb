@@ -239,7 +239,7 @@ requires-dist = [
     { name = "numpyro", specifier = ">=0.21.0" },
     { name = "pandas", extras = ["output-formatting"], marker = "extra == 'notebook'", specifier = ">=2.0" },
     { name = "platformdirs", marker = "extra == 'paper'", specifier = ">=4.11.12" },
-    { name = "pydantic", specifier = ">=2.11" },
+    { name = "pydantic", specifier = ">=2.14" },
     { name = "pyknf", specifier = ">=0.6,<0.8" },
     { name = "ripplegw", specifier = ">=0.3.1" },
     { name = "scipy", marker = "extra == 'notebook'", specifier = ">=1.10" },

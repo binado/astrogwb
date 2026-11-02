@@ -36,12 +36,7 @@ with app.setup(hide_code=True):
     )
     from astrogwb.gwb.catalog import CatalogMetadata, draw_catalog
     from astrogwb.gwb.spectral import spectral_density as catalog_spectral_density
-    from astrogwb.paper.config import (
-        detector_registry,
-        fiducials,
-        population_metadata,
-        waveform_metadata,
-    )
+    from astrogwb.paper.config import load_config
     from astrogwb.paper.config.runs import FIGURES_DIR
     from astrogwb.paper.plotting import (
         DETECTOR_COMPARISON_LEGEND,
@@ -54,6 +49,7 @@ with app.setup(hide_code=True):
         use_paper_style,
     )
     from astrogwb.utils import years_to_seconds
+    from astrogwb.waveform import WaveformMetadata
 
 
 @app.cell(hide_code=True)
@@ -101,7 +97,7 @@ def _():
     BASE_DIR = ROOT_DIR / FIGURES_DIR / "fiducial_spectrum"
 
     # The shared [fiducials]; `root=` because accessors resolve against the cwd.
-    FIDUCIALS = fiducials(root=ROOT_DIR)
+    FIDUCIALS = load_config(ROOT_DIR / "config").fiducials
 
     # Mirrors the shared [analysis] table. The frequency band is [analysis]; the
     # redshift bounds are analysis.population.model_kwargs. The approximant
@@ -120,7 +116,7 @@ def _():
     # Ordered legend from astrogwb.paper.plotting.DETECTOR_NETWORKS, detectors from
     # the shared [networks] table. Order is load-bearing: detector_network_styles
     # colors by first appearance, matching the other network figures.
-    registry = detector_registry(root=ROOT_DIR)
+    registry = load_config(ROOT_DIR / "config").registry
     NETWORKS: tuple[Network, ...] = tuple(
         Network(name, label, registry.networks[name], registry)
         for name, label in DETECTOR_NETWORKS
@@ -367,21 +363,19 @@ def _(
 ):
     # The expected spectrum: the population's total rate times the mean power
     # of a plain catalog drawn at the fiducials.
-    _population = population_metadata(
-        root=ROOT_DIR,
-        minimum_redshift=minimum_redshift,
-        maximum_redshift=maximum_redshift,
+    _population = load_config(ROOT_DIR / "config").catalog.population.with_model_kwargs(
+        minimum_redshift=minimum_redshift, maximum_redshift=maximum_redshift
     )
     _metadata = CatalogMetadata(
-        waveform=waveform_metadata(
-            root=ROOT_DIR,
-            approximant=approximant,
-            maximum_frequency=maximum_frequency,
-            # Uniform, whatever the shared waveform's grid: this notebook
-            # exists to resolve the SNR peak with fine, even bins.
-            frequency_spacing="linear",
-            frequency_resolution=frequency_resolution,
-            turnover_frequency=None,
+        waveform=WaveformMetadata.model_validate(
+            {
+                **load_config(ROOT_DIR / "config").catalog.waveform.model_dump(),
+                "approximant": approximant,
+                "maximum_frequency": maximum_frequency,
+                "frequency_spacing": "linear",
+                "frequency_resolution": frequency_resolution,
+                "turnover_frequency": None,
+            }
         ),
         population=_population,
         fiducials=FIDUCIALS,

@@ -29,13 +29,14 @@ with app.setup(hide_code=True):
     from xarray import DataTree
 
     from astrogwb.detector import sample_pair_response
+    from astrogwb.distributions.config import DistributionConfig
     from astrogwb.inference import ImportanceGaussianLikelihood
     from astrogwb.inference import Network as LikelihoodNetwork
     from astrogwb.paper.catalogs import (
         read_reference_catalog,
         validate_matching_frequency_grids,
     )
-    from astrogwb.paper.config import detector_registry, fiducials, priors
+    from astrogwb.paper.config import load_config
     from astrogwb.paper.config.runs import CATALOGS_ROOT, ENSEMBLES_ROOT, FIGURES_DIR
     from astrogwb.paper.plotting import (
         DETECTOR_NETWORKS,
@@ -215,12 +216,21 @@ def _():
     num_draws = 20_000  # draws of the posterior, for the plots and summaries
     draw_seed = 44
 
-    FIDUCIALS = fiducials(root=ROOT_DIR)
+    FIDUCIALS = load_config(ROOT_DIR / "config").fiducials
     # The shared U(-10, 10) priors on gamma and kappa are restricted to positive
     # values; every other prior is the shared one.
     positive = {"dist": "Uniform", "kwargs": {"low": 0.0, "high": 10.0}}
-    PRIORS = priors(root=ROOT_DIR, gamma=positive, kappa=positive)
-    registry = detector_registry(root=ROOT_DIR)
+    PRIORS = {
+        name: spec.build()
+        for name, spec in (
+            {
+                **load_config(ROOT_DIR / "config").priors,
+                "gamma": DistributionConfig.model_validate(positive),
+                "kappa": DistributionConfig.model_validate(positive),
+            }
+        ).items()
+    }
+    registry = load_config(ROOT_DIR / "config").registry
 
     # The same inputs as cosmology_grid_posteriors.py, written by
     # Snakefile and only read here: the injection ensemble,

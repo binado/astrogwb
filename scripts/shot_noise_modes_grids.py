@@ -50,9 +50,10 @@ import numpy as np
 from numpy.typing import NDArray
 
 from astrogwb.detector import sample_network_response
+from astrogwb.distributions.config import DistributionConfig
 from astrogwb.inference import ImportanceGaussianLikelihood, Network, shot_noise_modes
 from astrogwb.paper.catalogs import read_reference_catalog
-from astrogwb.paper.config import detector_registry, fiducials, priors
+from astrogwb.paper.config import load_config
 from astrogwb.paper.config.runs import CATALOGS_ROOT, ENSEMBLES_ROOT
 from astrogwb.paper.plotting import DETECTOR_NETWORKS
 from astrogwb.paper.posteriors import network_data
@@ -82,7 +83,7 @@ def _setup(
     dict,
 ]:
     """The notebooks' amplitude-mode likelihood, each network's data, the grid and noise."""
-    params = fiducials()
+    params = load_config().fiducials
     names = [name for name, _ in DETECTOR_NETWORKS]
     # Draw 0 of DATA_SEED: one catalog, as each network records it.
     background = BackgroundArtifact.open(ensemble / f"{DATA_SEED}-0.h5")
@@ -197,7 +198,7 @@ def main() -> None:
     likelihood, observed, frequencies, noise, params = _setup(
         args.ensemble, args.reference_catalog
     )
-    registry = detector_registry()
+    registry = load_config().registry
     names = [name for name, _ in DETECTOR_NETWORKS]
     per_network, networks, sky_s2, response_s2 = {}, {}, [], []
     for name in names:
@@ -266,7 +267,9 @@ def main() -> None:
         "modes": (dataclasses.replace(likelihood, shot_noise="modes"), None),
     }
     variants = {name: all_variants[name] for name in args.variants}
-    cosmology_priors = priors()
+    cosmology_priors = {
+        name: spec.build() for name, spec in (load_config().priors).items()
+    }
     problems = (
         ()
         if args.skip_cosmology
@@ -308,10 +311,20 @@ def main() -> None:
 
     if args.skip_madau:
         return
-    madau_priors = priors(
-        gamma={"dist": "Uniform", "kwargs": {"low": 0.0, "high": 10.0}},
-        kappa={"dist": "Uniform", "kwargs": {"low": 0.0, "high": 10.0}},
-    )
+    madau_priors = {
+        name: spec.build()
+        for name, spec in (
+            {
+                **load_config().priors,
+                "gamma": DistributionConfig.model_validate(
+                    {"dist": "Uniform", "kwargs": {"low": 0.0, "high": 10.0}}
+                ),
+                "kappa": DistributionConfig.model_validate(
+                    {"dist": "Uniform", "kwargs": {"low": 0.0, "high": 10.0}}
+                ),
+            }
+        ).items()
+    }
     z_range = (float(madau_priors["z_peak"].low), float(madau_priors["z_peak"].high))
     gamma_range = (float(madau_priors["gamma"].low), float(madau_priors["gamma"].high))
     kappa_range = (float(madau_priors["kappa"].low), float(madau_priors["kappa"].high))

@@ -118,25 +118,20 @@ For the shared scientific values on their own, without standing in for a
 particular run, read them from the package rather than retyping them:
 
 ```python
-from astrogwb.paper.config import detector_registry, fiducials, networks, priors
+from astrogwb.paper.config import load_config
 
-fid = fiducials()
-detectors = networks()["ET-2L-aligned-CE-Hanford"]
-registry = detector_registry()
+config = load_config()
+fid = config.fiducials
+registry = config.registry
 detectors = registry.build_network("ET-2L-aligned-CE-Hanford")
-higher_h0 = fiducials(H0=70.0)  # keyword overrides, merged over the file
+priors = {name: spec.build() for name, spec in config.priors.items()}
+higher_h0 = {**fid, "H0": 70.0}
 ```
 
-These are the `[fiducials]` and `[priors]` tables of `config/defaults.toml`, and
-the `[networks]` and `[detectors]` tables of `config/detectors.toml` — the shared
-layers the workflow merges into every run, so a notebook cannot drift from what
-the runs sample. `priors()` returns live NumPyro distributions. Each accessor
-also takes keyword overrides merged over the file, so varying one value does
-not mean retyping the table; a network name is hyphenated, so override one by
-unpacking a mapping (`networks(**{"ET-2L-aligned": ("S1", "R1", "C1")})`). Each
-accessor returns fresh settings from one cached merge of the shared layers. To
-see file edits in a long-lived kernel, call
-`astrogwb.paper.config._shared.cache_clear()`.
+`load_config()` merges the top-level TOML files in `config/` with packaged
+detector defaults. Pass a different config directory or ordered override files
+when needed. Each call returns independent settings and reads the current files.
+Prior specifications are built into NumPyro distributions where needed.
 
 ## Checking notebooks
 

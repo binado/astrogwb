@@ -51,18 +51,13 @@ from astrogwb.frequency import frequency_mask
 from astrogwb.gwb.catalog import CatalogMetadata
 from astrogwb.gwb.importance import reference_catalog
 from astrogwb.inference import ImportanceGaussianLikelihood, Network
-from astrogwb.paper.config import (
-    detector_registry,
-    fiducials,
-    population_metadata,
-    waveform_metadata,
-)
+from astrogwb.paper.config import load_config
 from astrogwb.paper.config.runs import CATALOGS_ROOT
 from astrogwb.paper.plotting import DETECTOR_NETWORKS
 from astrogwb.populations import build_population
 from astrogwb.simulators import realization_key
 from astrogwb.utils.io import load, write
-from astrogwb.waveform import waveform_generator
+from astrogwb.waveform import WaveformMetadata, waveform_generator
 
 # The configuration of notebooks/shot_noise_coverage.py.
 APPROXIMANT = "IMRPhenomXAS_NRTidalv3"
@@ -76,25 +71,31 @@ MINIMUM_FREQUENCY, MAXIMUM_FREQUENCY = 2.0, 2048.0
 
 def _likelihood() -> tuple[ImportanceGaussianLikelihood, NDArray[np.float64], dict]:
     """The notebook's amplitude-mode likelihood, its grid and the fiducials."""
-    params = fiducials()
-    waveform = waveform_metadata(
-        approximant=APPROXIMANT,
-        frequency_resolution=0.125,
-        turnover_frequency=100.0,
-        dlogf=0.01266,
+    params = load_config().fiducials
+    waveform = WaveformMetadata.model_validate(
+        {
+            **load_config().catalog.waveform.model_dump(),
+            "approximant": APPROXIMANT,
+            "frequency_resolution": 0.125,
+            "turnover_frequency": 100.0,
+            "dlogf": 0.01266,
+        }
     )
     frequencies = np.asarray(waveform_generator(waveform).frequencies)
-    population = population_metadata(
+    population = load_config().catalog.population.with_model_kwargs(
         minimum_redshift=MINIMUM_REDSHIFT, maximum_redshift=MAXIMUM_REDSHIFT
     )
     metadata = CatalogMetadata(
-        waveform=waveform_metadata(
-            approximant=APPROXIMANT,
-            frequency_spacing="log",
-            minimum_frequency=MINIMUM_FREQUENCY,
-            maximum_frequency=4000.0,
-            frequency_resolution=0.02,
-            turnover_frequency=None,
+        waveform=WaveformMetadata.model_validate(
+            {
+                **load_config().catalog.waveform.model_dump(),
+                "approximant": APPROXIMANT,
+                "frequency_spacing": "log",
+                "minimum_frequency": MINIMUM_FREQUENCY,
+                "maximum_frequency": 4000.0,
+                "frequency_resolution": 0.02,
+                "turnover_frequency": None,
+            }
         ),
         population=population,
         fiducials=params,
@@ -150,7 +151,7 @@ def main() -> None:
     likelihood, frequencies, params = _likelihood()
     template = np.asarray(likelihood.spectrum(params))
     sky_averaged = np.asarray(likelihood.catalog_covariance(params))
-    registry = detector_registry()
+    registry = load_config().registry
     grid = jnp.asarray(frequencies)
 
     columns = [

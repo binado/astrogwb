@@ -33,7 +33,7 @@ with app.setup(hide_code=True):
     )
     from astrogwb.inference import Network as LikelihoodNetwork
     from astrogwb.paper.catalogs import read_reference_catalog
-    from astrogwb.paper.config import detector_registry, fiducials, priors
+    from astrogwb.paper.config import load_config
     from astrogwb.paper.config.runs import CATALOGS_ROOT, ENSEMBLES_ROOT, FIGURES_DIR
     from astrogwb.paper.plotting import (
         DETECTOR_COMPARISON_LEGEND,
@@ -339,9 +339,12 @@ def _():
     network_names = [name for name, _ in DETECTOR_NETWORKS]
     h0_window, h0_size = (60.0, 76.0), 321
 
-    FIDUCIALS = fiducials(root=ROOT_DIR)
-    PRIORS = priors(root=ROOT_DIR)
-    registry = detector_registry(root=ROOT_DIR)
+    FIDUCIALS = load_config(ROOT_DIR / "config").fiducials
+    PRIORS = {
+        name: spec.build()
+        for name, spec in (load_config(ROOT_DIR / "config").priors).items()
+    }
+    registry = load_config(ROOT_DIR / "config").registry
 
     # The inputs, written by Snakefile and only read here:
     # the fiducial ensemble, its detector noise, and the reference catalog of

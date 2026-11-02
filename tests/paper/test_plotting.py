@@ -9,7 +9,7 @@ from repo import REPO_ROOT
 matplotlib = pytest.importorskip("matplotlib")
 
 from astrogwb.paper import plotting
-from astrogwb.paper.config import fiducials
+from astrogwb.paper.config import load_config
 from astrogwb.paper.plotting import Network
 
 
@@ -80,9 +80,9 @@ def test_every_fiducial_parameter_has_a_label() -> None:
     """
     labels = plotting.parameter_labels(REPO_ROOT)
 
-    assert set(fiducials(REPO_ROOT)) <= set(labels)
+    assert set(load_config(REPO_ROOT / "config").fiducials) <= set(labels)
     assert "importance_relative_ess" in labels
-    assert "importance_relative_ess" not in fiducials(REPO_ROOT)
+    assert "importance_relative_ess" not in load_config(REPO_ROOT / "config").fiducials
 
 
 def test_an_unlabelled_name_falls_back_to_itself() -> None:

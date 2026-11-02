@@ -47,7 +47,7 @@ with app.setup(hide_code=True):
     from astrogwb.inference import ImportanceGaussianLikelihood
     from astrogwb.inference import Network as LikelihoodNetwork
     from astrogwb.paper.catalogs import read_reference_catalog
-    from astrogwb.paper.config import detector_registry
+    from astrogwb.paper.config import load_config
     from astrogwb.paper.config.runs import CATALOGS_ROOT, ENSEMBLES_ROOT, FIGURES_DIR
     from astrogwb.paper.plotting import (
         DETECTOR_COMPARISON_LEGEND,
@@ -177,7 +177,7 @@ def _():
     ensemble_population = BackgroundArtifact.open(
         ensemble_root / f"{seed}-0.h5"
     ).config.population
-    registry = detector_registry(root=ROOT_DIR)
+    registry = load_config(ROOT_DIR / "config").registry
 
     network_rows = DETECTOR_NETWORKS
     network_names = [name for name, _ in network_rows]

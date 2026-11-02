@@ -45,7 +45,7 @@ from astrogwb.gwb.importance import INCLINATION_SECOND_MOMENT
 from astrogwb.inference import ImportanceGaussianLikelihood
 from astrogwb.inference import Network as LikelihoodNetwork
 from astrogwb.paper.catalogs import read_reference_catalog
-from astrogwb.paper.config import detector_registry, fiducials
+from astrogwb.paper.config import load_config
 from astrogwb.paper.config.runs import CATALOGS_ROOT, ENSEMBLES_ROOT, FIGURES_DIR
 from astrogwb.paper.plotting import DETECTOR_NETWORKS
 from astrogwb.paper.posteriors import network_pair_data
@@ -218,8 +218,8 @@ def main() -> None:
             table["num_sources"] = 7.134e5  # older CSVs predate the column
         (OUTPUT / "shot_noise_budget.tex").write_text(latex_table(table))
         return
-    fiducial = fiducials(root=ROOT_DIR)
-    registry = detector_registry(root=ROOT_DIR)
+    fiducial = load_config(ROOT_DIR / "config").fiducials
+    registry = load_config(ROOT_DIR / "config").registry
     background = BackgroundArtifact.open(args.ensemble / f"{DATA_SEED}-0.h5")
     noise = background.noise()
     frequencies = background.frequencies
