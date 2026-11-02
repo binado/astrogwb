@@ -10,9 +10,6 @@ from .likelihood import (
     gaussian_log_likelihood,
     shot_noise_log_likelihood,
 )
-from .models import (
-    gwb_likelihood_model,
-)
 from .protocol import LogLikelihood, SpectrumFn
 from .shot_noise import (
     amplitude_direction,
@@ -41,7 +38,6 @@ __all__ = [
     "fisher_matrix_per_bin",
     "gaussian_log_likelihood",
     "grid_log_posterior",
-    "gwb_likelihood_model",
     "low_rank_gaussian_log_likelihood",
     "pad_modes",
     "per_frequency_direction",

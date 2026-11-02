@@ -1,10 +1,8 @@
 r"""Pure Gaussian likelihoods of an observed spectrum, behind one output contract.
 
 A likelihood here is a pytree whose ``__call__`` maps ``params`` to
-``(log L, extras)``: no NumPyro, no sampling sites. NumPyro keeps the priors and
-the constraining transforms
-(:func:`~astrogwb.inference.models.gaussian_gwb_model.gwb_likelihood_model`);
-NUTS, blackjax, optimizers and grids consume the likelihood directly.
+``(log L, extras)``: no NumPyro, no sampling sites. NumPyro can supply priors and constraining transforms; optimizers and grids
+can consume the likelihood directly.
 
 The expensive stage, predicting the spectrum, does not depend on the detector
 network; only :class:`Network` does, at :math:`O(F)` per point. Each class

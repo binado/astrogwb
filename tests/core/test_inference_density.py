@@ -14,6 +14,7 @@ from typing import Any
 import jax
 import jax.numpy as jnp
 import numpy as np
+import numpyro
 import numpyro.distributions as dist
 import pytest
 from jax.typing import ArrayLike
@@ -23,7 +24,6 @@ from astrogwb.inference import (
     GaussianLikelihood,
     LogDensityFn,
     Network,
-    gwb_likelihood_model,
 )
 
 
@@ -36,14 +36,13 @@ def _gwb_model(
     frequency_mask: jax.Array | None = None,
 ) -> None:
     """The shell around a Gaussian likelihood, with the data as keyword arguments."""
-    gwb_likelihood_model(
-        likelihood=GaussianLikelihood(
-            spectral_density_fn,
-            observed_spectral_density,
-            Network(scale, frequency_mask),
-        ),
-        priors=priors,
+    params = {name: numpyro.sample(name, prior) for name, prior in priors.items()}
+    likelihood = GaussianLikelihood(
+        spectral_density_fn,
+        observed_spectral_density,
+        Network(scale, frequency_mask),
     )
+    numpyro.factor("log_likelihood", likelihood(params)[0])
 
 
 @pytest.fixture

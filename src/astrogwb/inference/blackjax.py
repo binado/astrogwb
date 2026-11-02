@@ -9,7 +9,6 @@ Example
 -------
 NUTS with window adaptation on a model built around a likelihood::
 
-    model = partial(gwb_likelihood_model, likelihood=likelihood, priors=priors)
     logdensity_fn, initial_position, postprocess_fn = potential_from_model(
         model, {}, jax.random.key(0)
     )
@@ -50,9 +49,7 @@ def potential_from_model(
     Parameters
     ----------
     model
-        A NumPyro model called as ``model(**model_kwargs)``, such as
-        :func:`~astrogwb.inference.models.gaussian_gwb_model.gwb_likelihood_model`
-        wrapped in a ``functools.partial``.
+        A NumPyro model called as ``model(**model_kwargs)``.
     model_kwargs
         Keyword arguments of ``model``, bound into the returned functions.
     rng_key

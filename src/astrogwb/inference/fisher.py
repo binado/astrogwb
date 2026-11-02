@@ -1,6 +1,6 @@
 r"""Per-frequency Fisher information of the diagonal Gaussian spectrum likelihood.
 
-:func:`~astrogwb.inference.models.gaussian_gwb_model.gwb_likelihood_model`
+:class:`~astrogwb.inference.likelihood.GaussianLikelihood`
 compares a predicted spectrum to data bin by bin,
 :math:`d_i \sim \mathcal{N}(S_i(\theta),
 \sigma_i)`, with a scale that does not depend on :math:`\theta`. Its Fisher

@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Iterator, Mapping
-from functools import partial
 from typing import Any
 
 import jax
 import jax.numpy as jnp
 import numpy as np
+import numpyro
 import numpyro.distributions as dist
 import pytest
 from astrogwb_mock_population import (
@@ -23,7 +23,6 @@ from astrogwb_mock_population import (
     mock_population,
 )
 from jax.typing import ArrayLike
-from numpyro.infer.util import log_density
 
 from astrogwb.background.importance import INCLINATION_SECOND_MOMENT
 from astrogwb.distributions.redshift.base import RedshiftDistribution
@@ -35,7 +34,6 @@ from astrogwb.inference import (
     amplitude_shot_noise_variance,
     gaussian_log_likelihood,
     grid_log_posterior,
-    gwb_likelihood_model,
     shot_noise_log_likelihood,
     shot_noise_modes,
 )
@@ -177,21 +175,6 @@ def test_gaussian_likelihood_accepts_a_spectrum_without_extras(
 
     np.testing.assert_allclose(value, analytic({"h0": 1.1})[0], rtol=1e-12)
     assert extras == {}
-
-
-def test_gwb_likelihood_model_density_is_log_prior_plus_likelihood(
-    analytic: GaussianLikelihood,
-) -> None:
-    prior = dist.Uniform(0.5, 2.0)
-    model = partial(gwb_likelihood_model, likelihood=analytic, priors={"h0": prior})
-
-    log_joint, _ = log_density(model, (), {}, {"h0": jnp.asarray(1.1)})
-
-    np.testing.assert_allclose(
-        log_joint,
-        prior.log_prob(1.1) + analytic({"h0": 1.1})[0],
-        rtol=1e-12,
-    )
 
 
 # --------------------------------------------------------------------------- #
@@ -447,7 +430,11 @@ def test_grid_log_posterior_matches_the_numpyro_log_density_per_network(
         networks=networks,
     )
 
-    density = LogDensityFn(partial(gwb_likelihood_model, priors=priors))
+    def model(likelihood: ImportanceGaussianLikelihood) -> None:
+        params = {name: numpyro.sample(name, prior) for name, prior in priors.items()}
+        numpyro.factor("log_likelihood", likelihood(params)[0])
+
+    density = LogDensityFn(model)
     expected = jnp.stack(
         [
             density(

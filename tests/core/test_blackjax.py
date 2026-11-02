@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from functools import partial
 
 import jax
 import jax.numpy as jnp
 import numpy as np
+import numpyro
 import numpyro.distributions as dist
 import pytest
 from jax.typing import ArrayLike
 
-from astrogwb.inference import GaussianLikelihood, Network, gwb_likelihood_model
+from astrogwb.inference import GaussianLikelihood, Network
 from astrogwb.inference.blackjax import potential_from_model
 
 # Optional extra: `just test-core` does not install it, `just test-integration` does.
@@ -42,11 +42,12 @@ def test_blackjax_nuts_recovers_the_analytic_gaussian_posterior(
     observed: jax.Array, scale: jax.Array
 ) -> None:
     """The amplitude posterior is Gaussian: linear model, Gaussian prior."""
-    model = partial(
-        gwb_likelihood_model,
-        likelihood=GaussianLikelihood(_spectrum, observed, Network(scale)),
-        priors={"amplitude": dist.Normal(0.0, PRIOR_SD)},
-    )
+    likelihood = GaussianLikelihood(_spectrum, observed, Network(scale))
+
+    def model() -> None:
+        amplitude = numpyro.sample("amplitude", dist.Normal(0.0, PRIOR_SD))
+        numpyro.factor("log_likelihood", likelihood({"amplitude": amplitude})[0])
+
     logdensity_fn, initial_position, postprocess_fn = potential_from_model(
         model, {}, jax.random.key(0)
     )
