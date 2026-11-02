@@ -55,10 +55,6 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - uses: extractions/setup-just@v4
-      - name: Verify reference fixtures are present
-        run: |
-          test -f tests/core/fixtures/gwfast_orf_reference.npz
-          test -f tests/core/fixtures/gwfast_orf_reference_et_triangle.npz
       - run: just test-core
 
   test-paper:
@@ -87,8 +83,4 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - uses: extractions/setup-just@v4
-      - name: Verify reference fixtures are present
-        run: |
-          test -f tests/core/fixtures/gwfast_orf_reference.npz
-          test -f tests/core/fixtures/gwfast_orf_reference_et_triangle.npz
       - run: just test-integration

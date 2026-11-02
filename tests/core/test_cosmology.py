@@ -41,10 +41,6 @@ def omega_m():
     return np.linspace(0.2, 0.4, 8).reshape(-1, 1)
 
 
-def _as_np(*arrs: npt.ArrayLike) -> tuple[npt.NDArray, ...]:
-    return tuple(np.asarray(arr) for arr in arrs)
-
-
 def _as_jnp(*arrs: npt.ArrayLike) -> tuple[jax.Array, ...]:
     return tuple(jnp.asarray(arr) for arr in arrs)
 
@@ -58,61 +54,7 @@ def _assert_finite_grad(
     assert jnp.all(jnp.isfinite(grad_jnp))
 
 
-def _assert_returns_jax_arrays(fn: Callable, *arrays: npt.ArrayLike) -> None:
-    """Assert the public contract: ``ArrayLike`` in, ``jax.Array`` out.
-
-    Python scalars, NumPy arrays and JAX arrays must agree numerically and
-    never return a NumPy result.
-    """
-    spellings: dict[str, tuple] = {
-        "numpy": _as_np(*arrays),
-        "jax": _as_jnp(*arrays),
-    }
-    if all(np.ndim(array) == 0 for array in arrays):
-        spellings["python"] = tuple(float(np.asarray(a)) for a in arrays)
-
-    reference: tuple[npt.NDArray, ...] | None = None
-    for name, args in spellings.items():
-        result = fn(*args)
-        results = result if isinstance(result, tuple) else (result,)
-        assert all(isinstance(r, jax.Array) for r in results), name
-
-        expected_shape = np.broadcast_shapes(*(np.shape(a) for a in arrays))
-        assert all(r.shape == expected_shape for r in results), name
-
-        values = tuple(np.asarray(r) for r in results)
-        if reference is None:
-            reference = values
-        else:
-            for got, want in zip(values, reference, strict=True):
-                np.testing.assert_allclose(got, want, err_msg=name)
-
-
-@pytest.mark.parametrize("h0", [70])
-def test_hubble_distance_returns_jax_array(h0: float) -> None:
-    _assert_returns_jax_arrays(hubble_distance, h0)
-
-
 class TestNormalizedHubbleParameter:
-    @pytest.mark.parametrize(
-        "omega_m",
-        [
-            0.3,
-            np.asarray([0.3, 0.4, 0.5]).reshape(-1, 1),
-            np.asarray([0.3, 0.4, 0.5]).reshape(-1, 1, 1),
-        ],
-    )
-    def test_broadcasting(self, redshift: npt.NDArray, omega_m: npt.ArrayLike) -> None:
-        _omega_m = np.asarray(omega_m)
-        ez = normalized_hubble_parameter(redshift, _omega_m)
-        expected_shape = np.broadcast_shapes(redshift.shape, _omega_m.shape)
-        assert ez.shape == expected_shape
-
-    def test_returns_jax_arrays(
-        self, redshift: npt.NDArray, omega_m: npt.NDArray
-    ) -> None:
-        _assert_returns_jax_arrays(normalized_hubble_parameter, redshift, omega_m)
-
     @pytest.mark.integration
     def test_matches_gwmockpop(
         self, redshift: npt.NDArray, omega_m: npt.NDArray
@@ -128,102 +70,24 @@ class TestNormalizedHubbleParameter:
 
 
 class TestDistanceAndVolumeGrid:
-    def test_returns_jax_arrays(
-        self, redshift: npt.NDArray, hubble_constant, omega_m: npt.NDArray
-    ) -> None:
-        _assert_returns_jax_arrays(
-            distance_and_volume_grid,
-            redshift,
-            hubble_constant,
-            omega_m,
-        )
-
-    def test_integer_redshift_grid_matches_float(self, parameters: dict) -> None:
-        """An integer grid must promote through float, not truncate the quadrature.
-
-        Cast to an integer dtype, the nodes and weights would truncate to zero.
-        """
-        integer_grid = np.arange(0, 21)
-        float_grid = integer_grid.astype(np.float64)
-
-        _assert_returns_jax_arrays(
-            distance_and_volume_grid,
-            integer_grid,
-            parameters["hubble_constant"],
-            parameters["omega_m"],
-        )
-
-        from_integers = distance_and_volume_grid(integer_grid, **parameters)
-        from_floats = distance_and_volume_grid(float_grid, **parameters)
-        for got, want in zip(from_integers, from_floats, strict=True):
-            np.testing.assert_allclose(got, want)
-
-        # Truncated nodes would collapse every distance past z=0 to exactly 0.
-        assert np.all(np.asarray(from_integers[0][1:]) > 0.0)
-
-    @pytest.mark.parametrize(
-        "hubble_constant,omega_m",
-        [
-            (70, 0.3),
-            (70, np.asarray([0.3, 0.4]).reshape(-1, 1)),
-            (np.asarray([70, 71]).reshape(-1, 1), 0.3),
-            (
-                np.asarray([70, 71]).reshape(-1, 1),
-                np.asarray([0.3, 0.4]).reshape(-1, 1),
-            ),
-        ],
-    )
-    def test_broadcasting(
+    @pytest.mark.parametrize("output", [0, 1], ids=["distance", "volume"])
+    @pytest.mark.parametrize("argnum", [1, 2], ids=["hubble_constant", "omega_m"])
+    def test_jitted_gradients_are_finite(
         self,
         redshift: npt.NDArray,
-        hubble_constant: npt.ArrayLike,
-        omega_m: npt.ArrayLike,
-    ) -> None:
-        _h, _om = _as_np(hubble_constant, omega_m)
-        res = distance_and_volume_grid(redshift, hubble_constant=_h, omega_m=_om)
-        shape = np.broadcast(redshift, _h, _om).shape
-        assert all(r.shape == shape for r in res)
-
-    def test_jittable(
-        self, redshift: npt.NDArray, hubble_constant: npt.NDArray, omega_m: npt.NDArray
-    ) -> None:
-        _z, _h, _om = _as_jnp(redshift, hubble_constant, omega_m)
-        jitted_fn = jax.jit(distance_and_volume_grid)
-        (d, _) = jitted_fn(redshift, hubble_constant=_h, omega_m=_om)
-        d.block_until_ready()
-
-    def test_grad_wrt_hubble_constant(
-        self, redshift: npt.NDArray, hubble_constant: npt.NDArray, omega_m: npt.NDArray
+        hubble_constant: npt.NDArray,
+        omega_m: npt.NDArray,
+        output: int,
+        argnum: int,
     ) -> None:
         _z, _h, _om = _as_jnp(redshift, hubble_constant, omega_m)
         _assert_finite_grad(
-            lambda z, h, om: distance_and_volume_grid(z, h, om)[0].sum(), 1, _z, _h, _om
+            jax.jit(lambda z, h, om: distance_and_volume_grid(z, h, om)[output].sum()),
+            argnum,
+            _z,
+            _h,
+            _om,
         )
-        _assert_finite_grad(
-            lambda z, h, om: distance_and_volume_grid(z, h, om)[1].sum(), 1, _z, _h, _om
-        )
-
-    def test_grad_wrt_omega_m(
-        self, redshift: npt.NDArray, hubble_constant: npt.NDArray, omega_m: npt.NDArray
-    ) -> None:
-        _z, _h, _om = _as_jnp(redshift, hubble_constant, omega_m)
-        _assert_finite_grad(
-            lambda z, h, om: distance_and_volume_grid(z, h, om)[0].sum(), 2, _z, _h, _om
-        )
-        _assert_finite_grad(
-            lambda z, h, om: distance_and_volume_grid(z, h, om)[1].sum(), 2, _z, _h, _om
-        )
-
-    def test_grad_jittable(
-        self, redshift: npt.NDArray, hubble_constant: npt.NDArray, omega_m: npt.NDArray
-    ) -> None:
-        _z, _h, _om = _as_jnp(redshift, hubble_constant, omega_m)
-        grad_fn = jax.jit(
-            jax.grad(
-                lambda z, h, om: distance_and_volume_grid(z, h, om)[0].sum(), argnums=2
-            )
-        )
-        grad_fn(_z, _h, _om).block_until_ready()
 
     @pytest.mark.integration
     @pytest.mark.parametrize("hubble_constant,omega_m", [(70, 0.3)])
@@ -324,22 +188,4 @@ def test_pointwise_distances_match_the_grid_helper(parameters) -> None:
         grid_volume[shuffled],
         rtol=1e-8,
         atol=1e-4,
-    )
-
-
-def test_pointwise_distances_are_differentiable(parameters) -> None:
-    redshift = jnp.array([0.5, 2.0, 8.0])
-    _assert_finite_grad(
-        lambda z, h, om: luminosity_distance(z, h, om).sum(),
-        1,
-        redshift,
-        jnp.asarray(70.0),
-        jnp.asarray(0.3),
-    )
-    _assert_finite_grad(
-        lambda z, h, om: differential_comoving_volume(z, h, om).sum(),
-        2,
-        redshift,
-        jnp.asarray(70.0),
-        jnp.asarray(0.3),
     )

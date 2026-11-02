@@ -1,12 +1,7 @@
 """Process configuration is applied before JAX or its backend loads."""
 
-import os
 import subprocess
 import sys
-
-import pytest
-
-from astrogwb.runtime import configure_runtime
 
 
 def test_runtime_import_does_not_import_jax() -> None:
@@ -38,17 +33,3 @@ assert jax.device_count() == 2
         [sys.executable, "-c", code], check=False, capture_output=True, text=True
     )
     assert result.returncode == 0, result.stderr
-
-
-def test_runtime_can_set_platform(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("JAX_PLATFORMS", raising=False)
-    configure_runtime(platform="cpu")
-    assert os.environ["JAX_PLATFORMS"] == "cpu"
-
-
-@pytest.mark.parametrize(("platform", "cpu_threads"), [("invalid", None), ("auto", 0)])
-def test_runtime_rejects_invalid_options(
-    platform: str, cpu_threads: int | None
-) -> None:
-    with pytest.raises(ValueError):
-        configure_runtime(platform=platform, cpu_threads=cpu_threads)

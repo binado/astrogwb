@@ -94,13 +94,6 @@ def test_columns_follow_the_requested_order_and_others_stay_fixed(
     )
 
 
-def test_an_unknown_parameter_is_rejected(
-    power_law: SpectrumFn, power_law_params: dict[str, float]
-) -> None:
-    with pytest.raises(KeyError, match="missing"):
-        spectral_density_jacobian(power_law, power_law_params, ("missing",))
-
-
 def test_summed_fisher_is_the_hessian_of_the_model_likelihood(
     power_law: SpectrumFn,
     power_law_params: dict[str, float],

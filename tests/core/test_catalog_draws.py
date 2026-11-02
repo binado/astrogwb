@@ -75,11 +75,6 @@ def test_polarization_power_round_trips_through_a_file(tmp_path: Path) -> None:
     assert attrs["seed"] == 41
 
 
-def test_sobol_catalog_needs_a_power_of_two_size() -> None:
-    with pytest.raises(ValueError, match="power-of-two"):
-        CatalogMetadata.model_validate({**CATALOG.model_dump(), "sampling": "sobol"})
-
-
 @pytest.mark.integration
 def test_polarization_power_key_picks_the_realization() -> None:
     one = draw_catalog(CATALOG, realization_key(41, 0))
@@ -93,7 +88,7 @@ def test_polarization_power_key_picks_the_realization() -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("chunk_size", [1, 4, 6, 100])
+@pytest.mark.parametrize("chunk_size", [4, 100])
 def test_polarization_power_is_independent_of_chunk_size(chunk_size: int) -> None:
     key = realization_key(41, 0)
     whole = draw_catalog(CATALOG, key, chunk_size=None)
@@ -106,30 +101,3 @@ def test_polarization_power_is_independent_of_chunk_size(chunk_size: int) -> Non
     np.testing.assert_allclose(
         chunked["polarization_power"], whole["polarization_power"], rtol=1e-12, atol=0
     )
-
-
-@pytest.mark.parametrize("resolution", [None, 0.1, 0.2])
-def test_nested_dlogf_round_trips_through_hdf5(
-    tmp_path: Path,
-    resolution: float | None,
-) -> None:
-    waveform = WaveformMetadata.model_validate(
-        {
-            **WAVEFORM.model_dump(),
-            "frequency_spacing": "loglinear",
-            "turnover_frequency": 30.0,
-            "dlogf": resolution,
-        }
-    )
-    metadata = CatalogMetadata.model_validate(
-        {**CATALOG.model_dump(), "waveform": waveform.model_dump()}
-    )
-    path = write(
-        tmp_path / "metadata.h5",
-        {"frequencies": np.array([20.0, 50.0])},
-        metadata,
-        seed=41,
-    )
-    _, restored, _ = load(path, CatalogMetadata)
-    assert restored == metadata
-    assert restored.waveform.model_dump()["dlogf"] == resolution

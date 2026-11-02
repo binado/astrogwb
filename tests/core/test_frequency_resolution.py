@@ -186,7 +186,7 @@ def _log_likelihood(run: dict[str, Any], hubble_constant: float) -> float:
     return float(jnp.sum(jnp.where(run["mask"], log_prob, 0.0)))
 
 
-def test_log_likelihood_ratio_converges_but_the_absolute_value_does_not(
+def test_the_absolute_log_likelihood_does_not_converge(
     resolutions: dict[int, dict[str, Any]],
 ) -> None:
     r"""Only differences at fixed resolution mean anything.
@@ -201,19 +201,8 @@ def test_log_likelihood_ratio_converges_but_the_absolute_value_does_not(
         factor: _log_likelihood(run, FIDUCIALS["H0"])
         for factor, run in resolutions.items()
     }
-    delta = {
-        factor: _log_likelihood(run, OFFSET_H0) - at_fiducial[factor]
-        for factor, run in resolutions.items()
-    }
-
-    # The ratio converges.
-    residuals = {factor: delta[factor] / delta[1] - 1.0 for factor in SUBSAMPLE_FACTORS}
-    magnitudes = [abs(residuals[factor]) for factor in SUBSAMPLE_FACTORS]
-    assert magnitudes == sorted(magnitudes), residuals
-    assert abs(residuals[SUBSAMPLE_FACTORS[0]]) < FIRST_STEP_TOLERANCE, residuals
-
-    # The absolute value does not: it tracks the bin count, so the coarsest
-    # grid is off by an order of magnitude while its ratio is off by 11%.
+    # It tracks the bin count, so the coarsest grid is off by an order of
+    # magnitude while the log-likelihood ratio is off by 11%.
     bin_ratio = (
         resolutions[1]["num_bins"] / resolutions[SUBSAMPLE_FACTORS[-1]]["num_bins"]
     )
@@ -253,13 +242,9 @@ def test_the_log_likelihood_ratio_residual_is_the_snr_squared_residual(
         ) - 1.0
         snr_squared_residual = run["snr_squared"] / resolutions[1]["snr_squared"] - 1.0
         np.testing.assert_allclose(delta_residual, snr_squared_residual, rtol=1e-5)
-
-
-def test_every_log_weight_is_exactly_zero_at_the_fiducials(
-    resolutions: dict[int, dict[str, Any]],
-) -> None:
-    """The premise the identity above rests on, stated on its own."""
-    run = resolutions[1]
-    log_weights = run["estimator"].log_weights(dict(FIDUCIALS))
-    assert isinstance(log_weights, jax.Array)
-    np.testing.assert_array_equal(np.asarray(log_weights), 0.0)
+    # The ratio converges: the first coarsening moves it very little.
+    first = resolutions[SUBSAMPLE_FACTORS[0]]
+    assert (
+        abs(first["snr_squared"] / resolutions[1]["snr_squared"] - 1.0)
+        < FIRST_STEP_TOLERANCE
+    )

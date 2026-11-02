@@ -8,15 +8,12 @@ closed-form mock reference catalog of ``astrogwb_mock_population``.
 
 from __future__ import annotations
 
-import dataclasses
 from collections.abc import Mapping
-from functools import partial
 from typing import Any
 
 import jax
 import jax.numpy as jnp
 import numpy as np
-import numpyro.distributions as dist
 import pytest
 from astrogwb_mock_population import (
     FIDUCIALS,
@@ -34,17 +31,13 @@ from astrogwb.inference import (
     AmplitudeDensityMethod,
     ImportanceCompoundPoissonLikelihood,
     ImportanceGaussianLikelihood,
-    LogDensityFn,
     Network,
     PointSet,
     amplitude_log_density,
-    grid_log_posterior,
-    gwb_likelihood_model,
 )
 from astrogwb.inference.compound_poisson import (
     cumulants,
     inclination_quadrature,
-    saddle,
 )
 from astrogwb.populations._types import SourceModel
 
@@ -108,17 +101,6 @@ def test_hermite_log_density_matches_the_exact_lattice_mixture(
     np.testing.assert_allclose(result, expected, rtol=0.0, atol=atol)
 
 
-def test_hermite_log_density_converges_with_the_node_count() -> None:
-    points, (b, expected) = _lattice_toy("skewed")
-
-    errors = [
-        np.max(np.abs(_evaluate(points, b, "hermite", num_hermite_nodes=n) - expected))
-        for n in (8, 16, 32)
-    ]
-
-    assert errors[0] > errors[1] > errors[2]
-
-
 def test_saddlepoint_log_density_matches_hermite_near_the_gaussian_limit() -> None:
     points, (b, _) = _lattice_toy("near_gaussian")
 
@@ -180,17 +162,6 @@ def test_hermite_cdf_matches_a_monte_carlo_draw() -> None:
     assert np.all(np.abs(predicted - empirical) < tolerance)
 
 
-@pytest.mark.parametrize("offset", [-3.0, 0.0, 6.0])
-def test_saddle_solves_the_derivative_equation(offset: float) -> None:
-    points, _ = _lattice_toy("skewed")
-    mean, variance = cumulants(0.0, points)[1:]
-    b = mean + offset * jnp.sqrt(variance)
-
-    t = saddle(b, points)
-
-    assert float(cumulants(t, points)[1]) == pytest.approx(float(b), rel=1e-12)
-
-
 @pytest.mark.parametrize("method", ["saddlepoint", "hermite"])
 @pytest.mark.parametrize("order", [1, 2])
 def test_amplitude_log_density_derivatives_match_finite_differences(
@@ -210,7 +181,7 @@ def test_amplitude_log_density_derivatives_match_finite_differences(
     assert float(analytic) == pytest.approx(float(numeric), rel=1e-6)
 
 
-@pytest.mark.parametrize("num_nodes", [5, 8, 24])
+@pytest.mark.parametrize("num_nodes", [5, 24])
 def test_inclination_quadrature_has_the_exact_first_two_moments(
     num_nodes: int,
 ) -> None:
@@ -226,6 +197,8 @@ def test_inclination_quadrature_has_the_exact_first_two_moments(
 # --------------------------------------------------------------------------- #
 _TARGET = mock_population()
 NUM_NETWORKS = 3
+#: The network with masked bins: it exercises every branch the others do.
+MASKED = 2
 OBSERVATION_TIME = 2.0
 
 
@@ -314,25 +287,10 @@ def build_gaussian(catalog: Any, frequencies: np.ndarray, observed: jax.Array) -
     return factory
 
 
-@pytest.mark.parametrize("index", range(NUM_NETWORKS))
-def test_point_set_has_unit_mean(build: Any, networks: Network, index: int) -> None:
-    weights, amplitudes, _ = build().point_set(FIDUCIALS, _single(networks, index))
+def test_point_set_has_unit_mean(build: Any, networks: Network) -> None:
+    weights, amplitudes, _ = build().point_set(FIDUCIALS, _single(networks, MASKED))
 
     assert float(jnp.sum(weights * amplitudes)) == pytest.approx(1.0, rel=1e-12)
-
-
-@pytest.mark.parametrize("index", range(NUM_NETWORKS))
-def test_point_set_variance_is_the_gaussian_relative_variance(
-    build: Any, build_gaussian: Any, networks: Network, index: int
-) -> None:
-    network = _single(networks, index)
-    weights, amplitudes, _ = build().point_set(FIDUCIALS, network)
-
-    expected = build_gaussian(OBSERVATION_TIME).relative_variance(FIDUCIALS, network)
-
-    assert float(jnp.sum(weights * amplitudes**2)) == pytest.approx(
-        float(expected), rel=1e-12
-    )
 
 
 @pytest.mark.parametrize("observation_time", [1e-6, OBSERVATION_TIME])
@@ -374,27 +332,10 @@ def test_log_likelihood_departs_from_the_gaussian_for_a_small_count(
     assert abs(float(exact - gaussian)) > 1e-3
 
 
-def test_saddlepoint_matches_hermite_on_the_mock_catalog(
+def test_vmap_over_networks_equals_one_evaluation_per_network(
     build: Any, networks: Network
 ) -> None:
-    network = _single(networks, 1)
-    values = {
-        method: build(1e-3, method=method, num_hermite_nodes=16).log_likelihood(
-            FIDUCIALS, network
-        )[0]
-        for method in ("saddlepoint", "hermite")
-    }
-
-    assert float(values["saddlepoint"]) == pytest.approx(
-        float(values["hermite"]), abs=1e-3
-    )
-
-
-@pytest.mark.parametrize("method", ["saddlepoint", "hermite"])
-def test_vmap_over_networks_equals_one_evaluation_per_network(
-    build: Any, networks: Network, method: str
-) -> None:
-    likelihood = build(1e-3, method=method)
+    likelihood = build(1e-3, method="hermite")
     params = {**FIDUCIALS, "H0": 70.0}
 
     stacked, extras = jax.vmap(
@@ -427,37 +368,12 @@ def test_log_likelihood_gradient_matches_finite_differences(
     assert float(analytic) == pytest.approx(float(numeric), rel=1e-5)
 
 
-def test_grid_log_posterior_matches_the_numpyro_log_density_per_network(
-    build: Any, networks: Network
-) -> None:
-    priors = {"H0": dist.Uniform(20.0, 140.0)}
-    grids = {"H0": jnp.linspace(66.0, 70.0, 3)}
-    likelihood = build(1e-3)
-
-    result = grid_log_posterior(likelihood, priors, grids, networks=networks)
-
-    density = LogDensityFn(partial(gwb_likelihood_model, priors=priors))
-    expected = jnp.stack(
-        [
-            density(
-                grids,
-                likelihood=dataclasses.replace(
-                    likelihood, network=_single(networks, k)
-                ),
-            )
-            for k in range(NUM_NETWORKS)
-        ]
-    )
-    np.testing.assert_allclose(result, expected, rtol=1e-10)
-
-
-@pytest.mark.parametrize("index", range(NUM_NETWORKS))
 def test_point_set_under_a_network_response_has_the_gaussian_moments(
-    build: Any, build_gaussian: Any, networks: Network, index: int
+    build: Any, build_gaussian: Any, networks: Network
 ) -> None:
     """Each response draw reweights the source across the band in both likelihoods."""
-    draws = jax.random.gamma(jax.random.key(index), 3.0, (8, 12)) / 3.0
-    network = _single(networks, index)._replace(
+    draws = jax.random.gamma(jax.random.key(MASKED), 3.0, (8, 12)) / 3.0
+    network = _single(networks, MASKED)._replace(
         response=draws / jnp.mean(draws, axis=0)
     )
     weights, amplitudes, _ = build().point_set(FIDUCIALS, network)

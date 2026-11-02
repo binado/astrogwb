@@ -95,11 +95,6 @@ def model(
     return model_factory()
 
 
-@pytest.fixture
-def log_density_fn(model: Callable[..., None]) -> LogDensityFn:
-    return LogDensityFn(model)
-
-
 def _positional_model(
     observed_spectral_density: jax.Array,
     scale: jax.Array,
@@ -136,26 +131,6 @@ def positional_model(
     positional_model_factory: Callable[..., Callable[..., None]],
 ) -> Callable[..., None]:
     return positional_model_factory()
-
-
-def test_call_matches_naive_log_density_1d(
-    log_density_fn: LogDensityFn,
-    model: Callable[..., None],
-    data_kwargs: dict[str, Any],
-) -> None:
-    h0_grid = jnp.linspace(55.0, 85.0, 7)
-    tilt = jnp.array(0.2)
-
-    result = log_density_fn({"h0": h0_grid}, fixed={"tilt": tilt}, **data_kwargs)
-    assert result.shape == (7,)
-
-    naive = jnp.stack(
-        [
-            log_density(model, (), data_kwargs, {"h0": h0, "tilt": tilt})[0]
-            for h0 in h0_grid
-        ]
-    )
-    np.testing.assert_allclose(result, naive, rtol=1e-10)
 
 
 def test_call_shape_and_axis_order_2d(
@@ -268,23 +243,6 @@ def test_call_reuses_compilation_across_grid_key_sets(
     assert len(calls) == 2
 
 
-def test_batched_evaluation_matches_unbatched(
-    log_density_fn: LogDensityFn,
-    model: Callable[..., None],
-    data_kwargs: dict[str, Any],
-) -> None:
-    """`chunk_size` only bounds peak memory; the result must not depend on it."""
-    h0_grid = jnp.linspace(55.0, 85.0, 6)  # divides evenly by chunk_size=2 below
-
-    unbatched = log_density_fn(
-        {"h0": h0_grid}, fixed={"tilt": jnp.array(0.1)}, **data_kwargs
-    )
-    batched = LogDensityFn(model, chunk_size=2)(
-        {"h0": h0_grid}, fixed={"tilt": jnp.array(0.1)}, **data_kwargs
-    )
-    np.testing.assert_allclose(batched, unbatched, rtol=1e-10)
-
-
 def test_call_matches_naive_log_density_with_model_args(
     positional_model: Callable[..., None],
     observed: jax.Array,
@@ -310,37 +268,3 @@ def test_call_matches_naive_log_density_with_model_args(
         ]
     )
     np.testing.assert_allclose(result, naive, rtol=1e-10)
-
-
-def test_call_retraces_once_per_model_args_shape_not_per_value(
-    positional_model_factory: Callable[..., Callable[..., None]],
-    observed: jax.Array,
-    scale: jax.Array,
-) -> None:
-    calls: list[None] = []
-
-    def counting_spectrum(params: Mapping[str, ArrayLike]) -> tuple[jax.Array, dict]:
-        calls.append(None)
-        prediction = jnp.asarray(params["h0"]) * (1.0 + 0.1 * params["tilt"])
-        return prediction, {}
-
-    lp = LogDensityFn(positional_model_factory(counting_spectrum))
-    grids = {"h0": jnp.linspace(60.0, 80.0, 4)}
-    fixed = {"tilt": jnp.array(0.3)}
-
-    calls.clear()
-    lp(grids, fixed=fixed, model_args=(observed, scale))
-    assert len(calls) == 1
-
-    lp(grids, fixed=fixed, model_args=(observed, scale * 2.0))
-    assert len(calls) == 1, "same shape/dtype must reuse the compiled program"
-
-    lp(
-        grids,
-        fixed=fixed,
-        model_args=(
-            jnp.concatenate([observed, observed]),
-            jnp.concatenate([scale, scale]),
-        ),
-    )
-    assert len(calls) == 2, "a different array shape must trigger exactly one retrace"

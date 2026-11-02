@@ -31,7 +31,7 @@ test-core:
         --extra cli --group test \
         pytest tests/core -m "not integration"
 
-# Paper application tests: configuration, CLI, runtime, plotting.
+# Paper application tests: configuration, CLI, runtime.
 test-paper:
     uv run --frozen --isolated --no-default-groups \
         --extra notebook --group test \

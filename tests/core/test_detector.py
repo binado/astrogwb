@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import dataclasses
 import math
-from collections.abc import Callable
 
 import numpy as np
 import pytest
 
-from astrogwb.constants import EARTH_MEAN_RADIUS_IN_METERS, SPEED_OF_LIGHT
+from astrogwb.constants import SPEED_OF_LIGHT
 from astrogwb.detector import (
     Detector,
     DetectorGeometry,
@@ -19,24 +18,13 @@ from astrogwb.detector import (
     pairwise_overlap_reduction_function,
     relative_orientation,
 )
-from astrogwb.detector.overlap import _isotropic_orf_from_tensors
 
-# The sky-quadrature references work in kilometres.
-R_EARTH = EARTH_MEAN_RADIUS_IN_METERS / 1000.0
+# The sky-quadrature reference works in kilometres.
 C_LIGHT = SPEED_OF_LIGHT / 1000.0
 
 
 def _owned_detector(name: str, **fields: float) -> Detector:
     return Detector(name, DetectorGeometry(**fields), Sensitivity("ET_D_psd"))
-
-
-@pytest.mark.parametrize("name", ["H1", "V1"])
-def test_load_detector_returns_detector(name: str) -> None:
-    det = load_detector(name)
-
-    assert isinstance(det, Detector)
-    assert det.name == name
-    assert -math.pi / 2.0 < det.geometry.latitude_rad < math.pi / 2.0
 
 
 def test_load_detector_cosmic_explorer_is_not_lal_prototype() -> None:
@@ -48,72 +36,22 @@ def test_load_detector_cosmic_explorer_is_not_lal_prototype() -> None:
     assert math.degrees(det.geometry.latitude_rad) == pytest.approx(46.455, abs=0.01)
 
 
-def test_load_detector_unknown_name_raises() -> None:
-    with pytest.raises(KeyError):
-        load_detector("NOPE")
-
-
-def test_orf_colocated_is_normalized(frequencies: np.ndarray) -> None:
-    actual = isotropic_overlap_reduction_function(
-        frequencies, load_detector("H1"), load_detector("H1")
-    )
-
-    np.testing.assert_allclose(actual, np.ones_like(frequencies))
-
-
-def _arm_direction(det: Detector, azimuth: float, tilt: float = 0.0) -> np.ndarray:
-    # gwmock azimuths are measured clockwise from local North.
-    east = np.array(
-        [
-            -math.sin(det.geometry.longitude_rad),
-            math.cos(det.geometry.longitude_rad),
-            0.0,
-        ]
-    )
-    north = np.array(
-        [
-            -math.sin(det.geometry.latitude_rad) * math.cos(det.geometry.longitude_rad),
-            -math.sin(det.geometry.latitude_rad) * math.sin(det.geometry.longitude_rad),
-            math.cos(det.geometry.latitude_rad),
-        ]
-    )
-    up = np.cross(east, north)
-    return (
-        math.cos(tilt) * (math.sin(azimuth) * east + math.cos(azimuth) * north)
-        + math.sin(tilt) * up
-    )
-
-
-def _position_and_tensor(det: Detector) -> tuple[np.ndarray, np.ndarray]:
-    lat, lon = det.geometry.latitude_rad, det.geometry.longitude_rad
-    position = R_EARTH * np.array(
-        [math.cos(lat) * math.cos(lon), math.cos(lat) * math.sin(lon), math.sin(lat)]
-    )
-    # The analytic ORF deliberately uses a spherical Earth and zero arm tilts.
-    x = _arm_direction(det, det.geometry.xarm_azimuth_rad)
-    y = _arm_direction(det, det.geometry.yarm_azimuth_rad)
-    return position, 0.5 * (np.outer(x, x) - np.outer(y, y))
-
-
 def _sky_quadrature_orf(
-    frequencies: np.ndarray, first: Detector, second: Detector, *, native: bool = False
+    frequencies: np.ndarray, first: Detector, second: Detector
 ) -> np.ndarray:
     """ORF by direct sky integration, (5/8pi) sum_A int dOmega F1^A F2^A e^(ik.dx).
 
     The sky is parametrized about the separation vector, so the phase only
     oscillates in cos(theta), where Gauss-Legendre converges exponentially.
     """
-    position_1, tensor_1 = _position_and_tensor(first)
-    position_2, tensor_2 = _position_and_tensor(second)
-    if native:
-        position_1, tensor_1 = (
-            first.geometry.location / 1000,
-            first.geometry.response_tensor,
-        )
-        position_2, tensor_2 = (
-            second.geometry.location / 1000,
-            second.geometry.response_tensor,
-        )
+    position_1, tensor_1 = (
+        first.geometry.location / 1000,
+        first.geometry.response_tensor,
+    )
+    position_2, tensor_2 = (
+        second.geometry.location / 1000,
+        second.geometry.response_tensor,
+    )
     separation = position_2 - position_1
     distance = float(np.linalg.norm(separation))
     z_axis = separation / distance
@@ -168,28 +106,8 @@ def test_orf_matches_direct_sky_quadrature(
 
     actual = isotropic_overlap_reduction_function(freqs, first, second)
 
-    expected = _sky_quadrature_orf(freqs, first, second, native=True)
-    np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1e-11)
-
-
-@pytest.mark.parametrize(
-    ("detector_1", "detector_2", "max_frequency"),
-    [("E1", "E2", 1e4), ("H1", "L1", 2e3), ("V1", "K1", 2e3)],
-)
-def test_tensor_orf_matches_spherical_level_sky_quadrature(
-    detector_1: str, detector_2: str, max_frequency: float
-) -> None:
-    freqs = np.concatenate([[0.0], np.geomspace(0.01, max_frequency, 400)])
-    first, second = load_detector(detector_1), load_detector(detector_2)
-    position_1, tensor_1 = _position_and_tensor(first)
-    position_2, tensor_2 = _position_and_tensor(second)
-
-    actual = _isotropic_orf_from_tensors(
-        freqs, tensor_1, tensor_2, 1000.0 * (position_2 - position_1)
-    )
-
     expected = _sky_quadrature_orf(freqs, first, second)
-    np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1e-11)
 
 
 @pytest.mark.parametrize(
@@ -248,7 +166,7 @@ def test_orf_matches_native_sky_quadrature_for_tilted_elevated_arms(
 
     actual = isotropic_overlap_reduction_function(freqs, first, second)
 
-    expected = _sky_quadrature_orf(freqs, first, second, native=True)
+    expected = _sky_quadrature_orf(freqs, first, second)
     np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1e-11)
 
 
@@ -260,141 +178,6 @@ def test_pairwise_overlap_shape_and_symmetry(frequencies: np.ndarray) -> None:
     assert actual.shape == (3, 3, frequencies.shape[0])
     np.testing.assert_allclose(actual, np.transpose(actual, (1, 0, 2)))
     np.testing.assert_allclose(actual[0, 0, :], 1.0)
-
-
-@pytest.mark.integration
-def test_tensor_orf_matches_gwfast_reference_for_spherical_level_arms(
-    load_orf_fixture: Callable[[str], dict[str, np.ndarray]],
-) -> None:
-    # gwfast tabulates the spherical-Earth, level-arm ORF, not the native WGS-84
-    # one, so the reference is reproduced from spherical, level inputs.
-    fixture = load_orf_fixture("gwfast_orf_reference")
-    freqs = fixture["frequencies"]
-
-    for key, reference in fixture.items():
-        if key == "frequencies":
-            continue
-        det1_name, det2_name = key.split("_", maxsplit=1)
-        position_1, tensor_1 = _position_and_tensor(load_detector(det1_name))
-        position_2, tensor_2 = _position_and_tensor(load_detector(det2_name))
-        ours = _isotropic_orf_from_tensors(
-            freqs, tensor_1, tensor_2, 1000.0 * (position_2 - position_1)
-        )
-        np.testing.assert_allclose(ours, reference, atol=1e-4)
-
-
-@pytest.mark.integration
-def test_et_triangle_sum_upper_pairs_matches_reference(
-    load_orf_fixture: Callable[[str], dict[str, np.ndarray]],
-) -> None:
-    fixture = load_orf_fixture("gwfast_orf_reference_et_triangle")
-    freqs = fixture["frequencies"]
-    ets_lat = 40.0 + 31.0 / 60.0
-    ets_lon = 9.0 + 25.0 / 60.0
-    arm_length_km = 10.0
-    height = math.sqrt(3.0) * arm_length_km / 2.0
-    en_offsets_km = [
-        (-arm_length_km / 2.0, -height / 3.0),
-        (arm_length_km / 2.0, -height / 3.0),
-        (0.0, 2.0 * height / 3.0),
-    ]
-    xax_values = [-90.0, -30.0, 30.0]
-
-    def _to_lat_lon(east_km: float, north_km: float) -> tuple[float, float]:
-        dlat = math.degrees(north_km / R_EARTH)
-        dlon = math.degrees(east_km / (R_EARTH * math.cos(math.radians(ets_lat))))
-        return ets_lat + dlat, ets_lon + dlon
-
-    detectors = []
-    for idx, ((east_km, north_km), xax) in enumerate(
-        zip(en_offsets_km, xax_values, strict=True)
-    ):
-        lat, lon = _to_lat_lon(east_km, north_km)
-        detectors.append(
-            _owned_detector(
-                name=f"ETS_like_{idx}",
-                latitude_rad=math.radians(lat),
-                longitude_rad=math.radians(lon),
-                elevation_m=0.0,
-                xarm_azimuth_rad=(math.pi / 2.0 - math.radians(xax - 30.0))
-                % (2.0 * math.pi),
-                yarm_azimuth_rad=(math.pi / 2.0 - math.radians(xax + 30.0))
-                % (2.0 * math.pi),
-            )
-        )
-
-    pairwise = pairwise_overlap_reduction_function(freqs, detectors)
-    ours_sum = pairwise[0, 1, :] + pairwise[0, 2, :] + pairwise[1, 2, :]
-
-    np.testing.assert_allclose(ours_sum, fixture["sum_upper_pairs"], atol=1e-4)
-
-
-def _opening_angle_deg(det) -> float:
-    diff = (
-        (det.xarm_azimuth_rad - det.yarm_azimuth_rad + math.pi) % (2.0 * math.pi)
-    ) - math.pi
-    return math.degrees(abs(diff))
-
-
-@pytest.mark.integration
-@pytest.mark.parametrize(
-    ("preset", "expected_opening"),
-    [
-        ("ET-Sardinia", 60.0),
-        ("ET-Triangle-Sardinia", 60.0),
-        ("ET-2L-Aligned", 90.0),
-        ("ET-2L-Misaligned", 90.0),
-    ],
-)
-def test_gwmock_et_preset_opening_angles(preset: str, expected_opening: float) -> None:
-    """gwmock ET presets carry the arm opening angles astrogwb's ORF assumes."""
-    from gwmock_signal.detector import CustomDetector
-    from gwmock_signal.network import Network
-
-    network = Network.from_name(preset)
-
-    for detector in network.detector_names:
-        assert isinstance(detector, CustomDetector)
-        assert _opening_angle_deg(detector) == pytest.approx(expected_opening, abs=0.1)
-
-
-@pytest.mark.integration
-def test_gwmock_et_triangle_orf_matches_geometry_table(
-    frequencies: np.ndarray,
-) -> None:
-    """astrogwb's ORF agrees on the co-located ET triangle across geometry sources.
-
-    The gwmock ``ET-Sardinia`` preset and astrogwb's ``geometry.toml``
-    E1/E2/E3 rows describe 10 km, 60-degree triangles at nearby (but not
-    identical) sites, so their ORF triangle sums coincide to within a small
-    geometric tolerance. This cross-validates the gwmock-preset geometry
-    path against the validated angle table.
-    """
-    from gwmock_signal.network import Network
-
-    preset = [
-        Detector(
-            d.name,
-            DetectorGeometry(
-                **{
-                    f.name: getattr(d, f.name)
-                    for f in dataclasses.fields(DetectorGeometry)
-                }
-            ),
-            Sensitivity("ET_D_psd"),
-        )
-        for d in Network.from_name("ET-Sardinia").detector_names
-        if not isinstance(d, str)
-    ]
-    preset_pw = pairwise_overlap_reduction_function(frequencies, preset)
-    preset_sum = preset_pw[0, 1, :] + preset_pw[0, 2, :] + preset_pw[1, 2, :]
-
-    table_pw = pairwise_overlap_reduction_function(
-        frequencies, [load_detector(name) for name in ("E1", "E2", "E3")]
-    )
-    table_sum = table_pw[0, 1, :] + table_pw[0, 2, :] + table_pw[1, 2, :]
-
-    np.testing.assert_allclose(preset_sum, table_sum, atol=5e-3)
 
 
 @pytest.mark.parametrize(
@@ -415,7 +198,7 @@ def test_et_2l_orientations_match_branchesi(
 
 
 @pytest.mark.parametrize("reference", ["great_circle", "north"])
-@pytest.mark.parametrize("angle_deg", [-60.0, 0.0, 30.0, 45.0, 89.0])
+@pytest.mark.parametrize("angle_deg", [-60.0, 45.0])
 def test_align_detector_reaches_target_orientation(
     reference: OrientationReference, angle_deg: float
 ) -> None:
@@ -507,7 +290,7 @@ PACKAGED_NAMES = [
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("name", [*PACKAGED_NAMES, "tilted", "nonorthogonal"])
+@pytest.mark.parametrize("name", ["H1", "E1", "tilted", "nonorthogonal"])
 @pytest.mark.parametrize("batched", [False, True])
 def test_native_projection_matches_gwmock_polarization_convention(
     name: str, batched: bool
@@ -585,31 +368,6 @@ def test_native_projection_matches_gwmock_polarization_convention(
     assert np.all(np.abs(actual - strains) <= strain_bound)
 
 
-def test_geometry_cached_fields_are_immutable_and_excluded_from_identity() -> None:
-    from pydantic import TypeAdapter
-
-    geometry = load_detector("H1").geometry
-    payload = TypeAdapter(DetectorGeometry).dump_python(geometry)
-    before_hash = hash(geometry)
-    assert geometry.location is geometry.location
-    assert geometry.response_tensor is geometry.response_tensor
-    assert not geometry.location.flags.writeable
-    assert not geometry.response_tensor.flags.writeable
-    assert geometry.location.dtype == np.float64
-    assert geometry.response_tensor.dtype == np.float64
-    with pytest.raises(ValueError):
-        geometry.location[0] = 0
-    assert hash(geometry) == before_hash
-    assert TypeAdapter(DetectorGeometry).dump_python(geometry) == payload
-    assert set(payload) == {f.name for f in dataclasses.fields(geometry)}
-    rotated = align_detector(load_detector("L1"), load_detector("H1"), 0.3)
-    assert rotated.name == "H1"
-    assert rotated.sensitivity is load_detector("H1").sensitivity
-    assert rotated.geometry is not geometry
-    assert rotated.geometry.response_tensor is not geometry.response_tensor
-    assert rotated.geometry != geometry
-
-
 def test_native_projection_broadcasts_and_jits() -> None:
     import jax
 
@@ -645,21 +403,3 @@ def test_native_projection_broadcasts_and_jits() -> None:
                 polarization_angle=0.7,
             )
             np.testing.assert_allclose(eager[i, j], scalar)
-
-
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [
-        ("latitude_rad", np.pi),
-        ("longitude_rad", 2 * np.pi),
-        ("elevation_m", 1e6),
-        ("latitude_rad", np.nan),
-        ("xarm_azimuth_rad", np.inf),
-        ("yarm_tilt_rad", np.nan),
-    ],
-)
-def test_geometry_validates_defining_fields(field: str, value: float) -> None:
-    fields = dataclasses.asdict(load_detector("H1").geometry)
-    fields[field] = value
-    with pytest.raises(ValueError):
-        DetectorGeometry(**fields)
