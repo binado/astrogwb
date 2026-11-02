@@ -451,6 +451,37 @@ def test_grid_log_posterior_matches_the_numpyro_log_density_per_network(
     np.testing.assert_allclose(result, expected, rtol=1e-10)
 
 
+def test_grid_log_posterior_compiles_once_per_likelihood_structure(
+    catalog: Any, networks: Network, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    traces: list[None] = []
+    log_likelihood = ImportanceGaussianLikelihood.log_likelihood
+
+    def counted(self: Any, *args: Any, **kwargs: Any) -> Any:
+        traces.append(None)
+        return log_likelihood(self, *args, **kwargs)
+
+    monkeypatch.setattr(ImportanceGaussianLikelihood, "log_likelihood", counted)
+    priors = {"H0": dist.Uniform(20.0, 140.0), "Omega_m": dist.Normal(0.3096, 0.006)}
+    grids = {"H0": jnp.linspace(66.0, 70.0, 3)}
+    fixed = {"Omega_m": jnp.asarray(0.31)}
+
+    first = _likelihood(catalog, None)
+    second = dataclasses.replace(first, power=1.1 * first.power)
+    results = [
+        grid_log_posterior(lik, priors, grids, fixed=fixed, networks=networks)
+        for lik in (first, second)
+    ]
+
+    assert len(traces) == 1
+    assert not np.allclose(results[0], results[1], rtol=1e-6, atol=0.0)
+
+    grid_log_posterior(
+        _likelihood(catalog, "amplitude"), priors, grids, fixed=fixed, networks=networks
+    )
+    assert len(traces) == 2
+
+
 def test_grid_log_posterior_outside_the_prior_support_is_negative_infinite(
     catalog: Any, networks: Network
 ) -> None:
