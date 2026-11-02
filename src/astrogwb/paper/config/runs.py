@@ -18,23 +18,16 @@ waveform and population by reference. A reference resolves against the *final*
 merge, and a reference to a table also merges as that table: a layer that sets
 a key under one overrides that field and keeps the rest. A table that is a base
 plus additions is written ``extends = "${a.b}"`` (:data:`~astrogwb.config.MERGE_KEY`).
-
-Entrypoints that take layers on argv (see :func:`add_config_arguments`) merge
-them in process with :func:`load_merged_config`.
 """
 
 from __future__ import annotations
 
-import argparse
-import logging
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 from astrogwb.config import merge_layers
 from astrogwb.detector.config import DETECTOR_DEFAULT_PATHS
-
-logger = logging.getLogger(__name__)
 
 #: Relative to the working directory, the repository root for every script and
 #: notebook.
@@ -49,9 +42,6 @@ DETECTORS_PATH = CONFIG_DIR / "detectors.toml"
 
 #: Every shared layer, in merge order.
 SHARED_LAYER_PATHS = (DEFAULTS_PATH, WAVEFORMS_PATH, POPULATIONS_PATH, DETECTORS_PATH)
-
-#: Presentation settings, read by `astrogwb.paper.plotting`; not a config layer.
-PLOTTING_PATH = CONFIG_DIR / "plotting.toml"
 
 #: Root of everything the scripts and notebooks write.
 BASE_OUT_DIR = Path("outputs")
@@ -113,49 +103,3 @@ def load_base(root: Path | None = None) -> dict[str, Any]:
         Root directory for configuration files.
     """
     return merge_config_layers(base_config_paths(root))
-
-
-def add_config_arguments(
-    parser: argparse.ArgumentParser, *, help: str | None = None
-) -> None:
-    """Add the repeated ``--config`` layer flag shared by every entrypoint.
-
-    ``help`` replaces the default text.
-
-    Parameters
-    ----------
-    parser
-        Argument parser to extend.
-    help
-        Help text for the argument.
-    """
-    parser.add_argument(
-        "--config",
-        dest="config",
-        action="append",
-        type=Path,
-        required=True,
-        metavar="PATH",
-        help=help
-        or (
-            "One config layer file, in merge order; repeat once per layer "
-            "(the four shared config/*.toml layers, then any override)."
-        ),
-    )
-
-
-def load_merged_config(args: argparse.Namespace) -> dict[str, Any]:
-    """Merge the ``--config`` layers an entrypoint was handed, order preserved.
-
-    The order is logged: a wrong-but-valid order fails silently.
-
-    Parameters
-    ----------
-    args
-        Parsed command-line arguments.
-    """
-    paths: list[Path] = list(args.config)
-    logger.info(
-        "Config layers (merge order): %s", " -> ".join(str(path) for path in paths)
-    )
-    return merge_config_layers(paths)
