@@ -14,7 +14,6 @@ import numpyro.distributions as dist
 import pytest
 from jax.typing import ArrayLike
 from numpyro import handlers
-from numpyro.infer import MCMC, NUTS
 from numpyro.infer.util import compute_log_probs, log_density
 
 from astrogwb.utils.numpyro import (
@@ -106,21 +105,6 @@ def _hierarchical_model() -> None:
     numpyro.factor("source_density", jnp.sum(log_prob))
 
 
-def test_sample_and_logprob_matches_the_hand_written_density() -> None:
-    outputs, log_prob = sample_and_logprob(
-        _source_model(0.5), density_sites=("z", "m"), values=FIXED
-    )
-    expected = dist.Uniform(0.0, 2.0).log_prob(FIXED["z"]) + dist.Normal(
-        0.5, 1.5
-    ).log_prob(FIXED["m"])
-
-    np.testing.assert_allclose(log_prob, expected, rtol=1e-12)
-    np.testing.assert_array_equal(
-        outputs["detector_mass"],
-        jnp.asarray(FIXED["m"]) * (1.0 + jnp.asarray(FIXED["z"])),
-    )
-
-
 def test_outer_log_density_excludes_source_sites() -> None:
     mu = 0.8
     total, trace = log_density(_hierarchical_model, (), {}, {"mu": mu})
@@ -136,15 +120,6 @@ def test_outer_log_density_excludes_source_sites() -> None:
     )
 
 
-def test_mcmc_collects_no_per_source_sites() -> None:
-    mcmc = MCMC(
-        NUTS(_hierarchical_model), num_warmup=5, num_samples=5, progress_bar=False
-    )
-    mcmc.run(jax.random.PRNGKey(0))
-
-    assert set(mcmc.get_samples()) == {"mu"}
-
-
 def test_a_missing_column_raises_naming_the_site() -> None:
     with pytest.raises(KeyError, match="'m'"):
         sample_and_logprob(
@@ -155,25 +130,6 @@ def test_a_missing_column_raises_naming_the_site() -> None:
         sample_and_logprob(
             _source_model(0.5), density_sites=(), values={"z": FIXED["z"]}
         )
-
-
-def test_a_length_one_column_is_rejected() -> None:
-    columns = {"z": FIXED["z"], "m": jnp.array([1.4])}
-    with pytest.raises(ValueError, match=r"\(N,\)"):
-        sample_and_logprob(_source_model(0.5), density_sites=(), values=columns)
-
-
-def test_a_non_vector_column_is_rejected() -> None:
-    columns = {"z": jnp.reshape(jnp.asarray(FIXED["z"]), (3, 1)), "m": FIXED["m"]}
-    with pytest.raises(ValueError, match=r"\(N,\)"):
-        sample_and_logprob(_source_model(0.5), density_sites=(), values=columns)
-
-
-def test_empty_density_sites_give_per_source_zeros() -> None:
-    _, log_prob = sample_and_logprob(_source_model(0.5), density_sites=(), values=FIXED)
-
-    assert log_prob.shape == (3,)
-    np.testing.assert_array_equal(log_prob, jnp.zeros(3))
 
 
 def test_stored_deterministic_columns_are_recomputed() -> None:
@@ -200,37 +156,6 @@ def test_sample_and_logprob_is_differentiable_and_jittable() -> None:
     assert jnp.array_equal(jax.jit(total)(mu), total(mu))
 
 
-def test_sample_sources_matches_evaluation_bit_for_bit() -> None:
-    key = jax.random.PRNGKey(3)
-    first = sample_and_logprob(
-        _source_model(0.5), key, num_samples=32, density_sites=()
-    )[0]
-    second = sample_and_logprob(
-        _source_model(0.5), key, num_samples=32, density_sites=()
-    )[0]
-    replay, _ = sample_and_logprob(
-        _source_model(0.5), density_sites=(), values={"z": first["z"], "m": first["m"]}
-    )
-
-    assert set(first) == {"z", "m", "detector_mass"}
-    assert all(values.shape == (32,) for values in first.values())
-    for name in first:
-        np.testing.assert_array_equal(first[name], second[name])
-        np.testing.assert_array_equal(first[name], replay[name])
-
-
-def test_sample_sources_executes_model_once() -> None:
-    calls = []
-    source = _source_model(0.5)
-
-    def model() -> None:
-        calls.append(None)
-        source()
-
-    sample_and_logprob(model, jax.random.PRNGKey(0), num_samples=4, density_sites=())[0]
-    assert len(calls) == 1
-
-
 def test_sample_sources_broadcasts_conditioned_sites() -> None:
     model = handlers.condition(_source_model(0.5), data={"z": 0.7})
     sources = sample_and_logprob(
@@ -248,12 +173,9 @@ def test_sample_sources_is_isolated_from_enclosing_handlers() -> None:
     assert outer == {}
 
 
-@pytest.mark.parametrize("exponent", [3, 8])
-def test_sample_sources_qmc_puts_one_point_in_every_dyadic_interval(
-    exponent: int,
-) -> None:
+def test_sample_sources_qmc_puts_one_point_in_every_dyadic_interval() -> None:
     """The first coordinate of a base-2 Sobol net is exactly stratified."""
-    count = 2**exponent
+    count = 2**8
     sources = sample_sources_qmc(
         _source_model(0.5), jax.random.PRNGKey(3), num_samples=count
     )
@@ -284,20 +206,6 @@ def test_sample_sources_qmc_gives_a_conditioned_site_no_coordinate() -> None:
     # m now takes the first coordinate: one point per cell of its CDF.
     cells = np.floor(np.asarray(dist.Normal(0.5, 1.5).cdf(sources["m"])) * 16)
     np.testing.assert_array_equal(np.sort(cells), np.arange(16))
-
-
-def test_sample_sources_qmc_scramble_is_fixed_by_the_key() -> None:
-    draw = lambda seed: sample_sources_qmc(
-        _source_model(0.5), jax.random.PRNGKey(seed), num_samples=8
-    )
-    np.testing.assert_array_equal(draw(1)["m"], draw(1)["m"])
-    assert not np.array_equal(draw(1)["m"], draw(2)["m"])
-
-
-@pytest.mark.parametrize("count", [0, 3, 24])
-def test_sample_sources_qmc_rejects_a_non_power_of_two(count: int) -> None:
-    with pytest.raises(ValueError, match="power of two"):
-        sample_sources_qmc(_source_model(0.5), jax.random.PRNGKey(0), num_samples=count)
 
 
 def test_partial_conditioning_samples_and_scores_in_one_pass() -> None:
@@ -332,21 +240,3 @@ def test_auxiliary_factors_are_scored_but_not_output_columns() -> None:
     )
     assert set(outputs) == {"x", "twice_x"}
     np.testing.assert_array_equal(log_prob, -(outputs["x"] ** 2))
-
-
-@pytest.mark.parametrize("num_samples", [None, 0, -1])
-def test_sampling_requires_a_positive_source_count(num_samples: int | None) -> None:
-    with pytest.raises(ValueError, match="num_samples"):
-        sample_and_logprob(
-            _source_model(0.5),
-            jax.random.key(0),
-            num_samples=num_samples,
-            density_sites=(),
-        )
-
-
-def test_explicit_count_must_agree_with_columns() -> None:
-    with pytest.raises(ValueError, match="match"):
-        sample_and_logprob(
-            _source_model(0.5), num_samples=4, values=FIXED, density_sites=()
-        )

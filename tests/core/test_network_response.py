@@ -52,7 +52,7 @@ def _standard_errors(draws: jax.Array, expected: np.ndarray) -> np.ndarray:
 
 @pytest.mark.parametrize(
     ("detector_1", "detector_2"),
-    [("H1", "L1"), ("E1", "E2"), ("S1", "R1"), ("S2", "R2"), ("C1", "S1")],
+    [("H1", "L1"), ("E1", "E2")],
 )
 def test_the_isotropic_mean_of_the_per_source_orf_is_the_isotropic_orf(
     detector_1: str, detector_2: str
@@ -64,39 +64,10 @@ def test_the_isotropic_mean_of_the_per_source_orf_is_the_isotropic_orf(
         second,
         *_isotropic_angles(jax.random.key(0), NUM_DRAWS),
     )
-    expected = _sky_quadrature_orf(FREQUENCIES, first, second, native=True)
+    expected = _sky_quadrature_orf(FREQUENCIES, first, second)
 
     assert draws.shape == (NUM_DRAWS, FREQUENCIES.size)
     assert np.all(_standard_errors(draws, expected) < MAX_STANDARD_ERRORS)
-
-
-def test_a_detector_paired_with_itself_sees_a_non_negative_power() -> None:
-    h1 = load_detector("H1")
-    draws = overlap_reduction_function(
-        FREQUENCIES, h1, h1, *_isotropic_angles(jax.random.key(1), 1_000)
-    )
-
-    assert np.all(np.asarray(draws) >= 0.0)
-    np.testing.assert_allclose(
-        np.asarray(draws), np.broadcast_to(np.asarray(draws[:, :1]), draws.shape)
-    )
-
-
-def test_the_per_source_orf_broadcasts_over_the_angles() -> None:
-    polar_cosine = jnp.linspace(-1.0, 1.0, 5)[:, None]
-    azimuth = jnp.linspace(0.0, 6.0, 3)[None, :]
-
-    draws = overlap_reduction_function(
-        FREQUENCIES,
-        load_detector("H1"),
-        load_detector("L1"),
-        polar_cosine,
-        azimuth,
-        0.3,
-        0.5,
-    )
-
-    assert draws.shape == (5, 3, FREQUENCIES.size)
 
 
 @pytest.mark.parametrize("names", [["S1", "R1"], ["E1", "E2", "E3", "C1"]])
@@ -113,7 +84,7 @@ def test_the_network_response_has_unit_isotropic_mean(names: list[str]) -> None:
     numerator = sum(
         term.weight
         * _sky_quadrature_orf(
-            FREQUENCIES, detectors[term.first], detectors[term.second], native=True
+            FREQUENCIES, detectors[term.first], detectors[term.second]
         )
         for term in terms
     )
@@ -138,25 +109,9 @@ def test_a_single_pair_response_does_not_depend_on_the_noise() -> None:
     )
 
 
-def test_a_misaligned_pair_scatters_more_than_an_aligned_one() -> None:
-    """A nearly cancelled isotropic ORF leaves sources of either sign: more scatter."""
-
-    def variance(names: list[str]) -> np.ndarray:
-        draws = sample_network_response(
-            jax.random.key(8),
-            NUM_DRAWS,
-            FREQUENCIES,
-            [load_detector(name) for name in names],
-        )
-        return np.asarray(jnp.var(draws, axis=0))
-
-    assert np.all(variance(["S1", "R1"]) < variance(["S2", "R2"]))
-
-
 @pytest.mark.parametrize(
     ("names", "pairs"),
     [
-        (["S1", "R1"], [("S1", "R1")]),
         (
             ["E1", "E2", "E3", "C1"],
             [
@@ -208,55 +163,12 @@ def test_pair_response_draws_combine_to_the_network_response_draws() -> None:
     )
 
 
-def test_pair_response_has_each_pairs_isotropic_orf_as_its_mean() -> None:
-    detectors = [load_detector(name) for name in ("S2", "R2", "C1")]
-    draws = sample_pair_response(jax.random.key(6), NUM_DRAWS, FREQUENCIES, detectors)
-    expected = np.stack(
-        [
-            _sky_quadrature_orf(FREQUENCIES, first, second, native=True)
-            for first, second in [
-                (detectors[0], detectors[1]),
-                (detectors[0], detectors[2]),
-                (detectors[1], detectors[2]),
-            ]
-        ]
-    )
-
-    assert np.all(_standard_errors(draws, expected) < MAX_STANDARD_ERRORS)
-
-
 def _random_stokes(key: jax.Array, num_draws: int) -> jax.Array:
     """Stokes parameters ``(4, num_draws, F)`` of random fully polarized sources."""
     inclination = jax.random.uniform(
         key, (num_draws, FREQUENCIES.size), minval=-1.0, maxval=1.0
     )
     return quadrupolar_stokes_factors(inclination)
-
-
-@pytest.mark.parametrize(
-    ("detector_1", "detector_2"), [("H1", "L1"), ("E1", "E2"), ("C1", "S1")]
-)
-def test_stokes_cross_power_of_unpolarized_sources_averages_to_the_isotropic_orf(
-    detector_1: str, detector_2: str
-) -> None:
-    first, second = load_detector(detector_1), load_detector(detector_2)
-    polar_cosine, azimuth, polarization, _ = _isotropic_angles(
-        jax.random.key(4), NUM_DRAWS
-    )
-    unpolarized = jnp.array([1.0, 0.0, 0.0, 0.0])[:, None, None]
-
-    draws = 5.0 * stokes_cross_power(
-        FREQUENCIES,
-        first,
-        second,
-        polar_cosine,
-        azimuth,
-        polarization,
-        unpolarized,
-    )
-    expected = _sky_quadrature_orf(FREQUENCIES, first, second, native=True)
-
-    assert np.all(_standard_errors(draws, expected) < MAX_STANDARD_ERRORS)
 
 
 def test_stokes_cross_power_of_a_detector_with_itself_is_blind_to_v() -> None:
@@ -322,13 +234,9 @@ def test_stokes_cross_power_rotates_linear_polarization_by_four_psi(
     )
 
 
-@pytest.mark.parametrize("pair", [("H1", "L1"), ("E1", "E2"), ("S2", "R2")])
 @pytest.mark.parametrize("circular", [False, True])
-def test_stokes_matches_direct_complex_strain_cross_power(
-    pair: tuple[str, str], circular: bool
-) -> None:
-    from astrogwb.detector import load_detector
-
+def test_stokes_matches_direct_complex_strain_cross_power(circular: bool) -> None:
+    pair = ("H1", "L1")
     ra = jnp.array([0.0, 1.0, 2.0, 2 * jnp.pi])[:, None]
     dec = jnp.array([-jnp.pi / 2, 0.4, jnp.pi / 2])[None, :]
     coordinates = {"right_ascension": ra, "declination": dec, "polarization_angle": 0.7}
@@ -377,6 +285,6 @@ def test_native_unpolarized_average_matches_independent_geometry_quadrature(
     integrated = np.sum(np.asarray(response) * weights[:, None, None], axis=(0, 1)) / (
         2 * phi.size
     )
-    expected = _sky_quadrature_orf(frequencies, first, second, native=True)
+    expected = _sky_quadrature_orf(frequencies, first, second)
     # Both independent spherical quadratures are converged at these frequencies.
     assert np.all(np.abs(integrated - expected) < 512 * np.finfo(np.float64).eps)

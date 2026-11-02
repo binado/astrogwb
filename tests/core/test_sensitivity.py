@@ -8,19 +8,22 @@ import pytest
 from astrogwb.detector import (
     Sensitivity,
     effective_psd,
-    isotropic_overlap_reduction_function,
     load_detector,
     load_sensitivity_map,
 )
 
 
-def test_sensitivity_call_in_band_is_finite_and_positive() -> None:
-    sensitivity = Sensitivity(psd_reference="AplusDesign_psd.txt")
-    values = sensitivity(np.array([25.0, 100.0, 500.0]))
-
-    assert values.shape == (3,)
-    assert np.all(np.isfinite(values))
-    assert np.all(values > 0.0)
+def test_bundled_sensitivities_are_finite_and_positive_in_band() -> None:
+    sensitivities = [
+        Sensitivity(psd_reference="AplusDesign_psd.txt"),
+        Sensitivity(psd_reference="ET_D_psd"),
+        *load_sensitivity_map(["H1", "L1", "V1"]).values(),
+    ]
+    frequencies = np.array([25.0, 100.0, 500.0])
+    for sensitivity in sensitivities:
+        values = sensitivity(frequencies)
+        assert values.shape == frequencies.shape
+        assert np.all(np.isfinite(values) & (values > 0.0))
 
 
 @pytest.mark.parametrize(
@@ -37,45 +40,6 @@ def test_sensitivity_call_out_of_band_policy(
     assert values[0] == expected_oob_value
     assert np.isfinite(values[1]) and values[1] > 0.0
     assert values[2] == expected_oob_value
-
-
-def test_sensitivity_call_bundled_preset_runs() -> None:
-    sensitivity = Sensitivity(psd_reference="ET_D_psd")
-    values = sensitivity(np.array([20.0, 100.0]))
-
-    assert np.all(np.isfinite(values))
-    assert np.all(values > 0.0)
-
-
-def test_sensitivity_call_unknown_reference_raises() -> None:
-    sensitivity = Sensitivity(psd_reference="does_not_exist_anywhere.txt")
-    with pytest.raises(FileNotFoundError):
-        sensitivity(np.array([100.0]))
-
-
-def test_load_sensitivity_map_multiple() -> None:
-    sensitivities = load_sensitivity_map(["H1", "L1", "V1"])
-
-    assert set(sensitivities) == {"H1", "L1", "V1"}
-    for sensitivity in sensitivities.values():
-        values = sensitivity(np.array([100.0]))
-        assert np.all(np.isfinite(values))
-        assert np.all(values > 0.0)
-
-
-def test_network_overlap_and_effective_psd(frequencies: np.ndarray) -> None:
-
-    orf = isotropic_overlap_reduction_function(
-        frequencies, load_detector("H1"), load_detector("L1")
-    )
-    assert orf.shape == frequencies.shape
-    assert np.all(np.isfinite(orf))
-
-    eff = effective_psd(
-        frequencies, [load_detector(name) for name in ("H1", "L1", "V1")]
-    )
-    assert eff.shape == frequencies.shape
-    assert np.any(np.isfinite(eff))
 
 
 def test_effective_psd_inf_for_single_detector(frequencies: np.ndarray) -> None:

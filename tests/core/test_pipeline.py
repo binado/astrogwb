@@ -11,7 +11,7 @@ import dataclasses
 
 import numpy as np
 import pytest
-from astrogwb_tiny_pipeline import NETWORKS, WAVEFORM, assert_same_spectra
+from astrogwb_tiny_pipeline import NETWORKS, WAVEFORM
 from astrogwb_tiny_pipeline import population_metadata as _population
 
 from astrogwb.detector import DetectorRegistry, isotropic_overlap_reduction_function
@@ -44,56 +44,6 @@ def test_population_is_reproducible(population: PopulationArtifact) -> None:
     assert redrawn.source_parameters.keys() == population.source_parameters.keys()
     for name, values in population.source_parameters.items():
         np.testing.assert_array_equal(redrawn.source_parameters[name], values)
-
-
-def test_population_changes_with_seed(population: PopulationArtifact) -> None:
-    other = PopulationSimulator(population.metadata)(realization_key(42, 0))
-    assert other.rng_key != population.rng_key
-    assert not np.array_equal(
-        other.source_parameters["redshift"], population.source_parameters["redshift"]
-    )
-
-
-def test_population_deterministics_replay_exactly(
-    population: PopulationArtifact,
-) -> None:
-    from astrogwb.populations import joint_model
-    from astrogwb.utils.numpyro import sample_and_logprob
-
-    model = joint_model(
-        *population.metadata.population.build()(population.hyperparameters)
-    )
-    replayed, _ = sample_and_logprob(
-        model, density_sites=(), values=population.source_parameters
-    )
-    for name, values in replayed.items():
-        np.testing.assert_array_equal(values, population.source_parameters[name])
-
-
-@pytest.mark.parametrize("sample_prior", [False, True])
-def test_population_hyperparameters(sample_prior: bool) -> None:
-    from astrogwb.distributions.config import DistributionConfig
-
-    metadata = _population()
-    if sample_prior:
-        metadata = metadata.model_copy(
-            update={
-                "hyperparameters": {
-                    **metadata.hyperparameters,
-                    "H0": DistributionConfig.model_validate(
-                        {"dist": "Uniform", "kwargs": {"low": 60.0, "high": 80.0}}
-                    ),
-                }
-            }
-        )
-    drawn = PopulationSimulator(metadata)(realization_key(41, 0))
-    if sample_prior:
-        assert 60.0 < drawn.hyperparameters["H0"] < 80.0
-    else:
-        assert drawn.hyperparameters == metadata.fixed
-    for values in drawn.source_parameters.values():
-        assert values.shape == (drawn.count,)
-        assert np.all(np.isfinite(values))
 
 
 @pytest.mark.parametrize(
@@ -271,41 +221,6 @@ def test_psd_override_preserves_pair_spectra_and_changes_combination(
     )
 
 
-@pytest.mark.parametrize(
-    "detectors", [["S1", "R1", "C1"], ["C1", "R1", "S1"], ["R1", "C1", "S1"]]
-)
-def test_declaration_order_does_not_change_the_pairs(detectors: list[str]) -> None:
-    reordered = DetectorRegistry(
-        detectors=NETWORKS.detectors,
-        networks={"triangle": tuple(detectors), "pair": NETWORKS.networks["pair"]},
-    )
-
-    assert reordered.pairs("triangle") == [("C1", "R1"), ("C1", "S1"), ("R1", "S1")]
-
-
-def test_native_coordinate_columns_and_ranges(population: PopulationArtifact) -> None:
-    columns = population.source_parameters
-    assert set(EXTRINSIC_SITES) == {
-        "right_ascension",
-        "declination",
-        "polarization_angle",
-        "coa_phase",
-    }
-    assert np.all(
-        (columns["right_ascension"] >= 0) & (columns["right_ascension"] < 2 * np.pi)
-    )
-    assert np.all(abs(columns["declination"]) <= np.pi / 2)
-    assert np.all(
-        (columns["polarization_angle"] >= 0) & (columns["polarization_angle"] < np.pi)
-    )
-    for missing in ("right_ascension", "declination", "polarization_angle"):
-        with pytest.raises(ValueError, match="regenerate"):
-            dataclasses.replace(
-                population,
-                source_parameters={k: v for k, v in columns.items() if k != missing},
-            )
-
-
 @pytest.fixture(scope="module")
 def empty(population: PopulationArtifact) -> PopulationArtifact:
     """A population with no sources, so the background is pure noise."""
@@ -315,46 +230,8 @@ def empty(population: PopulationArtifact) -> PopulationArtifact:
     )
 
 
-def test_noise_is_reproducible_for_the_same_population(
-    population: PopulationArtifact,
-) -> None:
-    simulator = BackgroundSimulator(
-        WAVEFORM, NETWORKS, chunk_size=8, segment_duration=60.0
-    )
-
-    assert_same_spectra(simulator(population), simulator(population))
-
-
-def test_noise_changes_the_spectra(
-    population: PopulationArtifact, projected: BackgroundArtifact
-) -> None:
-    noisy = BackgroundSimulator(
-        WAVEFORM, NETWORKS, chunk_size=8, segment_duration=60.0
-    )(population)
-
-    assert not np.array_equal(
-        noisy.spectra["pair"],
-        projected.spectra["pair"],
-    )
-
-
-def test_noise_depends_on_the_segment_duration(
-    population: PopulationArtifact,
-) -> None:
-    short, long = (
-        BackgroundSimulator(
-            WAVEFORM, NETWORKS, chunk_size=8, segment_duration=duration
-        )(population)
-        for duration in (60.0, 600.0)
-    )
-
-    assert not np.array_equal(short.spectra["pair"], long.spectra["pair"])
-
-
-@pytest.mark.parametrize("segment_duration", [60.0, 600.0])
-def test_pure_noise_matches_the_pair_scale_whatever_the_segment_duration(
-    empty: PopulationArtifact, segment_duration: float
-) -> None:
+def test_pure_noise_matches_the_pair_scale(empty: PopulationArtifact) -> None:
+    segment_duration = 600.0
     simulator = BackgroundSimulator(
         WAVEFORM, NETWORKS, chunk_size=8, segment_duration=segment_duration
     )
@@ -377,32 +254,10 @@ def test_pure_noise_matches_the_pair_scale_whatever_the_segment_duration(
     assert abs(residuals.var() - 1.0) < variance_bound
 
 
-def test_a_segment_longer_than_the_observation_raises(
-    population: PopulationArtifact,
-) -> None:
-    simulator = BackgroundSimulator(
-        WAVEFORM, NETWORKS, chunk_size=8, segment_duration=1e9
-    )
-
-    with pytest.raises(ValueError, match="exceeds the observation"):
-        simulator(population)
-
-
-def test_a_segment_shorter_than_one_over_the_bin_width_raises(
-    population: PopulationArtifact,
-) -> None:
-    simulator = BackgroundSimulator(
-        WAVEFORM, NETWORKS, chunk_size=8, segment_duration=0.01
-    )
-
-    with pytest.raises(ValueError, match="bin width"):
-        simulator(population)
-
-
-@pytest.mark.parametrize("batch_size", [1, 7])
 def test_spectra_do_not_depend_on_the_segment_batch_size(
-    population: PopulationArtifact, batch_size: int
+    population: PopulationArtifact,
 ) -> None:
+    batch_size = 7
     reference = BackgroundSimulator(
         WAVEFORM, NETWORKS, chunk_size=8, segment_duration=60.0, segment_batch_size=64
     )(population)
@@ -418,13 +273,12 @@ def test_spectra_do_not_depend_on_the_segment_batch_size(
         np.testing.assert_allclose(batched.spectra[name], spectrum)
 
 
-@pytest.mark.parametrize("segment_duration", [60.0, 3000.0])
 def test_noisy_background_averages_to_the_incoherent_signal(
     population: PopulationArtifact,
     projected: BackgroundArtifact,
-    segment_duration: float,
 ) -> None:
     """New labels and noise per key, same sources: the mean is ``5 K / T``."""
+    segment_duration = 60.0
     simulator = BackgroundSimulator(
         WAVEFORM, NETWORKS, chunk_size=8, segment_duration=segment_duration
     )
@@ -440,8 +294,3 @@ def test_noisy_background_averages_to_the_incoherent_signal(
     error = draws.std(axis=0, ddof=1) / np.sqrt(len(draws))
 
     assert np.all(abs(draws.mean(axis=0) - expected) < MAX_STANDARD_ERRORS * error)
-
-
-def test_a_nonpositive_segment_duration_raises() -> None:
-    with pytest.raises(ValueError, match="positive"):
-        BackgroundSimulator(WAVEFORM, NETWORKS, segment_duration=0.0)

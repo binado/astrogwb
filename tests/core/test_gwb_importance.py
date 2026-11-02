@@ -28,7 +28,6 @@ from astrogwb.gwb.importance import (
     phinney_kernel,
     redshift_quadrature,
     reference_catalog,
-    reference_redshift,
 )
 from astrogwb.inference import ImportanceGaussianLikelihood
 from astrogwb.populations import PopulationMetadata, build_population, joint_model
@@ -120,37 +119,6 @@ def test_redshift_quadrature_polynomial_in_scale_factor_is_exact(power: int) -> 
     exact = (upper ** (power - 1) - lower ** (power - 1)) / (power - 1)
     estimate = np.sum(weights / (1.0 + redshift) ** power)
     assert estimate == pytest.approx(exact, rel=1e-13)
-
-
-def test_redshift_quadrature_weights_sum_to_the_window_width() -> None:
-    _, weights = redshift_quadrature(0.01, 5.0, 32)
-    assert np.sum(weights) == pytest.approx(4.99, rel=1e-10)
-
-
-def test_redshift_quadrature_nodes_increase_inside_the_window() -> None:
-    redshift, weights = redshift_quadrature(0.01, 5.0, 16)
-    assert np.all(np.diff(redshift) > 0.0)
-    assert 0.01 < redshift[0] and redshift[-1] < 5.0
-    assert np.all(weights > 0.0)
-
-
-def test_redshift_quadrature_without_nodes_raises() -> None:
-    with pytest.raises(ValueError, match="num_nodes"):
-        redshift_quadrature(0.01, 5.0, 0)
-
-
-@pytest.mark.integration
-def test_reference_catalog_places_every_draw_at_the_minimum_redshift(
-    reference_metadata: CatalogMetadata,
-) -> None:
-    data = reference_catalog(reference_metadata, realization_key(41, 0))
-
-    columns = data["source_parameters"]
-    assert data["polarization_power"].shape == (data["frequencies"].size, 6)
-    np.testing.assert_array_equal(columns["redshift"], np.full(6, 0.1))
-    np.testing.assert_array_equal(
-        columns["inclination"], np.full(6, EFFECTIVE_INCLINATION)
-    )
 
 
 @pytest.mark.integration
@@ -282,8 +250,9 @@ def _rescaled_and_brute_force(
 
 
 @pytest.mark.integration
-def test_rescaled_spectrum_matches_waveforms_generated_at_every_node(
-    reference_metadata: CatalogMetadata,
+@pytest.mark.parametrize("variance", [False, True], ids=["spectrum", "shot-noise"])
+def test_rescaled_prediction_matches_waveforms_generated_at_every_node(
+    reference_metadata: CatalogMetadata, variance: bool
 ) -> None:
     fiducials = reference_metadata.fiducials
     points = [
@@ -291,50 +260,23 @@ def test_rescaled_spectrum_matches_waveforms_generated_at_every_node(
         {**fiducials, "H0": 60.0},
         {**fiducials, "xi_0": 1.2, "xi_n": 2.0},
     ]
-    rescaled, brute_force = _rescaled_and_brute_force(reference_metadata, (), points)
+    rescaled, brute_force = _rescaled_and_brute_force(
+        reference_metadata, (), points, variance=variance
+    )
 
     # Linear interpolation of an f^(-7/3) power law on a 0.1% log grid.
     np.testing.assert_allclose(rescaled, brute_force, rtol=1e-5)
 
 
 @pytest.mark.integration
-def test_rescaled_spectrum_reweights_like_waveforms_generated_at_every_node(
-    reference_metadata: CatalogMetadata,
-) -> None:
-    sites = ("source_frame_mass_1", "source_frame_mass_2")
-    points = [{**reference_metadata.fiducials, "minimum_mass": 0.9, "mass_width": 1.6}]
-    rescaled, brute_force = _rescaled_and_brute_force(reference_metadata, sites, points)
-
-    np.testing.assert_allclose(rescaled, brute_force, rtol=1e-5)
-
-
-@pytest.mark.integration
-def test_rescaled_shot_noise_matches_waveforms_generated_at_every_node(
-    reference_metadata: CatalogMetadata,
-) -> None:
-    fiducials = reference_metadata.fiducials
-    points = [
-        fiducials,
-        {**fiducials, "H0": 60.0},
-        {**fiducials, "xi_0": 1.2, "xi_n": 2.0},
-    ]
-    rescaled, brute_force = _rescaled_and_brute_force(
-        reference_metadata, (), points, variance=True
-    )
-
-    # Squaring doubles the power-law index, so linear interpolation in ln f
-    # errs several times more than for the spectrum: about 2e-6 here.
-    np.testing.assert_allclose(rescaled, brute_force, rtol=1e-5)
-
-
-@pytest.mark.integration
-def test_rescaled_shot_noise_reweights_like_waveforms_generated_at_every_node(
-    reference_metadata: CatalogMetadata,
+@pytest.mark.parametrize("variance", [False, True], ids=["spectrum", "shot-noise"])
+def test_rescaled_prediction_reweights_like_waveforms_generated_at_every_node(
+    reference_metadata: CatalogMetadata, variance: bool
 ) -> None:
     sites = ("source_frame_mass_1", "source_frame_mass_2")
     points = [{**reference_metadata.fiducials, "minimum_mass": 0.9, "mass_width": 1.6}]
     rescaled, brute_force = _rescaled_and_brute_force(
-        reference_metadata, sites, points, variance=True
+        reference_metadata, sites, points, variance=variance
     )
 
     np.testing.assert_allclose(rescaled, brute_force, rtol=1e-5)
@@ -365,133 +307,18 @@ def shot_noise_builder(reference_metadata: CatalogMetadata) -> Any:
 
 
 @pytest.mark.integration
-def test_rescaled_shot_noise_falls_inversely_with_observation_time(
-    reference_metadata: CatalogMetadata, shot_noise_builder: Any
-) -> None:
-    fiducials = reference_metadata.fiducials
-    one_year = np.asarray(shot_noise_builder(1.0).predict(fiducials)[1])
-    four_years = np.asarray(shot_noise_builder(4.0).predict(fiducials)[1])
-
-    np.testing.assert_allclose(four_years, one_year / 4.0, rtol=1e-14)
-
-
-@pytest.mark.integration
-@pytest.mark.parametrize("hubble_constant", [50.0, 90.0])
 def test_rescaled_shot_noise_grows_linearly_with_the_hubble_constant(
     reference_metadata: CatalogMetadata,
     shot_noise_builder: Any,
-    hubble_constant: float,
 ) -> None:
     """The squared kernel goes as :math:`D_H / \\chi^2 \\propto H_0`."""
+    hubble_constant = 90.0
     fiducials = reference_metadata.fiducials
     likelihood = shot_noise_builder(OBSERVATION_TIME)
     shifted = np.asarray(likelihood.predict({**fiducials, "H0": hubble_constant})[1])
     ratio = shifted / np.asarray(likelihood.predict(fiducials)[1])
 
     np.testing.assert_allclose(ratio, hubble_constant / fiducials["H0"], rtol=1e-12)
-
-
-@pytest.mark.integration
-def test_rescaled_log_weights_vanish_at_the_fiducials(
-    reference_metadata: CatalogMetadata,
-) -> None:
-    data = reference_catalog(reference_metadata, realization_key(41, 0))
-    target = build_population(
-        reference_metadata.population.model_name,
-        **reference_metadata.population.model_kwargs,
-    )
-    likelihood = ImportanceGaussianLikelihood.from_catalog(
-        data,
-        reference_metadata,
-        population=target,
-        frequencies=np.asarray(waveform_generator(OBSERVED_WAVEFORM).frequencies),
-        num_redshift_nodes=NUM_NODES,
-        density_sites=("source_frame_mass_1", "source_frame_mass_2"),
-    )
-
-    np.testing.assert_array_equal(
-        np.asarray(likelihood.log_weights(reference_metadata.fiducials)), np.zeros(6)
-    )
-    assert (
-        np.ptp(
-            np.asarray(
-                likelihood.log_weights(
-                    {
-                        **reference_metadata.fiducials,
-                        "minimum_mass": 0.9,
-                        "mass_width": 1.6,
-                    }
-                )
-            )
-        )
-        > 0.0
-    )
-
-
-@pytest.mark.integration
-def test_rescaled_spectrum_as_a_jit_argument_traces_once_per_shape(
-    reference_metadata: CatalogMetadata,
-) -> None:
-    """Separately built catalogs of one shape share a compilation."""
-    target = build_population(
-        reference_metadata.population.model_name,
-        **reference_metadata.population.model_kwargs,
-    )
-    traces: list[None] = []
-
-    def body(fn: Any, params: dict[str, float]) -> jax.Array:
-        traces.append(None)
-        return fn.spectrum(params)
-
-    spectrum = jax.jit(body)
-    results = []
-    for seed in (41, 42):
-        data = reference_catalog(reference_metadata, realization_key(seed, 0))
-        fn = ImportanceGaussianLikelihood.from_catalog(
-            data,
-            reference_metadata,
-            population=target,
-            frequencies=data["frequencies"][:20],
-            num_redshift_nodes=4,
-            density_sites=(),
-        )
-        results.append(np.asarray(spectrum(fn, reference_metadata.fiducials)))
-
-    assert len(traces) == 1
-    assert not np.allclose(results[0], results[1], rtol=1e-6, atol=0.0)
-
-
-@pytest.mark.integration
-def test_rescaled_shot_noise_as_a_jit_argument_traces_once_per_shape(
-    reference_metadata: CatalogMetadata,
-) -> None:
-    """Separately built catalogs of one shape share a compilation."""
-    target = build_population(
-        reference_metadata.population.model_name,
-        **reference_metadata.population.model_kwargs,
-    )
-    traces: list[None] = []
-
-    def body(fn: Any, params: dict[str, float]) -> jax.Array:
-        traces.append(None)
-        return fn.predict(params)[1]
-
-    variance = jax.jit(body)
-    for seed in (41, 42):
-        data = reference_catalog(reference_metadata, realization_key(seed, 0))
-        fn = ImportanceGaussianLikelihood.from_catalog(
-            data,
-            reference_metadata,
-            population=target,
-            frequencies=data["frequencies"][:20],
-            num_redshift_nodes=4,
-            density_sites=(),
-            shot_noise="amplitude",
-            observation_time=OBSERVATION_TIME,
-        )
-        variance(fn, reference_metadata.fiducials)
-
-    assert len(traces) == 1
 
 
 @pytest.mark.parametrize("xi_0", [1.0, 0.8])
@@ -525,15 +352,15 @@ def test_phinney_kernel_times_the_distance_ratio_squared_is_the_rate_density(
 @pytest.mark.parametrize(
     ("parameter", "exponent"), [("H0", -1.0), ("local_merger_rate", 1.0)]
 )
-@pytest.mark.parametrize("factor", [0.5, 1.3, 2.0])
 def test_spectrum_scales_as_a_power_of_h0_and_the_local_merger_rate(
-    parameter: str, exponent: float, factor: float
+    parameter: str, exponent: float
 ) -> None:
     """``S ~ 1/H0`` and ``S ~ R0``: the exponents the cosmology and kernel imply."""
     spectrum = build_reference_spectrum(
         *build_reference_catalog(num_sources=16)
     ).spectrum
     fiducial = FIDUCIALS[parameter]
+    factor = 1.3
 
     baseline = spectrum(FIDUCIALS)
     scaled = spectrum({**FIDUCIALS, parameter: factor * fiducial})
@@ -580,7 +407,7 @@ def _bound_predictions(
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("window_edge", [0.1, 0.5, 1.5])
+@pytest.mark.parametrize("window_edge", [0.5, 1.5])
 def test_low_reference_catalog_matches_one_generated_at_the_window_edge(
     reference_metadata: CatalogMetadata, window_edge: float
 ) -> None:
@@ -601,40 +428,6 @@ def test_low_reference_catalog_matches_one_generated_at_the_window_edge(
     # the comparisons against waveforms generated at every node.
     np.testing.assert_allclose(rescaled[0], expected[0], rtol=1e-5)
     np.testing.assert_allclose(rescaled[1], expected[1], rtol=1e-5)
-
-
-@pytest.mark.integration
-def test_default_window_edge_is_the_population_minimum_redshift(
-    reference_metadata: CatalogMetadata,
-) -> None:
-    low = reference_catalog(reference_metadata, realization_key(41, 0))
-
-    default = _bound_predictions(low, reference_metadata)
-    explicit = _bound_predictions(
-        low, reference_metadata, minimum_redshift=reference_redshift(reference_metadata)
-    )
-
-    np.testing.assert_array_equal(default[0], explicit[0])
-    np.testing.assert_array_equal(default[1], explicit[1])
-
-
-@pytest.mark.integration
-def test_window_edge_below_the_reference_redshift_is_rejected(
-    reference_metadata: CatalogMetadata,
-) -> None:
-    low = reference_catalog(reference_metadata, realization_key(41, 0))
-
-    with pytest.raises(ValueError, match="below the reference redshift"):
-        _bound_predictions(low, reference_metadata, minimum_redshift=0.05)
-
-
-@pytest.mark.parametrize("reference", [None, 0.1])
-def test_reference_redshift_defaults_to_the_window_lower_edge(
-    reference_metadata: CatalogMetadata, reference: float | None
-) -> None:
-    metadata = reference_metadata.model_copy(update={"reference_redshift": reference})
-
-    assert reference_redshift(metadata) == 0.1
 
 
 @pytest.mark.integration

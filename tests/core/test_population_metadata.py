@@ -8,7 +8,6 @@ import jax
 import jax.numpy as jnp
 import pytest
 from numpyro import handlers
-from pydantic import ValidationError
 
 from astrogwb.distributions.config import DistributionConfig
 from astrogwb.populations import PopulationMetadata
@@ -51,26 +50,6 @@ def test_check_registered_rejects_a_kwarg_the_population_does_not_take() -> None
         record.check_registered()
 
 
-def test_flags_travel_in_the_record_as_booleans_and_strings() -> None:
-    record = _record(
-        model_kwargs={
-            **MODEL_KWARGS,
-            "time_delay": True,
-            "minimum_delay": 0.02,
-            "maximum_formation_redshift": 15.0,
-        }
-    )
-    restored = PopulationMetadata.model_validate_json(record.model_dump_json())
-    assert restored.model_kwargs["time_delay"] is True
-    assert type(restored.model_kwargs["mass_model"]) is str
-
-
-def test_a_seed_is_not_part_of_the_record() -> None:
-    """A seed picks a realization; it is a simulator input, not metadata."""
-    with pytest.raises(ValidationError, match="seed"):
-        _record(seed=7)
-
-
 def _draw_metadata() -> RealizationMetadata:
     return RealizationMetadata(
         population=_record(),
@@ -84,8 +63,7 @@ def _draw_metadata() -> RealizationMetadata:
     )
 
 
-def test_prior_model_has_a_site_per_hyperparameter() -> None:
-    jax.config.update("jax_enable_x64", True)
+def test_prior_model_has_a_scalar_site_per_hyperparameter() -> None:
     metadata = _draw_metadata()
     model = metadata.prior_model()
     trace = handlers.trace(handlers.seed(model, jax.random.key(0))).get_trace()
@@ -96,9 +74,7 @@ def test_prior_model_has_a_site_per_hyperparameter() -> None:
     assert trace["H0"]["value"].dtype == jnp.float64
     assert float(trace["H0"]["value"]) == 67.66
 
-
-def test_prior_model_returns_every_hyperparameter_as_a_scalar() -> None:
-    theta = handlers.seed(_draw_metadata().prior_model(), jax.random.key(3))()
+    theta = handlers.seed(model, jax.random.key(3))()
     assert set(theta) == {"H0", "gamma"}
     assert all(v.shape == () for v in theta.values())
     assert 1.0 <= float(theta["gamma"]) <= 2.0

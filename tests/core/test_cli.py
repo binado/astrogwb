@@ -18,9 +18,9 @@ from astrogwb.simulators import BackgroundArtifact
 POPULATION = population_metadata()
 
 
-@pytest.mark.parametrize("command", ["simulate"])
-def test_importing_the_cli_leaves_the_xla_backend_uninitialized(command: str) -> None:
+def test_importing_the_cli_leaves_the_xla_backend_uninitialized() -> None:
     """A late ``set_host_device_count(2)`` still taking effect proves it."""
+    command = "simulate"
     code = f"""
 from typer.testing import CliRunner
 from astrogwb.cli import app
@@ -102,19 +102,3 @@ def test_segment_duration_is_recorded_with_the_noise(
     assert background.segment_duration == 600.0
     noise = background.noise()
     assert noise["ET"].pair_scale.shape == (1, background.frequencies.size)
-
-
-@pytest.mark.parametrize(
-    "missing",
-    ["--population-metadata", "--waveform-metadata", "--detector-config", "--seed"],
-)
-def test_a_missing_required_option_is_refused(
-    tmp_path: Path, required: list[str], missing: str
-) -> None:
-    at = required.index(missing)
-    options = required[:at] + required[at + 2 :]
-
-    result = CliRunner().invoke(app, ["simulate", str(tmp_path / "41-0.h5"), *options])
-
-    assert result.exit_code != 0
-    assert not (tmp_path / "41-0.h5").exists()

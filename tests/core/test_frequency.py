@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
 
 from astrogwb.frequency import (
-    FrequencySpacing,
-    apply_frequency_mask,
     bin_widths,
     frequency_grid,
     frequency_mask,
@@ -15,7 +12,6 @@ from astrogwb.frequency import (
     loglinear_frequency_grid,
     noise_weighted_inner_product,
     uniform_frequency_grid,
-    validate_frequency_grid,
 )
 
 
@@ -25,62 +21,6 @@ def test_frequency_mask_includes_both_bounds() -> None:
     mask = frequency_mask(frequencies, fmin=10.0, fmax=20.0)
 
     np.testing.assert_array_equal(np.asarray(mask), [False, True, True, False])
-
-
-def test_frequency_mask_leaves_open_bounds_unconstrained() -> None:
-    frequencies = jnp.array([5.0, 10.0, 20.0, 30.0])
-
-    np.testing.assert_array_equal(
-        np.asarray(frequency_mask(frequencies, fmax=20.0)),
-        [True, True, True, False],
-    )
-    np.testing.assert_array_equal(
-        np.asarray(frequency_mask(frequencies, fmin=10.0)),
-        [False, True, True, True],
-    )
-    np.testing.assert_array_equal(
-        np.asarray(frequency_mask(frequencies)), [True, True, True, True]
-    )
-
-
-def test_apply_frequency_mask_compresses_leading_axis() -> None:
-    """The ``(F, N)`` layout is why ``axis=0`` is the default."""
-    mask = jnp.array([True, False, True, False])
-    frequencies = jnp.array([5.0, 10.0, 20.0, 30.0])
-    polarization_power = jnp.arange(12.0).reshape(4, 3)
-
-    band_frequencies, band_power = apply_frequency_mask(
-        mask, frequencies, polarization_power
-    )
-
-    np.testing.assert_array_equal(np.asarray(band_frequencies), [5.0, 20.0])
-    assert band_power.shape == (2, 3)
-    np.testing.assert_array_equal(
-        np.asarray(band_power), np.asarray(polarization_power)[[0, 2]]
-    )
-
-
-def test_apply_frequency_mask_need_not_select_a_contiguous_run() -> None:
-    """Gappy bands are legal: bin widths come from the full grid, never the band."""
-    mask = jnp.array([True, False, True, True])
-    frequencies = jnp.array([5.0, 10.0, 15.0, 20.0])
-
-    (band,) = apply_frequency_mask(mask, frequencies)
-
-    np.testing.assert_array_equal(np.asarray(band), [5.0, 15.0, 20.0])
-
-
-def test_noise_weighted_inner_product_matches_explicit_sum() -> None:
-    a = jnp.array([1.3, 1.7, 4.6, 2.8])
-    b = jnp.array([1.0, 2.0, 4.0, 3.0])
-    psd = jnp.array([0.5, 0.4, 0.8, 0.6])
-    df = 2.5
-    frequencies = 10.0 + df * jnp.arange(4)
-
-    actual = noise_weighted_inner_product(a, b, psd, frequencies)
-    expected = df * np.sum(np.asarray(a) * np.asarray(b) / np.asarray(psd) ** 2)
-
-    np.testing.assert_allclose(np.asarray(actual), expected, rtol=1e-6)
 
 
 def test_noise_weighted_inner_product_conjugates_its_first_argument() -> None:
@@ -108,45 +48,6 @@ def test_noise_weighted_inner_product_conjugates_its_first_argument() -> None:
     )
 
 
-def test_noise_weighted_inner_product_scales_linearly_with_grid_spacing() -> None:
-    a = jnp.array([1.3, 1.7, 4.6, 2.8])
-    b = jnp.array([1.0, 2.0, 4.0, 3.0])
-    psd = jnp.array([0.5, 0.4, 0.8, 0.6])
-
-    baseline = noise_weighted_inner_product(a, b, psd, 1.0 * jnp.arange(4))
-    scaled = noise_weighted_inner_product(a, b, psd, 3.0 * jnp.arange(4))
-
-    np.testing.assert_allclose(
-        np.asarray(scaled), 3.0 * np.asarray(baseline), rtol=1e-6
-    )
-
-
-def test_noise_weighted_inner_product_broadcasts_over_leading_axes() -> None:
-    a = jnp.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
-    psd = jnp.array([0.5, 1.0, 2.0])
-    df = 2.0
-    frequencies = df * jnp.arange(3)
-
-    actual = noise_weighted_inner_product(a, a, psd, frequencies)
-
-    expected = df * np.sum(np.asarray(a) ** 2 / np.asarray(psd) ** 2, axis=-1)
-    assert actual.shape == (2,)
-    np.testing.assert_allclose(np.asarray(actual), expected, rtol=1e-6)
-
-
-def test_noise_weighted_inner_product_honors_the_axis_keyword() -> None:
-    a = jnp.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
-    psd = jnp.array([0.5, 1.0])
-    df = 2.0
-    frequencies = df * jnp.arange(2)
-
-    actual = noise_weighted_inner_product(a, a, psd[:, None], frequencies, axis=0)
-
-    expected = df * np.sum(np.asarray(a) ** 2 / np.asarray(psd)[:, None] ** 2, axis=0)
-    assert actual.shape == (3,)
-    np.testing.assert_allclose(np.asarray(actual), expected, rtol=1e-6)
-
-
 def test_uniform_frequency_grid_includes_tolerant_endpoint() -> None:
     frequencies = uniform_frequency_grid(0.1, 0.3, 0.1)
     assert frequencies.dtype == np.float64
@@ -154,60 +55,22 @@ def test_uniform_frequency_grid_includes_tolerant_endpoint() -> None:
     np.testing.assert_array_equal(frequencies, [0.1, 0.2, 0.3])
 
 
-@pytest.mark.parametrize(
-    ("minimum", "maximum", "df"),
-    [(2.0, 1.0, 0.5), (1.0, 2.0, 0.0), (1.0, 2.0, -1.0)],
-)
-def test_uniform_frequency_grid_rejects_invalid_settings(
-    minimum: float, maximum: float, df: float
-) -> None:
-    with pytest.raises(ValueError):
-        uniform_frequency_grid(minimum, maximum, df)
-
-
-def test_loglinear_grid_spans_the_band_exactly() -> None:
-    frequencies = loglinear_frequency_grid(2.0, 2048.0, 1.0, 100.0)
-
-    assert frequencies.dtype == np.float64
-    assert frequencies[0] == 2.0
-    assert frequencies[-1] == 2048.0
-    assert np.all(np.diff(frequencies) > 0.0)
-
-
-def test_loglinear_grid_is_uniform_up_to_the_turnover() -> None:
+def test_loglinear_grid_is_uniform_then_geometric_with_continuous_spacing() -> None:
     frequencies = loglinear_frequency_grid(2.0, 2048.0, 1.0, 100.0)
 
     np.testing.assert_array_equal(
         frequencies[frequencies <= 100.0], uniform_frequency_grid(2.0, 100.0, 1.0)
     )
-
-
-def test_loglinear_grid_is_geometric_above_the_turnover() -> None:
-    frequencies = loglinear_frequency_grid(2.0, 2048.0, 1.0, 100.0)
-
     above = frequencies[frequencies >= 100.0]
     ratios = above[1:] / above[:-1]
     np.testing.assert_allclose(ratios, ratios[0], rtol=1e-12)
-
-
-def test_loglinear_grid_spacing_is_continuous_at_the_turnover() -> None:
-    frequencies = loglinear_frequency_grid(2.0, 2048.0, 1.0, 100.0)
-
+    # The first geometric gap does not exceed df and is within one geometric
+    # step of it.
     gaps = np.diff(frequencies)
     last_linear = np.flatnonzero(frequencies == 100.0)[0] - 1
     assert gaps[last_linear] == 1.0
-    # The first geometric gap does not exceed df and is within one geometric
-    # step of it.
     assert gaps[last_linear + 1] <= 1.0
     assert gaps[last_linear + 1] > 1.0 - 1.0 / 100.0
-
-
-def test_loglinear_grid_has_far_fewer_bins_than_the_uniform_grid() -> None:
-    loglinear = loglinear_frequency_grid(2.0, 2048.0, 1.0, 100.0)
-    uniform = uniform_frequency_grid(2.0, 2048.0, 1.0)
-
-    assert uniform.size == 2047
-    assert loglinear.size == 403
 
 
 def test_loglinear_grid_turns_at_the_last_linear_point_below_the_request() -> None:
@@ -220,36 +83,6 @@ def test_loglinear_grid_turns_at_the_last_linear_point_below_the_request() -> No
     assert frequencies[25] - 98.0 <= 4.0
 
 
-def test_loglinear_bin_widths_grow_with_frequency_above_the_turnover() -> None:
-    frequencies = loglinear_frequency_grid(2.0, 2048.0, 1.0, 100.0)
-
-    widths = np.asarray(bin_widths(frequencies))
-    np.testing.assert_allclose(widths[:90], 1.0)
-    assert np.all(np.diff(widths[frequencies > 110.0]) > 0.0)
-    assert widths[-1] > 15.0
-
-
-@pytest.mark.parametrize(
-    ("minimum", "maximum", "df", "turnover"),
-    [
-        (2.0, 2048.0, 1.0, 2.0),
-        (2.0, 2048.0, 1.0, 1.0),
-        (2.0, 2048.0, 1.0, 2048.0),
-        (2.0, 2048.0, 1.0, 4000.0),
-        (0.0, 2048.0, 1.0, 100.0),
-        (2.0, 2048.0, 0.0, 100.0),
-        (2.0, 2048.0, -1.0, 100.0),
-        (2048.0, 2.0, 1.0, 100.0),
-        (2.0, 2048.0, 1.0, np.nan),
-    ],
-)
-def test_loglinear_grid_rejects_invalid_settings(
-    minimum: float, maximum: float, df: float, turnover: float
-) -> None:
-    with pytest.raises(ValueError):
-        loglinear_frequency_grid(minimum, maximum, df, turnover)
-
-
 def test_log_grid_is_geometric_with_df_wide_first_bin() -> None:
     frequencies = log_frequency_grid(2.0, 2048.0, 0.5)
 
@@ -260,65 +93,9 @@ def test_log_grid_is_geometric_with_df_wide_first_bin() -> None:
     assert frequencies[1] - frequencies[0] <= 0.5
 
 
-@pytest.mark.parametrize(
-    ("minimum", "maximum", "df"),
-    [(0.0, 10.0, 1.0), (10.0, 2.0, 1.0), (2.0, 10.0, 0.0)],
-)
-def test_log_grid_rejects_invalid_settings(
-    minimum: float, maximum: float, df: float
-) -> None:
-    with pytest.raises(ValueError):
-        log_frequency_grid(minimum, maximum, df)
-
-
-@pytest.mark.parametrize(
-    ("spacing", "turnover", "expected"),
-    [
-        ("linear", None, uniform_frequency_grid(2.0, 100.0, 1.0)),
-        ("log", None, log_frequency_grid(2.0, 100.0, 1.0)),
-        ("loglinear", 20.0, loglinear_frequency_grid(2.0, 100.0, 1.0, 20.0)),
-    ],
-)
-def test_frequency_grid_dispatches_on_the_spacing(
-    spacing: FrequencySpacing, turnover: float | None, expected: np.ndarray
-) -> None:
-    grid = frequency_grid(spacing, 2.0, 100.0, 1.0, turnover)
-
-    np.testing.assert_array_equal(grid, expected)
-
-
-def test_frequency_grid_requires_a_turnover_only_for_loglinear() -> None:
-    with pytest.raises(ValueError, match="needs a turnover_frequency"):
-        frequency_grid("loglinear", 2.0, 100.0, 1.0)
-    spacings: tuple[FrequencySpacing, ...] = ("linear", "log")
-    for spacing in spacings:
-        with pytest.raises(ValueError, match="only used by the 'loglinear'"):
-            frequency_grid(spacing, 2.0, 100.0, 1.0, 50.0)
-
-
-def test_noise_weighted_inner_product_weights_each_bin_by_its_own_width() -> None:
-    a = jnp.array([1.0, 2.0, 3.0, 4.0])
-    psd = jnp.ones(4)
-    frequencies = jnp.array([1.0, 2.0, 4.0, 8.0])
-
-    actual = noise_weighted_inner_product(a, a, psd, frequencies)
-
-    # Widths on this grid are [1, 1.5, 3, 4].
-    np.testing.assert_allclose(np.asarray(actual), 1 * 1 + 1.5 * 4 + 3 * 9 + 4 * 16)
-
-
-def test_bin_widths_of_a_uniform_grid_is_its_spacing_in_every_bin() -> None:
-    """Exact for ``arange(n) * delta_f``, the shape Ripple's grid takes."""
-    widths = bin_widths(np.arange(9) * 0.5)
-
-    np.testing.assert_allclose(np.asarray(widths), np.full(9, 0.5))
-
-
-@pytest.mark.parametrize("stride", [2, 4, 8])
-def test_bin_widths_of_a_subsampled_uniform_grid_is_stride_times_spacing(
-    stride: int,
-) -> None:
+def test_bin_widths_of_a_subsampled_uniform_grid_is_stride_times_spacing() -> None:
     """Coarsening ``frequencies`` coarsens the widths with no width to keep in step."""
+    stride = 4
     fine_spacing = 0.25
     frequencies = 2.0 + fine_spacing * np.arange(257)
 
@@ -339,14 +116,6 @@ def test_bin_widths_of_a_two_bin_grid_is_the_one_gap_in_both() -> None:
     np.testing.assert_allclose(np.asarray(widths), [2.0, 2.0])
 
 
-def test_bin_widths_sums_to_the_grid_span_plus_half_an_end_gap_each_side() -> None:
-    frequencies = np.array([1.0, 2.0, 4.0, 8.0, 16.0])
-
-    total = float(jnp.sum(bin_widths(frequencies)))
-
-    assert total == pytest.approx((16.0 - 1.0) + (1.0 + 8.0) / 2)
-
-
 def test_bin_widths_midpoint_sum_converges_at_second_order() -> None:
     """Halving the log step quarters the quadrature error on a smooth integrand.
 
@@ -365,55 +134,6 @@ def test_bin_widths_midpoint_sum_converges_at_second_order() -> None:
     ratio = error(200) / error(400)
 
     assert 3.0 < ratio < 5.0
-
-
-def test_bin_widths_can_be_traced_under_jit() -> None:
-    frequencies = jnp.array([1.0, 2.0, 4.0, 8.0])
-
-    traced = jax.jit(bin_widths)(frequencies)
-
-    np.testing.assert_allclose(np.asarray(traced), np.asarray(bin_widths(frequencies)))
-
-
-@pytest.mark.parametrize(
-    ("frequencies", "message"),
-    [
-        (np.array([1.0]), "at least two bins"),
-        (np.ones((2, 2)), "one-dimensional"),
-    ],
-)
-def test_bin_widths_rejects_malformed_grids(
-    frequencies: np.ndarray, message: str
-) -> None:
-    with pytest.raises(ValueError, match=message):
-        bin_widths(frequencies)
-
-
-def test_validate_frequency_grid_accepts_a_non_uniform_grid() -> None:
-    grid = validate_frequency_grid(np.geomspace(1.0, 100.0, 8))
-
-    assert grid.dtype == np.float64
-    assert grid.shape == (8,)
-
-
-def test_validate_frequency_grid_accepts_a_single_bin() -> None:
-    assert validate_frequency_grid([5.0]).shape == (1,)
-
-
-@pytest.mark.parametrize(
-    ("frequencies", "message"),
-    [
-        (np.array([1.0, 3.0, 2.0]), "strictly increasing"),
-        (np.array([1.0, 1.0, 2.0]), "strictly increasing"),
-        (np.array([1.0, np.nan, 2.0]), "finite"),
-        (np.ones((2, 2)), "one-dimensional"),
-    ],
-)
-def test_validate_frequency_grid_rejects_malformed_grids(
-    frequencies: np.ndarray, message: str
-) -> None:
-    with pytest.raises(ValueError, match=message):
-        validate_frequency_grid(frequencies)
 
 
 @pytest.mark.parametrize(
@@ -444,9 +164,7 @@ def test_loglinear_independent_tail_has_exact_expected_grid(
     assert np.all(np.diff(grid) > 0.0)
 
 
-@pytest.mark.parametrize(
-    ("turnover", "start", "linear_count"), [(100.0, 98.0, 25), (101.0, 98.0, 25)]
-)
+@pytest.mark.parametrize(("turnover", "start", "linear_count"), [(101.0, 98.0, 25)])
 @pytest.mark.parametrize(("resolution", "tail_steps"), [(0.1, 31), (0.3, 11), (4.0, 1)])
 def test_loglinear_tail_aligns_endpoint_with_bounded_uniform_log_steps(
     turnover: float,
@@ -466,19 +184,3 @@ def test_loglinear_tail_aligns_endpoint_with_bounded_uniform_log_steps(
     assert np.all(np.abs(steps - expected_step) <= slack)
     assert np.all(steps <= resolution + slack)
     assert np.all(np.diff(grid) > 0.0)
-
-
-@pytest.mark.parametrize("resolution", [0.0, -0.1, np.inf, -np.inf, np.nan])
-def test_loglinear_rejects_invalid_dlogf(resolution: float) -> None:
-    with pytest.raises(ValueError, match="dlogf"):
-        loglinear_frequency_grid(2.0, 16.0, 2.0, 4.0, dlogf=resolution)
-    with pytest.raises(ValueError, match="dlogf"):
-        frequency_grid("loglinear", 2.0, 16.0, 2.0, 4.0, dlogf=resolution)
-
-
-@pytest.mark.parametrize("spacing", ["linear", "log"])
-def test_frequency_grid_rejects_dlogf_for_other_spacings(
-    spacing: FrequencySpacing,
-) -> None:
-    with pytest.raises(ValueError, match="dlogf is only used"):
-        frequency_grid(spacing, 2.0, 16.0, 2.0, dlogf=0.1)

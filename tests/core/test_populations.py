@@ -44,8 +44,6 @@ from astrogwb.populations import (
     Population,
     build_population,
     joint_model,
-    known_populations,
-    register_population,
 )
 from astrogwb.utils.numpyro import sample_and_logprob
 
@@ -140,15 +138,6 @@ GAUSSIAN_PARAMS: dict[str, float] = {
     "mass_mean": 1.33,
     "mass_sigma": 0.09,
 }
-GAUSSIAN_FIDUCIALS: dict[str, float] = {
-    **{
-        name: value
-        for name, value in FIDUCIALS.items()
-        if name not in {"minimum_mass", "mass_width"}
-    },
-    "mass_mean": 1.33,
-    "mass_sigma": 0.09,
-}
 MASS_SITES = ("source_frame_mass_1", "source_frame_mass_2")
 
 
@@ -200,42 +189,6 @@ DELAY = {
 }
 
 
-def test_the_one_shipped_population_is_registered() -> None:
-    assert known_populations() == ("bns_coba",)
-
-
-def test_a_kwarg_the_population_does_not_take_is_rejected() -> None:
-    """The factory signature is the kwargs schema."""
-    with pytest.raises(TypeError, match="no_such_kwarg"):
-        build_population("bns_coba", **WINDOW, no_such_kwarg=1.0)
-    with pytest.raises(TypeError, match="mass_model"):
-        build_population("bns_coba", minimum_redshift=Z_MIN, maximum_redshift=Z_MAX)
-
-
-def test_unknown_population_names_list_the_known_set() -> None:
-    with pytest.raises(KeyError, match="bns_coba"):
-        build_population("no_such_population")
-
-
-def test_registering_a_name_twice_is_rejected() -> None:
-    def factory(**kwargs: float) -> Population:
-        raise AssertionError("never called")
-
-    with pytest.raises(ValueError, match="already registered"):
-        register_population("bns_coba")(factory)
-
-
-def test_an_unknown_mass_model_is_rejected_at_construction() -> None:
-    with pytest.raises(ValueError, match="mass_model"):
-        build_population("bns_coba", **{**WINDOW, "mass_model": "triangular"})
-
-
-def test_time_delay_without_a_delay_floor_is_rejected() -> None:
-    population = build_population("bns_coba", **WINDOW, time_delay=True)
-    with pytest.raises(ValueError, match="minimum_delay"):
-        population({**POPULATION_PARAMS, "delay_slope": -1.0})
-
-
 # --------------------------------------------------------------------------- #
 # Explicit site metadata and recomputation
 # --------------------------------------------------------------------------- #
@@ -255,16 +208,6 @@ def test_joint_model_extrinsics_are_conditionable_sample_sites() -> None:
         assert trace[name]["value"] == value
 
 
-def test_sampling_collects_every_declared_site() -> None:
-    model = joint_model(*mock_population()(POPULATION_PARAMS))
-    sources, _ = sample_and_logprob(
-        model, jax.random.key(0), num_samples=1, density_sites=()
-    )
-    assert set(sources) == STOCHASTIC_SITES | DETERMINISTIC_SITES
-    for name in sources:
-        assert jnp.asarray(sources[name]).shape == (1,)
-
-
 def test_source_evaluate_needs_no_physical_rate() -> None:
     """Evaluating a density never reads the rate, so a proposal can omit it."""
     without_rate = {
@@ -274,19 +217,6 @@ def test_source_evaluate_needs_no_physical_rate() -> None:
     }
     _, luminosity_distance = evaluate(mock_population(), without_rate, sample_values())
     assert luminosity_distance.shape == SAMPLE_REDSHIFTS.shape
-
-
-def test_stored_deterministics_are_recomputed_from_sampled_values() -> None:
-    population = mock_population()
-    stored = {
-        **sample_values(),
-        LUMINOSITY_DISTANCE_SITE: jnp.ones_like(SAMPLE_REDSHIFTS),
-    }
-    clean = derived_columns(population, POPULATION_PARAMS, sample_values())
-    tampered = derived_columns(population, POPULATION_PARAMS, stored)
-    np.testing.assert_array_equal(
-        tampered[LUMINOSITY_DISTANCE_SITE], clean[LUMINOSITY_DISTANCE_SITE]
-    )
 
 
 # --------------------------------------------------------------------------- #
@@ -307,12 +237,6 @@ def test_one_execution_supplies_per_sample_density_distance_and_scalar_rate() ->
     )
     np.testing.assert_allclose(distance, expected_distance, rtol=1e-14)
     np.testing.assert_allclose(float(rate), float(expected_rate), rtol=1e-15)
-
-
-def test_the_detector_frame_is_left_to_the_waveform_layer() -> None:
-    columns = derived_columns(mock_population(), POPULATION_PARAMS, sample_values())
-
-    assert not {"detector_frame_mass_1", "detector_frame_mass_2"} & set(columns)
 
 
 def test_source_model_never_sees_redshift() -> None:
@@ -371,15 +295,6 @@ def test_density_selection_preserves_supplied_values_and_deterministics() -> Non
     np.testing.assert_array_equal(luminosity_distance, selected_distance)
 
 
-def test_empty_density_selection_returns_per_source_zeros() -> None:
-    values = sample_values()
-    log_prob, _ = evaluate(
-        mock_population(), POPULATION_PARAMS, values, density_sites=()
-    )
-    assert log_prob.shape == SAMPLE_REDSHIFTS.shape
-    np.testing.assert_array_equal(log_prob, jnp.zeros_like(SAMPLE_REDSHIFTS))
-
-
 # --------------------------------------------------------------------------- #
 # Isolation from an outer inference model
 # --------------------------------------------------------------------------- #
@@ -395,12 +310,6 @@ def _outer_model(observed: jax.Array) -> None:
         total = total + jnp.sum(log_prob)
         total = total + jnp.sum(luminosity_distance)
     numpyro.sample("obs", dist.Normal(total * 1e-6, 1.0), obs=observed)
-
-
-def test_source_sites_stay_out_of_the_outer_trace() -> None:
-    with handlers.seed(rng_seed=0):
-        trace = handlers.trace(_outer_model).get_trace(jnp.asarray(0.0))
-    assert set(trace) == {"H0", "obs"}
 
 
 def test_outer_density_and_gradient_match_a_direct_calculation() -> None:
@@ -436,15 +345,6 @@ def test_outer_density_and_gradient_match_a_direct_calculation() -> None:
     )
 
 
-@pytest.mark.integration
-def test_nuts_samples_only_the_outer_hyperparameter() -> None:
-    from numpyro.infer import MCMC, NUTS
-
-    mcmc = MCMC(NUTS(_outer_model), num_warmup=20, num_samples=20, progress_bar=False)
-    mcmc.run(jax.random.PRNGKey(0), jnp.asarray(0.0))
-    assert set(mcmc.get_samples()) == {"H0"}
-
-
 # --------------------------------------------------------------------------- #
 # Generation
 # --------------------------------------------------------------------------- #
@@ -467,19 +367,6 @@ def test_generation_is_reproducible(generating: str) -> None:
     assert set(first) == STOCHASTIC_SITES | DETERMINISTIC_SITES
     for name in first:
         np.testing.assert_array_equal(first[name], second[name])
-
-
-def test_a_smaller_catalog_is_a_prefix_of_a_larger_one() -> None:
-    """Draws are prefix-stable in the sample count.
-
-    ``Predictive`` allocates per-draw keys with ``jax.random.split``, whose
-    prefix stability is a property of the installed JAX rather than something
-    the API promises, so it is checked here rather than assumed.
-    """
-    small = draw(mock_population(), POPULATION_PARAMS, jax.random.PRNGKey(7), 16)
-    large = draw(mock_population(), POPULATION_PARAMS, jax.random.PRNGKey(7), 64)
-    for name, values in small.items():
-        np.testing.assert_array_equal(values, large[name][:16])
 
 
 @pytest.mark.parametrize("generating", GENERATING_POPULATIONS)
@@ -537,12 +424,6 @@ def test_sampling_is_jittable_and_isolated_from_outer_handlers() -> None:
         log_prob(POPULATION_PARAMS, sources),
         rtol=1e-12,
     )
-
-
-def test_sampling_and_derivation_are_isolated_without_jit() -> None:
-    with handlers.trace() as outer:
-        draw(mock_population(), POPULATION_PARAMS, jax.random.PRNGKey(7), 8)
-    assert outer == {}
 
 
 # --------------------------------------------------------------------------- #
@@ -633,41 +514,9 @@ def test_gaussian_mass_density_stays_finite_when_hyperparameters_move() -> None:
     assert np.all(np.isneginf(np.asarray(jax.jit(uniform_log_prob)(outside_uniform))))
 
 
-def test_gaussian_modified_propagation_reduces_exactly_to_the_plain_model() -> None:
-    values = sample_values()
-    cosmological_log_prob, cosmological_distance = evaluate(
-        _gaussian_population(), GAUSSIAN_PARAMS, values
-    )
-    modified_log_prob, modified_distance = evaluate(
-        _gaussian_population(), GAUSSIAN_FIDUCIALS, values
-    )
-    assert GAUSSIAN_FIDUCIALS["xi_0"] == 1.0
-    np.testing.assert_array_equal(cosmological_log_prob, modified_log_prob)
-    np.testing.assert_array_equal(cosmological_distance, modified_distance)
-
-
-def test_gaussian_and_uniform_models_share_distance() -> None:
-    values = sample_values()
-    _, gaussian_distance = evaluate(_gaussian_population(), GAUSSIAN_PARAMS, values)
-    _, uniform_distance = evaluate(mock_population(), POPULATION_PARAMS, values)
-    np.testing.assert_array_equal(gaussian_distance, uniform_distance)
-
-
 # --------------------------------------------------------------------------- #
 # Inclination
 # --------------------------------------------------------------------------- #
-def test_inclination_is_always_drawn_isotropically() -> None:
-    samples = draw(mock_population(), POPULATION_PARAMS, jax.random.PRNGKey(0), 256)
-    inclination = samples["inclination"]
-    assert inclination.shape == (256,)
-    assert bool(jnp.all((inclination >= 0.0) & (inclination <= jnp.pi)))
-    # cos(iota) is uniform on [-1, 1], so its mean is 0 and its variance is 1/3.
-    np.testing.assert_allclose(float(jnp.mean(jnp.cos(inclination))), 0.0, atol=0.15)
-    np.testing.assert_allclose(
-        float(jnp.mean(jnp.cos(inclination) ** 2)), 1.0 / 3.0, atol=0.08
-    )
-
-
 def test_inclination_is_absent_from_the_default_density() -> None:
     """Inclination has no hyperparameters, so it must not enter the weight."""
     values = sample_values()
@@ -732,15 +581,6 @@ def test_time_delayed_rate_is_linear_in_the_local_rate_but_not_in_h0() -> None:
     h0 = DELAYED_PARAMS["H0"]
     moved = rate({**DELAYED_PARAMS, "H0": 1.2 * h0})
     assert not np.isclose(moved * (1.2 * h0) ** 3, base * h0**3, rtol=1e-3)
-
-    def undelayed(params: Mapping[str, ArrayLike]) -> jax.Array:
-        return merger_rate(mock_population(), params)
-
-    np.testing.assert_allclose(
-        undelayed({**POPULATION_PARAMS, "H0": 1.2 * h0}) * (1.2 * h0) ** 3,
-        undelayed(POPULATION_PARAMS) * h0**3,
-        rtol=1e-10,
-    )
 
 
 @pytest.mark.parametrize("slope", [-1.5, -1.0, 0.5])

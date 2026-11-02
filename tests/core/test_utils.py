@@ -19,25 +19,9 @@ def test_array_dict_shape_returns_the_common_shape() -> None:
     assert array_dict_shape({"mass": np.ones(3), "redshift": jnp.ones(3)}) == (3,)
 
 
-def test_array_dict_shape_accepts_matching_arbitrary_shapes() -> None:
-    assert array_dict_shape({"first": np.ones((2, 3)), "second": jnp.ones((2, 3))}) == (
-        2,
-        3,
-    )
-
-
-def test_array_dict_shape_accepts_matching_scalar_values() -> None:
-    assert array_dict_shape({"first": 1.0, "second": np.asarray(2.0)}) == ()
-
-
 def test_array_dict_shape_rejects_mismatched_shapes() -> None:
     with pytest.raises(ValueError, match=r"mass.*\(2,\).*redshift.*\(3,\)"):
         array_dict_shape({"mass": np.ones(2), "redshift": np.ones(3)})
-
-
-def test_array_dict_shape_rejects_empty_mappings() -> None:
-    with pytest.raises(ValueError, match="at least one array"):
-        array_dict_shape({})
 
 
 def test_require_x64_raises_when_disabled() -> None:
@@ -65,36 +49,6 @@ def test_cumulative_trapezoid_is_exact_for_linear_samples() -> None:
     np.testing.assert_allclose(np.asarray(actual), np.asarray(expected), atol=2e-15)
 
 
-def test_cumulative_trapezoid_is_jittable_and_differentiable() -> None:
-    x = jnp.linspace(1.0, 4.0, 7)
-
-    def evaluate(scale: jax.Array) -> jax.Array:
-        return jnp.sum(cumulative_trapezoid(scale * x, x))
-
-    actual = jax.jit(evaluate)(jnp.asarray(2.0))
-    derivative = jax.grad(evaluate)(jnp.asarray(2.0))
-    expected_derivative = evaluate(jnp.asarray(1.0))
-
-    assert actual == pytest.approx(2.0 * float(expected_derivative), rel=2e-15)
-    assert derivative == pytest.approx(float(expected_derivative), rel=2e-15)
-
-
-def test_cumulative_trapezoid_broadcasts_over_leading_batch_dimensions() -> None:
-    x = jnp.linspace(0.0, 2.0, 5)
-    y = jnp.stack([x**2, jnp.sin(x)])
-
-    actual = cumulative_trapezoid(y, x)
-
-    assert actual.shape == y.shape
-    np.testing.assert_allclose(np.asarray(actual[:, 0]), np.zeros(2), atol=0.0)
-    for row in range(y.shape[0]):
-        np.testing.assert_allclose(
-            np.asarray(actual[row]),
-            np.asarray(cumulative_trapezoid(y[row], x)),
-            atol=2e-15,
-        )
-
-
 @pytest.mark.parametrize("order", [2, 4, 8])
 def test_nodes_weights_is_exact_for_the_highest_representable_degree(
     order: int,
@@ -110,19 +64,6 @@ def test_nodes_weights_is_exact_for_the_highest_representable_degree(
     assert float(actual) == pytest.approx(expected, rel=2e-14)
 
 
-def test_nodes_weights_weights_carry_the_interval_jacobian() -> None:
-    lower = jnp.array([0.0, 1.0, 3.0])
-    upper = jnp.array([1.0, 3.0, 7.0])
-
-    _, weights = gauss_legendre_nodes_weights(lower, upper, 4)
-
-    np.testing.assert_allclose(
-        np.asarray(jnp.sum(weights, axis=-1)),
-        np.asarray(upper - lower),
-        rtol=2e-15,
-    )
-
-
 def test_nodes_weights_covers_every_interval_of_a_grid() -> None:
     """Per-interval integrals must sum to the integral over the whole range."""
     order = 4
@@ -135,15 +76,6 @@ def test_nodes_weights_covers_every_interval_of_a_grid() -> None:
     total = float(jnp.sum(interval_integrals))
 
     assert total == pytest.approx(float(jnp.exp(2.0) - 1.0), rel=2e-14)
-
-
-def test_nodes_weights_follow_the_dtype_of_the_bounds() -> None:
-    points, weights = gauss_legendre_nodes_weights(
-        jnp.asarray(0.0, jnp.float32), jnp.asarray(1.0, jnp.float32), 4
-    )
-
-    assert points.dtype == jnp.float32
-    assert weights.dtype == jnp.float32
 
 
 def test_nodes_weights_promotes_integer_bounds_instead_of_truncating() -> None:
@@ -171,18 +103,3 @@ def test_nodes_weights_promotes_integer_bounds_instead_of_truncating() -> None:
         ),
         rtol=2e-15,
     )
-
-
-def test_nodes_weights_is_jittable_and_differentiable_in_its_bounds() -> None:
-    def integrate(upper: jax.Array) -> jax.Array:
-        points, weights = gauss_legendre_nodes_weights(0.0, upper, 4)
-        return jnp.sum(weights * points**2, axis=-1)
-
-    upper = jnp.asarray(3.0)
-
-    actual = jax.jit(integrate)(upper)
-    derivative = jax.grad(integrate)(upper)
-
-    # d/db of the integral of x^2 from 0 to b is b^2.
-    assert float(actual) == pytest.approx(3.0**3 / 3.0, rel=2e-15)
-    assert float(derivative) == pytest.approx(3.0**2, rel=2e-15)

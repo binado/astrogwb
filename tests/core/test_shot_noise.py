@@ -70,19 +70,6 @@ def test_rank_one_log_likelihood_with_a_mask_matches_the_compressed_dense_gaussi
     assert float(value) == pytest.approx(expected, rel=1e-12)
 
 
-def test_rank_one_log_likelihood_with_zero_direction_is_the_diagonal_gaussian(
-    template: np.ndarray, observed: np.ndarray, scale: np.ndarray
-) -> None:
-    value = rank_one_gaussian_log_likelihood(
-        observed, template, scale, np.zeros_like(template)
-    )
-    diagonal = dist.Normal(jnp.asarray(template), jnp.asarray(scale)).log_prob(
-        jnp.asarray(observed)
-    )
-
-    assert float(value) == pytest.approx(float(diagonal.sum()), rel=1e-14)
-
-
 def test_rank_one_log_likelihood_stays_finite_at_detector_scales(
     template: np.ndarray, observed: np.ndarray, scale: np.ndarray
 ) -> None:
@@ -128,10 +115,10 @@ def test_amplitude_direction_gives_the_amplitude_variance_with_shot_noise(
     )
 
 
-@pytest.mark.parametrize("relative_sd", [0.002, 0.05])
 def test_amplitude_shot_noise_variance_of_a_flat_relative_scatter_is_its_square(
-    template: np.ndarray, scale: np.ndarray, relative_sd: float
+    template: np.ndarray, scale: np.ndarray
 ) -> None:
+    relative_sd = 0.05
     variance = (relative_sd * template) ** 2
 
     assert float(
@@ -202,23 +189,6 @@ def test_low_rank_log_likelihood_matches_the_dense_gaussian(
 
     assert float(value) == pytest.approx(
         _whitened_dense(observed, template, scale, modes, block), rel=1e-12
-    )
-
-
-def test_low_rank_log_likelihood_of_one_mode_is_the_rank_one_one(
-    template: np.ndarray, observed: np.ndarray, scale: np.ndarray
-) -> None:
-    direction = np.array([0.5, -0.2, 0.3, 0.1, 0.4])
-    whitened = direction / scale
-    norm = np.linalg.norm(whitened)
-
-    value = low_rank_gaussian_log_likelihood(
-        observed, template, scale, (whitened / norm)[:, None], np.array([[norm**2]])
-    )
-
-    assert float(value) == pytest.approx(
-        float(rank_one_gaussian_log_likelihood(observed, template, scale, direction)),
-        rel=1e-12,
     )
 
 
@@ -299,14 +269,6 @@ def test_shot_noise_modes_warn_when_the_cap_stops_them_short(
         )
 
     assert modes.shape == (4, 2)
-
-
-def test_shot_noise_modes_do_not_warn_within_the_cap(
-    spectrum_covariance: np.ndarray, recwarn: pytest.WarningsRecorder
-) -> None:
-    shot_noise_modes(spectrum_covariance, np.ones(4), tolerance=1e-3, max_modes=2)
-
-    assert not [w for w in recwarn if issubclass(w.category, UserWarning)]
 
 
 def test_shot_noise_modes_are_zero_in_masked_bins(

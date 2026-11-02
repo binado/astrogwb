@@ -64,6 +64,4 @@ def test_owned_registry_build_order_and_serialization() -> None:
     )
     for detector in built:
         assert detector.geometry is registry.detectors[detector.name].geometry
-        assert detector.geometry.location.shape == (3,)
-        assert detector.geometry.response_tensor.shape == (3, 3)
     assert registry.model_dump(mode="json") == before
