@@ -210,23 +210,20 @@ class RedshiftDistribution(InterpolatedDistribution):
         """
         return self.luminosity_distance(redshift) * self.distance_ratio(redshift)
 
-    def distance_model(self) -> Callable[[], dict[str, jax.Array]]:
+    def distance_model(self) -> Callable[[], None]:
         """A no-argument NumPyro model of the source's redshift and GW distance.
 
         Samples ``redshift`` from this distribution and registers
         ``luminosity_distance`` (:meth:`gw_luminosity_distance`) as a
-        deterministic. Returns both, so a population composes it with a source
-        model that never sees redshift.
+        deterministic. A population composes it with an intrinsic source model
+        that never sees redshift.
         """
 
-        def model() -> dict[str, jax.Array]:
+        def model() -> None:
             redshift = jnp.asarray(numpyro.sample("redshift", self))
-            distance = jnp.asarray(
-                numpyro.deterministic(
-                    "luminosity_distance", self.gw_luminosity_distance(redshift)
-                )
+            numpyro.deterministic(
+                "luminosity_distance", self.gw_luminosity_distance(redshift)
             )
-            return {"redshift": redshift, "luminosity_distance": distance}
 
         return model
 

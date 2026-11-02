@@ -32,7 +32,7 @@ from astrogwb.gwb.importance import (
 )
 from astrogwb.inference import ImportanceGaussianLikelihood
 from astrogwb.populations import PopulationMetadata, build_population, joint_model
-from astrogwb.populations.evaluation import evaluate_sources, sample_sources
+from astrogwb.populations.evaluation import sample_and_logprob
 from astrogwb.simulators import realization_key
 from astrogwb.utils import gauss_legendre_nodes_weights
 from astrogwb.waveform import WaveformMetadata, inclination_factor, waveform_generator
@@ -199,11 +199,12 @@ def _spectrum_on_nodes(
     )
     redshift, weights = redshift_quadrature(minimum, maximum, NUM_NODES)
     fiducial_model = joint_model(*population.build()(metadata.fiducials))
-    samples = sample_sources(
+    samples = sample_and_logprob(
         _pin_redshift_and_inclination(fiducial_model, minimum),
         key,
         num_samples=metadata.num_samples,
-    )
+        density_sites=(),
+    )[0]
     # Every source at every node, node-major: row ``j * N + k`` is source ``k``
     # at node ``j``, replayed through the model so redshift-derived columns
     # (the luminosity distance) are recomputed.
@@ -214,7 +215,7 @@ def _spectrum_on_nodes(
     }
     tiled["redshift"] = np.repeat(redshift, count)
     tiled["inclination"] = np.full(count * redshift.size, EFFECTIVE_INCLINATION)
-    _, outputs = evaluate_sources(fiducial_model, tiled, density_sites=())
+    outputs, _ = sample_and_logprob(fiducial_model, density_sites=(), values=tiled)
     rows = {name: np.asarray(values) for name, values in outputs.items()}
     power = polarization_power_data(waveform_generator(OBSERVED_WAVEFORM), rows)
     power = np.asarray(power["polarization_power"]).reshape(-1, NUM_NODES, 6)
@@ -222,13 +223,17 @@ def _spectrum_on_nodes(
     redshift_distribution, source_model = population.build()(params)
     merger_rate = redshift_distribution.total_merger_rate()
     model = joint_model(redshift_distribution, source_model)
-    log_density, outputs = evaluate_sources(model, rows, density_sites=("redshift",))
+    outputs, log_density = sample_and_logprob(
+        model, density_sites=("redshift",), values=rows
+    )
     distance_ratio = rows["luminosity_distance"] / outputs["luminosity_distance"]
     target_power = power * distance_ratio.reshape(NUM_NODES, 6) ** 2
     density = weights * np.exp(log_density[::6])
     first = {name: values[:6] for name, values in rows.items()}
-    target, _ = evaluate_sources(model, first, density_sites=density_sites)
-    drawn, _ = evaluate_sources(fiducial_model, first, density_sites=density_sites)
+    _, target = sample_and_logprob(model, density_sites=density_sites, values=first)
+    _, drawn = sample_and_logprob(
+        fiducial_model, density_sites=density_sites, values=first
+    )
     importance = np.exp(np.asarray(target) - np.asarray(drawn))
     rate = float(merger_rate)
     spectrum = rate * np.einsum("fzn,z,n->f", target_power, density, importance) / 6

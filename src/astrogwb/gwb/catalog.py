@@ -25,7 +25,7 @@ from numpy.typing import ArrayLike, NDArray
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from astrogwb import __version__
-from astrogwb.populations.evaluation import sample_sources
+from astrogwb.populations.evaluation import sample_and_logprob
 from astrogwb.populations.joint import fix_extrinsic_parameters, joint_model
 from astrogwb.populations.metadata import PopulationMetadata
 from astrogwb.waveform.base import WaveformGenerator
@@ -167,7 +167,9 @@ def draw_catalog(
     model = fix_extrinsic_parameters(
         joint_model(*metadata.population.build()(metadata.fiducials))
     )
-    samples = sample_sources(model, key, num_samples=metadata.num_samples)
+    samples, _ = sample_and_logprob(
+        model, key, num_samples=metadata.num_samples, density_sites=()
+    )
     return polarization_power_data(
         waveform_generator(metadata.waveform), samples, chunk_size=chunk_size
     )

@@ -30,7 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from astrogwb import __version__
 from astrogwb.distributions.config import DistributionConfig
 from astrogwb.populations import joint_model
-from astrogwb.populations.evaluation import sample_sources
+from astrogwb.populations.evaluation import sample_and_logprob
 from astrogwb.populations.joint import EXTRINSIC_SITES
 from astrogwb.populations.metadata import PopulationMetadata as PopulationSpec
 from astrogwb.utils import years_to_seconds
@@ -196,8 +196,11 @@ class PopulationSimulator:
             jax.random.poisson(count_key, rate * self.metadata.observation_seconds)
         )
         # One sample preserves column names even for an empty realization.
-        sources = sample_sources(
-            joint_model(redshift, source_model), source_key, num_samples=max(count, 1)
+        sources, _ = sample_and_logprob(
+            joint_model(redshift, source_model),
+            source_key,
+            num_samples=max(count, 1),
+            density_sites=(),
         )
         return PopulationArtifact(
             metadata=self.metadata,

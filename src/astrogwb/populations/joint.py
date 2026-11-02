@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import math
 
-import jax
 import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
@@ -76,7 +75,7 @@ def joint_model(
     ``redshift_distribution.distance_model()`` contributes the ``redshift``
     site and the ``luminosity_distance`` deterministic; ``source_model`` the
     intrinsic sites. This model adds isotropic sky coordinates, polarization
-    angle and coalescence phase as sample sites. The returned mapping holds all
+    angle and coalescence phase as sample sites. The declared sites define all
     source columns. Call it as ``joint_model(*population(params))``.
 
     Parameters
@@ -90,15 +89,10 @@ def joint_model(
     """
     distance_model = redshift_distribution.distance_model()
 
-    def model() -> dict[str, jax.Array]:
-        sources = {**distance_model(), **source_model()}
-        outputs = {
-            **sources,
-            **{
-                name: numpyro.sample(name, prior)
-                for name, prior in extrinsic_priors().items()
-            },
-        }
-        return {name: jnp.asarray(value) for name, value in outputs.items()}
+    def model() -> None:
+        distance_model()
+        source_model()
+        for name, prior in extrinsic_priors().items():
+            numpyro.sample(name, prior)
 
     return model

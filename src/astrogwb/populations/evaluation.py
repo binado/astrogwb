@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+import operator
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import jax
@@ -8,46 +9,15 @@ import jax.numpy as jnp
 import numpyro
 from jax.typing import ArrayLike
 from numpyro import handlers
-from numpyro.infer import Predictive
+from numpyro.distributions.util import is_identically_one
 from numpyro.primitives import Messenger
 from scipy.stats import qmc
 
 from astrogwb.populations._types import PopulationModel
 from astrogwb.utils import numpyro as numpyro_utils
 
-#: The plate :func:`evaluate_sources` executes a source model under.
+#: The plate used for batched source execution.
 _SOURCES_PLATE = "sources"
-
-
-def compute_model_and_log_probs(
-    model: Callable[..., Any],
-    density_sites: Sequence[str],
-    *model_args: Any,
-    **model_kwargs: Any,
-) -> tuple[Any, jax.Array]:
-    """Run ``model`` once in isolation; return its result and selected density.
-
-    ``model`` must already be wrapped as needed, e.g. by ``handlers.condition``.
-    ``handlers.block`` keeps catalog rows out of an enclosing inference trace.
-
-    Returns ``(model return value, log_prob)``. ``log_prob`` has one entry per
-    source, or is the scalar zero if no ``density_sites`` matched.
-
-    Parameters
-    ----------
-    model
-        NumPyro model.
-    density_sites
-        Names of sites included in the density.
-    *model_args
-        Positional arguments passed to the model.
-    **model_kwargs
-        Keyword arguments passed to the model.
-    """
-    with handlers.block():
-        accumulator = numpyro_utils.DensityAccumulator(model, sites=density_sites)
-        result = accumulator(*model_args, **model_kwargs)
-    return result, accumulator.log_prob
 
 
 class _RequireObserved(Messenger):
@@ -79,87 +49,99 @@ def _num_sources(columns: Mapping[str, ArrayLike]) -> int:
     return lengths.pop()
 
 
-def evaluate_sources(
+def _outputs_and_logprob(
+    trace: Mapping[str, Any], num_samples: int, density_sites: Sequence[str]
+) -> tuple[dict[str, jax.Array], jax.Array]:
+    outputs = {
+        name: jnp.broadcast_to(jnp.asarray(site["value"]), (num_samples,))
+        for name, site in trace.items()
+        if site["type"] in {"sample", "deterministic"}
+        and not site.get("infer", {}).get("is_auxiliary", False)
+    }
+    log_probs = {}
+    for name in density_sites:
+        if name not in trace or trace[name]["type"] != "sample":
+            continue
+        site = trace[name]
+        intermediates = site["intermediates"]
+        log_prob = (
+            site["fn"].log_prob(site["value"], intermediates)
+            if intermediates
+            else site["fn"].log_prob(site["value"])
+        )
+        scale = site["scale"]
+        if scale is not None and not is_identically_one(scale):
+            log_prob = scale * log_prob
+        log_probs[name] = log_prob
+    total = jax.tree.reduce(operator.add, log_probs, initializer=jnp.zeros(()))
+    return outputs, jnp.broadcast_to(total, (num_samples,))
+
+
+def sample_and_logprob(
     model: PopulationModel,
-    source_parameters: Mapping[str, ArrayLike],
+    key: jax.Array | None = None,
     *,
+    num_samples: int | None = None,
+    values: Mapping[str, ArrayLike] | None = None,
     density_sites: Sequence[str],
-) -> tuple[jax.Array, dict[str, jax.Array]]:
-    """Selected log density and the model's returned mapping, in one isolated pass.
+) -> tuple[dict[str, jax.Array], jax.Array]:
+    """Collect source columns and selected log density from one isolated trace.
 
-    ``model`` is a no-argument source model, built from the hyperparameters it
-    closes over, so gradients with respect to them flow through its closure.
-    It runs once under a ``sources`` plate of length ``N``, with every column
-    of ``source_parameters`` conditioned in. Stored deterministic columns, such
-    as ``luminosity_distance``, are ignored and recomputed. ``density_sites``
-    names the factors summed into the log density. Execution is blocked from
-    enclosing handlers.
-
-    Returns ``(log_prob, outputs)``. ``log_prob`` has shape ``(N,)``, zeros when
-    ``density_sites`` is empty. ``outputs`` is the model's return mapping.
-
-    Raises ``ValueError`` unless every column has the same shape ``(N,)``, and
-    ``KeyError`` if a sample site has no column.
+    Sample and deterministic sites define the output columns; auxiliary sites
+    such as factors are excluded. The model's return value is ignored.
+    Deterministic columns supplied in ``values`` are recomputed. All outputs
+    and the summed log density have shape ``(num_samples,)``. An empty density
+    selection gives zeros. The source model must support this batch shape.
 
     Parameters
     ----------
     model
-        NumPyro model.
-    source_parameters
-        Source parameter values by name.
-    density_sites
-        Names of sites included in the density.
-    """
-    columns: dict[str, ArrayLike] = {
-        name: jnp.asarray(value) for name, value in source_parameters.items()
-    }
-    num_sources = _num_sources(columns)
-
-    def plated() -> Mapping[str, jax.Array]:
-        with numpyro.plate(_SOURCES_PLATE, num_sources):
-            return model()
-
-    conditioned = _RequireObserved(handlers.condition(plated, data=columns))
-    outputs, log_prob = compute_model_and_log_probs(conditioned, density_sites)
-    return (
-        jnp.broadcast_to(log_prob, (num_sources,)),
-        {name: jnp.asarray(value) for name, value in outputs.items()},
-    )
-
-
-def sample_sources(
-    model: PopulationModel,
-    key: jax.Array,
-    *,
-    num_samples: int,
-) -> dict[str, jax.Array]:
-    """Draw ``num_samples`` sources, then replay them through :func:`evaluate_sources`.
-
-    The batched replay recomputes every returned column through the evaluation
-    code path: ``Predictive``'s per-draw execution can differ in the last bits,
-    which would spoil the exact-zero weights of a catalog used as its own
-    proposal.
-
-    ``num_samples`` is a Python int, static under JIT. Returns the model's
-    output mapping, each column of shape ``(num_samples,)``.
-
-    Parameters
-    ----------
-    model
-        NumPyro model.
+        No-argument NumPyro model declaring scalar source sites.
     key
-        JAX random key.
+        Random key for free sample sites. Without a key every sample site
+        must be conditioned, even under an enclosing seed handler.
     num_samples
-        Number of source samples.
+        Source count, static under JIT. Inferred from ``values`` if omitted;
+        must agree with their length when both are supplied.
+    values
+        Columns of shape ``(N,)`` to condition on. Partial conditioning is
+        allowed when a key is supplied.
+    density_sites
+        Sample sites whose log probabilities are summed.
+
+    Raises
+    ------
+    ValueError
+        If the source count is missing or columns have incompatible shapes.
+    KeyError
+        If a sample site is unconditioned and no key is supplied.
     """
+    columns: dict[str, ArrayLike] = (
+        {}
+        if values is None
+        else {name: jnp.asarray(value) for name, value in values.items()}
+    )
+    if columns:
+        count = _num_sources(columns)
+        if num_samples is not None and num_samples != count:
+            raise ValueError("num_samples must match the source column length")
+        num_samples = count
+    if num_samples is None or num_samples <= 0:
+        raise ValueError("num_samples must be positive or inferred from values")
+
+    def plated() -> None:
+        with numpyro.plate(_SOURCES_PLATE, num_samples):
+            model()
+
+    conditioned = handlers.condition(plated, data=columns)
+    execution = (
+        _RequireObserved(conditioned)
+        if key is None
+        else handlers.seed(conditioned, rng_seed=key)
+    )
     with handlers.block():
-        draws = Predictive(model, num_samples=num_samples)(key)
-        probe = handlers.trace(handlers.seed(model, jax.random.PRNGKey(0))).get_trace()
-    sampled = {
-        name: draws[name] for name, site in probe.items() if site["type"] == "sample"
-    }
-    _, outputs = evaluate_sources(model, sampled, density_sites=())
-    return outputs
+        trace = handlers.trace(execution).get_trace()
+    return _outputs_and_logprob(trace, num_samples, density_sites)
 
 
 def sample_sources_qmc(
@@ -168,9 +150,9 @@ def sample_sources_qmc(
     *,
     num_samples: int,
 ) -> dict[str, jax.Array]:
-    """Draw ``num_samples`` sources on a scrambled Sobol net, then replay them.
+    """Draw source columns on a scrambled Sobol net.
 
-    The quasi-random counterpart of :func:`sample_sources`: ``key`` seeds an
+    The quasi-random counterpart of :func:`sample_and_logprob`: ``key`` seeds an
     Owen scrambling of a Sobol sequence with one dimension per free sample
     site, driven through :class:`~astrogwb.utils.numpyro.InverseCDF`, whose
     contracts the model must meet.
@@ -197,24 +179,27 @@ def sample_sources_qmc(
         )
     with handlers.block():
         probe = handlers.trace(handlers.seed(model, jax.random.PRNGKey(0))).get_trace()
-    samples = [name for name, site in probe.items() if site["type"] == "sample"]
+    samples = [
+        name
+        for name, site in probe.items()
+        if site["type"] == "sample"
+        and not site.get("infer", {}).get("is_auxiliary", False)
+    ]
     free = [name for name in samples if not probe[name]["is_observed"]]
     scramble = int(jax.random.randint(key, (), 0, jnp.iinfo(jnp.int32).max))
     points = qmc.Sobol(len(free), scramble=True, seed=scramble).random_base2(exponent)
-    with handlers.block():
+
+    # Transform sites before the plate expands their distributions: NumPyro's
+    # ExpandedDistribution does not implement icdf.
+    with handlers.block(), numpyro.plate(_SOURCES_PLATE, num_samples):
         trace = handlers.trace(
             numpyro_utils.InverseCDF(model, points=points)
         ).get_trace()
-    sampled = {
-        name: jnp.broadcast_to(trace[name]["value"], (num_samples,)) for name in samples
-    }
-    _, outputs = evaluate_sources(model, sampled, density_sites=())
+    outputs, _ = _outputs_and_logprob(trace, num_samples, ())
     return outputs
 
 
 __all__ = [
-    "compute_model_and_log_probs",
-    "evaluate_sources",
-    "sample_sources",
+    "sample_and_logprob",
     "sample_sources_qmc",
 ]

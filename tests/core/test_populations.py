@@ -47,7 +47,7 @@ from astrogwb.populations import (
     known_populations,
     register_population,
 )
-from astrogwb.populations.evaluation import evaluate_sources, sample_sources
+from astrogwb.populations.evaluation import sample_and_logprob
 
 #: The deterministic output governing waveform amplitude.
 LUMINOSITY_DISTANCE_SITE = "luminosity_distance"
@@ -119,7 +119,9 @@ def evaluate(
 ) -> tuple[jax.Array, jax.Array]:
     """Selected ``(N,)`` density and recomputed distance, in one isolated pass."""
     model = joint_model(*population(params))
-    log_prob, outputs = evaluate_sources(model, values, density_sites=density_sites)
+    outputs, log_prob = sample_and_logprob(
+        model, density_sites=density_sites, values=values
+    )
     return log_prob, outputs[LUMINOSITY_DISTANCE_SITE]
 
 
@@ -253,12 +255,14 @@ def test_joint_model_extrinsics_are_conditionable_sample_sites() -> None:
         assert trace[name]["value"] == value
 
 
-def test_source_call_returns_every_declared_site() -> None:
+def test_sampling_collects_every_declared_site() -> None:
     model = joint_model(*mock_population()(POPULATION_PARAMS))
-    sources = handlers.seed(model, 0)()
+    sources, _ = sample_and_logprob(
+        model, jax.random.key(0), num_samples=1, density_sites=()
+    )
     assert set(sources) == STOCHASTIC_SITES | DETERMINISTIC_SITES
     for name in sources:
-        assert jnp.asarray(sources[name]).shape == ()
+        assert jnp.asarray(sources[name]).shape == (1,)
 
 
 def test_source_evaluate_needs_no_physical_rate() -> None:
@@ -452,7 +456,7 @@ def draw(
 ) -> dict[str, jax.Array]:
     """``num_samples`` sources from ``population`` at ``params``."""
     model = joint_model(*population(params))
-    return sample_sources(model, key, num_samples=num_samples)
+    return sample_and_logprob(model, key, num_samples=num_samples, density_sites=())[0]
 
 
 @pytest.mark.parametrize("generating", GENERATING_POPULATIONS)
