@@ -99,13 +99,13 @@ from astrogwb.gwb.catalog import (
     polarization_power_data,
 )
 from astrogwb.populations._types import Population, PopulationModel, SourceModel
-from astrogwb.populations.evaluation import (
-    sample_and_logprob,
-    sample_sources_qmc,
-)
 from astrogwb.populations.joint import fix_extrinsic_parameters, joint_model
 from astrogwb.populations.metadata import PopulationMetadata
 from astrogwb.utils import gauss_legendre_nodes_weights
+from astrogwb.utils.numpyro import (
+    sample_and_logprob,
+    sample_sources_qmc,
+)
 from astrogwb.waveform.factory import waveform_generator
 
 __all__ = [

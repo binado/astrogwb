@@ -32,9 +32,9 @@ from astrogwb.gwb.importance import (
 )
 from astrogwb.inference import ImportanceGaussianLikelihood
 from astrogwb.populations import PopulationMetadata, build_population, joint_model
-from astrogwb.populations.evaluation import sample_and_logprob
 from astrogwb.simulators import realization_key
 from astrogwb.utils import gauss_legendre_nodes_weights
+from astrogwb.utils.numpyro import sample_and_logprob
 from astrogwb.waveform import WaveformMetadata, inclination_factor, waveform_generator
 
 #: The observed grid of the comparisons: four 10 Hz bins from 20 Hz.

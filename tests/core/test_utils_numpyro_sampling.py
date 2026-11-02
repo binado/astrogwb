@@ -17,7 +17,7 @@ from numpyro import handlers
 from numpyro.infer import MCMC, NUTS
 from numpyro.infer.util import compute_log_probs, log_density
 
-from astrogwb.populations.evaluation import (
+from astrogwb.utils.numpyro import (
     sample_and_logprob,
     sample_sources_qmc,
 )
@@ -68,7 +68,7 @@ def test_sampled_transformed_density_matches_numpyro_intermediates() -> None:
         )
 
     def plated() -> None:
-        with numpyro.plate("sources", 8):
+        with numpyro.plate("batch", 8):
             model()
 
     key = jax.random.key(0)

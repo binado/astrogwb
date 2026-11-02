@@ -30,10 +30,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from astrogwb import __version__
 from astrogwb.distributions.config import DistributionConfig
 from astrogwb.populations import joint_model
-from astrogwb.populations.evaluation import sample_and_logprob
 from astrogwb.populations.joint import EXTRINSIC_SITES
 from astrogwb.populations.metadata import PopulationMetadata as PopulationSpec
 from astrogwb.utils import years_to_seconds
+from astrogwb.utils.numpyro import sample_and_logprob
 
 __all__ = [
     "Hyperparameter",

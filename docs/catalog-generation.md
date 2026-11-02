@@ -103,7 +103,7 @@ from astrogwb.populations import (
     build_population,
     joint_model,
 )
-from astrogwb.populations.evaluation import sample_and_logprob
+from astrogwb.utils.numpyro import sample_and_logprob
 
 population = build_population(
     "bns_coba",
@@ -155,7 +155,7 @@ accepts, rather than being silently dropped.
   redshift and the ordered mass pair -- and one value
   is used for both sides of every weight. Omitting factors does not
   marginalize variables.
-- `sample_and_logprob` runs the model once under a `sources` plate and returns
+- `sample_and_logprob` runs the model once under a `batch` plate and returns
   `(outputs, log_prob)` from its trace. Model return values are ignored, and
   auxiliary sample sites such as factors are excluded from output columns.
 

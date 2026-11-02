@@ -47,7 +47,7 @@ from astrogwb.populations import (
     known_populations,
     register_population,
 )
-from astrogwb.populations.evaluation import sample_and_logprob
+from astrogwb.utils.numpyro import sample_and_logprob
 
 #: The deterministic output governing waveform amplitude.
 LUMINOSITY_DISTANCE_SITE = "luminosity_distance"

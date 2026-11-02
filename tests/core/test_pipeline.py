@@ -58,7 +58,7 @@ def test_population_deterministics_replay_exactly(
     population: PopulationArtifact,
 ) -> None:
     from astrogwb.populations import joint_model
-    from astrogwb.populations.evaluation import sample_and_logprob
+    from astrogwb.utils.numpyro import sample_and_logprob
 
     model = joint_model(
         *population.metadata.population.build()(population.hyperparameters)

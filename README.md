@@ -64,7 +64,7 @@ import jax
 from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.metadata import PopulationMetadata, WaveformMetadata
 from astrogwb.populations import build_population, joint_model
-from astrogwb.populations.evaluation import sample_and_logprob
+from astrogwb.utils.numpyro import sample_and_logprob
 from astrogwb.waveform import AnalyticInspiralGenerator
 
 model_kwargs = {

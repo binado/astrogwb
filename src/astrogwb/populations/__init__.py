@@ -1,10 +1,10 @@
 """Source populations declared as NumPyro models, addressed by registered name.
 
 One declaration serves generation and inference: a population's source model
-draws a catalog (:func:`~astrogwb.populations.evaluation.sample_and_logprob`), and
+draws a catalog (:func:`~astrogwb.utils.numpyro.sample_and_logprob`), and
 conditioning those draws back into it recovers the per-sample source density
 the importance weights divide by
-(:func:`~astrogwb.populations.evaluation.sample_and_logprob`). A population also
+(:func:`~astrogwb.utils.numpyro.sample_and_logprob`). A population also
 returns its redshift distribution, whose total merger rate sets the catalog's
 Poisson count and predicted spectrum. A catalog file therefore records only the
 registry name, construction kwargs and hyperparameters needed to rebuild the

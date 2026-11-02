@@ -35,7 +35,7 @@ from astrogwb.populations import (
     build_population,
     joint_model,
 )
-from astrogwb.populations.evaluation import sample_and_logprob, sample_sources_qmc
+from astrogwb.utils.numpyro import sample_and_logprob, sample_sources_qmc
 from astrogwb.waveform import AnalyticInspiralGenerator, WaveformMetadata
 
 
@@ -47,7 +47,7 @@ def derived_columns(
     """Replay a population's model at fixed source values, returning declared outputs.
 
     Sample sites take the supplied values and deterministic outputs are
-    recomputed through :func:`astrogwb.populations.evaluation.sample_and_logprob`.
+    recomputed through :func:`astrogwb.utils.numpyro.sample_and_logprob`.
     """
     model = joint_model(*population(params))
     outputs, _ = sample_and_logprob(model, density_sites=(), values=sources)
