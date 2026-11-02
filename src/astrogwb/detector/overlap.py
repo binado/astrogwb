@@ -268,6 +268,15 @@ def isotropic_overlap_reduction_function(
     Exact for the native geometry: WGS-84 positions, elevation and arm tilts
     enter through the response tensors and the vertex separation (see
     :func:`_isotropic_orf_from_tensors`).
+
+    Parameters
+    ----------
+    frequencies
+        Frequency grid in Hz.
+    detector_1
+        First detector.
+    detector_2
+        Second detector.
     """
     first, second = detector_1.geometry, detector_2.geometry
     return _isotropic_orf_from_tensors(
@@ -282,7 +291,15 @@ def pairwise_overlap_reduction_function(
     frequencies: ArrayLike,
     detectors: Sequence[Detector],
 ) -> NDArray[np.float64]:
-    """Symmetric ``(n, n, nfreq)`` isotropic ORF matrix with unit diagonal."""
+    """Symmetric ``(n, n, nfreq)`` isotropic ORF matrix with unit diagonal.
+
+    Parameters
+    ----------
+    frequencies
+        Frequency grid in Hz.
+    detectors
+        Detectors in the network.
+    """
     frequencies = np.asarray(frequencies, dtype=float)
     det_list = list(detectors)
     n = len(det_list)
@@ -487,6 +504,25 @@ def overlap_reduction_function(
 
     The isotropic mean is the :func:`isotropic_overlap_reduction_function` of
     the pair, equal to one for co-located, aligned, orthogonal arms.
+
+    Parameters
+    ----------
+    frequencies
+        Frequency grid in Hz.
+    detector_1
+        First detector.
+    detector_2
+        Second detector.
+    right_ascension
+        Source right ascension in radians.
+    declination
+        Source declination in radians.
+    polarization_angle
+        Polarization angle in radians.
+    cos_inclination
+        Cosine of the inclination angle.
+    gmst
+        Greenwich mean sidereal time in radians.
     """
     declination, right_ascension, polarization_angle, cos_inclination = (
         jnp.broadcast_arrays(

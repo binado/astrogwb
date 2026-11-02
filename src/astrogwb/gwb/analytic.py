@@ -301,21 +301,21 @@ def uniform_prior_mass_moments(
 
     Parameters
     ----------
-    frequencies:
+    frequencies
         One-dimensional observer-frame frequency array in Hz. Values must be
         finite and strictly positive.
-    minimum_redshift, maximum_redshift:
+    minimum_redshift, maximum_redshift
         Redshift integration bounds.
-    minimum_component_mass, maximum_component_mass:
+    minimum_component_mass, maximum_component_mass
         Shared source-frame component-mass bounds in solar masses. They also fix
         the normalized density ``2 / (maximum_component_mass - minimum_component_mass)**2``.
-    alpha:
+    alpha
         Dimensionless source-frame cutoff coefficient, defining
         ``f_max = alpha / (M * SOLAR_MASS_IN_SECONDS)`` in Hz for a
         source-frame total mass ``M`` in solar masses. Shares the convention
         of :func:`astrogwb.waveform.termination_frequency`. Use ``inf`` for
         no cutoff.
-    redshift_quadrature_order:
+    redshift_quadrature_order
         Gauss-Legendre order of the redshift nodes.
 
     Returns
@@ -368,6 +368,31 @@ def precompute_cumulative_mass_moments(
     sampling cosmology or the redshift distribution with a fixed mass
     population. Values below the physical total-mass support are exactly zero;
     values above it are exactly the full mass moment.
+
+    Parameters
+    ----------
+    frequencies
+        Frequency grid in Hz.
+    hyperparameters
+        Population hyperparameters.
+    joint_mass_prior_fn
+        Joint component-mass density function.
+    minimum_redshift
+        Lower redshift bound.
+    maximum_redshift
+        Upper redshift bound.
+    minimum_component_mass
+        Lower component-mass bound.
+    maximum_component_mass
+        Upper component-mass bound.
+    alpha
+        Inspiral power-law exponent.
+    mass_ratio_quadrature_order
+        Mass-ratio quadrature order.
+    n_interp_grid
+        Number of interpolation grid nodes.
+    redshift_quadrature_order
+        Redshift quadrature order.
     """
     frequencies = jnp.asarray(frequencies, dtype=jnp.float64)
     redshift, _ = gauss_legendre_nodes_weights(
@@ -410,6 +435,23 @@ def analytic_spectral_density_from_mass_moments(
 
     A fixed ``(F, Z)`` array can be reused throughout an MCMC over cosmology or
     the redshift distribution.
+
+    Parameters
+    ----------
+    frequencies
+        Frequency grid in Hz.
+    hyperparameters
+        Population hyperparameters.
+    merger_rate_fn
+        Source-frame merger-rate function.
+    cumulative_mass_moments
+        Precomputed cumulative mass moments.
+    minimum_redshift
+        Lower redshift bound.
+    maximum_redshift
+        Upper redshift bound.
+    redshift_quadrature_order
+        Redshift quadrature order.
     """
     frequencies = jnp.asarray(frequencies, dtype=jnp.float64)
     cumulative_mass_moments = jnp.asarray(cumulative_mass_moments, dtype=jnp.float64)
@@ -460,31 +502,31 @@ def analytic_spectral_density(
 
     Parameters
     ----------
-    frequencies:
+    frequencies
         One-dimensional observer-frame frequency array in Hz. Values must be
         finite and strictly positive.
-    hyperparameters:
+    hyperparameters
         Population/cosmology parameters supplied unchanged to every callback.
         ``H0`` (km s^-1 Mpc^-1) and ``Omega_m`` are required.
-    merger_rate_fn:
+    merger_rate_fn
         ``fn(redshift, hyperparameters)`` returning the absolute source-frame
         merger-rate density in Gpc^-3 yr^-1.
-    joint_mass_prior_fn:
+    joint_mass_prior_fn
         ``fn(mass_1, mass_2, hyperparameters)`` returning a normalized ordered
         density with respect to ``dmass_1 dmass_2``.
-    minimum_redshift, maximum_redshift:
+    minimum_redshift, maximum_redshift
         Redshift integration bounds.
-    minimum_component_mass, maximum_component_mass:
+    minimum_component_mass, maximum_component_mass
         Shared source-frame component-mass bounds in solar masses.
-    alpha:
+    alpha
         Dimensionless source-frame cutoff coefficient, defining
         ``f_max = alpha / (M * SOLAR_MASS_IN_SECONDS)`` in Hz for a
         source-frame total mass ``M`` in solar masses. Shares the convention
         of :func:`astrogwb.waveform.termination_frequency`. Use ``inf`` for
         no cutoff.
-    quadrature_order:
+    quadrature_order
         Shared Gauss-Legendre order for redshift and mass ratio.
-    n_interp_grid:
+    n_interp_grid
         Odd number of uniform total-mass interpolation nodes. The default gives
         2048 intervals; use 1025, 2049, and 4097 for grid-refinement checks.
 

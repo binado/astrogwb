@@ -54,6 +54,21 @@ def spectral_snr_squared_per_bin(
     ``frequencies`` is the whole grid ``axis`` runs over. ``frequency_mask``
     zeroes excluded bins while keeping full-grid widths; pass it rather than
     slicing, which would mis-size the bins at the band edges.
+
+    Parameters
+    ----------
+    spectral_density
+        Strain spectral density.
+    effective_psd
+        Effective noise PSD.
+    observation_time_sec
+        Observation time in seconds.
+    frequencies
+        Frequency grid in Hz.
+    frequency_mask
+        Mask of frequency bins to include.
+    axis
+        Frequency-axis index.
     """
     ratio_squared = spectral_density**2 / effective_psd**2
     widths = broadcast_along_axis(bin_widths(frequencies), ratio_squared.ndim, axis)
@@ -90,6 +105,21 @@ def spectral_snr_squared(
     with per-bin terms from :func:`spectral_snr_squared_per_bin`.
     :math:`\sigma_i` matches :func:`astrogwb.detector.gaussian_bin_scale`, which
     takes the observation time in years rather than seconds.
+
+    Parameters
+    ----------
+    spectral_density
+        Strain spectral density.
+    effective_psd
+        Effective noise PSD.
+    observation_time_sec
+        Observation time in seconds.
+    frequencies
+        Frequency grid in Hz.
+    frequency_mask
+        Mask of frequency bins to include.
+    axis
+        Frequency-axis index.
     """
     return jnp.sum(
         spectral_snr_squared_per_bin(
@@ -125,6 +155,17 @@ def spectral_snr_squared_per_log_frequency(
     Plotted against :math:`f` with a log x-axis and a linear y-axis, the area
     under the curve over a band is that band's share of :math:`\mathrm{SNR}^2`.
     ``frequencies`` broadcasts against the trailing (frequency) axis.
+
+    Parameters
+    ----------
+    spectral_density
+        Strain spectral density.
+    effective_psd
+        Effective noise PSD.
+    frequencies
+        Frequency grid in Hz.
+    observation_time_sec
+        Observation time in seconds.
     """
     ratio_squared = spectral_density**2 / effective_psd**2
     return 2.0 * observation_time_sec * frequencies * ratio_squared
@@ -141,6 +182,21 @@ def spectral_snr(
 ) -> jax.Array:
     r""":math:`\mathrm{SNR} = \sqrt{\mathrm{SNR}^2}` with :math:`\mathrm{SNR}^2` from
     :func:`spectral_snr_squared`.
+
+    Parameters
+    ----------
+    spectral_density
+        Strain spectral density.
+    effective_psd
+        Effective noise PSD.
+    observation_time_sec
+        Observation time in seconds.
+    frequencies
+        Frequency grid in Hz.
+    frequency_mask
+        Mask of frequency bins to include.
+    axis
+        Frequency-axis index.
     """
     return jnp.sqrt(
         spectral_snr_squared(

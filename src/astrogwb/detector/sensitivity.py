@@ -76,7 +76,15 @@ class Sensitivity:
 
 
 def load_sensitivity(name: str, *, path: str | Path | None = None) -> Sensitivity:
-    """Load a single detector's :class:`Sensitivity` from a TOML table."""
+    """Load a single detector's :class:`Sensitivity` from a TOML table.
+
+    Parameters
+    ----------
+    name
+        Name to look up.
+    path
+        File path.
+    """
     table = _load_sensitivity_table(path)
     return _sensitivity_from_dict(table[name])
 
@@ -84,7 +92,15 @@ def load_sensitivity(name: str, *, path: str | Path | None = None) -> Sensitivit
 def load_sensitivity_map(
     names: Sequence[str], *, path: str | Path | None = None
 ) -> Mapping[str, Sensitivity]:
-    """Load a name -> :class:`Sensitivity` mapping for several detectors."""
+    """Load a name -> :class:`Sensitivity` mapping for several detectors.
+
+    Parameters
+    ----------
+    names
+        Names to select.
+    path
+        File path.
+    """
     table = _load_sensitivity_table(path)
     return {name: _sensitivity_from_dict(table[name]) for name in names}
 

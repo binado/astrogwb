@@ -187,6 +187,11 @@ class RippleGenerator(WaveformGenerator):
 
         Eager only; see
         :meth:`~astrogwb.waveform.WaveformGenerator.check_sources`.
+
+        Parameters
+        ----------
+        source_parameters
+            Source parameter values by name.
         """
         check_sources(self.metadata.approximant, source_parameters)
 

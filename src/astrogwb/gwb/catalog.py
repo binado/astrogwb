@@ -106,6 +106,15 @@ def polarization_power_data(
     Values are checked here, eagerly: traced generation would silently drop a
     degree of freedom the approximant cannot represent. ``chunk_size`` is
     :meth:`~astrogwb.waveform.WaveformGenerator.generate_batch`'s.
+
+    Parameters
+    ----------
+    generator
+        Waveform generator.
+    source_parameters
+        Source parameter values by name.
+    chunk_size
+        Number of sources per chunk.
     """
     jax.config.update("jax_enable_x64", True)
     columns = {name: np.asarray(values) for name, values in source_parameters.items()}
@@ -130,7 +139,17 @@ def polarization_power_data(
 def draw_catalog(
     metadata: CatalogMetadata, key: jax.Array, *, chunk_size: int | None = None
 ) -> PolarizationPowerData:
-    """The plain catalog ``key`` draws: ``num_samples`` sources at the fiducials."""
+    """The plain catalog ``key`` draws: ``num_samples`` sources at the fiducials.
+
+    Parameters
+    ----------
+    metadata
+        Metadata describing the object.
+    key
+        JAX random key.
+    chunk_size
+        Number of sources per chunk.
+    """
     # Before the draw: ripplegw enables x64 on import, but only once the
     # generator runs, after the sources are sampled.
     jax.config.update("jax_enable_x64", True)

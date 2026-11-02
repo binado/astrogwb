@@ -51,6 +51,11 @@ class PopulationMetadata(BaseModel):
 
         Constructs rather than ``model_copy(update=...)``, which skips
         validation.
+
+        Parameters
+        ----------
+        **updates
+            Construction keyword arguments to override.
         """
         return type(self)(
             model_name=self.model_name,

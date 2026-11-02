@@ -13,6 +13,22 @@ def spectral_density(
     weights: jax.Array,
     total_merger_rate: float | jax.Array,
 ) -> jax.Array:
+    """Compute the weighted catalog estimate of the strain spectral density.
+
+    Parameters
+    ----------
+    polarization_power
+        Polarization power with sources on the last axis.
+    weights
+        Per-source importance weights.
+    total_merger_rate
+        Total merger rate in inverse seconds.
+
+    Returns
+    -------
+    jax.Array
+        Weighted spectral density, with the source axis contracted.
+    """
     return total_merger_rate * jnp.dot(polarization_power, weights) / weights.shape[0]
 
 
@@ -22,6 +38,22 @@ def omega_gw_from_spectral_density(
     *,
     hubble_constant: float,
 ) -> jax.Array:
+    r"""Convert strain spectral density to the GW energy-density spectrum.
+
+    Parameters
+    ----------
+    spectral_density
+        Strain spectral density in Hz^-1.
+    frequencies
+        Frequencies in Hz, broadcastable with ``spectral_density``.
+    hubble_constant
+        Hubble constant in km s^-1 Mpc^-1.
+
+    Returns
+    -------
+    jax.Array
+        Dimensionless energy density :math:`\Omega_{\mathrm{GW}}`.
+    """
     coefficient = 4.0 * jnp.pi**2 / (3.0 * hubble_constant_si(hubble_constant) ** 2)
     return coefficient * frequencies**3 * spectral_density
 
@@ -32,6 +64,22 @@ def spectral_density_from_omega_gw(
     *,
     hubble_constant: float,
 ) -> jax.Array:
+    r"""Convert the GW energy-density spectrum to strain spectral density.
+
+    Parameters
+    ----------
+    omega_gw
+        Dimensionless energy density :math:`\Omega_{\mathrm{GW}}`.
+    frequencies
+        Frequencies in Hz, broadcastable with ``omega_gw``.
+    hubble_constant
+        Hubble constant in km s^-1 Mpc^-1.
+
+    Returns
+    -------
+    jax.Array
+        Strain spectral density in Hz^-1.
+    """
     coefficient = 3.0 * hubble_constant_si(hubble_constant) ** 2 / (4.0 * jnp.pi**2)
     return coefficient * omega_gw / frequencies**3
 

@@ -30,7 +30,13 @@ def hubble_constant_si(h0_km_s_mpc: jax.Array) -> jax.Array: ...
 
 
 def hubble_constant_si(h0_km_s_mpc: float | jax.Array) -> float | jax.Array:
-    """Convert $H_0$ from $\\mathrm{km\\,s^{-1}\\,Mpc^{-1}}$ to SI ($\\mathrm{s^{-1}}$)."""
+    """Convert $H_0$ from $\\mathrm{km\\,s^{-1}\\,Mpc^{-1}}$ to SI ($\\mathrm{s^{-1}}$).
+
+    Parameters
+    ----------
+    h0_km_s_mpc
+        Hubble constant in km s^-1 Mpc^-1.
+    """
     return h0_km_s_mpc * 1000.0 / MPC_IN_METERS
 
 
@@ -44,9 +50,9 @@ def log_gw_em_ratio(z: ArrayLike, xi_0: ArrayLike, xi_n: ArrayLike) -> jax.Array
 
     Parameters
     ----------
-    z:
+    z
         Redshift array.
-    xi_0, xi_n:
+    xi_0, xi_n
         Modified-propagation parameters.
 
     Returns
@@ -66,10 +72,10 @@ def normalized_hubble_parameter(redshift: ArrayLike, omega_m: ArrayLike) -> jax.
 
     Parameters
     ----------
-    redshift:
+    redshift
         Redshift array. It must be broadcastable with ``omega_m`` according to
         the usual broadcasting rules.
-    omega_m:
+    omega_m
         Matter density parameter, broadcastable with ``redshift``.
 
     Returns
@@ -85,6 +91,11 @@ def hubble_distance(h0: ArrayLike) -> jax.Array:
 
     With $H_0$ given in $\mathrm{km\,s^{-1}\,Mpc^{-1}}$ and the speed of light
     in $\mathrm{km\,s^{-1}}$, the result is the Hubble distance in Mpc.
+
+    Parameters
+    ----------
+    h0
+        Hubble constant in km s^-1 Mpc^-1.
     """
     return SPEED_OF_LIGHT / 1000.0 / jnp.asarray(h0)
 
@@ -100,13 +111,13 @@ def distance_and_volume_grid(
 
     Parameters
     ----------
-    redshift:
+    redshift
         Redshift grid on which both arrays are evaluated. The final axis is
         the grid axis, with shape ``(..., n_grid)``.
-    hubble_constant:
+    hubble_constant
         Hubble constant $H_0$ in $\mathrm{km\,s^{-1}\,Mpc^{-1}}$. May be an
         array and must be broadcastable with the redshift-dependent terms.
-    omega_m:
+    omega_m
         Matter density parameter. May be an array and must be broadcastable
         with the redshift-dependent terms.
 
@@ -182,6 +193,15 @@ def comoving_distance(
     grid: each is integrated on its own :math:`[0, z]` with a fixed
     :data:`POINTWISE_GAUSS_LEGENDRE_ORDER`-point rule. The three arguments
     broadcast.
+
+    Parameters
+    ----------
+    redshift
+        Redshift.
+    hubble_constant
+        Hubble constant in km s^-1 Mpc^-1.
+    omega_m
+        Matter density parameter.
     """
     redshift = jnp.asarray(redshift)
     points, weights = gauss_legendre_nodes_weights(
@@ -197,7 +217,17 @@ def comoving_distance(
 def luminosity_distance(
     redshift: ArrayLike, hubble_constant: ArrayLike, omega_m: ArrayLike
 ) -> jax.Array:
-    r"""Luminosity distance in Mpc, :math:`(1 + z)\,\chi(z)`; see :func:`comoving_distance`."""
+    r"""Luminosity distance in Mpc, :math:`(1 + z)\,\chi(z)`; see :func:`comoving_distance`.
+
+    Parameters
+    ----------
+    redshift
+        Redshift.
+    hubble_constant
+        Hubble constant in km s^-1 Mpc^-1.
+    omega_m
+        Matter density parameter.
+    """
     return (1.0 + jnp.asarray(redshift)) * comoving_distance(
         redshift, hubble_constant, omega_m
     )
@@ -206,7 +236,17 @@ def luminosity_distance(
 def differential_comoving_volume(
     redshift: ArrayLike, hubble_constant: ArrayLike, omega_m: ArrayLike
 ) -> jax.Array:
-    r"""All-sky :math:`\mathrm{d}V_c/\mathrm{d}z` in :math:`\mathrm{Mpc}^3`."""
+    r"""All-sky :math:`\mathrm{d}V_c/\mathrm{d}z` in :math:`\mathrm{Mpc}^3`.
+
+    Parameters
+    ----------
+    redshift
+        Redshift.
+    hubble_constant
+        Hubble constant in km s^-1 Mpc^-1.
+    omega_m
+        Matter density parameter.
+    """
     return _comoving_volume_element(
         comoving_distance(redshift, hubble_constant, omega_m),
         redshift,
@@ -216,7 +256,13 @@ def differential_comoving_volume(
 
 
 def hubble_time_gyr(h0: ArrayLike) -> jax.Array:
-    r"""Hubble time $1 / H_0$ in Gyr, with $H_0$ in $\mathrm{km\,s^{-1}\,Mpc^{-1}}$."""
+    r"""Hubble time $1 / H_0$ in Gyr, with $H_0$ in $\mathrm{km\,s^{-1}\,Mpc^{-1}}$.
+
+    Parameters
+    ----------
+    h0
+        Hubble constant in km s^-1 Mpc^-1.
+    """
     return 1.0 / (hubble_constant_si(jnp.asarray(h0)) * SECONDS_PER_YEAR * 1e9)
 
 
@@ -244,6 +290,15 @@ def lookback_time(
     with $t_H = 1/H_0$ and $\Omega_\Lambda = 1 - \Omega_m$, which must be
     positive. As $z \to \infty$ it tends to the age of the universe.
     Broadcasts ``redshift``, ``hubble_constant`` and ``omega_m``.
+
+    Parameters
+    ----------
+    redshift
+        Redshift.
+    hubble_constant
+        Hubble constant in km s^-1 Mpc^-1.
+    omega_m
+        Matter density parameter.
     """
     sqrt_omega_lambda, ratio = _lambda_matter_ratio(omega_m)
     scale = 2.0 * hubble_time_gyr(hubble_constant) / (3.0 * sqrt_omega_lambda)
@@ -266,6 +321,15 @@ def redshift_at_lookback_time(
 
     Returns ``inf`` at and beyond the age of the universe ($A \le 0$), with
     gradient-safe masking.
+
+    Parameters
+    ----------
+    time
+        Lookback time in Gyr.
+    hubble_constant
+        Hubble constant in km s^-1 Mpc^-1.
+    omega_m
+        Matter density parameter.
     """
     sqrt_omega_lambda, ratio = _lambda_matter_ratio(omega_m)
     angle = jnp.arcsinh(ratio) - 1.5 * sqrt_omega_lambda * jnp.asarray(

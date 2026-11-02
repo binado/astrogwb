@@ -49,13 +49,13 @@ def potential_from_model(
 
     Parameters
     ----------
-    model:
+    model
         A NumPyro model called as ``model(**model_kwargs)``, such as
         :func:`~astrogwb.inference.models.gaussian_gwb_model.gwb_likelihood_model`
         wrapped in a ``functools.partial``.
-    model_kwargs:
+    model_kwargs
         Keyword arguments of ``model``, bound into the returned functions.
-    rng_key:
+    rng_key
         Key for the initial position, drawn from the prior.
 
     Returns

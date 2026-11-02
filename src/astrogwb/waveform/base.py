@@ -26,11 +26,23 @@ class WaveformGenerator:
         raise NotImplementedError
 
     def check_sources(self, source_parameters: Mapping[str, ArrayLike]) -> None:
-        """Check eager source values supported by a concrete generator."""
+        """Check eager source values supported by a concrete generator.
+
+        Parameters
+        ----------
+        source_parameters
+            Source parameter values by name.
+        """
         del source_parameters
 
     def generate(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
-        """Generate power for one source."""
+        """Generate power for one source.
+
+        Parameters
+        ----------
+        source_parameters
+            Source parameter values by name.
+        """
         power = self.generate_batch(
             {
                 name: jnp.atleast_1d(jnp.asarray(value))
@@ -54,6 +66,13 @@ class WaveformGenerator:
         Trace-safe; an eager whole-catalog caller should ``jit`` it.
         ``chunk_size`` bounds peak memory via :func:`jax.lax.map`, changing the
         output only at rounding level. ``None`` generates one batch.
+
+        Parameters
+        ----------
+        source_parameters
+            Source parameter values by name.
+        chunk_size
+            Number of sources per chunk.
         """
         return _chunked(self._generate_batch, source_parameters, chunk_size)
 
@@ -66,6 +85,11 @@ class WaveformGenerator:
         they depend on the intrinsic parameters, the inclination and the
         coalescence phase, never on the sky position or the polarization angle,
         which enter through the antenna patterns. Trace-safe.
+
+        Parameters
+        ----------
+        source_parameters
+            Source parameter values by name.
         """
         return self._generate_polarizations_batch(source_parameters)
 

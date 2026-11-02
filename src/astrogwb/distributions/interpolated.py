@@ -28,11 +28,11 @@ class InterpolatedDistribution(dist.Distribution):
 
     Parameters
     ----------
-    x:
+    x
         Strictly increasing abscissa, shape ``(n_grid,)``.
-    y:
+    y
         Unnormalized density on ``x``, nonnegative, same shape.
-    validate_args:
+    validate_args
         Forwarded to :class:`~numpyro.distributions.Distribution`; it has no
         effect here.
     """
@@ -85,17 +85,38 @@ class InterpolatedDistribution(dist.Distribution):
         ``intermediates`` is unused. The operation order, ``log(interp(y) /
         norm)``, matches ``tests/reference_population.py`` bit for bit, which
         keeps a catalog that is its own proposal at exactly zero log-weight.
+
+        Parameters
+        ----------
+        value
+            Value to evaluate.
+        intermediates
+            Optional distribution intermediates.
         """
         unnormalized_pdf = jnp.interp(value, self.x, self.y, left=0.0, right=0.0)
         return jnp.log(unnormalized_pdf / self.norm)
 
     def icdf(self, q: ArrayLike) -> jax.Array:
-        """Inverse CDF by linear-in-CDF inversion on :attr:`cdf_grid`."""
+        """Inverse CDF by linear-in-CDF inversion on :attr:`cdf_grid`.
+
+        Parameters
+        ----------
+        q
+            Cumulative probability.
+        """
         return jnp.interp(q, self.cdf_grid, self.x)
 
     def sample(
         self, key: jax.Array | None, sample_shape: tuple[int, ...] = ()
     ) -> jax.Array:
-        """Inverse-transform draw: one uniform per element, through :meth:`icdf`."""
+        """Inverse-transform draw: one uniform per element, through :meth:`icdf`.
+
+        Parameters
+        ----------
+        key
+            JAX random key.
+        sample_shape
+            Leading shape of the samples.
+        """
         assert key is not None
         return self.icdf(jax.random.uniform(key, sample_shape + self.batch_shape))

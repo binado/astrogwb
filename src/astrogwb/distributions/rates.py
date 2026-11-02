@@ -35,6 +35,19 @@ def madau_dickinson_rate(
 
     Same parametrization as ``gwmock_pop.distributions.madau_dickinson``
     (Leuven Gravity Institute, BSD-3-Clause).
+
+    Parameters
+    ----------
+    redshift
+        Redshift.
+    gamma
+        Low-redshift rate exponent.
+    kappa
+        High-redshift rate exponent.
+    z_peak
+        Redshift of the rate turnover.
+    local_merger_rate
+        Local merger rate density.
     """
     one_plus_z = 1.0 + jnp.asarray(redshift)
     # Promoted so the unary minus below type-checks (`numpy.bool_` has no `__neg__`).
@@ -70,12 +83,12 @@ def total_merger_rate(
 
     Parameters
     ----------
-    redshift, weights:
+    redshift, weights
         Quadrature nodes and weights of :math:`\int \mathrm{d}z`, shape ``(Z,)``.
-    merger_rate:
+    merger_rate
         The source-frame rate :math:`\psi` at ``redshift``, in
         :math:`\mathrm{Gpc}^{-3}\,\mathrm{yr}^{-1}`, shape ``(Z,)``.
-    hubble_constant, omega_m:
+    hubble_constant, omega_m
         Flat :math:`\Lambda`CDM cosmology, as in :mod:`astrogwb.cosmology`.
     """
     redshift = jnp.asarray(redshift)

@@ -151,6 +151,15 @@ def redshift_quadrature(
     :math:`dz / d_L^2 = da / \chi^2`: the Jacobian cancels the
     :math:`(1 + z)^2` inside :math:`d_L^2`, leaving a smooth integrand in
     :math:`a`. Nodes are returned in increasing redshift.
+
+    Parameters
+    ----------
+    minimum_redshift
+        Lower redshift bound.
+    maximum_redshift
+        Upper redshift bound.
+    num_nodes
+        Number of quadrature nodes.
     """
     if num_nodes <= 0:
         raise ValueError("num_nodes must be positive")
@@ -199,14 +208,14 @@ def phinney_kernel(
 
     Parameters
     ----------
-    redshift, merger_rate, distance_ratio:
+    redshift, merger_rate, distance_ratio
         The nodes, the source-frame rate :math:`\psi` in
         :math:`\mathrm{Gpc}^{-3}\,\mathrm{yr}^{-1}` there, and the ratio
         :math:`\Xi = d_{GW}/d_{EM}` of the model's distance to the
         electromagnetic one; all shape ``(Z,)``.
-    hubble_constant, omega_m:
+    hubble_constant, omega_m
         Flat :math:`\Lambda`CDM cosmology.
-    reference_distance:
+    reference_distance
         The distance :math:`d^{\mathrm{ref}}` in Mpc the power was generated at.
 
     Returns
@@ -246,6 +255,11 @@ def reference_redshift(metadata: CatalogMetadata) -> float:
 
     ``metadata.reference_redshift``, or the population's ``minimum_redshift``
     when that is ``None``.
+
+    Parameters
+    ----------
+    metadata
+        Metadata describing the object.
     """
     if metadata.reference_redshift is not None:
         return metadata.reference_redshift
@@ -281,6 +295,15 @@ def reference_catalog(
     drawn i.i.d. or, with ``metadata.sampling == "sobol"``, on a scrambled
     Sobol net. ``chunk_size`` is
     :meth:`~astrogwb.waveform.WaveformGenerator.generate_batch`'s.
+
+    Parameters
+    ----------
+    metadata
+        Metadata describing the object.
+    key
+        JAX random key.
+    chunk_size
+        Number of sources per chunk.
     """
     # x64 before the draw: see draw_catalog.
     jax.config.update("jax_enable_x64", True)

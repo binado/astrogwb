@@ -62,12 +62,24 @@ def _figure_settings(root: Path | None = None) -> Mapping[str, Any]:
 
 
 def figure_dpi(root: Path | None = None) -> int:
-    """Raster resolution for saved figures. Applied by :func:`use_paper_style`."""
+    """Raster resolution for saved figures. Applied by :func:`use_paper_style`.
+
+    Parameters
+    ----------
+    root
+        Root directory for configuration files.
+    """
     return int(_figure_settings(root)["figure_dpi"])
 
 
 def figure_format(root: Path | None = None) -> str:
-    """Default savefig format for extensionless paths. Applied by :func:`use_paper_style`."""
+    """Default savefig format for extensionless paths. Applied by :func:`use_paper_style`.
+
+    Parameters
+    ----------
+    root
+        Root directory for configuration files.
+    """
     return str(_figure_settings(root)["figure_format"])
 
 
@@ -76,12 +88,25 @@ def parameter_labels(root: Path | None = None) -> dict[str, str]:
 
     Covers every fiducial plus derived diagnostics such as
     ``importance_relative_ess``.
+
+    Parameters
+    ----------
+    root
+        Root directory for configuration files.
     """
     return dict(_figure_settings(root)["labels"])
 
 
 def parameter_label(name: str, root: Path | None = None) -> str:
-    """The LaTeX label for ``name``, or ``name`` itself if none is declared."""
+    """The LaTeX label for ``name``, or ``name`` itself if none is declared.
+
+    Parameters
+    ----------
+    name
+        Name to look up.
+    root
+        Root directory for configuration files.
+    """
     return parameter_labels(root).get(name, name)
 
 
@@ -150,7 +175,13 @@ DETECTOR_NETWORKS: tuple[tuple[str, str], ...] = (
 
 
 def use_paper_style(root: Path | None = None) -> None:
-    """Apply ``paper.mplstyle`` and configured savefig settings."""
+    """Apply ``paper.mplstyle`` and configured savefig settings.
+
+    Parameters
+    ----------
+    root
+        Root directory for configuration files.
+    """
     plt.style.use(str(_STYLE_PATH))
     plt.rcParams["savefig.dpi"] = figure_dpi(root)
     plt.rcParams["savefig.format"] = figure_format(root)
@@ -167,6 +198,17 @@ def save_figures(
 
     The dpi and format default to ``config/plotting.toml``; ``figure_format``
     is the extension given to a path without one. Returns the written paths.
+
+    Parameters
+    ----------
+    figures
+        Figures and their output paths.
+    figure_dpi
+        Output resolution in dots per inch.
+    figure_format
+        Output figure format.
+    root
+        Root directory for configuration files.
     """
     settings = _figure_settings(root)
     dpi = int(settings["figure_dpi"]) if figure_dpi is None else figure_dpi
@@ -192,6 +234,11 @@ def get_corner_kwargs(**overrides: object) -> dict[str, object]:
     Corner does not read most rcParams, so the axis-label and title font sizes
     are pulled from the active rcParams here. Pass keyword overrides to replace
     any default for a single call.
+
+    Parameters
+    ----------
+    **overrides
+        Values overriding the defaults.
     """
     kwargs: dict[str, object] = {
         "plot_datapoints": True,
@@ -382,7 +429,13 @@ def plot_corner_for_posterior_grid(
 
 
 def combo_colors(n: int) -> list[str]:
-    """Ordered qualitative colors for the per-parameter-combination overlay."""
+    """Ordered qualitative colors for the per-parameter-combination overlay.
+
+    Parameters
+    ----------
+    n
+        Number of colors.
+    """
     return [to_hex(c) for c in plt.cm.viridis(np.linspace(0.1, 0.9, n))]
 
 
@@ -399,6 +452,11 @@ def detector_network_styles(
 
     Both lists are positional: they index the ``networks`` sequence, whose
     order comes from the figure config's run array.
+
+    Parameters
+    ----------
+    networks
+        Detector networks.
     """
     bases: list[str] = []
     for network in networks:

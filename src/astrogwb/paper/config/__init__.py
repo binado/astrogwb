@@ -82,6 +82,13 @@ def fiducials(root: Path | None = None, **kwargs: float) -> dict[str, float]:
 
     Keyword arguments override the file, and may name a fiducial the file does
     not declare; keeping it consistent with :func:`priors` is the caller's job.
+
+    Parameters
+    ----------
+    root
+        Root directory for configuration files.
+    **kwargs
+        Additional keyword arguments.
     """
     table = {**_table(root, "fiducials"), **kwargs}
     return {name: float(value) for name, value in table.items()}
@@ -96,6 +103,13 @@ def priors(root: Path | None = None, **kwargs: Any) -> dict[str, dist.Distributi
     not declare. A value may be a wire-format spec
     (``{"dist": ..., "kwargs": {...}}``) or an already-built ``numpyro``
     distribution, which is passed through unchanged.
+
+    Parameters
+    ----------
+    root
+        Root directory for configuration files.
+    **kwargs
+        Additional keyword arguments.
     """
     table = {**_table(root, "priors"), **kwargs}
     return {
@@ -114,6 +128,13 @@ def networks(root: Path | None = None, **kwargs: Any) -> dict[str, tuple[str, ..
     override the file; names are hyphenated, so unpack them from a mapping::
 
         networks(**{"ET-2L-aligned": ("S1", "R1", "C1")})
+
+    Parameters
+    ----------
+    root
+        Root directory for configuration files.
+    **kwargs
+        Additional keyword arguments.
     """
     table = {**_table(root, "networks"), **kwargs}
     return {name: tuple(detectors) for name, detectors in table.items()}
@@ -124,6 +145,13 @@ def detector_registry(root: Path | None = None, **overrides: Any) -> DetectorReg
 
     Overrides may contain ``detectors`` and ``networks`` tables, deep-merged
     over the shared file. Runtime objects are built only by its build methods.
+
+    Parameters
+    ----------
+    root
+        Root directory for configuration files.
+    **overrides
+        Values overriding the defaults.
     """
     shared = {name: _table(root, name) for name in ("detectors", "networks")}
     settings = deep_merge(shared, overrides)
@@ -139,6 +167,13 @@ def waveform_generator(root: Path | None = None, **kwargs: Any) -> WaveformGener
     Keyword arguments override the file and are validated through
     :class:`~astrogwb.waveform.WaveformMetadata`. Not safe before
     ``configure_runtime``.
+
+    Parameters
+    ----------
+    root
+        Root directory for configuration files.
+    **kwargs
+        Additional keyword arguments.
     """
     return build_waveform_generator(waveform_metadata(root, **kwargs))
 
@@ -147,6 +182,13 @@ def waveform_metadata(root: Path | None = None, **kwargs: Any) -> WaveformMetada
     """The waveform the default draw, ``[catalog]``, uses, as a record.
 
     Keyword arguments override the file. Safe before ``configure_runtime``.
+
+    Parameters
+    ----------
+    root
+        Root directory for configuration files.
+    **kwargs
+        Additional keyword arguments.
     """
     settings = {**_table(root, "catalog", "waveform"), **kwargs}
     return WaveformMetadata.model_validate(settings)
@@ -162,6 +204,13 @@ def population_model(
         population_model(n_grid=256, minimum_redshift=0.3)
 
     Not safe before ``configure_runtime``.
+
+    Parameters
+    ----------
+    root
+        Root directory for configuration files.
+    **kwargs
+        Additional keyword arguments.
     """
     return population_metadata(root).with_model_kwargs(**kwargs).build()
 
@@ -173,6 +222,13 @@ def population_metadata(
 
     Keyword arguments override ``model_kwargs``. Safe before
     ``configure_runtime``; building the record's population is not.
+
+    Parameters
+    ----------
+    root
+        Root directory for configuration files.
+    **kwargs
+        Additional keyword arguments.
     """
     table = _table(root, "catalog", "population")
     table["model_kwargs"] = {**table.get("model_kwargs", {}), **kwargs}

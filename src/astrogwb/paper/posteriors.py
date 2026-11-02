@@ -86,7 +86,15 @@ MAX_PAIRS = 6
 
 
 def pad_pairs(values: ArrayLike, num_pairs: int = MAX_PAIRS) -> NDArray:
-    """Pad the pair axis (second to last) of ``values`` with zeros to ``num_pairs``."""
+    """Pad the pair axis (second to last) of ``values`` with zeros to ``num_pairs``.
+
+    Parameters
+    ----------
+    values
+        Input values.
+    num_pairs
+        Number of detector pairs.
+    """
     values = np.asarray(values)
     widths = [(0, 0)] * values.ndim
     widths[-2] = (0, num_pairs - values.shape[-2])
@@ -112,6 +120,19 @@ def network_pair_data(
 
     Parameters are those of :func:`network_data`, with ``num_pairs`` the padded
     pair count.
+
+    Parameters
+    ----------
+    frequencies
+        Frequency grid in Hz.
+    noise
+        Network noise.
+    minimum_frequency
+        Lower frequency bound in Hz.
+    maximum_frequency
+        Upper frequency bound in Hz.
+    num_pairs
+        Number of detector pairs.
 
     Returns
     -------

@@ -58,6 +58,13 @@ class InverseCDF(Messenger):
         return super().__enter__()
 
     def process_message(self, msg: dict[str, Any]) -> None:
+        """Transform the next uniform coordinate at an eligible sample site.
+
+        Parameters
+        ----------
+        msg
+            NumPyro effect message.
+        """
         if msg["type"] != "sample" or msg["is_observed"] or msg["value"] is not None:
             return
         msg["value"] = msg["fn"].icdf(self.points[..., self._index])

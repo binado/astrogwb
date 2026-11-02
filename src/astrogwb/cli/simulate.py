@@ -48,7 +48,31 @@ def simulate(
         int | None, typer.Option(min=1, help="Cap OMP/BLAS/XLA CPU threads.")
     ] = None,
 ) -> None:
-    """Simulate the population, waveforms and background in one pass into OUTPUT."""
+    """Simulate the population, waveforms and background in one pass into OUTPUT.
+
+    Parameters
+    ----------
+    output
+        Output file path.
+    population_metadata
+        Path to population metadata.
+    waveform_metadata
+        Path to waveform metadata.
+    detector_config
+        Detector configuration layer paths.
+    seed
+        Random seed.
+    index
+        Realization index.
+    chunk_size
+        Number of sources per chunk.
+    segment_duration
+        Noise segment duration in seconds.
+    platform
+        JAX execution platform.
+    cpu_threads
+        Number of CPU threads.
+    """
     _apply_runtime(platform, cpu_threads)
     from astrogwb.detector.config import load_detector_config
     from astrogwb.simulators import (

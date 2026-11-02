@@ -105,15 +105,15 @@ class Network(NamedTuple):
 
     Attributes
     ----------
-    scale:
+    scale
         Per-entry standard deviation, ``(F,)`` or ``(P, F)``
         (:func:`~astrogwb.detector.pair_bin_scale` for pairs).
-    mask:
+    mask
         Boolean, shaped as ``scale``, of the entries counted; ``None`` counts
         all. Masked entries contribute exactly zero, whatever their ``scale``.
-    relative_variance:
+    relative_variance
         A fixed :math:`s^2`, shape ``()``, for the ``"fixed"`` shot-noise mode.
-    response:
+    response
         Equally weighted isotropic draws of the network response
         :math:`r_l(f)` on the likelihood's frequency grid, ``(L, F)``
         (:func:`~astrogwb.detector.response.sample_network_response`), or of
@@ -133,34 +133,34 @@ class Network(NamedTuple):
         :data:`~astrogwb.gwb.importance.INCLINATION_SECOND_MOMENT` everywhere.
         ``None`` keeps the sky-averaged power. With pairs, the covariance
         indices run over (pair, bin).
-    modes:
+    modes
         The shot-noise basis :math:`U` of the ``"modes"`` mode, ``(D, k)``:
         orthonormal over the counted bins in whitened coordinates
         (:func:`~astrogwb.inference.shot_noise.shot_noise_modes`). Zero
         columns are inert.
-    mode_blocks:
+    mode_blocks
         The per-node blocks :math:`M_z` of the shot noise in the basis,
         ``(Z, k, k)``
         (:meth:`ImportanceGaussianLikelihood.mode_blocks`), held to skip
         recomputing them. Valid only with no ``density_sites`` (unchecked).
         ``None`` computes them.
-    mode_covariance:
+    mode_covariance
         The whitened shot-noise covariance in the basis, :math:`B`,
         ``(k, k)``, which
         :meth:`ImportanceGaussianLikelihood.log_likelihood` sets per point
         in the ``"modes"`` mode, as it sets ``relative_variance`` in the
         ``"amplitude"`` mode.
-    observed:
+    observed
         The data this network recorded, shaped as ``scale``, in place of the
         likelihood's ``observed``; ``None`` uses the likelihood's.
-    response_moments:
+    response_moments
         The per-node second moments of the power under ``response``, collapsed
         over the pairs, :math:`s_z^4 W_z G W_z^T \circ \bar R`, ``(Z, F, F)``
         (:meth:`ImportanceGaussianLikelihood.response_moments`), making the
         ``"amplitude"`` mode's :math:`s^2` one quadratic form per node. Valid
         only with no ``density_sites`` and the ``scale`` and ``mask`` they were
         formed under (unchecked). ``None`` projects every draw.
-    pair_overlap:
+    pair_overlap
         The isotropic ORF :math:`\gamma_{ab}(f_k)` of every pair, ``(P, F)``,
         in the order of :func:`~astrogwb.detector.pair_terms`; the gain from
         the predicted spectrum to each pair's mean. Pad networks with fewer
@@ -280,6 +280,17 @@ def gaussian_log_likelihood(
     Masked bins contribute exactly zero, and their ``scale`` may be infinite
     without producing a non-finite value or gradient. Shape ``(...)`` for
     ``mean`` of shape ``(..., F)``.
+
+    Parameters
+    ----------
+    mean
+        Predicted mean.
+    observed
+        Observed data.
+    scale
+        Noise standard deviation.
+    mask
+        Boolean mask of entries to include.
     """
     return rank_one_gaussian_log_likelihood(
         observed, mean, scale, jnp.zeros_like(jnp.asarray(mean)), mask
@@ -309,6 +320,19 @@ def shot_noise_log_likelihood(
     ``mean`` is the predicted spectrum, ``(F,)``, which ``network`` expands to
     its data (see :class:`Network`); ``observed`` and ``variance`` are already
     on the flat data axis, ``(D,)``.
+
+    Parameters
+    ----------
+    mean
+        Predicted mean.
+    variance
+        Predicted variance.
+    observed
+        Observed data.
+    network
+        Detector network and noise configuration.
+    mode
+        Shot-noise approximation mode.
     """
     expanded = _expand(jnp.asarray(mean), network)
     observed = jnp.reshape(jnp.asarray(observed), -1)
@@ -336,14 +360,14 @@ class GaussianLikelihood:
 
     Parameters
     ----------
-    spectrum_fn:
+    spectrum_fn
         ``params -> (F,)`` or ``params -> ((F,), extras)``. Static: it is
         compared by identity, so whatever it captures is compiled in as a
         constant. Use :class:`~astrogwb.inference.likelihood.ImportanceGaussianLikelihood`
         when a large catalog should be a traced input instead.
-    observed:
+    observed
         Observed spectrum, ``(F,)``.
-    network:
+    network
         The detector network ``log_likelihood`` and ``__call__`` default to.
     """
 
@@ -352,7 +376,13 @@ class GaussianLikelihood:
     network: Network
 
     def predict(self, params: Mapping[str, ArrayLike]) -> Prediction:
-        """The spectrum at ``params``: ``(mean, None, extras)``."""
+        """The spectrum at ``params``: ``(mean, None, extras)``.
+
+        Parameters
+        ----------
+        params
+            Model parameter values.
+        """
         result = self.spectrum_fn(params)
         if isinstance(result, tuple):
             mean, extras = result
@@ -362,7 +392,15 @@ class GaussianLikelihood:
     def log_likelihood_from_prediction(
         self, prediction: Prediction, network: Network
     ) -> jax.Array:
-        """The log-likelihood of ``prediction`` under ``network``, shape ``()``."""
+        """The log-likelihood of ``prediction`` under ``network``, shape ``()``.
+
+        Parameters
+        ----------
+        prediction
+            Model prediction.
+        network
+            Detector network and noise configuration.
+        """
         mean, _, _ = prediction
         return gaussian_log_likelihood(
             _expand(mean, network),
@@ -374,7 +412,15 @@ class GaussianLikelihood:
     def log_likelihood(
         self, params: Mapping[str, ArrayLike], network: Network | None = None
     ) -> tuple[jax.Array, Mapping[str, jax.Array]]:
-        """``(log L, extras)`` at ``params`` under ``network`` (the instance's by default)."""
+        """``(log L, extras)`` at ``params`` under ``network`` (the instance's by default).
+
+        Parameters
+        ----------
+        params
+            Model parameter values.
+        network
+            Detector network and noise configuration.
+        """
         prediction = self.predict(params)
         value = self.log_likelihood_from_prediction(
             prediction, self.network if network is None else network
@@ -433,7 +479,13 @@ class _ImportanceCatalog:
         )
 
     def log_weights(self, params: Mapping[str, ArrayLike]) -> jax.Array:
-        """Per-draw intrinsic log importance weights at ``params``, ``(N,)``."""
+        """Per-draw intrinsic log importance weights at ``params``, ``(N,)``.
+
+        Parameters
+        ----------
+        params
+            Model parameter values.
+        """
         return self._shared(params).log_weights
 
     def _squared_distance_ratio(self, shared: _SharedTerms) -> jax.Array:
@@ -471,7 +523,13 @@ class _ImportanceCatalog:
         return node_power @ shared.kernel, extras
 
     def spectrum(self, params: Mapping[str, ArrayLike]) -> jax.Array:
-        """The spectrum at ``params``, ``(F,)``: a :data:`~astrogwb.inference.protocol.SpectrumFn`."""
+        """The spectrum at ``params``, ``(F,)``: a :data:`~astrogwb.inference.protocol.SpectrumFn`.
+
+        Parameters
+        ----------
+        params
+            Model parameter values.
+        """
         return self._mean(self._shared(params))[0]
 
     def _node_projectors(self, projector: jax.Array) -> jax.Array:
@@ -539,35 +597,35 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
 
     Attributes
     ----------
-    power:
+    power
         Reference-catalog polarization power, ``(F_ref, N)``.
-    squared_power:
+    squared_power
         ``power`` squared; ``None`` unless ``shot_noise`` is ``"amplitude"`` or
         ``"per_frequency"``.
-    mean_power, mean_squared_power:
+    mean_power, mean_squared_power
         Means over draws, ``(F_ref,)``, held only when ``density_sites`` is
         empty (every weight is one); ``mean_squared_power`` also needs a
         predicted variance. Caches of ``power``: replacing ``power`` must
         replace them too.
-    gram:
+    gram
         The catalog Gram matrix :math:`\sum_i P_i P_i^T / N`,
         ``(F_ref, F_ref)``, held only when ``density_sites`` is empty and
         ``shot_noise`` is ``"amplitude"`` or ``"modes"``. A cache of ``power``.
     intrinsic, proposal_log_prob, log_reference_frequencies, query_log_frequencies,
-    amplitude, redshift, redshift_weights, reference_distance:
+    amplitude, redshift, redshift_weights, reference_distance
         The arrays of :func:`~astrogwb.gwb.importance._rescaling_arrays`.
-    observation_seconds:
+    observation_seconds
         Observation time in seconds, ``()``; ``None`` unless a variance is
         predicted.
-    observed:
+    observed
         Observed spectrum, ``(F,)``, or ``None`` when only the spectrum is used.
-    network:
+    network
         The detector network ``log_likelihood`` defaults to, or ``None``.
-    population:
+    population
         The target's bound :class:`~astrogwb.populations.Population`.
-    density_sites:
+    density_sites
         The intrinsic factors the importance weights include.
-    shot_noise:
+    shot_noise
         The shot-noise mode, or ``None`` for the diagonal Gaussian.
     """
 
@@ -608,6 +666,31 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         ``observation_time`` in years; ``"fixed"`` reads
         ``network.relative_variance``; ``"modes"`` needs ``network.modes``. The
         contracts of :mod:`astrogwb.gwb.importance` must hold.
+
+        Parameters
+        ----------
+        data
+            Reference catalog power data.
+        metadata
+            Metadata describing the object.
+        population
+            Target population model.
+        frequencies
+            Frequency grid in Hz.
+        num_redshift_nodes
+            Number of redshift quadrature nodes.
+        density_sites
+            Names of sites included in the density.
+        observed
+            Observed data.
+        network
+            Detector network and noise configuration.
+        shot_noise
+            Shot-noise approximation.
+        observation_time
+            Observation time in years.
+        minimum_redshift
+            Lower redshift bound.
         """
         power = np.asarray(data["polarization_power"], dtype=np.float64)
         needs_variance = shot_noise in ("amplitude", "per_frequency")
@@ -660,6 +743,11 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         that factor for the network's response. ``extras`` holds ``total_merger_rate``
         (observer frame, mergers per second) and ``importance_relative_ess``,
         both ``()``.
+
+        Parameters
+        ----------
+        params
+            Model parameter values.
         """
         return self._predict(self._shared(params))
 
@@ -763,6 +851,13 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         :func:`~astrogwb.inference.shot_noise.amplitude_shot_noise_variance` of
         the predicted per-bin variance, and equals it when the shot noise is
         perfectly correlated across bins. Requires ``observation_seconds``.
+
+        Parameters
+        ----------
+        params
+            Model parameter values.
+        network
+            Detector network and noise configuration.
         """
         shared = self._shared(params)
         mean = self._predict(shared)[0]
@@ -795,6 +890,13 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         factor becomes the Hadamard product with
         :math:`\langle r_f r_{f'} \rangle`; for pairs the indices run over the
         flat data axis. Requires ``observation_seconds``.
+
+        Parameters
+        ----------
+        params
+            Model parameter values.
+        network
+            Detector network and noise configuration.
         """
         assert self.observation_seconds is not None
         shared = self._shared(params)
@@ -926,6 +1028,13 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         :meth:`_variance_kernel`, so :math:`U B U^T` is the whitened
         :meth:`catalog_covariance` restricted to the basis. Hold the result on
         ``network.mode_blocks`` when the importance weights do not vary.
+
+        Parameters
+        ----------
+        params
+            Model parameter values.
+        network
+            Detector network and noise configuration.
         """
         network = self.network if network is None else network
         assert network is not None
@@ -950,6 +1059,13 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         :math:`\mathbf{S}^T K_z \mathbf{S}`. Hold the result on
         ``network.response_moments`` when the importance weights do not vary.
         Requires ``network.response``.
+
+        Parameters
+        ----------
+        params
+            Model parameter values.
+        network
+            Detector network and noise configuration.
         """
         network = self.network if network is None else network
         assert network is not None and network.response is not None
@@ -982,6 +1098,21 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         that networks stack. ``hold_blocks`` also holds :meth:`mode_blocks`;
         it defaults to true when there are no ``density_sites``. Call outside
         JAX transformations.
+
+        Parameters
+        ----------
+        params
+            Model parameter values.
+        network
+            Detector network and noise configuration.
+        tolerance
+            Mode truncation tolerance.
+        max_modes
+            Maximum number of modes.
+        num_modes
+            Number of modes.
+        hold_blocks
+            Whether to retain the computed mode blocks.
         """
         modes = shot_noise_modes(
             self.catalog_covariance(params, network),
@@ -1023,6 +1154,13 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         ``network.response`` or ``network.pair_overlap`` rescales the per-bin
         variance of ``prediction`` from the inclination factor to the diagonal
         of the orientation factor, tiled over the pairs.
+
+        Parameters
+        ----------
+        prediction
+            Model prediction.
+        network
+            Detector network and noise configuration.
         """
         mean, variance, _ = prediction
         if variance is not None and (
@@ -1040,7 +1178,15 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
     def log_likelihood(
         self, params: Mapping[str, ArrayLike], network: Network | None = None
     ) -> tuple[jax.Array, Mapping[str, jax.Array]]:
-        """``(log L, extras)`` at ``params`` under ``network`` (the instance's by default)."""
+        """``(log L, extras)`` at ``params`` under ``network`` (the instance's by default).
+
+        Parameters
+        ----------
+        params
+            Model parameter values.
+        network
+            Detector network and noise configuration.
+        """
         shared = self._shared(params)
         prediction = self._predict(shared)
         network = self.network if network is None else network
@@ -1136,22 +1282,22 @@ class ImportanceCompoundPoissonLikelihood(_ImportanceCatalog):
     ----------
     power, intrinsic, proposal_log_prob, log_reference_frequencies,
     query_log_frequencies, amplitude, redshift, redshift_weights,
-    reference_distance, observed, network, population, density_sites:
+    reference_distance, observed, network, population, density_sites
         As for :class:`ImportanceGaussianLikelihood`.
-    observation_seconds:
+    observation_seconds
         Observation time :math:`T` in seconds, ``()``; required.
-    method:
+    method
         How :math:`p(\hat B)` is evaluated: ``"saddlepoint"`` (normalized),
         ``"hermite"`` (Gauss-Hermite on the contour through the saddle) or
         ``"gaussian"``.
-    num_inclination_nodes:
+    num_inclination_nodes
         Gauss-Legendre nodes :math:`L` in :math:`\cos\iota`. Eight are plenty
         when :math:`\mathcal{R} T` is large; the skewness at small
         :math:`\mathcal{R} T` needs more (24). Unused under a network that
         carries a ``response``.
-    num_hermite_nodes:
+    num_hermite_nodes
         Contour nodes of ``"hermite"``.
-    num_normalization_nodes:
+    num_normalization_nodes
         Nodes of the ``"saddlepoint"`` normalization.
     """
 
@@ -1184,6 +1330,37 @@ class ImportanceCompoundPoissonLikelihood(_ImportanceCatalog):
         As :meth:`ImportanceGaussianLikelihood.from_catalog`, with
         ``observation_time`` in years required and the density options of the
         class. Call outside JAX transformations.
+
+        Parameters
+        ----------
+        data
+            Reference catalog power data.
+        metadata
+            Metadata describing the object.
+        population
+            Target population model.
+        frequencies
+            Frequency grid in Hz.
+        num_redshift_nodes
+            Number of redshift quadrature nodes.
+        density_sites
+            Names of sites included in the density.
+        observation_time
+            Observation time in years.
+        observed
+            Observed data.
+        network
+            Detector network and noise configuration.
+        minimum_redshift
+            Lower redshift bound.
+        method
+            Density approximation method.
+        num_inclination_nodes
+            Number of inclination quadrature nodes.
+        num_hermite_nodes
+            Number of Gauss-Hermite nodes.
+        num_normalization_nodes
+            Number of normalization quadrature nodes.
         """
         return cls(
             power=jnp.asarray(np.asarray(data["polarization_power"], dtype=np.float64)),
@@ -1207,7 +1384,13 @@ class ImportanceCompoundPoissonLikelihood(_ImportanceCatalog):
         )
 
     def predict(self, params: Mapping[str, ArrayLike]) -> Prediction:
-        """``(mean, None, extras)`` at ``params``, as the Gaussian class's."""
+        """``(mean, None, extras)`` at ``params``, as the Gaussian class's.
+
+        Parameters
+        ----------
+        params
+            Model parameter values.
+        """
         mean, extras = self._mean(self._shared(params))
         return mean, None, extras
 
@@ -1251,6 +1434,13 @@ class ImportanceCompoundPoissonLikelihood(_ImportanceCatalog):
         """The compound-Poisson point set of :math:`\\hat B` at ``params``, ``(Z, N, L)``.
 
         Under ``network``, the instance's by default.
+
+        Parameters
+        ----------
+        params
+            Model parameter values.
+        network
+            Detector network and noise configuration.
         """
         shared = self._shared(params)
         mean = self._mean(shared)[0]
@@ -1263,7 +1453,15 @@ class ImportanceCompoundPoissonLikelihood(_ImportanceCatalog):
     def log_likelihood(
         self, params: Mapping[str, ArrayLike], network: Network | None = None
     ) -> tuple[jax.Array, Mapping[str, jax.Array]]:
-        """``(log L, extras)`` at ``params`` under ``network`` (the instance's by default)."""
+        """``(log L, extras)`` at ``params`` under ``network`` (the instance's by default).
+
+        Parameters
+        ----------
+        params
+            Model parameter values.
+        network
+            Detector network and noise configuration.
+        """
         shared = self._shared(params)
         mean, extras = self._mean(shared)
         network = self.network if network is None else network

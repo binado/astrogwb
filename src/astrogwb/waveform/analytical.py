@@ -71,7 +71,7 @@ def inclination_factor(inclination: JaxArrayLike) -> jax.Array:
 
     Parameters
     ----------
-    inclination:
+    inclination
         Inclination angle in radians.
     """
     cos_squared = jnp.cos(inclination) ** 2
@@ -82,6 +82,13 @@ def chirp_mass(mass_1: JaxArrayLike, mass_2: JaxArrayLike) -> jax.Array:
     r"""Chirp mass $M_c = (m_1 m_2)^{3/5} / (m_1 + m_2)^{1/5}$.
 
     In the frame and unit of the components.
+
+    Parameters
+    ----------
+    mass_1
+        First component mass.
+    mass_2
+        Second component mass.
     """
     mass_1, mass_2 = jnp.asarray(mass_1), jnp.asarray(mass_2)
     return (mass_1 * mass_2) ** 0.6 / (mass_1 + mass_2) ** 0.2
@@ -113,11 +120,11 @@ def termination_frequency(
 
     Parameters
     ----------
-    mass_1, mass_2:
+    mass_1, mass_2
         Source-frame component masses in solar masses.
-    redshift:
+    redshift
         Source redshift.
-    alpha:
+    alpha
         Scalar dimensionless truncation parameter. See
         :data:`~astrogwb.constants.ISCO_ALPHA` for
         the value corresponding to the Schwarzschild test-particle ISCO.
@@ -244,14 +251,14 @@ def inspiral_polarization_power(
 
     Parameters
     ----------
-    frequencies:
+    frequencies
         Frequency grid in Hz, shape ``(F,)``. A zero bin returns zero power
         rather than the divergence of $f^{-7/3}$.
-    parameters:
+    parameters
         ``source_frame_mass_1``, ``source_frame_mass_2`` (solar masses),
         ``redshift``, ``luminosity_distance`` (Mpc) and optional
         ``inclination`` (radians, default face-on).
-    alpha:
+    alpha
         Scalar dimensionless truncation parameter shared by every source; see
         :func:`termination_frequency`.
 
@@ -278,6 +285,7 @@ class AnalyticInspiralGenerator(WaveformGenerator):
 
     @property
     def frequencies(self) -> np.ndarray:
+        """Return the waveform frequency grid in Hz."""
         return frequency_grid(
             self.metadata.frequency_spacing,
             self.metadata.minimum_frequency,

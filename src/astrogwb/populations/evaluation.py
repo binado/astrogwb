@@ -42,6 +42,13 @@ class DensityAccumulator(Messenger):
         return self
 
     def postprocess_message(self, msg: dict[str, Any]) -> None:
+        """Accumulate the density contribution from a selected sample site.
+
+        Parameters
+        ----------
+        msg
+            NumPyro effect message.
+        """
         if msg["type"] != "sample" or msg["name"] not in self.sites:
             return
         intermediates = msg["intermediates"]
@@ -73,6 +80,17 @@ def compute_model_and_log_probs(
 
     Returns ``(model return value, log_prob)``. ``log_prob`` has one entry per
     source, or is the scalar zero if no ``density_sites`` matched.
+
+    Parameters
+    ----------
+    model
+        NumPyro model.
+    density_sites
+        Names of sites included in the density.
+    *model_args
+        Positional arguments passed to the model.
+    **model_kwargs
+        Keyword arguments passed to the model.
     """
     with handlers.block():
         accumulator = DensityAccumulator(model, sites=density_sites)
@@ -130,6 +148,15 @@ def evaluate_sources(
 
     Raises ``ValueError`` unless every column has the same shape ``(N,)``, and
     ``KeyError`` if a sample site has no column.
+
+    Parameters
+    ----------
+    model
+        NumPyro model.
+    source_parameters
+        Source parameter values by name.
+    density_sites
+        Names of sites included in the density.
     """
     columns: dict[str, ArrayLike] = {
         name: jnp.asarray(value) for name, value in source_parameters.items()
@@ -163,6 +190,15 @@ def sample_sources(
 
     ``num_samples`` is a Python int, static under JIT. Returns the model's
     output mapping, each column of shape ``(num_samples,)``.
+
+    Parameters
+    ----------
+    model
+        NumPyro model.
+    key
+        JAX random key.
+    num_samples
+        Number of source samples.
     """
     with handlers.block():
         draws = Predictive(model, num_samples=num_samples)(key)
@@ -186,6 +222,15 @@ def sample_sources_qmc(
     Owen scrambling of a Sobol sequence with one dimension per free sample
     site, driven through :class:`~astrogwb.utils.numpyro.InverseCDF`, whose
     contracts the model must meet.
+
+    Parameters
+    ----------
+    model
+        NumPyro model.
+    key
+        JAX random key.
+    num_samples
+        Number of source samples.
 
     Raises
     ------

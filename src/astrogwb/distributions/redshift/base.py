@@ -46,16 +46,16 @@ class RedshiftDistribution(InterpolatedDistribution):
 
     Parameters
     ----------
-    params:
+    params
         Hyperparameters. Must include ``H0`` (in
         :math:`\mathrm{km\,s^{-1}\,Mpc^{-1}}`) and ``Omega_m``, plus whatever
         ``source_frame_distribution`` reads.
-    source_frame_distribution:
+    source_frame_distribution
         Callable returning the unnormalized source-frame merger-rate shape
         :math:`\psi(z)`, kept as static pytree metadata.
-    minimum_redshift, maximum_redshift, n_grid:
+    minimum_redshift, maximum_redshift, n_grid
         The linear grid the cosmology integrals and the normalization run on.
-    validate_args:
+    validate_args
         Forwarded to :class:`~numpyro.distributions.Distribution`.
     """
 
@@ -118,13 +118,26 @@ class RedshiftDistribution(InterpolatedDistribution):
 
         Evaluated pointwise at the distribution's hyperparameters, not
         interpolated from the grid.
+
+        Parameters
+        ----------
+        redshift
+            Redshift.
         """
         return self._merger_rate(jnp.asarray(redshift), self.params)
 
     def source_frame_distribution(
         self, redshift: ArrayLike, params: Mapping[str, ArrayLike]
     ) -> jax.Array:
-        r"""Forward to the supplied source-frame merger-rate shape :math:`\psi(z)`."""
+        r"""Forward to the supplied source-frame merger-rate shape :math:`\psi(z)`.
+
+        Parameters
+        ----------
+        redshift
+            Redshift.
+        params
+            Model parameter values.
+        """
         return self._source_frame_distribution(redshift, params)
 
     @property
@@ -158,7 +171,13 @@ class RedshiftDistribution(InterpolatedDistribution):
         return 1e-9 * self.norm / SECONDS_PER_YEAR
 
     def luminosity_distance(self, redshift: ArrayLike) -> jax.Array:
-        """Luminosity distance in Mpc at redshift(s), clamped outside the grid."""
+        """Luminosity distance in Mpc at redshift(s), clamped outside the grid.
+
+        Parameters
+        ----------
+        redshift
+            Redshift.
+        """
         return jnp.interp(jnp.asarray(redshift), self.x, self.luminosity_distance_grid)
 
     def distance_ratio(self, redshift: ArrayLike) -> jax.Array:
@@ -166,6 +185,11 @@ class RedshiftDistribution(InterpolatedDistribution):
 
         Analytic in the hyperparameters: :math:`\Xi(z)` when ``xi_0`` is among
         them (``xi_n`` must then be too), else one.
+
+        Parameters
+        ----------
+        redshift
+            Redshift.
         """
         redshift = jnp.asarray(redshift)
         if "xi_0" in self.params:
@@ -178,6 +202,11 @@ class RedshiftDistribution(InterpolatedDistribution):
         r"""Gravitational-wave luminosity distance in Mpc at redshift(s).
 
         The electromagnetic distance, times :meth:`distance_ratio`.
+
+        Parameters
+        ----------
+        redshift
+            Redshift.
         """
         return self.luminosity_distance(redshift) * self.distance_ratio(redshift)
 
@@ -205,6 +234,11 @@ class RedshiftDistribution(InterpolatedDistribution):
         r"""All-sky :math:`\mathrm{d}V_c/\mathrm{d}z` in :math:`\mathrm{Mpc}^3`.
 
         Clamped to the grid endpoints outside ``[x[0], x[-1]]``.
+
+        Parameters
+        ----------
+        redshift
+            Redshift.
         """
         return jnp.interp(
             jnp.asarray(redshift), self.x, self.differential_comoving_volume_grid

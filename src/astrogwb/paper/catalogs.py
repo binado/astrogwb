@@ -19,6 +19,11 @@ def read_reference_catalog(
 
     ``astrogwb model-catalog`` writes it; nothing here draws.
 
+    Parameters
+    ----------
+    path
+        File path.
+
     Raises
     ------
     FileNotFoundError
@@ -36,7 +41,17 @@ def validate_matching_frequency_grids(
     *,
     label: str = "injection and proposal",
 ) -> None:
-    """Require two waveform catalogs to share the exact frequency grid."""
+    """Require two waveform catalogs to share the exact frequency grid.
+
+    Parameters
+    ----------
+    injection_frequencies
+        Injection catalog frequency grid.
+    proposal_frequencies
+        Proposal catalog frequency grid.
+    label
+        Label used in error messages.
+    """
     injection_frequencies = np.asarray(injection_frequencies)
     proposal_frequencies = np.asarray(proposal_frequencies)
     if not np.array_equal(injection_frequencies, proposal_frequencies):
