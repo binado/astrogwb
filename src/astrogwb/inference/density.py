@@ -7,7 +7,6 @@ from typing import Any
 
 import jax
 import jax.numpy as jnp
-import numpy as np
 import numpyro.distributions as dist
 from jax.typing import ArrayLike
 from numpyro.infer.util import log_density
@@ -72,48 +71,15 @@ class LogDensityFn:
         return self._evaluator(grids, fixed_params, tuple(model_args), model_kwargs)
 
 
-#: A callable's static half: its pytree structure, and every non-array leaf in
-#: order with ``None`` holding each array's place.
-type _Structure = tuple[Any, tuple[Any, ...]]
-
-
-def _is_array(leaf: Any) -> bool:
-    return isinstance(leaf, (jax.Array, np.ndarray))
-
-
-def _partition(fn: Any) -> tuple[list[Any], _Structure]:
-    """Split ``fn`` into its array leaves and a hashable static rest.
-
-    A pytree callable (:class:`jax.tree_util.Partial`) yields its arrays; a
-    plain function is one static leaf. Flattening drops ``None``, so ``None``
-    cannot be a real static leaf.
-    """
-    leaves, treedef = jax.tree_util.tree_flatten(fn)
-    arrays = [leaf for leaf in leaves if _is_array(leaf)]
-    statics = tuple(None if _is_array(leaf) else leaf for leaf in leaves)
-    return arrays, (treedef, statics)
-
-
-def _combine(arrays: list[Any], structure: _Structure) -> Any:
-    """Inverse of :func:`_partition`."""
-    treedef, statics = structure
-    remaining = iter(arrays)
-    return jax.tree_util.tree_unflatten(
-        treedef, [next(remaining) if leaf is None else leaf for leaf in statics]
-    )
-
-
 def _grid_log_posterior(
     names: tuple[str, ...],
-    structure: _Structure,
     priors: tuple[tuple[str, dist.Distribution], ...],
     chunk_size: int | None,
-    arrays: list[Any],
+    likelihood: Any,
     grids: tuple[jax.Array, ...],
     fixed: dict[str, ArrayLike],
     networks: Network,
 ) -> jax.Array:
-    likelihood = _combine(arrays, structure)
     mesh = jnp.meshgrid(*grids, indexing="ij")
     points = {name: values.ravel() for name, values in zip(names, mesh, strict=True)}
 
@@ -135,11 +101,12 @@ def _grid_log_posterior(
     return flat.T.reshape(flat.shape[1], *sizes)
 
 
-# Built once, so every call with the same static half and array shapes shares
-# one compilation. `names` is static and `grids` a tuple: a dict argument would
-# be flattened in sorted-key order, losing the insertion order of the axes.
+# Built once, so every call with the same likelihood static fields and array
+# shapes shares one compilation. `names` is static and `grids` a tuple: a dict
+# argument would be flattened in sorted-key order, losing the insertion order of
+# the axes.
 _grid_log_posterior_jit = jax.jit(
-    _grid_log_posterior, static_argnames=("names", "structure", "priors", "chunk_size")
+    _grid_log_posterior, static_argnames=("names", "priors", "chunk_size")
 )
 
 
@@ -163,8 +130,10 @@ def grid_log_posterior(
     likelihood
         An object with ``log_likelihood(params, network) -> (log L, extras)``, such
         as :class:`~astrogwb.inference.likelihood.ImportanceGaussianLikelihood`.
-        Its array leaves are traced inputs, held once and not baked into the
-        compiled function; its static half is part of the compilation key.
+        It is passed to :func:`jax.jit` as a pytree argument, so it must be a
+        registered pytree: its data fields are traced inputs, not constants
+        baked into the compiled function, and its static (meta) fields are part
+        of the compilation key and must be hashable.
     priors
         Prior of every parameter, static. Each contributes its log density at
         the grid or ``fixed`` value, so a pinned site adds a constant, as in
@@ -190,13 +159,11 @@ def grid_log_posterior(
     KeyError
         At trace time, if a prior name is in neither ``grids`` nor ``fixed``.
     """
-    arrays, structure = _partition(likelihood)
     return _grid_log_posterior_jit(
         names=tuple(grids),
-        structure=structure,
         priors=tuple(priors.items()),
         chunk_size=chunk_size,
-        arrays=arrays,
+        likelihood=likelihood,
         grids=tuple(jnp.asarray(grid) for grid in grids.values()),
         fixed=dict(fixed) if fixed is not None else {},
         networks=networks,
