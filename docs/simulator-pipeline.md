@@ -37,7 +37,7 @@ hyperparameters (fixed, or drawn from their priors), a Poisson count
   `declination = arcsin(uniform(-1, 1))` (an isotropic celestial direction),
   `polarization_angle` uniform on `[0, pi)`, and `coa_phase`. Angles are radians.
 
-All sources are drawn in one batch through `sample_sources`, with independent
+All sources are drawn in one batch through `sample_and_logprob`, with independent
 random streams for hyperparameters, count, and the joint source model.
 The joint model samples intrinsic parameters and extrinsic angles together.
 Counts are Poisson only; the

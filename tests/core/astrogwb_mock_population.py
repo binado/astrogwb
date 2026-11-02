@@ -35,7 +35,7 @@ from astrogwb.populations import (
     build_population,
     joint_model,
 )
-from astrogwb.populations.evaluation import evaluate_sources, sample_sources
+from astrogwb.utils.numpyro import sample_and_logprob, sample_sources_qmc
 from astrogwb.waveform import AnalyticInspiralGenerator, WaveformMetadata
 
 
@@ -46,12 +46,11 @@ def derived_columns(
 ) -> dict[str, jax.Array]:
     """Replay a population's model at fixed source values, returning declared outputs.
 
-    The same code path as the replay in
-    :func:`astrogwb.populations.evaluation.sample_sources`: sample sites take
-    the supplied values and deterministic outputs are recomputed.
+    Sample sites take the supplied values and deterministic outputs are
+    recomputed through :func:`astrogwb.utils.numpyro.sample_and_logprob`.
     """
     model = joint_model(*population(params))
-    _, outputs = evaluate_sources(model, sources, density_sites=())
+    outputs, _ = sample_and_logprob(model, density_sites=(), values=sources)
     return outputs
 
 
@@ -119,9 +118,9 @@ def mock_population(n_grid: int = N_GRID) -> Population:
 
 
 def load_mock_population(num_sources: int = 1024) -> dict[str, np.ndarray]:
-    """Draw the mock population as plain ``(N,)`` float64 arrays."""
+    """Draw a Sobol population for stable spectrum integration checks."""
     model = joint_model(*mock_population()(POPULATION_PARAMS))
-    samples = sample_sources(
+    samples = sample_sources_qmc(
         model,
         jax.random.PRNGKey(MOCK_POPULATION_SEED),
         num_samples=num_sources,

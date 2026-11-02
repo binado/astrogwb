@@ -95,7 +95,7 @@ density come from the same grid. `source_model()` is a no-argument NumPyro
 model of the intrinsic parameters alone, in the source frame; it never sees
 redshift. `joint_model` composes the two halves into the model a catalog is
 drawn from. Hyperparameters are what the callable is called with, and source
-arrays are what `evaluate_sources` conditions in.
+arrays are what `sample_and_logprob` conditions in.
 
 ```python
 from astrogwb.populations import (
@@ -103,7 +103,7 @@ from astrogwb.populations import (
     build_population,
     joint_model,
 )
-from astrogwb.populations.evaluation import evaluate_sources, sample_sources
+from astrogwb.utils.numpyro import sample_and_logprob
 
 population = build_population(
     "bns_coba",
@@ -116,9 +116,11 @@ redshift_distribution, source_model = population(params)
 total_merger_rate = redshift_distribution.total_merger_rate()  # shape ()
 model = joint_model(redshift_distribution, source_model)
 
-sources = sample_sources(model, key, num_samples=1024)
-log_prob, outputs = evaluate_sources(
-    model, sources, density_sites=DEFAULT_DENSITY_SITES
+sources, log_prob = sample_and_logprob(
+    model, key, num_samples=1024, density_sites=DEFAULT_DENSITY_SITES
+)
+outputs, log_prob = sample_and_logprob(
+    model, values=sources, density_sites=DEFAULT_DENSITY_SITES
 )  # log_prob: shape (1024,); outputs["luminosity_distance"]: shape (1024,)
 ```
 
@@ -142,7 +144,7 @@ The factory's signature *is* the construction-settings schema. A key the named
 population does not take raises `TypeError` naming the population and what it
 accepts, rather than being silently dropped.
 
-- The joint model's returned mapping defines the stored columns, including
+- The joint model's sample and deterministic sites define the stored columns, including
   redshift, source-frame masses, spins, and `luminosity_distance`. Detector-frame
   masses are not stored: the waveform layer derives them from the source-frame
   masses and redshift. Its sample sites are
@@ -153,16 +155,17 @@ accepts, rather than being silently dropped.
   redshift and the ordered mass pair -- and one value
   is used for both sides of every weight. Omitting factors does not
   marginalize variables.
-- `evaluate_sources` runs the model once, under a `sources` plate, with every
-  column conditioned in, and returns the selected log density together with the
-  model's recomputed outputs.
+- `sample_and_logprob` runs the model once under a `batch` plate and returns
+  `(outputs, log_prob)` from its trace. Model return values are ignored, and
+  auxiliary sample sites such as factors are excluded from output columns.
 
-`sample_sources` uses `Predictive` followed by one batched replay through
-`evaluate_sources`. Conditioning affects sample sites only, so stored
-deterministic values never override the model's recomputation. That replay is
-the same code path density evaluation takes, which preserves exactly zero
-self-reweighting errors. Both functions isolate their NumPyro effects from
-enclosing inference models with `handlers.block`.
+A key allows free sites to be sampled; without a key every sample site must be
+conditioned through `values`. The source count is inferred from supplied columns
+or given explicitly as `num_samples`. Deterministic values are recomputed.
+Sampling and density evaluation use the same batched execution, preserving exact
+self-reweighting. Execution is isolated from enclosing inference models with
+`handlers.block`. Sobol sampling uses `sample_sources_qmc` and the same output
+collection from a trace.
 
 A population hashes by identity: build it once per run and close a
 JIT-compiled function over it, while hyperparameters and source arrays are
@@ -184,24 +187,6 @@ Two mass laws share the rest of the BNS Madau-Dickinson declaration:
   weight. Galactic BNS masses motivate the shape (a Gaussian around
   `1.33 Msun` with width `~0.09 Msun`). The default catalog still
   uses the uniform triangle.
-
-### Prefix stability across sizes
-
-Draws of different sizes at one seed are exact nested draws of the *source
-parameters*, which makes a catalog-size series a clean sweep rather than
-unrelated draws.
-`Predictive` allocates its per-draw keys with `jax.random.split`, which is
-prefix-stable -- a property of the installed JAX rather than an API promise, so
-`tests/core/test_populations.py` checks it directly.
-
-Prefix stability is a property of the population draw, not of the waveforms.
-Generation is exactly reproducible at a fixed sample count, but the same source
-generated in a batch of 8192 and a batch of 32768 gets polarization power
-agreeing only to ~1e-14 relative: XLA picks different reduction orders at
-different batch sizes and floating-point addition is not associative. The
-differences land on the deep tail of the spectrum -- values some three orders of
-magnitude below the array peak -- so they are numerically irrelevant, but the
-catalogs are not byte-identical to one another.
 
 ## Generate a catalog
 

@@ -58,13 +58,13 @@ def test_population_deterministics_replay_exactly(
     population: PopulationArtifact,
 ) -> None:
     from astrogwb.populations import joint_model
-    from astrogwb.populations.evaluation import evaluate_sources
+    from astrogwb.utils.numpyro import sample_and_logprob
 
     model = joint_model(
         *population.metadata.population.build()(population.hyperparameters)
     )
-    _, replayed = evaluate_sources(
-        model, population.source_parameters, density_sites=()
+    replayed, _ = sample_and_logprob(
+        model, density_sites=(), values=population.source_parameters
     )
     for name, values in replayed.items():
         np.testing.assert_array_equal(values, population.source_parameters[name])

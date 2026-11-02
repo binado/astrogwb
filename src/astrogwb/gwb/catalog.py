@@ -25,9 +25,9 @@ from numpy.typing import ArrayLike, NDArray
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from astrogwb import __version__
-from astrogwb.populations.evaluation import sample_sources
 from astrogwb.populations.joint import fix_extrinsic_parameters, joint_model
 from astrogwb.populations.metadata import PopulationMetadata
+from astrogwb.utils.numpyro import sample_and_logprob
 from astrogwb.waveform.base import WaveformGenerator
 from astrogwb.waveform.factory import waveform_generator
 from astrogwb.waveform.metadata import WaveformMetadata
@@ -54,7 +54,7 @@ class CatalogMetadata(BaseModel):
     ``sampling`` is how a reference catalog
     (:func:`~astrogwb.gwb.importance.reference_catalog`) draws its intrinsic
     parameters: ``"random"`` i.i.d., or ``"sobol"`` on a scrambled Sobol net
-    (:func:`~astrogwb.populations.evaluation.sample_sources_qmc`), which needs a
+    (:func:`~astrogwb.utils.numpyro.sample_sources_qmc`), which needs a
     power-of-two ``num_samples``. A plain catalog is always random.
 
     ``reference_redshift`` is the redshift a reference catalog's waveforms are
@@ -167,7 +167,9 @@ def draw_catalog(
     model = fix_extrinsic_parameters(
         joint_model(*metadata.population.build()(metadata.fiducials))
     )
-    samples = sample_sources(model, key, num_samples=metadata.num_samples)
+    samples, _ = sample_and_logprob(
+        model, key, num_samples=metadata.num_samples, density_sites=()
+    )
     return polarization_power_data(
         waveform_generator(metadata.waveform), samples, chunk_size=chunk_size
     )

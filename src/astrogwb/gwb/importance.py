@@ -99,14 +99,13 @@ from astrogwb.gwb.catalog import (
     polarization_power_data,
 )
 from astrogwb.populations._types import Population, PopulationModel, SourceModel
-from astrogwb.populations.evaluation import (
-    evaluate_sources,
-    sample_sources,
-    sample_sources_qmc,
-)
 from astrogwb.populations.joint import fix_extrinsic_parameters, joint_model
 from astrogwb.populations.metadata import PopulationMetadata
 from astrogwb.utils import gauss_legendre_nodes_weights
+from astrogwb.utils.numpyro import (
+    sample_and_logprob,
+    sample_sources_qmc,
+)
 from astrogwb.waveform.factory import waveform_generator
 
 __all__ = [
@@ -135,7 +134,7 @@ EFFECTIVE_INCLINATION = float(np.arccos(np.sqrt(np.sqrt(11.2) - 3.0)))
 #: the power. Exact for the :math:`(2, 2)` mode alone, as the pin is.
 INCLINATION_SECOND_MOMENT = 355.0 / 252.0
 
-#: The luminosity distance a source model returns.
+#: The luminosity distance declared by a source model.
 _LUMINOSITY_DISTANCE = "luminosity_distance"
 
 
@@ -175,12 +174,12 @@ def _intrinsic_log_prob(
     intrinsic: Mapping[str, jax.Array],
     density_sites: Sequence[str],
 ) -> jax.Array:
-    log_prob, _ = evaluate_sources(
+    _, log_prob = sample_and_logprob(
         handlers.condition(
             source_model, data={INCLINATION_SITE: EFFECTIVE_INCLINATION}
         ),
-        intrinsic,
         density_sites=density_sites,
+        values=intrinsic,
     )
     return log_prob
 
@@ -330,12 +329,13 @@ def reference_catalog(
             }
         )
     model = joint_model(*population.build()(metadata.fiducials))
-    draw = sample_sources_qmc if metadata.sampling == "sobol" else sample_sources
-    samples = draw(
-        _pin_redshift_and_inclination(model, reference),
-        key,
-        num_samples=metadata.num_samples,
-    )
+    pinned = _pin_redshift_and_inclination(model, reference)
+    if metadata.sampling == "sobol":
+        samples = sample_sources_qmc(pinned, key, num_samples=metadata.num_samples)
+    else:
+        samples, _ = sample_and_logprob(
+            pinned, key, num_samples=metadata.num_samples, density_sites=()
+        )
     return polarization_power_data(
         waveform_generator(metadata.waveform), samples, chunk_size=chunk_size
     )

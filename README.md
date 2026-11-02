@@ -64,7 +64,7 @@ import jax
 from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.metadata import PopulationMetadata, WaveformMetadata
 from astrogwb.populations import build_population, joint_model
-from astrogwb.inference.utils import sample_sources
+from astrogwb.utils.numpyro import sample_and_logprob
 from astrogwb.waveform import AnalyticInspiralGenerator
 
 model_kwargs = {
@@ -88,7 +88,9 @@ params = {
 # inclination is always sampled.
 population = build_population("bns_coba", **model_kwargs)
 model = joint_model(*population(params))
-source_parameters = sample_sources(model, jax.random.PRNGKey(42), num_samples=1024)
+source_parameters, _ = sample_and_logprob(
+    model, jax.random.PRNGKey(42), num_samples=1024, density_sites=()
+)
 
 generator = AnalyticInspiralGenerator(
     WaveformMetadata(

@@ -34,7 +34,6 @@ import jax
 import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
-from jax.typing import ArrayLike
 
 from astrogwb.cosmology import lookback_time
 from astrogwb.distributions import UniformCosineDistribution
@@ -188,41 +187,27 @@ def bns_coba_population_fn(
             n_delay_nodes=n_delay_nodes,
         )
 
-        def _source_model() -> dict[str, jax.Array]:
-            mass_1, mass_2 = draw_masses(parameters)
+        def _source_model() -> None:
+            mass_1, _ = draw_masses(parameters)
 
             spin_dist = dist.Uniform(
                 -maximum_aligned_spin_component,
                 maximum_aligned_spin_component,
                 validate_args=True,
             )
-            spin_1z = numpyro.sample("spin_1z", spin_dist)
-            spin_2z = numpyro.sample("spin_2z", spin_dist)
+            numpyro.sample("spin_1z", spin_dist)
+            numpyro.sample("spin_2z", spin_dist)
 
             lambda_dist = dist.Uniform(
                 0.0, maximum_tidal_deformability, validate_args=True
             )
-            lambda_1 = numpyro.sample("lambda_1", lambda_dist)
-            lambda_2 = numpyro.sample("lambda_2", lambda_dist)
+            numpyro.sample("lambda_1", lambda_dist)
+            numpyro.sample("lambda_2", lambda_dist)
 
             # Time-aligned; inclination is a separate stochastic site.
             zeros = jnp.zeros_like(mass_1)
-            coa_time = numpyro.deterministic("coa_time", zeros)
-            inclination = numpyro.sample(
-                "inclination", UniformCosineDistribution(validate_args=True)
-            )
-
-            sources: dict[str, ArrayLike] = {
-                "source_frame_mass_1": mass_1,
-                "source_frame_mass_2": mass_2,
-                "spin_1z": spin_1z,
-                "spin_2z": spin_2z,
-                "lambda_1": lambda_1,
-                "lambda_2": lambda_2,
-                "coa_time": coa_time,
-                "inclination": inclination,
-            }
-            return {name: jnp.asarray(values) for name, values in sources.items()}
+            numpyro.deterministic("coa_time", zeros)
+            numpyro.sample("inclination", UniformCosineDistribution(validate_args=True))
 
         return redshift_distribution, _source_model
 

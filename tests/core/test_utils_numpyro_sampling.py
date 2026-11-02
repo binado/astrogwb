@@ -1,17 +1,9 @@
-"""Contract tests for :mod:`astrogwb.populations.evaluation`.
-
-``DensityAccumulator`` must reproduce numpyro's ``compute_log_probs``
-bit-for-bit -- including the ``intermediates`` and plate-subsample ``scale``
-paths -- and ``compute_model_and_log_probs`` must hand back the model's return
-value from that same single execution. ``evaluate_sources`` and
-``sample_sources`` must evaluate a per-source model in isolation: nothing about
-the sources may reach an enclosing inference trace.
-"""
+"""Contract tests for isolated, trace-based source sampling and density evaluation."""
 
 from __future__ import annotations
 
 import operator
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from typing import Any
 
 import jax
@@ -25,11 +17,8 @@ from numpyro import handlers
 from numpyro.infer import MCMC, NUTS
 from numpyro.infer.util import compute_log_probs, log_density
 
-from astrogwb.populations.evaluation import (
-    DensityAccumulator,
-    compute_model_and_log_probs,
-    evaluate_sources,
-    sample_sources,
+from astrogwb.utils.numpyro import (
+    sample_and_logprob,
     sample_sources_qmc,
 )
 
@@ -39,18 +28,11 @@ FIXED: dict[str, ArrayLike] = {
 }
 
 
-def _two_site_model(params: Mapping[str, Any]) -> dict[str, ArrayLike]:
+def _two_site_model() -> dict[str, ArrayLike]:
     z = numpyro.sample("z", dist.Uniform(0.0, 2.0))
     m = numpyro.sample("m", dist.Normal(0.5, 1.5))
     numpyro.deterministic("detector_mass", m * (1.0 + z))
     return {"z": z, "m": m, "detector_mass": m * (1.0 + z)}
-
-
-def _plated_model(params: Mapping[str, Any]) -> dict[str, ArrayLike]:
-    with numpyro.plate("events", 6, subsample_size=2):
-        a = numpyro.sample("a", dist.Normal(0.0, 1.0))
-        b = numpyro.sample("b", dist.Uniform(0.0, 1.0))
-    return {"a": a, "b": b}
 
 
 def _reference(model: Any, sites: tuple[str, ...]) -> jax.Array:
@@ -61,95 +43,72 @@ def _reference(model: Any, sites: tuple[str, ...]) -> jax.Array:
             bound,
             hide_fn=lambda site: site["type"] == "sample" and site["name"] not in sites,
         )
-        log_probs, _ = compute_log_probs(filtered, ({},), {}, {}, sum_log_prob=False)
+        log_probs, _ = compute_log_probs(filtered, (), {}, {}, sum_log_prob=False)
     return jax.tree.reduce(operator.add, log_probs, initializer=jnp.zeros(()))
 
 
-def _accumulate(model: Any, sites: tuple[str, ...]) -> jax.Array:
-    with handlers.block():
-        accumulator = DensityAccumulator(
-            handlers.condition(model, data=FIXED), sites=sites
+@pytest.mark.parametrize("sites", [("z",), ("z", "m"), ("z", "detector_mass"), ()])
+@pytest.mark.parametrize("scale", [1.0, 3.0])
+def test_selected_density_matches_numpyro(sites: tuple[str, ...], scale: float) -> None:
+    model = handlers.scale(_two_site_model, scale=scale)
+    outputs, log_prob = sample_and_logprob(model, values=FIXED, density_sites=sites)
+
+    expected = jnp.broadcast_to(_reference(model, sites), (3,))
+    np.testing.assert_array_equal(log_prob, expected)
+    assert set(outputs) == {"z", "m", "detector_mass"}
+
+
+def test_sampled_transformed_density_matches_numpyro_intermediates() -> None:
+    def model() -> None:
+        numpyro.sample(
+            "x",
+            dist.TransformedDistribution(
+                dist.Normal(0.0, 1.0), dist.transforms.ExpTransform()
+            ),
         )
-        accumulator({})
-    return accumulator.log_prob
 
+    def plated() -> None:
+        with numpyro.plate("batch", 8):
+            model()
 
-def test_only_selected_sites_contribute() -> None:
-    partial = _accumulate(_two_site_model, ("z",))
-    full = _accumulate(_two_site_model, ("z", "m"))
-
-    assert jnp.array_equal(partial, _reference(_two_site_model, ("z",)))
-    assert not jnp.array_equal(partial, full)
-
-
-def test_deterministic_sites_are_ignored_even_if_listed() -> None:
-    sites = ("z", "detector_mass")
-    assert jnp.array_equal(
-        _accumulate(_two_site_model, sites), _reference(_two_site_model, sites)
+    key = jax.random.key(0)
+    outputs, log_prob = sample_and_logprob(
+        model, key, num_samples=8, density_sites=("x",)
     )
-
-
-def test_accumulator_matches_compute_log_probs_under_a_subsampled_plate() -> None:
-    """Exercises the ``scale`` branch: only a subsampled plate sets it."""
-    sites = ("a", "b")
     with handlers.block():
-        seeded = handlers.seed(_plated_model, jax.random.PRNGKey(0))
-        log_probs, _ = compute_log_probs(seeded, ({},), {}, {}, sum_log_prob=False)
-        expected = jax.tree.reduce(operator.add, log_probs, initializer=jnp.zeros(()))
-    with handlers.block():
-        seeded = handlers.seed(_plated_model, jax.random.PRNGKey(0))
-        accumulator = DensityAccumulator(seeded, sites=sites)
-        accumulator({})
-    assert jnp.array_equal(accumulator.log_prob, expected)
-
-
-def test_compute_model_and_log_probs_returns_the_model_value_and_density() -> None:
-    bound = handlers.condition(_two_site_model, data=FIXED)
-    result, log_prob = compute_model_and_log_probs(bound, ("z", "m"), {})
-
-    assert set(result) == {"z", "m", "detector_mass"}
-    assert jnp.array_equal(log_prob, _reference(_two_site_model, ("z", "m")))
-    np.testing.assert_array_equal(
-        result["detector_mass"], FIXED["m"] * (1.0 + FIXED["z"])
-    )
-
-
-def test_empty_sites_sum_to_the_scalar_zero() -> None:
-    bound = handlers.condition(_two_site_model, data=FIXED)
-    _, log_prob = compute_model_and_log_probs(bound, (), {})
-
-    assert log_prob.shape == ()
-    assert float(log_prob) == 0.0
+        expected, trace = compute_log_probs(
+            handlers.seed(plated, key), (), {}, {}, sum_log_prob=False
+        )
+    assert trace["x"]["intermediates"]
+    np.testing.assert_array_equal(outputs["x"], trace["x"]["value"])
+    np.testing.assert_array_equal(log_prob, expected["x"])
 
 
 # --------------------------------------------------------------------------- #
-# evaluate_sources / sample_sources
+# Population sampling and density evaluation
 # --------------------------------------------------------------------------- #
-def _source_model(mu: ArrayLike) -> Callable[[], dict[str, jax.Array]]:
+def _source_model(mu: ArrayLike) -> Callable[[], None]:
     """A per-source toy, with ``mu`` closed over: two sample sites, one deterministic."""
 
-    def model() -> dict[str, jax.Array]:
+    def model() -> None:
         z = numpyro.sample("z", dist.Uniform(0.0, 2.0))
         m = numpyro.sample("m", dist.Normal(mu, 1.5))
-        detector_mass = numpyro.deterministic("detector_mass", m * (1.0 + z))
-        return {
-            "z": jnp.asarray(z),
-            "m": jnp.asarray(m),
-            "detector_mass": jnp.asarray(detector_mass),
-        }
+        numpyro.deterministic("detector_mass", m * (1.0 + z))
 
     return model
 
 
 def _hierarchical_model() -> None:
     mu = numpyro.sample("mu", dist.Normal(0.5, 1.0))
-    log_prob, _ = evaluate_sources(_source_model(mu), FIXED, density_sites=("z", "m"))
+    _, log_prob = sample_and_logprob(
+        _source_model(mu), density_sites=("z", "m"), values=FIXED
+    )
     numpyro.factor("source_density", jnp.sum(log_prob))
 
 
-def test_evaluate_sources_matches_the_hand_written_density() -> None:
-    log_prob, outputs = evaluate_sources(
-        _source_model(0.5), FIXED, density_sites=("z", "m")
+def test_sample_and_logprob_matches_the_hand_written_density() -> None:
+    outputs, log_prob = sample_and_logprob(
+        _source_model(0.5), density_sites=("z", "m"), values=FIXED
     )
     expected = dist.Uniform(0.0, 2.0).log_prob(FIXED["z"]) + dist.Normal(
         0.5, 1.5
@@ -165,8 +124,8 @@ def test_evaluate_sources_matches_the_hand_written_density() -> None:
 def test_outer_log_density_excludes_source_sites() -> None:
     mu = 0.8
     total, trace = log_density(_hierarchical_model, (), {}, {"mu": mu})
-    source_log_prob, _ = evaluate_sources(
-        _source_model(mu), FIXED, density_sites=("z", "m")
+    _, source_log_prob = sample_and_logprob(
+        _source_model(mu), density_sites=("z", "m"), values=FIXED
     )
 
     assert set(trace) == {"mu", "source_density"}
@@ -188,26 +147,30 @@ def test_mcmc_collects_no_per_source_sites() -> None:
 
 def test_a_missing_column_raises_naming_the_site() -> None:
     with pytest.raises(KeyError, match="'m'"):
-        evaluate_sources(_source_model(0.5), {"z": FIXED["z"]}, density_sites=())
+        sample_and_logprob(
+            _source_model(0.5), density_sites=(), values={"z": FIXED["z"]}
+        )
     # An enclosing seed must not turn the missing column into fresh draws.
     with handlers.seed(rng_seed=0), pytest.raises(KeyError, match="'m'"):
-        evaluate_sources(_source_model(0.5), {"z": FIXED["z"]}, density_sites=())
+        sample_and_logprob(
+            _source_model(0.5), density_sites=(), values={"z": FIXED["z"]}
+        )
 
 
 def test_a_length_one_column_is_rejected() -> None:
     columns = {"z": FIXED["z"], "m": jnp.array([1.4])}
     with pytest.raises(ValueError, match=r"\(N,\)"):
-        evaluate_sources(_source_model(0.5), columns, density_sites=())
+        sample_and_logprob(_source_model(0.5), density_sites=(), values=columns)
 
 
 def test_a_non_vector_column_is_rejected() -> None:
     columns = {"z": jnp.reshape(jnp.asarray(FIXED["z"]), (3, 1)), "m": FIXED["m"]}
     with pytest.raises(ValueError, match=r"\(N,\)"):
-        evaluate_sources(_source_model(0.5), columns, density_sites=())
+        sample_and_logprob(_source_model(0.5), density_sites=(), values=columns)
 
 
 def test_empty_density_sites_give_per_source_zeros() -> None:
-    log_prob, _ = evaluate_sources(_source_model(0.5), FIXED, density_sites=())
+    _, log_prob = sample_and_logprob(_source_model(0.5), density_sites=(), values=FIXED)
 
     assert log_prob.shape == (3,)
     np.testing.assert_array_equal(log_prob, jnp.zeros(3))
@@ -215,7 +178,7 @@ def test_empty_density_sites_give_per_source_zeros() -> None:
 
 def test_stored_deterministic_columns_are_recomputed() -> None:
     stale = {**FIXED, "detector_mass": jnp.full(3, -1.0)}
-    _, outputs = evaluate_sources(_source_model(0.5), stale, density_sites=())
+    outputs, _ = sample_and_logprob(_source_model(0.5), density_sites=(), values=stale)
 
     np.testing.assert_array_equal(
         outputs["detector_mass"],
@@ -223,9 +186,11 @@ def test_stored_deterministic_columns_are_recomputed() -> None:
     )
 
 
-def test_evaluate_sources_is_differentiable_and_jittable() -> None:
+def test_sample_and_logprob_is_differentiable_and_jittable() -> None:
     def total(mu: jax.Array) -> jax.Array:
-        log_prob, _ = evaluate_sources(_source_model(mu), FIXED, density_sites=("m",))
+        _, log_prob = sample_and_logprob(
+            _source_model(mu), density_sites=("m",), values=FIXED
+        )
         return jnp.sum(log_prob)
 
     mu = jnp.asarray(0.5)
@@ -235,14 +200,16 @@ def test_evaluate_sources_is_differentiable_and_jittable() -> None:
     assert jnp.array_equal(jax.jit(total)(mu), total(mu))
 
 
-def test_sample_sources_replays_through_evaluation_bit_for_bit() -> None:
+def test_sample_sources_matches_evaluation_bit_for_bit() -> None:
     key = jax.random.PRNGKey(3)
-    first = sample_sources(_source_model(0.5), key, num_samples=32)
-    second = sample_sources(_source_model(0.5), key, num_samples=32)
-    _, replay = evaluate_sources(
-        _source_model(0.5),
-        {"z": first["z"], "m": first["m"]},
-        density_sites=(),
+    first = sample_and_logprob(
+        _source_model(0.5), key, num_samples=32, density_sites=()
+    )[0]
+    second = sample_and_logprob(
+        _source_model(0.5), key, num_samples=32, density_sites=()
+    )[0]
+    replay, _ = sample_and_logprob(
+        _source_model(0.5), density_sites=(), values={"z": first["z"], "m": first["m"]}
     )
 
     assert set(first) == {"z", "m", "detector_mass"}
@@ -252,9 +219,32 @@ def test_sample_sources_replays_through_evaluation_bit_for_bit() -> None:
         np.testing.assert_array_equal(first[name], replay[name])
 
 
+def test_sample_sources_executes_model_once() -> None:
+    calls = []
+    source = _source_model(0.5)
+
+    def model() -> None:
+        calls.append(None)
+        source()
+
+    sample_and_logprob(model, jax.random.PRNGKey(0), num_samples=4, density_sites=())[0]
+    assert len(calls) == 1
+
+
+def test_sample_sources_broadcasts_conditioned_sites() -> None:
+    model = handlers.condition(_source_model(0.5), data={"z": 0.7})
+    sources = sample_and_logprob(
+        model, jax.random.PRNGKey(0), num_samples=8, density_sites=()
+    )[0]
+    np.testing.assert_array_equal(sources["z"], np.full(8, 0.7))
+    assert all(value.shape == (8,) for value in sources.values())
+
+
 def test_sample_sources_is_isolated_from_enclosing_handlers() -> None:
     with handlers.trace() as outer:
-        sample_sources(_source_model(0.5), jax.random.PRNGKey(0), num_samples=4)
+        sample_and_logprob(
+            _source_model(0.5), jax.random.PRNGKey(0), num_samples=4, density_sites=()
+        )[0]
     assert outer == {}
 
 
@@ -276,8 +266,10 @@ def test_sample_sources_qmc_replays_through_evaluation_bit_for_bit() -> None:
     sources = sample_sources_qmc(
         _source_model(0.5), jax.random.PRNGKey(3), num_samples=32
     )
-    _, replay = evaluate_sources(
-        _source_model(0.5), {"z": sources["z"], "m": sources["m"]}, density_sites=()
+    replay, _ = sample_and_logprob(
+        _source_model(0.5),
+        density_sites=(),
+        values={"z": sources["z"], "m": sources["m"]},
     )
 
     for name in sources:
@@ -306,3 +298,55 @@ def test_sample_sources_qmc_scramble_is_fixed_by_the_key() -> None:
 def test_sample_sources_qmc_rejects_a_non_power_of_two(count: int) -> None:
     with pytest.raises(ValueError, match="power of two"):
         sample_sources_qmc(_source_model(0.5), jax.random.PRNGKey(0), num_samples=count)
+
+
+def test_partial_conditioning_samples_and_scores_in_one_pass() -> None:
+    outputs, sampled_density = sample_and_logprob(
+        _source_model(0.5),
+        jax.random.key(2),
+        values={"z": FIXED["z"]},
+        density_sites=("z", "m"),
+    )
+    replay, replay_density = sample_and_logprob(
+        _source_model(0.5),
+        values=outputs,
+        density_sites=("z", "m"),
+    )
+    np.testing.assert_array_equal(outputs["z"], FIXED["z"])
+    np.testing.assert_array_equal(sampled_density, replay_density)
+    for name in outputs:
+        np.testing.assert_array_equal(outputs[name], replay[name])
+
+
+def test_auxiliary_factors_are_scored_but_not_output_columns() -> None:
+    def model() -> None:
+        x = jnp.asarray(numpyro.sample("x", dist.Normal(0.0, 1.0)))
+        numpyro.factor("extra", -x * x)
+        numpyro.deterministic("twice_x", 2.0 * x)
+
+    outputs, log_prob = sample_and_logprob(
+        model,
+        jax.random.key(0),
+        num_samples=8,
+        density_sites=("extra",),
+    )
+    assert set(outputs) == {"x", "twice_x"}
+    np.testing.assert_array_equal(log_prob, -(outputs["x"] ** 2))
+
+
+@pytest.mark.parametrize("num_samples", [None, 0, -1])
+def test_sampling_requires_a_positive_source_count(num_samples: int | None) -> None:
+    with pytest.raises(ValueError, match="num_samples"):
+        sample_and_logprob(
+            _source_model(0.5),
+            jax.random.key(0),
+            num_samples=num_samples,
+            density_sites=(),
+        )
+
+
+def test_explicit_count_must_agree_with_columns() -> None:
+    with pytest.raises(ValueError, match="match"):
+        sample_and_logprob(
+            _source_model(0.5), num_samples=4, values=FIXED, density_sites=()
+        )
