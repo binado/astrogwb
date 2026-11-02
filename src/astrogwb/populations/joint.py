@@ -14,11 +14,30 @@ from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.populations._types import PopulationModel, SourceModel
 
 __all__ = [
+    "DEFAULT_DENSITY_SITES",
     "EXTRINSIC_SITES",
+    "INTRINSIC_DENSITY_SITES",
+    "REDSHIFT_SITE",
     "extrinsic_priors",
     "fix_extrinsic_parameters",
     "joint_model",
 ]
+
+#: The redshift site every population must declare; its density is never
+#: excluded.
+REDSHIFT_SITE = "redshift"
+
+#: The intrinsic density factors of a source model: the ordered source-frame
+#: mass pair. These are the factors an importance weight divides by, since
+#: redshift is integrated by quadrature rather than reweighted.
+INTRINSIC_DENSITY_SITES: tuple[str, ...] = (
+    "source_frame_mass_1",
+    "source_frame_mass_2",
+)
+
+#: Density factors of the joint model a catalog selects when nothing narrower
+#: is requested: ``redshift`` plus the intrinsic ones.
+DEFAULT_DENSITY_SITES: tuple[str, ...] = (REDSHIFT_SITE, *INTRINSIC_DENSITY_SITES)
 
 #: The extrinsic sites :func:`joint_model` samples.
 EXTRINSIC_SITES = (

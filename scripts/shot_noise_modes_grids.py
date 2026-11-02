@@ -52,11 +52,10 @@ from numpy.typing import NDArray
 from astrogwb.config import load_config
 from astrogwb.detector import sample_network_response
 from astrogwb.distributions.config import DistributionConfig
+from astrogwb.gwb.catalog import read_catalog
 from astrogwb.inference import ImportanceGaussianLikelihood, Network, shot_noise_modes
-from astrogwb.paper.catalogs import read_reference_catalog
 from astrogwb.paper.plotting import DETECTOR_NETWORKS
 from astrogwb.paper.posteriors import network_data
-from astrogwb.populations import build_population
 from astrogwb.simulators import BackgroundArtifact, NetworkNoise, combine_pair_spectra
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "notebooks"))
@@ -94,12 +93,12 @@ def _setup(
         for name in names
     }
     noise = background.noise()
-    catalog, catalog_metadata, _ = read_reference_catalog(catalog_path)
+    catalog, catalog_metadata, _ = read_catalog(catalog_path)
     population = catalog_metadata.population
     likelihood = ImportanceGaussianLikelihood.from_catalog(
         catalog,
         catalog_metadata,
-        population=build_population(population.model_name, **population.model_kwargs),
+        population=population.build(),
         frequencies=background.frequencies,
         num_redshift_nodes=REDSHIFT_NODES,
         density_sites=(),

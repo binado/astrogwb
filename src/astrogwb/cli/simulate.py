@@ -76,7 +76,7 @@ def simulate(
     _apply_runtime(platform, cpu_threads)
     from astrogwb.detector.config import load_detector_config
     from astrogwb.simulators import (
-        PopulationMetadata,
+        RealizationMetadata,
         SimulationConfig,
         realization_key,
     )
@@ -84,7 +84,7 @@ def simulate(
     from astrogwb.waveform import WaveformMetadata
 
     config = SimulationConfig(
-        population=PopulationMetadata.model_validate(_read_toml(population_metadata)),
+        population=RealizationMetadata.model_validate(_read_toml(population_metadata)),
         waveform=WaveformMetadata.model_validate(_read_toml(waveform_metadata)),
         detectors=load_detector_config(detector_config),
         segment_duration=segment_duration,

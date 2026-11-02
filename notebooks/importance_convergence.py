@@ -29,13 +29,13 @@ with app.setup(hide_code=True):
     from astrogwb.gwb.catalog import (
         CatalogMetadata,
         PolarizationPowerData,
+        read_catalog,
     )
     from astrogwb.gwb.importance import reference_catalog
     from astrogwb.inference import ImportanceGaussianLikelihood
     from astrogwb.inference.fisher import spectral_density_jacobian
-    from astrogwb.paper.catalogs import read_reference_catalog
     from astrogwb.paper.plotting import parameter_label, save_figures, use_paper_style
-    from astrogwb.populations import Population, build_population
+    from astrogwb.populations import Population
     from astrogwb.simulators import realization_key
     from astrogwb.waveform import WaveformMetadata, waveform_generator
 
@@ -163,7 +163,7 @@ def _():
     )
     frequencies = np.asarray(waveform_generator(waveform).frequencies)
     population = load_config(ROOT_DIR / "config").catalog.population
-    target = build_population(population.model_name, **population.model_kwargs)
+    target = population.build()
     registry = load_config(ROOT_DIR / "config").registry
 
     write_figures = mo.ui.switch(value=True, label="Write figures")
@@ -395,9 +395,7 @@ def _(
 
 @app.cell
 def _(ladder_path):
-    ladder_reference, ladder_reference_metadata, _seed = read_reference_catalog(
-        ladder_path
-    )
+    ladder_reference, ladder_reference_metadata, _seed = read_catalog(ladder_path)
     print(
         f"ladder: N = {ladder_reference_metadata.num_samples} at seed "
         f"{_seed}, reference grid "

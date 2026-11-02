@@ -44,7 +44,9 @@ assert jax.device_count() == 2, f"backend initialized early: {{jax.devices()}}"
 def metadata_files(tmp_path: Path) -> dict[str, Path]:
     """The tiny population, waveform and two-detector network, as TOML files."""
     tables = {
-        "population": POPULATION.model_dump(mode="json", exclude={"version"}),
+        "population": POPULATION.model_dump(
+            mode="json", exclude={"version"}, exclude_none=True
+        ),
         "waveform": WAVEFORM.model_dump(mode="json", exclude_none=True),
         "detector": {"networks": {"ET": ["S1", "R1"]}},
     }

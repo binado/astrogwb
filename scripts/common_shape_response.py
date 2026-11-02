@@ -54,7 +54,6 @@ from astrogwb.gwb.catalog import CatalogMetadata
 from astrogwb.gwb.importance import reference_catalog
 from astrogwb.inference import ImportanceGaussianLikelihood, Network
 from astrogwb.paper.plotting import DETECTOR_NETWORKS
-from astrogwb.populations import build_population
 from astrogwb.simulators import realization_key
 from astrogwb.utils.io import load, write
 from astrogwb.waveform import WaveformMetadata, waveform_generator
@@ -82,7 +81,7 @@ def _likelihood() -> tuple[ImportanceGaussianLikelihood, NDArray[np.float64], di
         }
     )
     frequencies = np.asarray(waveform_generator(waveform).frequencies)
-    population = load_config().catalog.population.with_model_kwargs(
+    population = load_config().catalog.population.replace(
         minimum_redshift=MINIMUM_REDSHIFT, maximum_redshift=MAXIMUM_REDSHIFT
     )
     metadata = CatalogMetadata(
@@ -116,7 +115,7 @@ def _likelihood() -> tuple[ImportanceGaussianLikelihood, NDArray[np.float64], di
     likelihood = ImportanceGaussianLikelihood.from_catalog(
         data,  # ty: ignore[invalid-argument-type]
         metadata,
-        population=build_population(population.model_name, **population.model_kwargs),
+        population=population.build(),
         frequencies=frequencies,
         num_redshift_nodes=REDSHIFT_NODES,
         density_sites=(),

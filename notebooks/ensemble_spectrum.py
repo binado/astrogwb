@@ -44,10 +44,10 @@ with app.setup(hide_code=True):
     from astrogwb.gwb.catalog import (
         CatalogMetadata,
         PolarizationPowerData,
+        read_catalog,
     )
     from astrogwb.inference import ImportanceGaussianLikelihood
     from astrogwb.inference import Network as LikelihoodNetwork
-    from astrogwb.paper.catalogs import read_reference_catalog
     from astrogwb.paper.plotting import (
         DETECTOR_COMPARISON_LEGEND,
         DETECTOR_NETWORKS,
@@ -57,8 +57,7 @@ with app.setup(hide_code=True):
         save_figures,
         use_paper_style,
     )
-    from astrogwb.populations import build_population
-    from astrogwb.populations.metadata import PopulationMetadata
+    from astrogwb.populations import AnyPopulation
     from astrogwb.simulators import (
         BackgroundArtifact,
         combine_pair_spectra,
@@ -901,7 +900,7 @@ def _(ROOT_DIR):
     # isotropic draws, as in the grid and coverage notebooks.
     scan_response_draws, scan_response_seed = 32_768, 0
 
-    scan_data, scan_catalog_metadata, _ = read_reference_catalog(scan_catalog_path)
+    scan_data, scan_catalog_metadata, _ = read_catalog(scan_catalog_path)
     scan_hyperparameters = dict(scan_catalog_metadata.fiducials)
     mo.md(
         f"Reference redshift {scan_catalog_metadata.reference_redshift:.6g}; "
@@ -922,7 +921,7 @@ def _(ROOT_DIR):
 def minimum_redshift_scan(
     data: PolarizationPowerData,
     catalog_metadata: CatalogMetadata,
-    population: PopulationMetadata,
+    population: AnyPopulation,
     registry: DetectorRegistry,
     rows: Sequence[tuple[str, str]],
     frequencies: NDArray[np.float64],
@@ -979,7 +978,7 @@ def minimum_redshift_scan(
         One row per (network label, window edge), with ``snr``, ``scatter`` and
         ``relative_uncertainty`` columns.
     """
-    target = build_population(population.model_name, **population.model_kwargs)
+    target = population.build()
     grid = jnp.asarray(frequencies)
     seconds = years_to_seconds(observation_time)
     band = frequency_mask(grid, fmin=minimum_frequency, fmax=maximum_frequency)
@@ -1154,7 +1153,7 @@ def _(
         plotted_networks,
         plotted_colors,
         plotted_linestyles,
-        float(ensemble_population.population.model_kwargs["minimum_redshift"]),
+        float(ensemble_population.population.minimum_redshift),
     )
     if write_figures:
         BASE_DIR.mkdir(parents=True, exist_ok=True)
@@ -1196,7 +1195,7 @@ def _(
     scan_response_seed,
     shot_noise,
 ):
-    _edge = float(ensemble_population.population.model_kwargs["minimum_redshift"])
+    _edge = float(ensemble_population.population.minimum_redshift)
     _arguments = (
         scan_data,
         scan_catalog_metadata,

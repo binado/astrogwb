@@ -31,12 +31,12 @@ with app.setup(hide_code=True):
     from astrogwb.config import load_config
     from astrogwb.detector import sample_pair_response
     from astrogwb.distributions.config import DistributionConfig
-    from astrogwb.inference import ImportanceGaussianLikelihood
-    from astrogwb.inference import Network as LikelihoodNetwork
-    from astrogwb.paper.catalogs import (
-        read_reference_catalog,
+    from astrogwb.gwb.catalog import (
+        read_catalog,
         validate_matching_frequency_grids,
     )
+    from astrogwb.inference import ImportanceGaussianLikelihood
+    from astrogwb.inference import Network as LikelihoodNetwork
     from astrogwb.paper.plotting import (
         DETECTOR_NETWORKS,
         plot_corner,
@@ -49,7 +49,6 @@ with app.setup(hide_code=True):
         pad_pairs,
         shot_noise_variant,
     )
-    from astrogwb.populations import build_population
     from astrogwb.simulators import BackgroundArtifact, network_spectra_ensemble
 
     # Points of the coarse scan that locates the ridge, Newton iterations that
@@ -509,16 +508,14 @@ def _():
 def _(frequencies, observation_time, redshift_nodes, reference_catalog_path):
     # The NumPy catalog is local to this cell, so it is freed once the device
     # copy made by the likelihood exists.
-    catalog_data, catalog_metadata, _seed = read_reference_catalog(
-        reference_catalog_path
-    )
+    catalog_data, catalog_metadata, _seed = read_catalog(reference_catalog_path)
     population = catalog_metadata.population
     print(
         f"reference catalog: {catalog_metadata.num_samples:,} draws at seed "
         f"{_seed}, "
         f"{redshift_nodes} redshift nodes"
     )
-    target = build_population(population.model_name, **population.model_kwargs)
+    target = population.build()
     likelihood = ImportanceGaussianLikelihood.from_catalog(
         catalog_data,
         catalog_metadata,

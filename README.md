@@ -61,18 +61,17 @@ the declaration that produced it:
 ```python
 import jax
 
-from astrogwb.catalog import PolarizationPowerCatalog
-from astrogwb.metadata import PopulationMetadata, WaveformMetadata
-from astrogwb.populations import build_population, joint_model
-from astrogwb.utils.numpyro import sample_and_logprob
-from astrogwb.waveform import AnalyticInspiralGenerator
+from astrogwb.gwb.catalog import CatalogMetadata, simulate_catalog
+from astrogwb.populations import BNSCobaPopulation
+from astrogwb.utils.io import write
+from astrogwb.waveform import WaveformMetadata
 
-model_kwargs = {
-    "mass_model": "uniform",
-    "minimum_redshift": 0.0,
-    "maximum_redshift": 20.0,
-    "n_grid": 4096,
-}
+# A population record's fields are its construction settings; build() returns
+# hyperparameters -> (redshift distribution, source model). Isotropic
+# inclination is always sampled.
+population = BNSCobaPopulation(
+    mass_model="uniform", minimum_redshift=0.0, maximum_redshift=20.0, n_grid=4096
+)
 params = {
     "H0": 67.66,
     "Omega_m": 0.3096,
@@ -83,36 +82,19 @@ params = {
     "minimum_mass": 1.0,
     "mass_width": 1.5,
 }
-# A population maps hyperparameters to (redshift distribution, source model);
-# joint_model composes them into a no-argument NumPyro model. Isotropic
-# inclination is always sampled.
-population = build_population("bns_coba", **model_kwargs)
-model = joint_model(*population(params))
-source_parameters, _ = sample_and_logprob(
-    model, jax.random.PRNGKey(42), num_samples=1024, density_sites=()
+waveform = WaveformMetadata(
+    approximant="AnalyticInspiral",
+    minimum_frequency=2.0,
+    maximum_frequency=2048.0,
+    reference_frequency=2.0,
+    sampling_frequency=4096.0,
+    frequency_resolution=1.0,
 )
-
-generator = AnalyticInspiralGenerator(
-    WaveformMetadata(
-        approximant="AnalyticInspiral",
-        minimum_frequency=2.0,
-        maximum_frequency=2048.0,
-        reference_frequency=2.0,
-        sampling_frequency=4096.0,
-        frequency_resolution=1.0,
-    )
+metadata = CatalogMetadata(
+    waveform=waveform, population=population, fiducials=params, num_samples=1024
 )
-catalog = PolarizationPowerCatalog.from_generator(
-    source_parameters,
-    generator=generator,
-    population=PopulationMetadata(
-        model_name="bns_coba",
-        model_kwargs=model_kwargs,
-        seed=42,
-    ),
-    fiducials=params,
-)
-catalog.save("catalog.h5")
+catalog = simulate_catalog(metadata, jax.random.key(42))
+write("catalog.h5", catalog, metadata, seed=42)
 ```
 
 A spectrum prediction starts from a *reference catalog* instead: the same
@@ -127,21 +109,13 @@ import numpy as np
 
 from astrogwb.gwb.importance import reference_catalog
 from astrogwb.inference import ImportanceGaussianLikelihood
-from astrogwb.metadata import CatalogMetadata
 
-metadata = CatalogMetadata(
-    waveform=generator.metadata,
-    population=PopulationMetadata(model_name="bns_coba", model_kwargs=model_kwargs),
-    fiducials=params,
-    num_samples=1024,
-)
-reference = reference_catalog(metadata, jax.random.PRNGKey(42))
+reference = reference_catalog(metadata, jax.random.key(42))
 
-target = build_population("bns_coba", **model_kwargs)
 likelihood = ImportanceGaussianLikelihood.from_catalog(
     reference,
     metadata,
-    population=target,
+    population=population.build(),
     frequencies=np.arange(10.0, 1000.0, 1.0),
     num_redshift_nodes=32,
     density_sites=("source_frame_mass_1", "source_frame_mass_2"),

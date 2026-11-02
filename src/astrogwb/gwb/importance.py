@@ -84,7 +84,6 @@ from jax.typing import ArrayLike
 from numpy.typing import NDArray
 from numpyro import handlers
 
-from astrogwb import __version__
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import (
     hubble_distance,
@@ -92,20 +91,19 @@ from astrogwb.cosmology import (
 )
 from astrogwb.distributions.rates import total_merger_rate
 from astrogwb.gwb.catalog import (
-    REDSHIFT_SITE,
-    REDSHIFT_WINDOW_KWARGS,
     CatalogMetadata,
     PolarizationPowerData,
     polarization_power_data,
 )
 from astrogwb.populations._types import Population, PopulationModel, SourceModel
-from astrogwb.populations.joint import fix_extrinsic_parameters, joint_model
-from astrogwb.populations.metadata import PopulationMetadata
-from astrogwb.utils import gauss_legendre_nodes_weights
-from astrogwb.utils.numpyro import (
-    sample_and_logprob,
-    sample_sources_qmc,
+from astrogwb.populations.joint import (
+    REDSHIFT_SITE,
+    fix_extrinsic_parameters,
+    joint_model,
 )
+from astrogwb.simulators.sources import simulate_sources
+from astrogwb.utils import gauss_legendre_nodes_weights, require_current_version
+from astrogwb.utils.numpyro import sample_and_logprob
 from astrogwb.waveform.factory import waveform_generator
 
 __all__ = [
@@ -242,13 +240,6 @@ def phinney_kernel(
     )
 
 
-def _redshift_window(population: PopulationMetadata) -> tuple[float, float]:
-    """The population's ``(minimum_redshift, maximum_redshift)``."""
-    kwargs = population.model_kwargs
-    minimum, maximum = (float(kwargs[name]) for name in REDSHIFT_WINDOW_KWARGS)
-    return minimum, maximum
-
-
 def reference_redshift(metadata: CatalogMetadata) -> float:
     """The redshift ``metadata``'s reference catalog is generated at.
 
@@ -262,7 +253,7 @@ def reference_redshift(metadata: CatalogMetadata) -> float:
     """
     if metadata.reference_redshift is not None:
         return metadata.reference_redshift
-    return _redshift_window(metadata.population)[0]
+    return metadata.population.minimum_redshift
 
 
 def _pin_redshift_and_inclination(
@@ -304,38 +295,26 @@ def reference_catalog(
     chunk_size
         Number of sources per chunk.
     """
-    # x64 before the draw: see draw_catalog.
+    # x64 before the draw: see simulate_catalog.
     jax.config.update("jax_enable_x64", True)
-    if metadata.version != __version__:
-        raise ValueError(
-            f"metadata is for astrogwb {metadata.version}, but {__version__} "
-            "is installed; regenerate the catalog"
-        )
+    require_current_version(metadata.version)
     logger.info(
-        "Reference catalog: population=%s num_samples=%d",
-        metadata.population.model_name,
+        "Reference catalog: num_samples=%d population=%r",
         metadata.num_samples,
+        metadata.population,
     )
     reference = reference_redshift(metadata)
     population = metadata.population
-    if reference < _redshift_window(population)[0]:
+    if reference < population.minimum_redshift:
         # The distance table clamps outside its grid: extend it down to the pin.
-        population = population.model_copy(
-            update={
-                "model_kwargs": {
-                    **population.model_kwargs,
-                    "minimum_redshift": reference,
-                }
-            }
-        )
+        population = population.replace(minimum_redshift=reference)
     model = joint_model(*population.build()(metadata.fiducials))
-    pinned = _pin_redshift_and_inclination(model, reference)
-    if metadata.sampling == "sobol":
-        samples = sample_sources_qmc(pinned, key, num_samples=metadata.num_samples)
-    else:
-        samples, _ = sample_and_logprob(
-            pinned, key, num_samples=metadata.num_samples, density_sites=()
-        )
+    samples = simulate_sources(
+        _pin_redshift_and_inclination(model, reference),
+        key,
+        metadata.num_samples,
+        sampling=metadata.sampling,
+    )
     return polarization_power_data(
         waveform_generator(metadata.waveform), samples, chunk_size=chunk_size
     )
@@ -441,9 +420,9 @@ def _rescaling_arrays(
         frequencies would fall below the reference grid, where
         :func:`_node_power` clamps instead of following the power law.
     """
-    window_minimum, maximum_redshift = _redshift_window(metadata.population)
+    maximum_redshift = metadata.population.maximum_redshift
     if minimum_redshift is None:
-        minimum_redshift = window_minimum
+        minimum_redshift = metadata.population.minimum_redshift
     reference = reference_redshift(metadata)
     if minimum_redshift < reference:
         raise ValueError(

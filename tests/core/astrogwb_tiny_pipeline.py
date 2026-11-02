@@ -12,11 +12,8 @@ from pathlib import Path
 import numpy as np
 
 from astrogwb.detector.config import DetectorRegistry, load_detector_config
-from astrogwb.populations import PopulationMetadata as PopulationSpec
-from astrogwb.simulators import (
-    BackgroundArtifact,
-    PopulationMetadata,
-)
+from astrogwb.populations import BNSCobaPopulation
+from astrogwb.simulators import BackgroundArtifact, RealizationMetadata
 from astrogwb.waveform import WaveformMetadata
 
 WAVEFORM = WaveformMetadata(
@@ -45,17 +42,14 @@ def assert_same_spectra(
         np.testing.assert_array_equal(actual.spectra[name], spectrum)
 
 
-def population_metadata(observation_time: float = 1e-4) -> PopulationMetadata:
+def population_metadata(observation_time: float = 1e-4) -> RealizationMetadata:
     """The BNS population observed for ``observation_time`` years."""
-    return PopulationMetadata(
-        population=PopulationSpec(
-            model_name="bns_coba",
-            model_kwargs={
-                "mass_model": "uniform",
-                "minimum_redshift": 0.0,
-                "maximum_redshift": 5.0,
-                "n_grid": 64,
-            },
+    return RealizationMetadata(
+        population=BNSCobaPopulation(
+            mass_model="uniform",
+            minimum_redshift=0.0,
+            maximum_redshift=5.0,
+            n_grid=64,
         ),
         hyperparameters={
             "H0": 67.66,

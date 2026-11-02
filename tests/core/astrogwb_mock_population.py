@@ -30,9 +30,8 @@ from astrogwb.gwb.importance import (
 from astrogwb.inference import ImportanceGaussianLikelihood
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
+    BNSCobaPopulation,
     Population,
-    PopulationMetadata,
-    build_population,
     joint_model,
 )
 from astrogwb.utils.numpyro import sample_and_logprob, sample_sources_qmc
@@ -108,13 +107,12 @@ def mock_population(n_grid: int = N_GRID) -> Population:
     registered model; they differ only in whether ``xi_0`` is among the
     hyperparameters it is called with.
     """
-    return build_population(
-        "bns_coba",
+    return BNSCobaPopulation(
         mass_model="uniform",
         minimum_redshift=Z_MIN,
         maximum_redshift=Z_MAX,
         n_grid=n_grid,
-    )
+    ).build()
 
 
 def load_mock_population(num_sources: int = 1024) -> dict[str, np.ndarray]:
@@ -144,14 +142,11 @@ def mock_catalog(
     )
     metadata = CatalogMetadata(
         waveform=generator.metadata,
-        population=PopulationMetadata(
-            model_name="bns_coba",
-            model_kwargs={
-                "mass_model": "uniform",
-                "minimum_redshift": Z_MIN,
-                "maximum_redshift": Z_MAX,
-                "n_grid": N_GRID,
-            },
+        population=BNSCobaPopulation(
+            mass_model="uniform",
+            minimum_redshift=Z_MIN,
+            maximum_redshift=Z_MAX,
+            n_grid=N_GRID,
         ),
         fiducials={name: float(value) for name, value in POPULATION_PARAMS.items()},
         num_samples=int(power.shape[-1]),
@@ -240,14 +235,11 @@ def build_reference_catalog(
     )
     metadata = CatalogMetadata(
         waveform=generator.metadata,
-        population=PopulationMetadata(
-            model_name="bns_coba",
-            model_kwargs={
-                "mass_model": "uniform",
-                "minimum_redshift": Z_MIN,
-                "maximum_redshift": Z_MAX,
-                "n_grid": N_GRID,
-            },
+        population=BNSCobaPopulation(
+            mass_model="uniform",
+            minimum_redshift=Z_MIN,
+            maximum_redshift=Z_MAX,
+            n_grid=N_GRID,
         ),
         fiducials={name: float(value) for name, value in POPULATION_PARAMS.items()},
         num_samples=num_sources,

@@ -5,8 +5,6 @@ observation_time = 1.0
 
 [population]
 model_name = "bns_coba"
-
-[population.model_kwargs]
 mass_model = "uniform"
 minimum_redshift = 0.35
 maximum_redshift = 20.0

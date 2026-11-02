@@ -42,13 +42,12 @@ import pandas as pd
 from astrogwb.config import load_config
 from astrogwb.detector.overlap import stokes_cross_power
 from astrogwb.detector.response import _isotropic_angles
+from astrogwb.gwb.catalog import read_catalog
 from astrogwb.gwb.importance import INCLINATION_SECOND_MOMENT
 from astrogwb.inference import ImportanceGaussianLikelihood
 from astrogwb.inference import Network as LikelihoodNetwork
-from astrogwb.paper.catalogs import read_reference_catalog
 from astrogwb.paper.plotting import DETECTOR_NETWORKS
 from astrogwb.paper.posteriors import network_pair_data
-from astrogwb.populations import build_population
 from astrogwb.simulators import BackgroundArtifact
 from astrogwb.waveform import quadrupolar_stokes_factors
 
@@ -74,12 +73,12 @@ def build_likelihood(
     catalog_path: Path, frequencies: np.ndarray, observation_time: float
 ) -> ImportanceGaussianLikelihood:
     """The grid notebook's likelihood at the fiducials, amplitude mode."""
-    data, catalog_metadata, _ = read_reference_catalog(catalog_path)
+    data, catalog_metadata, _ = read_catalog(catalog_path)
     population = catalog_metadata.population
     return ImportanceGaussianLikelihood.from_catalog(
         data,
         catalog_metadata,
-        population=build_population(population.model_name, **population.model_kwargs),
+        population=population.build(),
         frequencies=frequencies,
         num_redshift_nodes=REDSHIFT_NODES,
         density_sites=(),

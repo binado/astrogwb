@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from astrogwb.simulators.background import BackgroundArtifact, BackgroundSimulator
+from astrogwb.simulators.background import BackgroundArtifact, simulate_background
 from astrogwb.simulators.config import SimulationConfig
-from astrogwb.simulators.population import PopulationSimulator
+from astrogwb.simulators.population import simulate_population
 
 if TYPE_CHECKING:
     import jax
@@ -41,11 +41,11 @@ def simulate(
     BackgroundArtifact
         The pair spectra, carrying ``config``.
     """
-    population = PopulationSimulator(config.population)(key)
-    return BackgroundSimulator(
+    return simulate_background(
+        simulate_population(config.population, key),
         config.waveform,
         config.detectors,
         chunk_size=chunk_size,
         segment_duration=config.segment_duration,
         segment_batch_size=segment_batch_size,
-    )(population)
+    )

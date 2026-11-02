@@ -35,7 +35,7 @@ with app.setup(hide_code=True):
         spectral_snr_squared_per_bin,
         spectral_snr_squared_per_log_frequency,
     )
-    from astrogwb.gwb.catalog import CatalogMetadata, draw_catalog
+    from astrogwb.gwb.catalog import CatalogMetadata, simulate_catalog
     from astrogwb.gwb.spectral import spectral_density as catalog_spectral_density
     from astrogwb.paper.plotting import (
         DETECTOR_COMPARISON_LEGEND,
@@ -99,7 +99,7 @@ def _():
     FIDUCIALS = load_config(ROOT_DIR / "config").fiducials
 
     # Mirrors the shared [analysis] table. The frequency band is [analysis]; the
-    # redshift bounds are analysis.population.model_kwargs. The approximant
+    # redshift bounds are analysis.population. The approximant
     # and observation time are the controls in the next cells.
     minimum_frequency = 2.0
     maximum_frequency = 4096.0
@@ -362,7 +362,7 @@ def _(
 ):
     # The expected spectrum: the population's total rate times the mean power
     # of a plain catalog drawn at the fiducials.
-    _population = load_config(ROOT_DIR / "config").catalog.population.with_model_kwargs(
+    _population = load_config(ROOT_DIR / "config").catalog.population.replace(
         minimum_redshift=minimum_redshift, maximum_redshift=maximum_redshift
     )
     _metadata = CatalogMetadata(
@@ -380,7 +380,7 @@ def _(
         fiducials=FIDUCIALS,
         num_samples=num_samples,
     )
-    _catalog = draw_catalog(_metadata, jax.random.key(seed), chunk_size=chunk_size)
+    _catalog = simulate_catalog(_metadata, jax.random.key(seed), chunk_size=chunk_size)
     _rate = _population.build()(FIDUCIALS)[0].total_merger_rate()
     frequencies = jnp.asarray(_catalog["frequencies"])
     spectral_density = catalog_spectral_density(
