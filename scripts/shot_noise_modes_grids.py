@@ -49,10 +49,10 @@ import jax.numpy as jnp
 import numpy as np
 from numpy.typing import NDArray
 
-from astrogwb.background.catalog import read_catalog
 from astrogwb.config import load_config
 from astrogwb.detector import sample_network_response
 from astrogwb.distributions.config import DistributionConfig
+from astrogwb.importance.catalog import read_catalog
 from astrogwb.inference import ImportanceGaussianLikelihood, Network, shot_noise_modes
 from astrogwb.paper.plotting import DETECTOR_NETWORKS
 from astrogwb.paper.posteriors import network_data

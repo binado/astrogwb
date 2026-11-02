@@ -38,12 +38,12 @@ hyperparameters (fixed, or drawn from their priors), a Poisson count
   `polarization_angle` uniform on `[0, pi)`, and `coa_phase`. Angles are radians.
 
 All sources are drawn in one batch through `simulate_sources`, which the
-importance catalogs of `astrogwb.background` share, with independent
+importance catalogs of `astrogwb.importance` share, with independent
 random streams for hyperparameters, count, and the joint source model.
 The joint model samples intrinsic parameters and extrinsic angles together.
 Counts are Poisson only; the
 fixed-count mode was removed. A fixed-size Monte Carlo sample of a population
-is a reference catalog for importance weighting (`astrogwb.background.catalog`), not
+is a reference catalog for importance weighting (`astrogwb.importance.catalog`), not
 a realization.
 
 **Background.** `simulate_background(population, waveform_metadata, registry)`
@@ -230,7 +230,7 @@ mixed.
 | `PopulationDrawMetadata` (`count`, `num_events`) | `astrogwb.simulators.RealizationMetadata`, Poisson only |
 | `PopulationSimulator(metadata)(key)`, `BackgroundSimulator(waveform, registry)(population)` | `simulate_population(metadata, key)`, `simulate_background(population, waveform, registry)` |
 | `astrogwb.simulators.PopulationMetadata` | `astrogwb.simulators.RealizationMetadata` |
-| `astrogwb.simulators.polarization_power` | `astrogwb.background.catalog` |
+| `astrogwb.simulators.polarization_power` | `astrogwb.importance.catalog` |
 | `astrogwb.simulators.core.{write,load,content_key}` | `astrogwb.utils.io` |
 | `spectra_ensemble`, `network_spectra_ensemble(EnsembleRecord, ...)` | `Snakefile` writes the ensemble; `network_spectra_ensemble(root, seed, n, names)` reads it |
 | `scripts/simulate_spectra.py`, `config/simulations/spectrum/` | `astrogwb simulate` |

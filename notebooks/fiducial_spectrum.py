@@ -29,7 +29,6 @@ with app.setup(hide_code=True):
         spectral_snr_squared_per_bin,
         spectral_snr_squared_per_log_frequency,
     )
-    from astrogwb.background.catalog import CatalogMetadata, simulate_catalog
     from astrogwb.background.spectral import (
         spectral_density as catalog_spectral_density,
     )
@@ -39,6 +38,7 @@ with app.setup(hide_code=True):
         log_frequency_noise_scale,
     )
     from astrogwb.frequency import frequency_mask as make_frequency_mask
+    from astrogwb.importance.catalog import CatalogMetadata, simulate_catalog
     from astrogwb.paper.plotting import (
         DETECTOR_COMPARISON_LEGEND,
         DETECTOR_NETWORKS,

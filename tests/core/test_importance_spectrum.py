@@ -13,11 +13,15 @@ from astrogwb_mock_population import (
     build_reference_spectrum,
 )
 
-from astrogwb.background.catalog import (
+from astrogwb.constants import SECONDS_PER_YEAR
+from astrogwb.cosmology import luminosity_distance
+from astrogwb.distributions.mass import MaxOfTwoUniformsDistribution
+from astrogwb.distributions.rates import madau_dickinson_rate, total_merger_rate
+from astrogwb.importance.catalog import (
     CatalogMetadata,
     polarization_power_data,
 )
-from astrogwb.background.importance import (
+from astrogwb.importance.spectrum import (
     EFFECTIVE_INCLINATION,
     INCLINATION_SECOND_MOMENT,
     _pin_redshift_and_inclination,
@@ -25,10 +29,6 @@ from astrogwb.background.importance import (
     redshift_quadrature,
     reference_catalog,
 )
-from astrogwb.constants import SECONDS_PER_YEAR
-from astrogwb.cosmology import luminosity_distance
-from astrogwb.distributions.mass import MaxOfTwoUniformsDistribution
-from astrogwb.distributions.rates import madau_dickinson_rate, total_merger_rate
 from astrogwb.inference import ImportanceGaussianLikelihood
 from astrogwb.populations import BNSCobaPopulation, joint_model
 from astrogwb.simulators import realization_key

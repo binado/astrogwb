@@ -24,8 +24,8 @@ from astrogwb_mock_population import (
 )
 from jax.typing import ArrayLike
 
-from astrogwb.background.importance import INCLINATION_SECOND_MOMENT
 from astrogwb.distributions.redshift.base import RedshiftDistribution
+from astrogwb.importance.spectrum import INCLINATION_SECOND_MOMENT
 from astrogwb.inference import (
     GaussianLikelihood,
     ImportanceGaussianLikelihood,

@@ -24,10 +24,10 @@ with app.setup(hide_code=True):
     from numpy.typing import NDArray
     from scipy import stats
 
-    from astrogwb.background.catalog import read_catalog
-    from astrogwb.background.importance import INCLINATION_SECOND_MOMENT
     from astrogwb.config import load_config
     from astrogwb.detector import sample_pair_response
+    from astrogwb.importance.catalog import read_catalog
+    from astrogwb.importance.spectrum import INCLINATION_SECOND_MOMENT
     from astrogwb.inference import (
         ImportanceGaussianLikelihood,
         amplitude_direction,

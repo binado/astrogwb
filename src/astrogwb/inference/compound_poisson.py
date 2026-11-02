@@ -93,7 +93,7 @@ def inclination_quadrature(num_nodes: int) -> tuple[np.ndarray, np.ndarray]:
     uniform on :math:`[0, 1]`, normalized to unit mean. ``num_nodes`` nodes
     integrate polynomials of degree :math:`2 n - 1` exactly, so from three on
     the mean and from five on the second moment
-    (:data:`~astrogwb.background.importance.INCLINATION_SECOND_MOMENT`) are exact.
+    (:data:`~astrogwb.importance.spectrum.INCLINATION_SECOND_MOMENT`) are exact.
 
     Parameters
     ----------

@@ -5,7 +5,7 @@ under. :func:`polarization_power_data` turns a generator and source columns
 into :class:`PolarizationPowerData`, one power column per source; where the
 sources come from is the caller's. :func:`simulate_catalog` is the plain
 catalog -- the population a record names, drawn at its fiducials from one key
--- and :func:`~astrogwb.background.importance.reference_catalog` draws at the redshift
+-- and :func:`~astrogwb.importance.spectrum.reference_catalog` draws at the redshift
 window's lower edge. :func:`read_catalog` reads back what
 :func:`~astrogwb.utils.io.write` stored.
 
@@ -57,7 +57,7 @@ class CatalogMetadata(BaseModel):
     :func:`~astrogwb.utils.io.write`. The seed is not part of it.
 
     ``sampling`` is how a reference catalog
-    (:func:`~astrogwb.background.importance.reference_catalog`) draws its intrinsic
+    (:func:`~astrogwb.importance.spectrum.reference_catalog`) draws its intrinsic
     parameters: ``"random"`` i.i.d., or ``"sobol"`` on a scrambled Sobol net
     (:func:`~astrogwb.utils.numpyro.sample_sources_qmc`), which needs a
     power-of-two ``num_samples``. A plain catalog is always random.
@@ -66,7 +66,7 @@ class CatalogMetadata(BaseModel):
     generated at; ``None`` means the population's ``minimum_redshift``, the
     window's lower edge. Set it below the edge to let one catalog serve every
     window that starts at or above it
-    (:func:`~astrogwb.background.importance.reference_redshift`).
+    (:func:`~astrogwb.importance.spectrum.reference_redshift`).
     """
 
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")

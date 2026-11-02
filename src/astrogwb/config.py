@@ -13,9 +13,9 @@ from typing import Any
 import knf
 from pydantic import BaseModel, model_validator
 
-from astrogwb.background.catalog import CatalogMetadata
 from astrogwb.detector.config import DETECTOR_DEFAULT_PATHS, DetectorRegistry
 from astrogwb.distributions.config import DistributionConfig
+from astrogwb.importance.catalog import CatalogMetadata
 from astrogwb.waveform import WaveformMetadata
 
 __all__ = ["MERGE_KEY", "PaperConfig", "load_config", "merge_layers", "require_toml"]
