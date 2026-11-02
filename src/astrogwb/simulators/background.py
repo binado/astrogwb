@@ -140,6 +140,13 @@ def select_networks(
 
     A network needs at least two detectors to have a pair.
 
+    Parameters
+    ----------
+    registry
+        Detector registry.
+    names
+        Names to select.
+
     Raises
     ------
     ValueError
@@ -159,7 +166,15 @@ def select_networks(
 
 
 def used_detectors(registry: DetectorRegistry, names: Sequence[str]) -> tuple[str, ...]:
-    """The sorted detectors that appear in the networks ``names`` of ``registry``."""
+    """The sorted detectors that appear in the networks ``names`` of ``registry``.
+
+    Parameters
+    ----------
+    registry
+        Detector registry.
+    names
+        Names to select.
+    """
     return tuple(sorted(registry.select(names).detectors))
 
 
@@ -229,6 +244,11 @@ class BackgroundArtifact:
         ``metadata``, the config as JSON, ``version``, the package version,
         and ``realization``, a JSON of ``rng_key``, ``count``,
         ``total_merger_rate`` and ``hyperparameters``.
+
+        Parameters
+        ----------
+        path
+            File path.
         """
         with atomic_h5(path) as file:
             file.attrs["metadata"] = self.config.model_dump_json()
@@ -250,6 +270,11 @@ class BackgroundArtifact:
     @classmethod
     def open(cls, path: str | Path) -> Self:
         """Read the background at ``path``, config included.
+
+        Parameters
+        ----------
+        path
+            File path.
 
         Raises
         ------

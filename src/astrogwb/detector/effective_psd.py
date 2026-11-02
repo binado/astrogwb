@@ -33,12 +33,12 @@ class PairTerms(NamedTuple):
 
     Attributes
     ----------
-    first, second:
+    first, second
         Indices of the two detectors in the network, ``first < second``.
-    weight:
+    weight
         :math:`w_{ab} = \gamma_{ab} / (S_{n,a} S_{n,b})`, zero where it is not
         finite (out of band), ``(F,)``.
-    overlap:
+    overlap
         The isotropic ORF :math:`\gamma_{ab}`, ``(F,)``.
     """
 
@@ -58,6 +58,13 @@ def pair_terms(
     \sum w_{ab} \gamma_{ab}`) and
     :func:`~astrogwb.detector.response.network_response`. Evaluated on the
     host, outside JIT.
+
+    Parameters
+    ----------
+    frequencies
+        Frequency grid in Hz.
+    detectors
+        Detectors in the network.
     """
     frequencies = np.asarray(frequencies, dtype=float)
     det_list = list(detectors)
@@ -88,6 +95,13 @@ def effective_psd(
 
     with :math:`\gamma_{ab}` the normalized overlap reduction function, summed
     over :func:`pair_terms` as :math:`\sum_{a<b} w_{ab} \gamma_{ab}`.
+
+    Parameters
+    ----------
+    frequencies
+        Frequency grid in Hz.
+    detectors
+        Detectors in the network.
     """
     frequencies = np.asarray(frequencies, dtype=float)
     if len(list(detectors)) < 2:
@@ -118,11 +132,11 @@ def gaussian_bin_scale(
 
     Parameters
     ----------
-    effective_psd:
+    effective_psd
         Network effective PSD, aligned with ``frequencies``.
-    observation_time:
+    observation_time
         Observation time in years. Converted to seconds internally.
-    frequencies:
+    frequencies
         The frequency grid in Hz. Bin widths come from
         :func:`astrogwb.frequency.bin_widths`, so pass the catalog's *full*
         axis and mask afterwards rather than a selected sub-grid.
@@ -156,11 +170,11 @@ def pair_bin_scale(
 
     Parameters
     ----------
-    frequencies:
+    frequencies
         The frequency grid in Hz; bin widths as for :func:`gaussian_bin_scale`.
-    detectors:
+    detectors
         As for :func:`effective_psd`.
-    observation_time:
+    observation_time
         Observation time in years.
     """
     frequencies = np.asarray(frequencies, dtype=float)
@@ -198,11 +212,11 @@ def log_frequency_noise_scale(
 
     Parameters
     ----------
-    effective_psd:
+    effective_psd
         Network effective PSD in Hz^-1.
-    frequencies:
+    frequencies
         Frequencies in Hz, aligned with ``effective_psd``.
-    observation_time:
+    observation_time
         Observation time in years. Converted to seconds internally.
     """
     observation_time_sec = years_to_seconds(observation_time)

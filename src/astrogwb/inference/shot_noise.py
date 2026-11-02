@@ -103,12 +103,12 @@ def amplitude_shot_noise_variance(
 
     Parameters
     ----------
-    spectrum, variance:
+    spectrum, variance
         The expected spectrum :math:`S` and its per-bin shot-noise variance
         :math:`V`, shape ``(..., F)``.
-    scale:
+    scale
         Per-bin detector standard deviation :math:`\sigma`, ``(F,)``.
-    frequency_mask:
+    frequency_mask
         Boolean ``(F,)`` of the bins counted; ``None`` counts all.
 
     Returns
@@ -131,12 +131,25 @@ def amplitude_direction(spectrum: ArrayLike, relative_variance: ArrayLike) -> ja
 
     ``relative_variance`` is :math:`s^2`, shape ``(...)``, from
     :func:`amplitude_shot_noise_variance` at the same point or fixed.
+
+    Parameters
+    ----------
+    spectrum
+        Predicted strain spectrum.
+    relative_variance
+        Relative shot-noise variance.
     """
     return jnp.sqrt(jnp.asarray(relative_variance))[..., None] * jnp.asarray(spectrum)
 
 
 def per_frequency_direction(variance: ArrayLike) -> jax.Array:
-    r""":math:`u_f = \sqrt{V_f}`, the shot noise with its per-bin variance."""
+    r""":math:`u_f = \sqrt{V_f}`, the shot noise with its per-bin variance.
+
+    Parameters
+    ----------
+    variance
+        Predicted variance.
+    """
     return jnp.sqrt(jnp.asarray(variance))
 
 
@@ -155,13 +168,13 @@ def rank_one_gaussian_log_likelihood(
 
     Parameters
     ----------
-    observed, prediction:
+    observed, prediction
         Data and expected spectrum, ``(..., F)``.
-    scale:
+    scale
         Per-bin detector standard deviation, ``(F,)``.
-    direction:
+    direction
         The shot-noise mode :math:`\mathbf{u}`, ``(..., F)``.
-    frequency_mask:
+    frequency_mask
         Boolean ``(F,)`` of the bins counted; ``None`` counts all. Excluded
         bins contribute exactly zero, so the result equals evaluating on the
         arrays compressed to the selection, and a masked bin's ``scale`` may
@@ -221,18 +234,18 @@ def shot_noise_modes(
 
     Parameters
     ----------
-    covariance:
+    covariance
         The catalog covariance, ``(F, F)``, typically
         :meth:`~astrogwb.inference.likelihood.ImportanceGaussianLikelihood.catalog_covariance`
         at the fiducials under the network.
-    scale:
+    scale
         Per-bin detector standard deviation :math:`\sigma`, ``(F,)``.
-    frequency_mask:
+    frequency_mask
         Boolean ``(F,)`` of the bins counted; ``None`` counts all.
-    tolerance:
+    tolerance
         The budget :math:`\epsilon` on the dropped eigenvalues, in units of the
         detector-noise variance.
-    max_modes:
+    max_modes
         The cap on :math:`k`.
 
     Returns
@@ -272,6 +285,13 @@ def pad_modes(modes: ArrayLike, num_modes: int) -> jax.Array:
 
     Zero columns are exactly inert in :func:`low_rank_gaussian_log_likelihood`,
     so bases of several networks can be stacked at one :math:`k`.
+
+    Parameters
+    ----------
+    modes
+        Shot-noise mode basis.
+    num_modes
+        Number of modes.
     """
     modes = jnp.asarray(modes)
     return jnp.pad(modes, ((0, 0), (0, num_modes - modes.shape[-1])))
@@ -296,15 +316,15 @@ def low_rank_gaussian_log_likelihood(
 
     Parameters
     ----------
-    observed, prediction:
+    observed, prediction
         Data and expected spectrum, ``(F,)``.
-    scale:
+    scale
         Per-bin detector standard deviation, ``(F,)``.
-    modes:
+    modes
         The basis :math:`U`, ``(F, k)``.
-    mode_covariance:
+    mode_covariance
         The whitened shot-noise covariance in the basis, :math:`B`, ``(k, k)``.
-    frequency_mask:
+    frequency_mask
         Boolean ``(F,)`` of the bins counted; ``None`` counts all. Excluded
         bins contribute exactly zero, and their ``scale`` may be infinite.
 

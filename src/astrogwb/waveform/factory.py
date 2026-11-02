@@ -7,7 +7,13 @@ from astrogwb.waveform.ripple import RippleGenerator
 
 
 def waveform_generator(metadata: WaveformMetadata) -> WaveformGenerator:
-    """Construct the generator described by the waveform metadata."""
+    """Construct the generator described by the waveform metadata.
+
+    Parameters
+    ----------
+    metadata
+        Metadata describing the object.
+    """
     if metadata.approximant == ANALYTIC_APPROXIMANT:
         return AnalyticInspiralGenerator(metadata)
     return RippleGenerator(metadata)

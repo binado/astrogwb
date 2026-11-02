@@ -35,6 +35,13 @@ def polarization_power(plus: ArrayLike, cross: ArrayLike) -> jax.Array:
 
     Returns ``|h+|^2 + |hx|^2`` per sample and frequency, transposed to the
     on-disk ``(frequency, sample)`` layout.
+
+    Parameters
+    ----------
+    plus
+        Plus polarization.
+    cross
+        Cross polarization.
     """
     power = jnp.abs(jnp.asarray(plus)) ** 2 + jnp.abs(jnp.asarray(cross)) ** 2
     return power.T.astype(jnp.float64)
@@ -52,9 +59,9 @@ def quadrupolar_polarizations(
 
     Parameters
     ----------
-    amplitude:
+    amplitude
         :math:`A`, ``(n, F)``.
-    inclination:
+    inclination
         :math:`\iota` in radians, ``(n,)``.
 
     Returns
@@ -74,6 +81,11 @@ def quadrupolar_stokes_factors(cos_inclination: ArrayLike) -> jax.Array:
     quadrupolar inclination dependence, for any shape of
     ``cos_inclination``. :math:`g` is formed as the quadrupolar power's
     inclination factor is.
+
+    Parameters
+    ----------
+    cos_inclination
+        Cosine of the inclination angle.
     """
     cosine = jnp.asarray(cos_inclination)
     cos_squared = cosine**2

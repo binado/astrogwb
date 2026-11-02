@@ -68,14 +68,16 @@ def network_response(
 
     Parameters
     ----------
-    frequencies:
+    frequencies
         Frequencies in Hz, ``(F,)``.
-    detectors:
+    detectors
         Two or more detectors with sensitivities.
-    right_ascension, declination, polarization_angle, cos_inclination:
+    right_ascension, declination, polarization_angle, cos_inclination
         The celestial source angles in radians of
         :func:`~astrogwb.detector.overlap.overlap_reduction_function`,
         broadcasting to ``(...)``.
+    gmst
+        Greenwich mean sidereal time in radians.
 
     Returns
     -------
@@ -124,14 +126,16 @@ def pair_response(
 
     Parameters
     ----------
-    frequencies:
+    frequencies
         Frequencies in Hz, ``(F,)``.
-    detectors:
+    detectors
         Two or more detectors.
-    right_ascension, declination, polarization_angle, cos_inclination:
+    right_ascension, declination, polarization_angle, cos_inclination
         The celestial source angles in radians of
         :func:`~astrogwb.detector.overlap.overlap_reduction_function`,
         broadcasting to ``(...)``.
+    gmst
+        Greenwich mean sidereal time in radians.
 
     Returns
     -------
@@ -183,6 +187,17 @@ def sample_network_response(
     :math:`[0, \pi)` and :math:`\cos\iota` uniform on :math:`[-1, 1]`. Pass the
     likelihood's frequency grid to use the draws as a
     :class:`~astrogwb.inference.likelihood.Network` ``response``.
+
+    Parameters
+    ----------
+    key
+        JAX random key.
+    num_draws
+        Number of random draws.
+    frequencies
+        Frequency grid in Hz.
+    detectors
+        Detectors in the network.
     """
     return network_response(frequencies, detectors, *_isotropic_angles(key, num_draws))
 
@@ -197,5 +212,16 @@ def sample_pair_response(
 
     The angles are those :func:`sample_network_response` draws from the same
     ``key``.
+
+    Parameters
+    ----------
+    key
+        JAX random key.
+    num_draws
+        Number of random draws.
+    frequencies
+        Frequency grid in Hz.
+    detectors
+        Detectors in the network.
     """
     return pair_response(frequencies, detectors, *_isotropic_angles(key, num_draws))

@@ -19,6 +19,13 @@ def deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str
 
     Nested mappings are merged; all other values (including lists) replace.
     Neither input mapping is mutated.
+
+    Parameters
+    ----------
+    base
+        Base mapping.
+    override
+        Mapping of overriding values.
     """
     merged: dict[str, Any] = dict(base)
     for key, value in override.items():
@@ -31,7 +38,13 @@ def deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str
 
 
 def load_mapping(path: Path) -> dict[str, Any]:
-    """Parse one TOML config file into a plain dict."""
+    """Parse one TOML config file into a plain dict.
+
+    Parameters
+    ----------
+    path
+        File path.
+    """
     require_toml(path)
     with path.open("rb") as handle:
         return tomllib.load(handle)

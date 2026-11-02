@@ -65,6 +65,11 @@ class DistributionConfig(BaseModel):
         """Return the config a live distribution was built from.
 
         Constructor keyword names are the class's ``arg_constraints``.
+
+        Parameters
+        ----------
+        distribution
+            Distribution to convert.
         """
 
         if not isinstance(distribution, dist.Distribution):

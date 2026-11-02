@@ -11,7 +11,13 @@ from astrogwb.constants import SECONDS_PER_YEAR
 
 
 def years_to_seconds(observation_time_yr: float) -> float:
-    """Convert an observation time from years to seconds."""
+    """Convert an observation time from years to seconds.
+
+    Parameters
+    ----------
+    observation_time_yr
+        Observation time in years.
+    """
     return observation_time_yr * SECONDS_PER_YEAR
 
 
@@ -21,6 +27,11 @@ def array_dict_shape(parameters: Mapping[str, ArrayLike]) -> tuple[int, ...]:
     Every value must have exactly the same shape. Scalar values are therefore
     valid and return ``()``; callers that require a particular rank should
     validate it separately.
+
+    Parameters
+    ----------
+    parameters
+        Parameter values by name.
     """
     shapes = [(name, np.shape(values)) for name, values in parameters.items()]
     if not shapes:
@@ -38,7 +49,13 @@ def array_dict_shape(parameters: Mapping[str, ArrayLike]) -> tuple[int, ...]:
 
 
 def require_x64[**P, R](function: Callable[P, R]) -> Callable[P, R]:
-    """Raise unless JAX x64 mode is enabled at call time."""
+    """Raise unless JAX x64 mode is enabled at call time.
+
+    Parameters
+    ----------
+    function
+        Function to wrap.
+    """
 
     @wraps(function)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
@@ -60,6 +77,13 @@ def cumulative_trapezoid(y: jax.Array, x: jax.Array) -> jax.Array:
     Integrates along the trailing axis of ``y`` with the trapezoid rule and
     broadcasts over any leading batch dimensions. The result has the shape
     of ``y`` and starts at zero along the integrated axis.
+
+    Parameters
+    ----------
+    y
+        Values to integrate.
+    x
+        Integration abscissa.
     """
     dx = jnp.diff(x)
     segments = 0.5 * (y[..., :-1] + y[..., 1:]) * dx
@@ -89,9 +113,9 @@ def gauss_legendre_nodes_weights(
 
     Parameters
     ----------
-    a, b:
+    a, b
         Integration bounds, broadcast against each other.
-    n:
+    n
         Number of quadrature nodes per interval.
 
     Returns

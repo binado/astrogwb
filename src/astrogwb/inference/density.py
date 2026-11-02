@@ -20,9 +20,9 @@ class LogDensityFn:
 
     Parameters
     ----------
-    model:
+    model
         A NumPyro model called as ``model(*model_args, **model_kwargs)``.
-    chunk_size:
+    chunk_size
         Forwarded to :func:`jax.lax.map` as ``batch_size``, bounding peak
         memory. ``None`` evaluates one point at a time.
     """
@@ -160,23 +160,23 @@ def grid_log_posterior(
 
     Parameters
     ----------
-    likelihood:
+    likelihood
         An object with ``log_likelihood(params, network) -> (log L, extras)``, such
         as :class:`~astrogwb.inference.likelihood.ImportanceGaussianLikelihood`.
         Its array leaves are traced inputs, held once and not baked into the
         compiled function; its static half is part of the compilation key.
-    priors:
+    priors
         Prior of every parameter, static. Each contributes its log density at
         the grid or ``fixed`` value, so a pinned site adds a constant, as in
         :class:`LogDensityFn`.
-    grids:
+    grids
         Values of each swept parameter.
-    fixed:
+    fixed
         Values of the remaining prior sites, pinned at every point.
-    networks:
+    networks
         K stacked :class:`~astrogwb.inference.likelihood.Network`: each leaf has
         a leading axis K, and all share one structure.
-    chunk_size:
+    chunk_size
         Forwarded to :func:`jax.lax.map` as ``batch_size``. Peak memory is
         ``chunk_size * (K, F)``. ``None`` evaluates one point at a time.
 

@@ -43,6 +43,19 @@ def madau_dickinson_redshift_distribution(
     carry ``local_merger_rate`` for the absolute source-frame rate, on top of
     the ``H0`` / ``Omega_m`` cosmology keys
     :class:`~astrogwb.distributions.redshift.base.RedshiftDistribution` reads.
+
+    Parameters
+    ----------
+    params
+        Model parameter values.
+    minimum_redshift
+        Lower redshift bound.
+    maximum_redshift
+        Upper redshift bound.
+    n_grid
+        Number of redshift grid nodes.
+    validate_args
+        Whether to validate distribution arguments.
     """
     return RedshiftDistribution(
         params=params,
@@ -74,6 +87,25 @@ def madau_dickinson_time_delayed_redshift_distribution(
     ``local_merger_rate`` stays the merger rate at :math:`z = 0`. See
     :class:`~astrogwb.distributions.redshift.time_delayed.TimeDelayedRedshiftDistribution`
     for the remaining arguments.
+
+    Parameters
+    ----------
+    params
+        Model parameter values.
+    time_delay_distribution
+        Delay-time distribution.
+    n_delay_nodes
+        Number of delay quadrature nodes.
+    maximum_formation_redshift
+        Upper formation-redshift bound.
+    minimum_redshift
+        Lower redshift bound.
+    maximum_redshift
+        Upper redshift bound.
+    n_grid
+        Number of redshift grid nodes.
+    validate_args
+        Whether to validate distribution arguments.
     """
     return TimeDelayedRedshiftDistribution(
         params=params,

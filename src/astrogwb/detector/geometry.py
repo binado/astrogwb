@@ -100,7 +100,19 @@ class Detector:
         declination: ArrayLike,
         polarization_angle: ArrayLike,
     ) -> tuple[jax.Array, jax.Array]:
-        """Return the gwmock/LAL plus and cross factors."""
+        """Return the gwmock/LAL plus and cross factors.
+
+        Parameters
+        ----------
+        gmst
+            Greenwich mean sidereal time in radians.
+        right_ascension
+            Source right ascension in radians.
+        declination
+            Source declination in radians.
+        polarization_angle
+            Polarization angle in radians.
+        """
         return projection.antenna_pattern(
             self.geometry.response_tensor,
             gmst,
@@ -112,7 +124,17 @@ class Detector:
     def time_delay_from_geocenter(
         self, gmst: ArrayLike, *, right_ascension: ArrayLike, declination: ArrayLike
     ) -> jax.Array:
-        """Return the geocenter-to-detector delay in seconds."""
+        """Return the geocenter-to-detector delay in seconds.
+
+        Parameters
+        ----------
+        gmst
+            Greenwich mean sidereal time in radians.
+        right_ascension
+            Source right ascension in radians.
+        declination
+            Source declination in radians.
+        """
         return projection.time_delay_from_geocenter(
             self.geometry.location,
             gmst,
@@ -131,7 +153,25 @@ class Detector:
         declination: ArrayLike,
         polarization_angle: ArrayLike,
     ) -> jax.Array:
-        """Project radiation-frame polarizations, with a final frequency axis."""
+        """Project radiation-frame polarizations, with a final frequency axis.
+
+        Parameters
+        ----------
+        frequencies
+            Frequency grid in Hz.
+        plus
+            Plus polarization.
+        cross
+            Cross polarization.
+        gmst
+            Greenwich mean sidereal time in radians.
+        right_ascension
+            Source right ascension in radians.
+        declination
+            Source declination in radians.
+        polarization_angle
+            Polarization angle in radians.
+        """
         return projection.project_polarizations_fd(
             self.geometry.response_tensor,
             self.geometry.location,

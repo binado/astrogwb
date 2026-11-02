@@ -12,7 +12,13 @@ from astrogwb.distributions.mass import MaxOfTwoUniformsDistribution
 def uniform_mass_pair_model(
     parameters: Mapping[str, ArrayLike],
 ) -> tuple[jax.Array, jax.Array]:
-    """Ordered pair of i.i.d. uniforms on ``[minimum_mass, minimum_mass + width]``."""
+    """Ordered pair of i.i.d. uniforms on ``[minimum_mass, minimum_mass + width]``.
+
+    Parameters
+    ----------
+    parameters
+        Parameter values by name.
+    """
     minimum_mass: jax.Array = jnp.asarray(parameters["minimum_mass"])
     mass_width: jax.Array = jnp.asarray(parameters["mass_width"])
     # The max's closed-form inverse CDF lets the pair be drawn on QMC points.

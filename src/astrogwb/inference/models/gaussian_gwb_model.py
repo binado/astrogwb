@@ -40,6 +40,13 @@ def gwb_likelihood_model(
     The sites are the priors, the likelihood's ``extras`` as deterministics, and
     a ``log_likelihood`` factor. Extra names must not collide with priors. Use
     ``priors={}`` for likelihood-only evaluation.
+
+    Parameters
+    ----------
+    likelihood
+        Likelihood to evaluate.
+    priors
+        Prior distributions by parameter name.
     """
     params = {name: numpyro.sample(name, prior) for name, prior in priors.items()}
     value, extras = likelihood(params)

@@ -58,6 +58,11 @@ def atomic_h5(path: str | Path) -> Generator[Any]:
 
     A reader sees no file at ``path`` or a complete one: if the body raises,
     the temporary file is removed and ``path`` is left as it was.
+
+    Parameters
+    ----------
+    path
+        File path.
     """
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -90,7 +95,15 @@ def _leaves(tree: Mapping[str, object], prefix: str = "") -> Iterator[tuple[str,
 
 
 def write_tree(group: Any, tree: Mapping[str, object]) -> None:
-    """Write ``tree`` into the open HDF5 ``group``."""
+    """Write ``tree`` into the open HDF5 ``group``.
+
+    Parameters
+    ----------
+    group
+        Open HDF5 group.
+    tree
+        Nested mapping of data.
+    """
     for _ in _leaves(tree):  # validates every key before anything is written
         pass
     for name in sorted(tree):
@@ -102,7 +115,13 @@ def write_tree(group: Any, tree: Mapping[str, object]) -> None:
 
 
 def read_tree(group: Any) -> Arrays:
-    """Read the HDF5 ``group`` back as nested dicts of NumPy arrays."""
+    """Read the HDF5 ``group`` back as nested dicts of NumPy arrays.
+
+    Parameters
+    ----------
+    group
+        Open HDF5 group.
+    """
     out: Arrays = {}
     for name, item in group.items():
         if isinstance(item, h5py.Group):
@@ -125,6 +144,19 @@ def write(
     The file is written beside ``path`` and renamed into place, so a reader sees
     no file or a complete one. ``seed`` and ``batch_size`` are recorded when
     given. Returns ``path``.
+
+    Parameters
+    ----------
+    path
+        File path.
+    data
+        Catalog or data to write.
+    metadata
+        Metadata describing the object.
+    seed
+        Random seed.
+    batch_size
+        Number of rows per batch.
     """
     for _ in _leaves(data):  # validates every key before a file exists
         pass
@@ -151,6 +183,13 @@ def load[M: BaseModel](
     ``attrs`` holds the remaining top-level attributes -- ``version``,
     ``created``, ``host``, and ``seed`` / ``batch_size`` when they were
     recorded -- as Python or NumPy scalars.
+
+    Parameters
+    ----------
+    path
+        File path.
+    metadata_type
+        Metadata class used to decode the file.
     """
     with h5py.File(path, "r") as file:
         attrs = {

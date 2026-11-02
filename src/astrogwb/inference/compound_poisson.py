@@ -72,11 +72,11 @@ class PointSet(NamedTuple):
 
     Attributes
     ----------
-    weights:
+    weights
         Expected counts :math:`a_i \geq 0`, any shape.
-    amplitudes:
+    amplitudes
         Per-source contributions :math:`\beta_i`, the shape of ``weights``.
-    noise_precision:
+    noise_precision
         :math:`\rho^2`, the inverse variance of the Gaussian noise, ``()``.
     """
 
@@ -95,6 +95,11 @@ def inclination_quadrature(num_nodes: int) -> tuple[np.ndarray, np.ndarray]:
     the mean and from five on the second moment
     (:data:`~astrogwb.gwb.importance.INCLINATION_SECOND_MOMENT`) are exact.
 
+    Parameters
+    ----------
+    num_nodes
+        Number of quadrature nodes.
+
     Returns
     -------
     tuple of numpy.ndarray
@@ -111,6 +116,13 @@ def cumulants(t: ArrayLike, points: PointSet) -> tuple[jax.Array, ...]:
 
     The derivatives are explicit sums, not automatic derivatives of :math:`K`,
     so differentiating a function of them is first-order AD.
+
+    Parameters
+    ----------
+    t
+        Cumulant generating function argument.
+    points
+        Compound-Poisson point set.
     """
     t = jnp.asarray(t)
     weights, amplitudes, precision = points
@@ -146,6 +158,15 @@ def saddle(
     the tilted density, or after ``max_newton_steps`` (static). The result is a
     :func:`jax.lax.custom_root`: derivatives of every order follow from the
     implicit function theorem, not from the iterations.
+
+    Parameters
+    ----------
+    b
+        Amplitude at which to evaluate the density.
+    points
+        Compound-Poisson point set.
+    max_newton_steps
+        Maximum number of Newton iterations.
     """
     b = jnp.asarray(b)
     mean, variance = _origin_moments(points)
@@ -187,7 +208,15 @@ def _over_nodes(fn: Callable[[jax.Array], jax.Array], nodes: np.ndarray) -> jax.
 
 
 def gaussian_log_density(b: ArrayLike, points: PointSet) -> jax.Array:
-    r"""The Gaussian approximation :math:`\mathcal{N}(b; K'(0), K''(0))`, ``()``."""
+    r"""The Gaussian approximation :math:`\mathcal{N}(b; K'(0), K''(0))`, ``()``.
+
+    Parameters
+    ----------
+    b
+        Amplitude at which to evaluate the density.
+    points
+        Compound-Poisson point set.
+    """
     mean, variance = _origin_moments(points)
     return -0.5 * (jnp.asarray(b) - mean) ** 2 / variance - 0.5 * jnp.log(
         2.0 * jnp.pi * variance
@@ -215,6 +244,15 @@ def saddlepoint_log_density(
     with ``num_normalization_nodes`` Gauss-Hermite nodes at
     :math:`t_k = \sqrt{2 / K''(0)}\, u_k`, so it needs no further saddles and
     does not depend on ``b``.
+
+    Parameters
+    ----------
+    b
+        Amplitude at which to evaluate the density.
+    points
+        Compound-Poisson point set.
+    num_normalization_nodes
+        Number of normalization quadrature nodes.
     """
     b = jnp.asarray(b)
     t = saddle(b, points)
@@ -263,6 +301,15 @@ def hermite_log_density(
 
     A point set far from Gaussian (few sources, little noise) may need many
     nodes, and too few can make the sum negative and the result ``nan``.
+
+    Parameters
+    ----------
+    b
+        Amplitude at which to evaluate the density.
+    points
+        Compound-Poisson point set.
+    num_nodes
+        Number of quadrature nodes.
     """
     b = jnp.asarray(b)
     weights, amplitudes, _ = points
@@ -298,6 +345,19 @@ def amplitude_log_density(
 
     ``num_hermite_nodes`` is the contour quadrature of ``"hermite"``,
     ``num_normalization_nodes`` the normalization of ``"saddlepoint"``.
+
+    Parameters
+    ----------
+    b
+        Amplitude at which to evaluate the density.
+    points
+        Compound-Poisson point set.
+    method
+        Density approximation method.
+    num_hermite_nodes
+        Number of Gauss-Hermite nodes.
+    num_normalization_nodes
+        Number of normalization quadrature nodes.
     """
     if method == "saddlepoint":
         return saddlepoint_log_density(b, points, num_normalization_nodes)

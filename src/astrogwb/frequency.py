@@ -35,7 +35,17 @@ _TURNOVER_STEP_TOLERANCE = 1e-9
 def uniform_frequency_grid(
     minimum_frequency: float, maximum_frequency: float, df: float
 ) -> np.ndarray:
-    """Return the inclusive uniform grid from ``minimum_frequency`` by ``df``."""
+    """Return the inclusive uniform grid from ``minimum_frequency`` by ``df``.
+
+    Parameters
+    ----------
+    minimum_frequency
+        Lower frequency bound in Hz.
+    maximum_frequency
+        Upper frequency bound in Hz.
+    df
+        Frequency resolution in Hz.
+    """
     minimum = float(minimum_frequency)
     maximum = float(maximum_frequency)
     spacing = float(df)
@@ -99,6 +109,15 @@ def log_frequency_grid(
 
     ``df`` is the bin width at ``minimum_frequency``, so the log step is
     ``df / minimum_frequency``; the last point is exactly ``maximum_frequency``.
+
+    Parameters
+    ----------
+    minimum_frequency
+        Lower frequency bound in Hz.
+    maximum_frequency
+        Upper frequency bound in Hz.
+    df
+        Frequency resolution in Hz.
     """
     minimum = float(minimum_frequency)
     maximum = float(maximum_frequency)
@@ -125,13 +144,13 @@ def loglinear_frequency_grid(
 
     Parameters
     ----------
-    minimum_frequency, maximum_frequency:
+    minimum_frequency, maximum_frequency
         Positive frequency bounds in Hz.
-    df:
+    df
         Linear spacing in Hz.
-    turnover_frequency:
+    turnover_frequency
         Requested turnover in Hz, strictly inside the band.
-    dlogf:
+    dlogf
         Optional finite positive bound on the natural-log step of the tail.
         The actual step may be slightly smaller to align the endpoint. The
         linear points and effective turnover are unchanged, but spacing may
@@ -174,6 +193,21 @@ def frequency_grid(
 
     ``turnover_frequency`` and ``dlogf`` are used by ``"loglinear"`` only and
     must be ``None`` otherwise.
+
+    Parameters
+    ----------
+    spacing
+        Frequency grid spacing mode.
+    minimum_frequency
+        Lower frequency bound in Hz.
+    maximum_frequency
+        Upper frequency bound in Hz.
+    df
+        Frequency resolution in Hz.
+    turnover_frequency
+        Frequency grid turnover in Hz.
+    dlogf
+        Logarithmic frequency spacing.
     """
     if spacing == "loglinear":
         if turnover_frequency is None:
@@ -205,6 +239,11 @@ def validate_frequency_grid(frequencies: ArrayLike) -> np.ndarray:
 
     A grid is one-dimensional, finite and strictly increasing; the spacing may
     vary.
+
+    Parameters
+    ----------
+    frequencies
+        Frequency grid in Hz.
     """
     array = np.asarray(frequencies, dtype=np.float64)
     if array.ndim != 1:
@@ -233,6 +272,11 @@ def bin_widths(frequencies: ArrayLike) -> jax.Array:
     Widths belong to the whole grid: compute them on the full axis and mask
     afterwards, or bins at the edge of a gap get the wrong width. Values are
     trusted (traceable); only the shape is checked.
+
+    Parameters
+    ----------
+    frequencies
+        Frequency grid in Hz.
     """
     grid = jnp.asarray(frequencies)
     if grid.ndim != 1:
@@ -246,7 +290,17 @@ def bin_widths(frequencies: ArrayLike) -> jax.Array:
 
 
 def broadcast_along_axis(values: jax.Array, ndim: int, axis: int) -> jax.Array:
-    """Reshape a per-frequency vector so it lines up with ``axis`` of an ``ndim`` array."""
+    """Reshape a per-frequency vector so it lines up with ``axis`` of an ``ndim`` array.
+
+    Parameters
+    ----------
+    values
+        Input values.
+    ndim
+        Number of dimensions in the target array.
+    axis
+        Frequency-axis index.
+    """
     shape = [1] * ndim
     shape[axis] = values.shape[0]
     return jnp.reshape(values, shape)
@@ -258,7 +312,17 @@ def frequency_mask(
     fmin: float | None = None,
     fmax: float | None = None,
 ) -> jax.Array:
-    """Boolean mask selecting the bins inside the inclusive band."""
+    """Boolean mask selecting the bins inside the inclusive band.
+
+    Parameters
+    ----------
+    frequencies
+        Frequency grid in Hz.
+    fmin
+        Lower frequency bound in Hz.
+    fmax
+        Upper frequency bound in Hz.
+    """
     mask = jnp.ones_like(frequencies, dtype=bool)
     if fmin is not None:
         mask = mask & (frequencies >= fmin)
@@ -276,6 +340,15 @@ def apply_frequency_mask(
 
     Compress only after grid-dependent quantities such as :func:`bin_widths`
     have been computed on the full axis.
+
+    Parameters
+    ----------
+    mask
+        Boolean mask of entries to include.
+    axis
+        Frequency-axis index.
+    *arrays
+        Arrays to mask.
     """
     return tuple(jnp.compress(mask, array, axis=axis) for array in arrays)
 
@@ -300,15 +373,15 @@ def noise_weighted_inner_product(
 
     Parameters
     ----------
-    a, b:
+    a, b
         Arrays whose ``axis`` runs over frequency bins; ``a`` is conjugated.
-    psd:
+    psd
         Power spectral density :math:`S_i`, broadcastable against ``a`` and
         ``b``.
-    frequencies:
+    frequencies
         The grid ``axis`` runs over, in Hz, one entry per bin. Widths come from
         :func:`bin_widths`.
-    axis:
+    axis
         Axis to contract over. Defaults to the trailing axis, so leading batch
         dimensions broadcast.
     """

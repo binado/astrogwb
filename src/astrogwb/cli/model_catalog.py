@@ -32,7 +32,23 @@ def model_catalog(
         int | None, typer.Option(min=1, help="Cap OMP/BLAS/XLA CPU threads.")
     ] = None,
 ) -> None:
-    """Write fixed source draws and waveform powers for importance weighting."""
+    """Write fixed source draws and waveform powers for importance weighting.
+
+    Parameters
+    ----------
+    output
+        Output file path.
+    catalog_metadata
+        Catalog metadata layer paths.
+    seed
+        Random seed.
+    chunk_size
+        Number of sources per chunk.
+    platform
+        JAX execution platform.
+    cpu_threads
+        Number of CPU threads.
+    """
     _apply_runtime(platform, cpu_threads)
     from astrogwb.config import merge_layers
     from astrogwb.gwb.catalog import CatalogMetadata

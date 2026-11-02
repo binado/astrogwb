@@ -65,6 +65,21 @@ def time_delayed_merger_rate(
     and ``Omega_m`` and is passed on to ``formation_rate``;
     ``n_delay_nodes`` sets an array shape and so must be a static integer.
     See :class:`TimeDelayedRedshiftDistribution` for the arguments.
+
+    Parameters
+    ----------
+    redshift
+        Redshift.
+    params
+        Model parameter values.
+    formation_rate
+        Source-frame formation rate function.
+    delay
+        Delay-time distribution.
+    n_delay_nodes
+        Number of delay quadrature nodes.
+    maximum_formation_redshift
+        Upper formation-redshift bound.
     """
     hubble_constant, omega_m = params["H0"], params["Omega_m"]
     longest_available = lookback_time(
@@ -116,22 +131,22 @@ class TimeDelayedRedshiftDistribution(RedshiftDistribution):
 
     Parameters
     ----------
-    params:
+    params
         As for :class:`RedshiftDistribution`: ``H0``, ``Omega_m``, and whatever
         ``source_frame_distribution`` reads. Delay hyperparameters live on
         ``time_delay_distribution`` instead.
-    source_frame_distribution:
+    source_frame_distribution
         The formation-rate shape :math:`\psi(z)`.
-    time_delay_distribution:
+    time_delay_distribution
         Delay distribution in Gyr. Must implement ``cdf`` and ``icdf``, e.g. the
         canonical :math:`p(\tau) \propto \tau^{-1}` as
         :class:`~astrogwb.distributions.delay.PowerLawDelayDistribution` ``(-1.0,
         0.02, 13.0)``, whose slope gradient stays finite near :math:`-1`.
-    n_delay_nodes:
+    n_delay_nodes
         Gauss-Legendre order of the delay integral.
-    maximum_formation_redshift:
+    maximum_formation_redshift
         Formation cut-off.
-    minimum_redshift, maximum_redshift, n_grid, validate_args:
+    minimum_redshift, maximum_redshift, n_grid, validate_args
         As for :class:`RedshiftDistribution`.
     """
 

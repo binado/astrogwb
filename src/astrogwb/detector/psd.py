@@ -15,6 +15,11 @@ def resolve_psd_path(reference: str | Path) -> Path | str:
     ``noise_curves/`` file -> absolute/relative path on disk -> HTTP(S) URL.
     Bundled presets and on-disk files return a ``Path``; URLs return the
     original ``str`` (gwmock-noise fetches them directly).
+
+    Parameters
+    ----------
+    reference
+        PSD reference to resolve.
     """
     reference_str = str(reference)
 

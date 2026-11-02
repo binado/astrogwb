@@ -51,6 +51,11 @@ def register_population[F: PopulationFactory](name: str) -> Callable[[F], F]:
     """Register a population factory under ``name``, returning it unchanged.
 
     Physical and proposal populations share this one registry.
+
+    Parameters
+    ----------
+    name
+        Name to look up.
     """
 
     def decorate(fn: F) -> F:
@@ -71,6 +76,13 @@ def build_population(name: str, **kwargs: float | bool | str) -> Population:
 
     The returned callable hashes by identity: build it once per run, or a
     jitted function closing over it recompiles.
+
+    Parameters
+    ----------
+    name
+        Name to look up.
+    **kwargs
+        Additional keyword arguments.
     """
     try:
         factory = _REGISTRY[name]

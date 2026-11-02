@@ -20,7 +20,13 @@ MERGE_KEY = "extends"
 
 
 def require_toml(path: Path) -> None:
-    """Reject a config layer that is not a ``.toml`` file; ``knf`` would accept JSON."""
+    """Reject a config layer that is not a ``.toml`` file; ``knf`` would accept JSON.
+
+    Parameters
+    ----------
+    path
+        File path.
+    """
     if path.suffix.lower() != ".toml":
         raise ValueError(f"config layers are TOML; got {path.suffix!r} for {path}")
 
@@ -34,6 +40,13 @@ def merge_layers(
     ``knf`` key-path glob ``shallow``, followed by resolving every ``${...}``
     reference against the merged result and every :data:`MERGE_KEY`
     inheritance.
+
+    Parameters
+    ----------
+    paths
+        Configuration file paths, in merge order.
+    shallow
+        Key-path glob to merge shallowly.
 
     Raises
     ------

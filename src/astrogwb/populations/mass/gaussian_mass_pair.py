@@ -12,7 +12,13 @@ from astrogwb.distributions import MaxOfTwoNormalsDistribution
 def gaussian_mass_pair_model(
     parameters: Mapping[str, ArrayLike],
 ) -> tuple[jax.Array, jax.Array]:
-    """Ordered pair of i.i.d. ``Normal(mass_mean, mass_sigma)`` components."""
+    """Ordered pair of i.i.d. ``Normal(mass_mean, mass_sigma)`` components.
+
+    Parameters
+    ----------
+    parameters
+        Parameter values by name.
+    """
     mass_mean: jax.Array = jnp.asarray(parameters["mass_mean"])
     mass_sigma: jax.Array = jnp.asarray(parameters["mass_sigma"])
     mass_1 = numpyro.sample(

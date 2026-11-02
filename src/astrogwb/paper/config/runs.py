@@ -76,6 +76,11 @@ def merge_config_layers(paths: Sequence[Path]) -> dict[str, Any]:
     right -- arrays and scalars replace -- except at :data:`PRIOR_SHALLOW`,
     then every ``${...}`` reference and
     :data:`~astrogwb.config.MERGE_KEY` inheritance is resolved.
+
+    Parameters
+    ----------
+    paths
+        Configuration file paths, in merge order.
     """
     if not paths:
         raise ValueError("no config layers given")
@@ -86,6 +91,11 @@ def base_config_paths(root: Path | None = None) -> tuple[Path, ...]:
     """The shared scientific, variant and detector layers, in merge order.
 
     Paths are relative to ``root``, default the working directory.
+
+    Parameters
+    ----------
+    root
+        Root directory for configuration files.
     """
     paths = tuple((root or Path()) / path for path in SHARED_LAYER_PATHS)
     for path in paths:
@@ -95,7 +105,13 @@ def base_config_paths(root: Path | None = None) -> tuple[Path, ...]:
 
 
 def load_base(root: Path | None = None) -> dict[str, Any]:
-    """Merge every shared layer into one mapping."""
+    """Merge every shared layer into one mapping.
+
+    Parameters
+    ----------
+    root
+        Root directory for configuration files.
+    """
     return merge_config_layers(base_config_paths(root))
 
 
@@ -105,6 +121,13 @@ def add_config_arguments(
     """Add the repeated ``--config`` layer flag shared by every entrypoint.
 
     ``help`` replaces the default text.
+
+    Parameters
+    ----------
+    parser
+        Argument parser to extend.
+    help
+        Help text for the argument.
     """
     parser.add_argument(
         "--config",
@@ -125,6 +148,11 @@ def load_merged_config(args: argparse.Namespace) -> dict[str, Any]:
     """Merge the ``--config`` layers an entrypoint was handed, order preserved.
 
     The order is logged: a wrong-but-valid order fails silently.
+
+    Parameters
+    ----------
+    args
+        Parsed command-line arguments.
     """
     paths: list[Path] = list(args.config)
     logger.info(

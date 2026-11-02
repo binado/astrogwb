@@ -52,6 +52,15 @@ def spectral_density_jacobian(
 
     Columns follow ``parameter_names``; every other entry of ``params`` is held
     fixed. Forward mode, since there are few parameters and many bins.
+
+    Parameters
+    ----------
+    spectral_density_fn
+        Function returning strain spectral density.
+    params
+        Model parameter values.
+    parameter_names
+        Names of parameters to differentiate.
     """
     missing = sorted(set(parameter_names) - params.keys())
     if missing:
@@ -82,6 +91,19 @@ def fisher_matrix_per_bin(
     ``gaussian_bin_scale(psd, time_years, frequencies)``. ``frequency_mask``
     selects bins as in :class:`~astrogwb.inference.likelihood.Network`: an
     excluded bin contributes exactly zero, even where its scale is infinite.
+
+    Parameters
+    ----------
+    spectral_density_fn
+        Function returning strain spectral density.
+    params
+        Model parameter values.
+    parameter_names
+        Names of parameters to differentiate.
+    scale
+        Noise standard deviation.
+    frequency_mask
+        Mask of frequency bins to include.
     """
     jacobian = spectral_density_jacobian(spectral_density_fn, params, parameter_names)
     inverse_variance = jnp.asarray(scale) ** -2

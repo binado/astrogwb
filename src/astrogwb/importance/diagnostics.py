@@ -29,7 +29,7 @@ def relative_ess(log_weights: jax.Array) -> jax.Array:
 
     Parameters
     ----------
-    log_weights:
+    log_weights
         Log importance weights; the effective sample size is computed over the
         trailing axis, so leading batch dimensions are preserved.
     """

@@ -21,7 +21,21 @@ def antenna_pattern(
     declination: ArrayLike,
     polarization_angle: ArrayLike,
 ) -> tuple[jax.Array, jax.Array]:
-    """Return plus and cross antenna factors in the gwmock/LAL basis."""
+    """Return plus and cross antenna factors in the gwmock/LAL basis.
+
+    Parameters
+    ----------
+    response_tensor
+        Detector response tensor.
+    gmst
+        Greenwich mean sidereal time in radians.
+    right_ascension
+        Source right ascension in radians.
+    declination
+        Source declination in radians.
+    polarization_angle
+        Polarization angle in radians.
+    """
     gmst, ra, dec, psi = jnp.broadcast_arrays(
         gmst, right_ascension, declination, polarization_angle
     )
@@ -44,7 +58,19 @@ def time_delay_from_geocenter(
     right_ascension: ArrayLike,
     declination: ArrayLike,
 ) -> jax.Array:
-    """Return minus the source-direction dot location divided by light speed."""
+    """Return minus the source-direction dot location divided by light speed.
+
+    Parameters
+    ----------
+    location
+        Detector location in Earth-fixed coordinates, in metres.
+    gmst
+        Greenwich mean sidereal time in radians.
+    right_ascension
+        Source right ascension in radians.
+    declination
+        Source declination in radians.
+    """
     gmst, ra, dec = jnp.broadcast_arrays(gmst, right_ascension, declination)
     hour = gmst - ra
     direction = jnp.stack(
@@ -69,7 +95,29 @@ def project_polarizations_fd(
     declination: ArrayLike,
     polarization_angle: ArrayLike,
 ) -> jax.Array:
-    """Project as (F_plus plus + F_cross cross) exp(-2 pi i f delay)."""
+    """Project as (F_plus plus + F_cross cross) exp(-2 pi i f delay).
+
+    Parameters
+    ----------
+    response_tensor
+        Detector response tensor.
+    location
+        Detector location in Earth-fixed coordinates, in metres.
+    frequencies
+        Frequency grid in Hz.
+    plus
+        Plus polarization.
+    cross
+        Cross polarization.
+    gmst
+        Greenwich mean sidereal time in radians.
+    right_ascension
+        Source right ascension in radians.
+    declination
+        Source declination in radians.
+    polarization_angle
+        Polarization angle in radians.
+    """
     fp, fc = antenna_pattern(
         response_tensor,
         gmst,

@@ -71,7 +71,13 @@ class DetectorConfig(BaseModel):
         return _sensitivity(self.psd_reference)
 
     def to_detector(self, name: str) -> Detector:
-        """Build an owned detector addressed by ``name``."""
+        """Build an owned detector addressed by ``name``.
+
+        Parameters
+        ----------
+        name
+            Name to look up.
+        """
         return Detector(name, self.geometry, self.sensitivity)
 
 
@@ -118,6 +124,11 @@ class DetectorRegistry(BaseModel):
 
         Members are sorted and labels dropped, so the result serializes alike
         for any presentation.
+
+        Parameters
+        ----------
+        names
+            Names to select.
         """
         networks = {name: tuple(sorted(self.networks[name])) for name in sorted(names)}
         used = sorted(
@@ -132,11 +143,23 @@ class DetectorRegistry(BaseModel):
         )
 
     def build_detectors(self, names: Sequence[str]) -> tuple[Detector, ...]:
-        """Build owned detectors in the supplied order."""
+        """Build owned detectors in the supplied order.
+
+        Parameters
+        ----------
+        names
+            Names to select.
+        """
         return tuple(self.detectors[name].to_detector(name) for name in names)
 
     def build_network(self, name: str) -> tuple[Detector, ...]:
-        """Build a named network in canonical sorted order."""
+        """Build a named network in canonical sorted order.
+
+        Parameters
+        ----------
+        name
+            Name to look up.
+        """
         return self.build_detectors(sorted(self.networks[name]))
 
     def pairs(self, network_name: str) -> list[tuple[str, str]]:
@@ -191,5 +214,11 @@ def load_detector_config(paths: Sequence[Path]) -> DetectorRegistry:
 
 @cache
 def load_detector(name: str) -> Detector:
-    """Load packaged geometry and sensitivity without reading the PSD curve."""
+    """Load packaged geometry and sensitivity without reading the PSD curve.
+
+    Parameters
+    ----------
+    name
+        Name to look up.
+    """
     return load_detector_config([]).detectors[name].to_detector(name)

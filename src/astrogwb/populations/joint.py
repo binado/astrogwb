@@ -55,6 +55,13 @@ def fix_extrinsic_parameters(
 
     Fixed sites draw no random numbers, so the intrinsic draws and any Sobol
     coordinates are those of a model without extrinsics.
+
+    Parameters
+    ----------
+    model
+        NumPyro model.
+    value
+        Value to evaluate.
     """
     return handlers.condition(
         model, data={name: jnp.asarray(value) for name in EXTRINSIC_SITES}
