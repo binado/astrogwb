@@ -19,14 +19,14 @@ import jax.numpy as jnp
 import numpy as np
 from jax.typing import ArrayLike
 
-from astrogwb.constants import ISCO_ALPHA
-from astrogwb.gwb.catalog import (
+from astrogwb.background.catalog import (
     CatalogMetadata,
     PolarizationPowerData,
 )
-from astrogwb.gwb.importance import (
+from astrogwb.background.importance import (
     reference_catalog,
 )
+from astrogwb.constants import ISCO_ALPHA
 from astrogwb.inference import ImportanceGaussianLikelihood
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
@@ -219,7 +219,7 @@ def build_reference_catalog(
     """A closed-form reference catalog of the mock population.
 
     Every draw sits at the window's lower edge, as
-    :func:`~astrogwb.gwb.importance.reference_catalog` places them; the power
+    :func:`~astrogwb.background.importance.reference_catalog` places them; the power
     comes from :class:`~astrogwb.waveform.AnalyticInspiralGenerator`.
     """
     generator = AnalyticInspiralGenerator(

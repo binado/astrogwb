@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from astrogwb.gwb.catalog import (
+from astrogwb.background.catalog import (
     CatalogMetadata,
     read_catalog,
     simulate_catalog,

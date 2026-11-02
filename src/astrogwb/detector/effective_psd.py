@@ -208,7 +208,7 @@ def log_frequency_noise_scale(
     :func:`gaussian_bin_scale` with the bin width replaced by :math:`f`: a
     presentation scale for sensitivity plots, not the likelihood's.
     :math:`(S_h/\sigma_{\ln f})^2` is :math:`d\mathrm{SNR}^2/d\ln f`
-    (:func:`astrogwb.gwb.spectral_snr_squared_per_log_frequency`).
+    (:func:`astrogwb.background.spectral_snr_squared_per_log_frequency`).
 
     Parameters
     ----------

@@ -22,7 +22,7 @@ Unchecked contracts:
 - Inclination is always sampled, isotropically, and the intrinsic sites (masses,
   spins, tidal deformabilities) are independent of inclination; independence
   of redshift is structural, since the source model never sees it.
-  :mod:`astrogwb.gwb.importance` relies on both.
+  :mod:`astrogwb.background.importance` relies on both.
 """
 
 from __future__ import annotations

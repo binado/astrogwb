@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from astrogwb.gwb.analytic import (
+from astrogwb.background.analytic import (
     JointMassFunction,
     PopulationFunction,
     analytic_spectral_density,
@@ -8,13 +8,13 @@ from astrogwb.gwb.analytic import (
     precompute_cumulative_mass_moments,
     uniform_prior_mass_moments,
 )
-from astrogwb.gwb.snr import (
+from astrogwb.background.snr import (
     spectral_snr,
     spectral_snr_squared,
     spectral_snr_squared_per_bin,
     spectral_snr_squared_per_log_frequency,
 )
-from astrogwb.gwb.spectral import (
+from astrogwb.background.spectral import (
     characteristic_noise,
     characteristic_strain,
     omega_gw_from_spectral_density,

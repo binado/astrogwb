@@ -4,12 +4,12 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from astrogwb.cosmology import hubble_constant_si
-from astrogwb.gwb import (
+from astrogwb.background import (
     omega_gw_from_spectral_density,
     spectral_density,
     spectral_density_from_omega_gw,
 )
+from astrogwb.cosmology import hubble_constant_si
 
 
 def test_spectral_density_is_the_rate_times_the_weighted_mean_power() -> None:

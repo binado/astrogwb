@@ -22,21 +22,23 @@ with app.setup(hide_code=True):
     from matplotlib.projections import register_projection
     from matplotlib.ticker import LogFormatterMathtext, ScalarFormatter
 
-    from astrogwb.config import load_config
-    from astrogwb.detector import (
-        effective_psd,
-        log_frequency_noise_scale,
-    )
-    from astrogwb.frequency import frequency_mask as make_frequency_mask
-    from astrogwb.gwb import (
+    from astrogwb.background import (
         characteristic_noise,
         characteristic_strain,
         omega_gw_from_spectral_density,
         spectral_snr_squared_per_bin,
         spectral_snr_squared_per_log_frequency,
     )
-    from astrogwb.gwb.catalog import CatalogMetadata, simulate_catalog
-    from astrogwb.gwb.spectral import spectral_density as catalog_spectral_density
+    from astrogwb.background.catalog import CatalogMetadata, simulate_catalog
+    from astrogwb.background.spectral import (
+        spectral_density as catalog_spectral_density,
+    )
+    from astrogwb.config import load_config
+    from astrogwb.detector import (
+        effective_psd,
+        log_frequency_noise_scale,
+    )
+    from astrogwb.frequency import frequency_mask as make_frequency_mask
     from astrogwb.paper.plotting import (
         DETECTOR_COMPARISON_LEGEND,
         DETECTOR_NETWORKS,

@@ -35,10 +35,8 @@ import jax.numpy as jnp
 import numpy as np
 from jax.typing import ArrayLike
 
-from astrogwb.constants import SECONDS_PER_YEAR
-from astrogwb.cosmology import luminosity_distance
-from astrogwb.gwb.catalog import CatalogMetadata, PolarizationPowerData
-from astrogwb.gwb.importance import (
+from astrogwb.background.catalog import CatalogMetadata, PolarizationPowerData
+from astrogwb.background.importance import (
     INCLINATION_SECOND_MOMENT,
     _node_power,
     _rescaling_arrays,
@@ -46,6 +44,8 @@ from astrogwb.gwb.importance import (
     _SharedTerms,
     _weighted_mean_power,
 )
+from astrogwb.constants import SECONDS_PER_YEAR
+from astrogwb.cosmology import luminosity_distance
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.populations._types import Population
 
@@ -130,7 +130,7 @@ class Network(NamedTuple):
 
         with :math:`P` the catalog power at the effective inclination. The
         response carries the inclination, so it replaces
-        :data:`~astrogwb.gwb.importance.INCLINATION_SECOND_MOMENT` everywhere.
+        :data:`~astrogwb.background.importance.INCLINATION_SECOND_MOMENT` everywhere.
         ``None`` keeps the sky-averaged power. With pairs, the covariance
         indices run over (pair, bin).
     modes
@@ -219,7 +219,7 @@ def _observed(observed: jax.Array | None, network: Network) -> jax.Array:
 def _orientation_covariance(network: Network | None) -> jax.Array | float:
     r"""The orientation factor of a second moment of the power, ``()`` or ``(D, D)``.
 
-    :data:`~astrogwb.gwb.importance.INCLINATION_SECOND_MOMENT` for the
+    :data:`~astrogwb.background.importance.INCLINATION_SECOND_MOMENT` for the
     sky-averaged power of a combined spectrum, that constant times
     :math:`\gamma_{ab} \gamma_{cd}` for the sky-averaged power of pairs, else
     :math:`\langle r_{ab}(f)\, r_{cd}(f') \rangle` of the network's response
@@ -444,7 +444,7 @@ jax.tree_util.register_dataclass(
 class _ImportanceCatalog:
     r"""What every likelihood of a rescaled reference catalog shares.
 
-    The fields of :func:`~astrogwb.gwb.importance._rescaling_arrays` plus the
+    The fields of :func:`~astrogwb.background.importance._rescaling_arrays` plus the
     data, and the stages that do not depend on how the shot noise is modelled:
     the importance terms of ``population(params)``, the predicted spectrum, and
     the projection of every catalog source on a network's noise-weighted
@@ -584,9 +584,9 @@ def _template_projector(mean: jax.Array, network: Network) -> jax.Array:
 class ImportanceGaussianLikelihood(_ImportanceCatalog):
     r"""A Gaussian likelihood of the rescaled importance spectrum.
 
-    Binds a :func:`~astrogwb.gwb.importance.reference_catalog` to a target
+    Binds a :func:`~astrogwb.background.importance.reference_catalog` to a target
     population on the observed grid. The spectrum is the redshift quadrature of
-    :mod:`astrogwb.gwb.importance`; with ``shot_noise`` set, the covariance of
+    :mod:`astrogwb.background.importance`; with ``shot_noise`` set, the covariance of
     each network gains a rank-one term from the catalog's Poisson variance
     (:mod:`astrogwb.inference.shot_noise`).
 
@@ -613,7 +613,7 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         ``shot_noise`` is ``"amplitude"`` or ``"modes"``. A cache of ``power``.
     intrinsic, proposal_log_prob, log_reference_frequencies, query_log_frequencies,
     amplitude, redshift, redshift_weights, reference_distance
-        The arrays of :func:`~astrogwb.gwb.importance._rescaling_arrays`.
+        The arrays of :func:`~astrogwb.background.importance._rescaling_arrays`.
     observation_seconds
         Observation time in seconds, ``()``; ``None`` unless a variance is
         predicted.
@@ -654,10 +654,10 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         """Bind a reference catalog to a target on the observed ``frequencies``.
 
         Redshift is integrated on ``num_redshift_nodes`` nodes of
-        :func:`~astrogwb.gwb.importance.redshift_quadrature` over the
+        :func:`~astrogwb.background.importance.redshift_quadrature` over the
         population's window, with lower edge ``minimum_redshift`` (default the
         population's); it must not be below the catalog's
-        :func:`~astrogwb.gwb.importance.reference_redshift`. Leave
+        :func:`~astrogwb.background.importance.reference_redshift`. Leave
         ``density_sites`` empty when no intrinsic hyperparameter varies. Call
         outside JAX transformations.
 
@@ -665,7 +665,7 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         (unchecked). ``"amplitude"``, ``"per_frequency"`` and ``"modes"`` need
         ``observation_time`` in years; ``"fixed"`` reads
         ``network.relative_variance``; ``"modes"`` needs ``network.modes``. The
-        contracts of :mod:`astrogwb.gwb.importance` must hold.
+        contracts of :mod:`astrogwb.background.importance` must hold.
 
         Parameters
         ----------
@@ -738,7 +738,7 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         ``"amplitude"`` and ``"per_frequency"`` modes: the weighted mean of
         ``squared_power`` is rescaled with ``amplitude**2`` (:math:`s_j^8`),
         integrated with :meth:`_variance_kernel` and multiplied by
-        :data:`~astrogwb.gwb.importance.INCLINATION_SECOND_MOMENT` over
+        :data:`~astrogwb.background.importance.INCLINATION_SECOND_MOMENT` over
         ``observation_seconds``; :meth:`log_likelihood_from_prediction` swaps
         that factor for the network's response. ``extras`` holds ``total_merger_rate``
         (observer frame, mergers per second) and ``importance_relative_ess``,
@@ -1021,7 +1021,7 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
 
         with :math:`R = \langle r_f r_{f'} \rangle` under a
         ``network.response`` and the constant
-        :data:`~astrogwb.gwb.importance.INCLINATION_SECOND_MOMENT` otherwise
+        :data:`~astrogwb.background.importance.INCLINATION_SECOND_MOMENT` otherwise
         (then contracted as projections, without the dense moment). The
         whitened shot-noise covariance in the basis is
         :math:`B = \sum_z \kappa_z M_z / T`, with :math:`\kappa_z` the

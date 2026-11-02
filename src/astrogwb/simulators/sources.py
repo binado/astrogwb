@@ -3,8 +3,8 @@
 :func:`simulate_sources` is the one place a population model becomes source
 columns: a Poisson realization
 (:func:`~astrogwb.simulators.simulate_population`), a plain catalog
-(:func:`~astrogwb.gwb.catalog.simulate_catalog`) and a reference catalog
-(:func:`~astrogwb.gwb.importance.reference_catalog`) differ only in the model
+(:func:`~astrogwb.background.catalog.simulate_catalog`) and a reference catalog
+(:func:`~astrogwb.background.importance.reference_catalog`) differ only in the model
 they hand it and how many sources they ask for.
 """
 

@@ -369,7 +369,7 @@ def noise_weighted_inner_product(
 
     with the bin widths :math:`\Delta f_i` of the frequency grid. The
     observation time enters separately, in
-    :func:`astrogwb.gwb.spectral_snr_squared`.
+    :func:`astrogwb.background.spectral_snr_squared`.
 
     Parameters
     ----------

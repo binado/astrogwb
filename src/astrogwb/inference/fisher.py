@@ -12,7 +12,7 @@ matrix is therefore a sum of per-bin terms,
     F_{ab,i} = \frac{\partial_a S_i \, \partial_b S_i}{\sigma_i^2},
 
 the matrix generalization of
-:func:`~astrogwb.gwb.snr.spectral_snr_squared_per_bin`.
+:func:`~astrogwb.background.snr.spectral_snr_squared_per_bin`.
 :func:`fisher_matrix_per_bin` returns the terms unsummed so the information
 can be attributed to frequency bands; ``.sum(axis=0)`` is the total.
 
