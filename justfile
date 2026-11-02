@@ -19,7 +19,7 @@ fmt:
 # -- ty resolves imports against the environment, and src/astrogwb/paper,
 # scripts/ and tests/paper all import the `notebook` extra's stack.
 typecheck:
-    uv run --extra notebook --extra blackjax --extra cli --group dev ty check
+    uv run --extra notebook --extra cli --group dev ty check
 
 # The core suite installs astrogwb WITHOUT the `paper` extra, so a core test
 # that reaches across the boundary fails here rather than passing by accident
@@ -47,7 +47,7 @@ test-paper:
 # is accepted in addition to success. Test failures still fail the recipe.
 test-integration:
     uv run --frozen --isolated --no-default-groups \
-        --extra cli --extra simulation --extra blackjax --group test \
+        --extra cli --extra simulation --group test \
         pytest tests/core -m integration
     uv run --frozen --isolated --no-default-groups \
         --extra notebook --group test \
