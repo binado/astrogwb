@@ -39,7 +39,7 @@ and sliders, is
 the posteriors of `H0`, `(H0, Omega_m)` and `(xi_0, xi_n)` on a grid for all six
 networks, with no sampler. The data are a zero-noise Poisson injection
 (`data_seed = 41`); the model spectrum is the rescaled reference-redshift
-spectrum of `astrogwb.background.importance` (`catalog_seed = 42`): `2^14` intrinsic
+spectrum of `astrogwb.importance.spectrum` (`catalog_seed = 42`): `2^14` intrinsic
 draws, each generated once at reference redshift `1e-4` by `reference_catalog`,
 and `ImportanceGaussianLikelihood` rescaling their mean power to 32 Gauss-Legendre
 nodes in the scale factor `1/(1 + z)` at each grid point, with no intrinsic
@@ -60,7 +60,7 @@ uv run --extra notebook --group dev marimo check --strict notebooks/cosmology_gr
 `notebooks/importance_convergence.py` measures the two errors of the
 rescaled reference-redshift spectrum separately, to choose the grid posteriors'
 `(N, Z)`. The rescaling itself holds for the (2,2)-mode aligned-spin waveforms
-used; `tests/core/test_gwb_importance.py` checks it against waveforms generated
+used; `tests/core/test_importance_spectrum.py` checks it against waveforms generated
 at every node. The redshift quadrature runs a `Z = 2^i` ladder (4 to 1024 nodes) on one
 reference catalog -- the node count is a builder argument, so the ladder costs
 no waveforms. The Monte Carlo noise is the scatter of `M`

@@ -22,16 +22,16 @@ with app.setup(hide_code=True):
     from matplotlib.projections import register_projection
     from numpy.typing import NDArray
 
-    from astrogwb.background.catalog import (
-        CatalogMetadata,
-        PolarizationPowerData,
-        read_catalog,
-    )
-    from astrogwb.background.importance import reference_catalog
     from astrogwb.config import load_config
     from astrogwb.detector import effective_psd, gaussian_bin_scale
     from astrogwb.detector.config import DetectorRegistry
     from astrogwb.frequency import frequency_mask
+    from astrogwb.importance.catalog import (
+        CatalogMetadata,
+        PolarizationPowerData,
+        read_catalog,
+    )
+    from astrogwb.importance.spectrum import reference_catalog
     from astrogwb.inference import ImportanceGaussianLikelihood
     from astrogwb.inference.fisher import spectral_density_jacobian
     from astrogwb.paper.plotting import parameter_label, save_figures, use_paper_style
@@ -66,7 +66,7 @@ def _():
 
     with $\bar P_{\mathrm{ref}}$ the mean reference power, interpolated in
     $\ln f$. The rescaling holds for the $(2,2)$-mode, aligned-spin,
-    quasi-circular waveforms used here; `tests/core/test_gwb_importance.py`
+    quasi-circular waveforms used here; `tests/core/test_importance_spectrum.py`
     checks it against waveforms generated at every node. Two checks, each
     measured on its own:
 

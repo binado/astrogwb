@@ -23,12 +23,12 @@ with app.setup(hide_code=True):
     from matplotlib.projections import register_projection
     from numpy.typing import NDArray
 
-    from astrogwb.background.catalog import (
+    from astrogwb.config import load_config
+    from astrogwb.detector import sample_pair_response
+    from astrogwb.importance.catalog import (
         read_catalog,
         validate_matching_frequency_grids,
     )
-    from astrogwb.config import load_config
-    from astrogwb.detector import sample_pair_response
     from astrogwb.inference import (
         ImportanceGaussianLikelihood,
         grid_log_posterior,

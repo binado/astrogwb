@@ -31,11 +31,6 @@ with app.setup(hide_code=True):
         spectral_snr,
         spectral_snr_squared_per_log_frequency,
     )
-    from astrogwb.background.catalog import (
-        CatalogMetadata,
-        PolarizationPowerData,
-        read_catalog,
-    )
     from astrogwb.config import load_config
     from astrogwb.detector import (
         effective_psd,
@@ -46,6 +41,11 @@ with app.setup(hide_code=True):
     )
     from astrogwb.detector.config import DetectorRegistry
     from astrogwb.frequency import frequency_mask
+    from astrogwb.importance.catalog import (
+        CatalogMetadata,
+        PolarizationPowerData,
+        read_catalog,
+    )
     from astrogwb.inference import ImportanceGaussianLikelihood
     from astrogwb.inference import Network as LikelihoodNetwork
     from astrogwb.paper.plotting import (
@@ -869,7 +869,7 @@ def _():
     Foreground subtraction removes the nearby sources, which dominate the shot
     noise: its variance goes as $1/z_{\min}$, while the signal loses only a
     little. This section scans the window's lower edge $z_{\min}$ with the
-    rescaled importance estimator of `astrogwb.background.importance`. One reference
+    rescaled importance estimator of `astrogwb.importance.spectrum`. One reference
     catalog is generated at the redshift where $d_L = 1$ Mpc, below every
     window, and rescaled to each window's nodes, so the scan costs no
     waveforms. Per network it computes $\rho$ and the relative shot-noise

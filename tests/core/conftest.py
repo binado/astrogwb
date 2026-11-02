@@ -24,7 +24,7 @@ from astrogwb_mock_population import (
     load_mock_population,
 )
 
-from astrogwb.background.catalog import (
+from astrogwb.importance.catalog import (
     CatalogMetadata,
     PolarizationPowerData,
 )

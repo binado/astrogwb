@@ -32,8 +32,11 @@ pip install astrogwb[io]
   addressed by registered name. One declaration serves both generation and
   density evaluation, so a catalog and the weights that reweight it can never
   disagree about the law behind it.
-- `astrogwb.background.importance` reweights the intrinsic draws of a reference catalog
-  to a target population and integrates redshift by closed-form quadrature.
+- `astrogwb.importance` owns importance weighting: `astrogwb.importance.catalog`
+  draws fixed-size reference catalogs and their polarization power,
+  `astrogwb.importance.spectrum` reweights their intrinsic draws to a target
+  population and integrates redshift by closed-form quadrature, and
+  `astrogwb.importance.diagnostics` reports effective sample sizes.
 - `astrogwb.inference` exposes the caller-prepared NumPyro model.
 - `astrogwb.catalog` provides an array-native catalog that records the
   population that drew it, and reads and writes it as HDF5 behind the `io`
@@ -61,7 +64,7 @@ the declaration that produced it:
 ```python
 import jax
 
-from astrogwb.background.catalog import CatalogMetadata, simulate_catalog
+from astrogwb.importance.catalog import CatalogMetadata, simulate_catalog
 from astrogwb.populations import BNSCobaPopulation
 from astrogwb.utils.io import write
 from astrogwb.waveform import WaveformMetadata
@@ -107,7 +110,7 @@ closed-form quadrature, so it needs no weights at all.
 import jax
 import numpy as np
 
-from astrogwb.background.importance import reference_catalog
+from astrogwb.importance.spectrum import reference_catalog
 from astrogwb.inference import ImportanceGaussianLikelihood
 
 reference = reference_catalog(metadata, jax.random.key(42))

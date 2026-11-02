@@ -21,7 +21,7 @@ settings or seeds need different paths; the recorded metadata tells which is whi
 
 ### What a catalog declares
 
-`CatalogMetadata` (in `astrogwb.background.catalog`) carries:
+`CatalogMetadata` (in `astrogwb.importance.catalog`) carries:
 
 1. `waveform` -- a `WaveformMetadata`, by default the named
    `[waveforms.default]` from `config/waveforms.toml`. The stored band matches
@@ -133,7 +133,7 @@ One call, not two. The redshift density and the merger rate are both
 normalizations of the same redshift law, so they come from one
 `~astrogwb.distributions.redshift.base.RedshiftDistribution`. Its
 `distance_model()` samples `redshift` and registers the GW `luminosity_distance`
-(modified propagation included), and the quadrature in `astrogwb.background.importance`
+(modified propagation included), and the quadrature in `astrogwb.importance.spectrum`
 reads the rate and the distances off it directly.
 
 `bns_coba` is the one shipped population, and its variants are construction
@@ -203,7 +203,7 @@ From Python, the cached node draws on a miss and reads on a hit:
 import numpy as np
 
 from astrogwb.config import load_config
-from astrogwb.background.catalog import (
+from astrogwb.importance.catalog import (
     CatalogMetadata,
     polarization_power,
 )
@@ -274,7 +274,7 @@ For a catalog, the root holds `frequencies` `(F,)`, `polarization_power`
 `(F, N)` and a `source_parameters/` group of `(N,)` columns. There are no
 format names or version files: the path says which node, metadata and inputs a
 file answers, and `load(path, MetadataType)` returns `(data, metadata, attrs)` to a
-caller that was handed a file by path; `astrogwb.background.catalog.read_catalog(path)`
+caller that was handed a file by path; `astrogwb.importance.catalog.read_catalog(path)`
 is that call for a catalog, returning `(data, metadata, seed)`.
 The arrays are used as read (the writer is the only source of files, so they
 are not re-validated), and `metadata.population.build()` rebuilds the recorded population: an unknown

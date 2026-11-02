@@ -8,7 +8,7 @@ blocks:
 1. :func:`simulate_population` draws one realization -- hyperparameters, a
    Poisson count, every source's intrinsic and extrinsic parameters -- as a
    :class:`PopulationArtifact`, its sources through :func:`simulate_sources`,
-   which the importance catalogs of :mod:`astrogwb.background` share.
+   which the importance catalogs of :mod:`astrogwb.importance` share.
 2. :func:`simulate_background` generates each chunk's radiation-frame
    polarizations through a :class:`~astrogwb.waveform.WaveformMetadata`,
    projects them onto the named networks of a
