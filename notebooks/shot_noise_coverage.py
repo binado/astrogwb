@@ -26,6 +26,7 @@ with app.setup(hide_code=True):
 
     from astrogwb.config import load_config
     from astrogwb.detector import sample_pair_response
+    from astrogwb.gwb.catalog import read_catalog
     from astrogwb.gwb.importance import INCLINATION_SECOND_MOMENT
     from astrogwb.inference import (
         ImportanceGaussianLikelihood,
@@ -33,7 +34,6 @@ with app.setup(hide_code=True):
         rank_one_gaussian_log_likelihood,
     )
     from astrogwb.inference import Network as LikelihoodNetwork
-    from astrogwb.paper.catalogs import read_reference_catalog
     from astrogwb.paper.plotting import (
         DETECTOR_COMPARISON_LEGEND,
         DETECTOR_NETWORKS,
@@ -47,7 +47,6 @@ with app.setup(hide_code=True):
         network_pair_data,
         pad_pairs,
     )
-    from astrogwb.populations import build_population
     from astrogwb.simulators import (
         BackgroundArtifact,
         network_spectra_ensemble,
@@ -101,7 +100,7 @@ def _():
     the optimally weighted sum over detector pairs of its cross-power relative
     to its sky-averaged power, with $\langle r \rangle = 1$ over isotropic
     orientations. The injections are drawn this way
-    (`astrogwb.simulators.BackgroundSimulator`), so the six networks record one catalog
+    (`astrogwb.simulators.simulate_background`), so the six networks record one catalog
     as six spectra, and the shot noise of each carries its own
     $\langle r_f r_{f'} \rangle$.
 
@@ -757,9 +756,9 @@ def _(
     reference_catalog_path,
     sample_response,
 ):
-    catalog_data, catalog_metadata, _ = read_reference_catalog(reference_catalog_path)
+    catalog_data, catalog_metadata, _ = read_catalog(reference_catalog_path)
     population = catalog_metadata.population
-    target = build_population(population.model_name, **population.model_kwargs)
+    target = population.build()
     likelihood = ImportanceGaussianLikelihood.from_catalog(
         catalog_data,
         catalog_metadata,

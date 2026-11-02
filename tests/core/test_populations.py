@@ -38,11 +38,11 @@ from astrogwb.distributions.delay import PowerLawDelayDistribution
 from astrogwb.distributions.redshift import (
     madau_dickinson_time_delayed_redshift_distribution,
 )
-from astrogwb.gwb.catalog import REDSHIFT_SITE
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
+    REDSHIFT_SITE,
+    BNSCobaPopulation,
     Population,
-    build_population,
     joint_model,
 )
 from astrogwb.utils.numpyro import sample_and_logprob
@@ -142,13 +142,12 @@ MASS_SITES = ("source_frame_mass_1", "source_frame_mass_2")
 
 
 def _gaussian_population() -> Population:
-    return build_population(
-        "bns_coba",
+    return BNSCobaPopulation(
         mass_model="gaussian",
         minimum_redshift=Z_MIN,
         maximum_redshift=Z_MAX,
         n_grid=N_GRID,
-    )
+    ).build()
 
 
 #: The generating populations whose draw path runs through the plated replay:
@@ -170,23 +169,20 @@ def reference(params: dict[str, float]) -> tuple[jax.Array, jax.Array, jax.Array
 
 
 # --------------------------------------------------------------------------- #
-# Registry
+# Population records
 # --------------------------------------------------------------------------- #
-WINDOW = {
-    "mass_model": "uniform",
-    "minimum_redshift": Z_MIN,
-    "maximum_redshift": Z_MAX,
-    "n_grid": N_GRID,
-}
-
-#: The delay construction kwargs the time-delayed population takes on top of the
-#: window: a 20 Myr floor and formation cut off at z = 20, which also caps the
-#: delay.
-DELAY = {
-    "minimum_delay": 0.02,
-    "maximum_formation_redshift": 20.0,
-    "n_delay_nodes": 48,
-}
+#: The time-delayed population: a 20 Myr floor and formation cut off at
+#: z = 20, which also caps the delay.
+DELAYED = BNSCobaPopulation(
+    mass_model="uniform",
+    minimum_redshift=Z_MIN,
+    maximum_redshift=Z_MAX,
+    n_grid=N_GRID,
+    time_delay=True,
+    minimum_delay=0.02,
+    maximum_formation_redshift=20.0,
+    n_delay_nodes=48,
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -533,7 +529,7 @@ DELAYED_PARAMS: dict[str, float] = {**POPULATION_PARAMS, "delay_slope": -1.0}
 
 
 def _delayed_population() -> Population:
-    return build_population("bns_coba", **WINDOW, **DELAY, time_delay=True)
+    return DELAYED.build()
 
 
 def test_time_delayed_draws_evaluate_to_a_finite_density_with_a_slope_gradient() -> (
@@ -601,7 +597,7 @@ def test_time_delayed_ceiling_is_cosmological_not_a_fixed_number(slope: float) -
     unbounded = madau_dickinson_time_delayed_redshift_distribution(
         params=params,
         time_delay_distribution=PowerLawDelayDistribution(
-            slope, DELAY["minimum_delay"], 1.0e3
+            slope, DELAYED.minimum_delay, 1.0e3
         ),
         n_delay_nodes=48,
         maximum_formation_redshift=20.0,

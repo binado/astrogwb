@@ -18,11 +18,11 @@ from astrogwb.detector import DetectorRegistry, isotropic_overlap_reduction_func
 from astrogwb.populations.joint import EXTRINSIC_SITES
 from astrogwb.simulators import (
     BackgroundArtifact,
-    BackgroundSimulator,
     PopulationArtifact,
-    PopulationSimulator,
     combine_pair_spectra,
     realization_key,
+    simulate_background,
+    simulate_population,
 )
 from astrogwb.waveform import WaveformMetadata, polarization_power, waveform_generator
 
@@ -33,11 +33,11 @@ MAX_STANDARD_ERRORS = 5.0
 @pytest.fixture(scope="module")
 def population() -> PopulationArtifact:
     """About fifty sources."""
-    return PopulationSimulator(_population(1e-4))(realization_key(41, 0))
+    return simulate_population(_population(1e-4), realization_key(41, 0))
 
 
 def test_population_is_reproducible(population: PopulationArtifact) -> None:
-    redrawn = PopulationSimulator(_population(1e-4))(realization_key(41, 0))
+    redrawn = simulate_population(_population(1e-4), realization_key(41, 0))
 
     assert population.count > 0
     assert set(EXTRINSIC_SITES) <= set(population.source_parameters)
@@ -83,14 +83,10 @@ def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum() -> No
     spectrum to the group's sky-averaged spectrum :math:`\sum_i I_i / T`
     isolates the response, and its mean over groups is :math:`\gamma_{ab}`.
     """
-    realization = PopulationSimulator(_population(4e-3))(realization_key(7, 0))
-    background = BackgroundSimulator(
-        WAVEFORM,
-        DetectorRegistry(
-            detectors=NETWORKS.detectors,
-            networks={"triangle": NETWORKS.networks["triangle"]},
-        ),
-        chunk_size=8,
+    realization = simulate_population(_population(4e-3), realization_key(7, 0))
+    triangle = DetectorRegistry(
+        detectors=NETWORKS.detectors,
+        networks={"triangle": NETWORKS.networks["triangle"]},
     )
     generator = waveform_generator(WAVEFORM)
     group = 16
@@ -102,13 +98,15 @@ def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum() -> No
         }
         part = dataclasses.replace(realization, source_parameters=sources)
         power = np.asarray(generator.generate_batch(sources)).sum(axis=1)
-        spectra = background(part).spectra["triangle"]
+        spectra = simulate_background(part, WAVEFORM, triangle, chunk_size=8).spectra[
+            "triangle"
+        ]
         ratios.append(spectra / (power / realization.observation_seconds))
     ratios = np.asarray(ratios)
     expected = np.stack(
         [
             isotropic_overlap_reduction_function(
-                background.frequencies, *NETWORKS.build_detectors(pair)
+                np.asarray(generator.frequencies), *NETWORKS.build_detectors(pair)
             )
             for pair in NETWORKS.pairs("triangle")
         ]
@@ -120,23 +118,22 @@ def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum() -> No
 
 
 def test_an_empty_realization_has_zero_spectra() -> None:
-    empty = PopulationSimulator(_population(1e-12))(realization_key(41, 0))
+    empty = simulate_population(_population(1e-12), realization_key(41, 0))
 
-    simulator = BackgroundSimulator(WAVEFORM, NETWORKS)
-    background = simulator(empty)
+    background = simulate_background(empty, WAVEFORM, NETWORKS)
 
     assert empty.count == 0
     assert all(values.shape == (0,) for values in empty.source_parameters.values())
     for name in NETWORKS.networks:
         pairs = background.spectra[name]
-        assert pairs.shape == (len(NETWORKS.pairs(name)), simulator.frequencies.size)
+        assert pairs.shape == (len(NETWORKS.pairs(name)), background.frequencies.size)
         assert not np.any(pairs)
 
 
 @pytest.fixture(scope="module")
 def projected(population: PopulationArtifact) -> BackgroundArtifact:
     """The tiny population projected onto both networks."""
-    return BackgroundSimulator(WAVEFORM, NETWORKS, chunk_size=8)(population)
+    return simulate_background(population, WAVEFORM, NETWORKS, chunk_size=8)
 
 
 @pytest.mark.parametrize("name", list(NETWORKS.networks))
@@ -148,7 +145,7 @@ def test_each_network_holds_its_rows_of_a_single_network_projection(
     alone_registry = DetectorRegistry(
         detectors=NETWORKS.detectors, networks={name: NETWORKS.networks[name]}
     )
-    alone = BackgroundSimulator(WAVEFORM, alone_registry, chunk_size=8)(population)
+    alone = simulate_background(population, WAVEFORM, alone_registry, chunk_size=8)
 
     np.testing.assert_array_equal(projected.spectra[name], alone.spectra[name])
 
@@ -186,8 +183,8 @@ def test_custom_detector_geometry_is_used_for_projection(
         detectors={**NETWORKS.detectors, "X1": NETWORKS.detectors["E1"]},
         networks={"custom": ("X1", "E2")},
     )
-    moved = BackgroundSimulator(WAVEFORM, registry)(population).spectra["custom"]
-    original = BackgroundSimulator(WAVEFORM, reference)(population).spectra["custom"]
+    moved = simulate_background(population, WAVEFORM, registry).spectra["custom"]
+    original = simulate_background(population, WAVEFORM, reference).spectra["custom"]
     assert not np.array_equal(moved, original)
 
 
@@ -207,8 +204,8 @@ def test_psd_override_preserves_pair_spectra_and_changes_combination(
         },
         networks=mixed.networks,
     )
-    baseline = BackgroundSimulator(WAVEFORM, mixed)(population)
-    overridden = BackgroundSimulator(WAVEFORM, changed)(population)
+    baseline = simulate_background(population, WAVEFORM, mixed)
+    overridden = simulate_background(population, WAVEFORM, changed)
     np.testing.assert_array_equal(
         baseline.spectra["mixed"], overridden.spectra["mixed"]
     )
@@ -232,12 +229,15 @@ def empty(population: PopulationArtifact) -> PopulationArtifact:
 
 def test_pure_noise_matches_the_pair_scale(empty: PopulationArtifact) -> None:
     segment_duration = 600.0
-    simulator = BackgroundSimulator(
-        WAVEFORM, NETWORKS, chunk_size=8, segment_duration=segment_duration
-    )
     residuals = []
     for draw in range(120):
-        background = simulator(dataclasses.replace(empty, rng_key=(0, draw)))
+        background = simulate_background(
+            dataclasses.replace(empty, rng_key=(0, draw)),
+            WAVEFORM,
+            NETWORKS,
+            chunk_size=8,
+            segment_duration=segment_duration,
+        )
         noise = background.noise()
         for name, spectrum in background.spectra.items():
             scale = noise[name].pair_scale
@@ -258,16 +258,22 @@ def test_spectra_do_not_depend_on_the_segment_batch_size(
     population: PopulationArtifact,
 ) -> None:
     batch_size = 7
-    reference = BackgroundSimulator(
-        WAVEFORM, NETWORKS, chunk_size=8, segment_duration=60.0, segment_batch_size=64
-    )(population)
-    batched = BackgroundSimulator(
+    reference = simulate_background(
+        population,
+        WAVEFORM,
+        NETWORKS,
+        chunk_size=8,
+        segment_duration=60.0,
+        segment_batch_size=64,
+    )
+    batched = simulate_background(
+        population,
         WAVEFORM,
         NETWORKS,
         chunk_size=8,
         segment_duration=60.0,
         segment_batch_size=batch_size,
-    )(population)
+    )
 
     for name, spectrum in reference.spectra.items():
         np.testing.assert_allclose(batched.spectra[name], spectrum)
@@ -279,14 +285,15 @@ def test_noisy_background_averages_to_the_incoherent_signal(
 ) -> None:
     """New labels and noise per key, same sources: the mean is ``5 K / T``."""
     segment_duration = 60.0
-    simulator = BackgroundSimulator(
-        WAVEFORM, NETWORKS, chunk_size=8, segment_duration=segment_duration
-    )
     draws = np.stack(
         [
-            simulator(dataclasses.replace(population, rng_key=(0, draw))).spectra[
-                "pair"
-            ]
+            simulate_background(
+                dataclasses.replace(population, rng_key=(0, draw)),
+                WAVEFORM,
+                NETWORKS,
+                chunk_size=8,
+                segment_duration=segment_duration,
+            ).spectra["pair"]
             for draw in range(150)
         ]
     )

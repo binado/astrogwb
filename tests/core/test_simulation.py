@@ -16,12 +16,12 @@ from astrogwb_tiny_pipeline import (
 
 from astrogwb.simulators import (
     BackgroundArtifact,
-    BackgroundSimulator,
-    PopulationSimulator,
     SimulationConfig,
     network_spectra_ensemble,
     realization_key,
     simulate,
+    simulate_background,
+    simulate_population,
 )
 
 SEED = 41
@@ -80,9 +80,9 @@ def test_simulate_is_the_two_building_blocks_composed(
     simulated: BackgroundArtifact,
 ) -> None:
     config = _config()
-    population = PopulationSimulator(config.population)(realization_key(SEED, 0))
+    population = simulate_population(config.population, realization_key(SEED, 0))
 
-    by_hand = BackgroundSimulator(WAVEFORM, NETWORKS, chunk_size=CHUNK)(population)
+    by_hand = simulate_background(population, WAVEFORM, NETWORKS, chunk_size=CHUNK)
 
     assert_same_spectra(simulated, by_hand)
     assert simulated.rng_key == population.rng_key

@@ -25,15 +25,15 @@ with app.setup(hide_code=True):
 
     from astrogwb.config import load_config
     from astrogwb.detector import sample_pair_response
+    from astrogwb.gwb.catalog import (
+        read_catalog,
+        validate_matching_frequency_grids,
+    )
     from astrogwb.inference import (
         ImportanceGaussianLikelihood,
         grid_log_posterior,
     )
     from astrogwb.inference import Network as LikelihoodNetwork
-    from astrogwb.paper.catalogs import (
-        read_reference_catalog,
-        validate_matching_frequency_grids,
-    )
     from astrogwb.paper.plotting import (
         DETECTOR_NETWORKS,
         TRUTH,
@@ -49,7 +49,6 @@ with app.setup(hide_code=True):
         pad_pairs,
         shot_noise_variant,
     )
-    from astrogwb.populations import build_population
     from astrogwb.simulators import (
         BackgroundArtifact,
         network_spectra_ensemble,
@@ -74,7 +73,7 @@ def _():
     records it. Every source reaches a network through its own antenna
     patterns at an isotropic sky position, and the detector pairs are combined
     with the optimal cross-correlation weights
-    (`astrogwb.simulators.BackgroundSimulator`), so the six networks see one catalog
+    (`astrogwb.simulators.simulate_background`), so the six networks see one catalog
     but record six spectra. Each is a catalog realization
     $S_h^{\mathrm{cat}}$ that carries physical shot noise about the expected
     spectrum, which each network's likelihood models with its own response. The
@@ -604,9 +603,7 @@ def _():
 def _(frequencies, observation_time, redshift_nodes, reference_catalog_path):
     # The NumPy catalog is local to this cell, so it is freed once the device
     # copy made by the likelihood exists: the power and its square.
-    catalog_data, catalog_metadata, _seed = read_reference_catalog(
-        reference_catalog_path
-    )
+    catalog_data, catalog_metadata, _seed = read_catalog(reference_catalog_path)
     population = catalog_metadata.population
     power = catalog_data["polarization_power"]
     print(
@@ -615,7 +612,7 @@ def _(frequencies, observation_time, redshift_nodes, reference_catalog_path):
         f"{power.shape[0]} reference bins, {power.nbytes / 1e9:.2f} GB of power; "
         f"{redshift_nodes} redshift nodes"
     )
-    target = build_population(population.model_name, **population.model_kwargs)
+    target = population.build()
     # No swept parameter is intrinsic, so no density factor enters a weight.
     # Built with the amplitude mode, so the squared power is held for every
     # variant `shot_noise_variant` switches to.

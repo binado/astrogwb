@@ -7,7 +7,7 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field
 
 from astrogwb.detector.config import DetectorRegistry
-from astrogwb.simulators.population import PopulationMetadata
+from astrogwb.simulators.population import RealizationMetadata
 from astrogwb.waveform.metadata import WaveformMetadata
 
 __all__ = ["SimulationConfig"]
@@ -27,7 +27,7 @@ class SimulationConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
 
-    population: PopulationMetadata
+    population: RealizationMetadata
     waveform: WaveformMetadata
     detectors: DetectorRegistry
     segment_duration: Annotated[float, Field(gt=0.0)] | None = None

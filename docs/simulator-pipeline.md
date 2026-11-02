@@ -5,12 +5,12 @@ pass: a `SimulationConfig` and a key in, one `BackgroundArtifact` out, written
 to one HDF5 file.
 
 ```text
-SimulationConfig = PopulationMetadata + WaveformMetadata + DetectorRegistry
+SimulationConfig = RealizationMetadata + WaveformMetadata + DetectorRegistry
                    (+ segment_duration)
 
-PopulationMetadata                     --PopulationSimulator(key)--> PopulationArtifact
-WaveformMetadata + DetectorRegistry    --BackgroundSimulator(pop)--> BackgroundArtifact
-simulate(config, key)                  = both, composed
+simulate_population(RealizationMetadata, key)                  -> PopulationArtifact
+simulate_background(PopulationArtifact, Waveform..., Registry) -> BackgroundArtifact
+simulate(config, key)                                          = both, composed
 ```
 
 `SimulationConfig` is a frozen pydantic model: everything that determines the
@@ -28,7 +28,7 @@ deterministic given the population and its config.
 
 ## Stages
 
-**Population.** `PopulationSimulator(metadata)(key)` draws the
+**Population.** `simulate_population(metadata, key)` draws the
 hyperparameters (fixed, or drawn from their priors), a Poisson count
 `N ~ Poisson(R T)`, and every source:
 
@@ -37,7 +37,8 @@ hyperparameters (fixed, or drawn from their priors), a Poisson count
   `declination = arcsin(uniform(-1, 1))` (an isotropic celestial direction),
   `polarization_angle` uniform on `[0, pi)`, and `coa_phase`. Angles are radians.
 
-All sources are drawn in one batch through `sample_and_logprob`, with independent
+All sources are drawn in one batch through `simulate_sources`, which the
+importance catalogs of `astrogwb.gwb` share, with independent
 random streams for hyperparameters, count, and the joint source model.
 The joint model samples intrinsic parameters and extrinsic angles together.
 Counts are Poisson only; the
@@ -45,10 +46,11 @@ fixed-count mode was removed. A fixed-size Monte Carlo sample of a population
 is a reference catalog for importance weighting (`astrogwb.gwb.catalog`), not
 a realization.
 
-**Background.** `BackgroundSimulator(waveform_metadata, networks)(population)`
+**Background.** `simulate_background(population, waveform_metadata, registry)`
 loops over fixed-size source chunks (the last chunk padded with copies of its
 first source whose polarizations are masked to zero, so every realization
-compiles once). For each chunk it evaluates the complex radiation-frame
+compiles once; the compiled kernels are cached per waveform and pair layout,
+so every call with the same waveform reuses them). For each chunk it evaluates the complex radiation-frame
 polarizations `(h+, hx)` (which depend on the intrinsic parameters, inclination
 and coalescence phase), projects them onto every pair `a < b` of the union of
 the networks' detectors once, and accumulates the real cross-power
@@ -111,7 +113,7 @@ combined spectrum is `S_h`.
 
 By default the background carries no noise. With `segment_duration` (seconds,
 e.g. 2048; `--segment-duration` of `astrogwb simulate`)
-the `BackgroundSimulator` cuts the observation into `N = floor(T / tau)`
+`simulate_background` cuts the observation into `N = floor(T / tau)`
 segments of length `tau_eff = T / N` and assigns every source to a uniformly
 drawn segment (sources are Poisson in time). Each segment has its own coherent
 strain `h_a^s = sum_{i in s} H_{a,i}` and fresh independent noise
@@ -185,8 +187,8 @@ background.config.population.observation_time
 background.noise()  # likelihood inputs, from the config's detectors
 ```
 
-`simulate` composes `PopulationSimulator(config.population)(key)` and
-`BackgroundSimulator(config.waveform, config.detectors, ...)(population)`,
+`simulate` composes `simulate_population(config.population, key)` and
+`simulate_background(population, config.waveform, config.detectors, ...)`,
 which remain available as building blocks.
 
 `astrogwb.simulators.network_spectra_ensemble(root, seed, n, names)` reads an
@@ -210,7 +212,7 @@ astrogwb simulate root/41-0.h5 --population-metadata population.toml \
     --seed 41 --segment-duration 2048
 ```
 
-The population and waveform files hold the fields of `PopulationMetadata` and
+The population and waveform files hold the fields of `RealizationMetadata` and
 `WaveformMetadata` at their top level. Repeat `--detector-config PATH` to merge
 registry layers in argument order. Draw `i` of a seed is `--index i`, the key
 `realization_key(seed, i)` that ensembles use. The runtime options
@@ -223,16 +225,18 @@ mixed.
 | Before | Now |
 | --- | --- |
 | `BackgroundSpectralDensitySimulator` (sky-averaged) | removed; the expected spectrum is the likelihood's prediction |
-| `NetworkSpectralDensitySimulator`, `JointNetworkSpectralDensitySimulator` | `BackgroundSimulator` over the detector union, then `combine_pair_spectra` |
-| `BackgroundSpectralDensityMetadata`, `NetworkSpectralDensityMetadata` | `PopulationMetadata` + `WaveformMetadata` + `DetectorRegistry` |
-| `PopulationDrawMetadata` (`count`, `num_events`) | `astrogwb.simulators.PopulationMetadata`, Poisson only |
+| `NetworkSpectralDensitySimulator`, `JointNetworkSpectralDensitySimulator` | `simulate_background` over the detector union, then `combine_pair_spectra` |
+| `BackgroundSpectralDensityMetadata`, `NetworkSpectralDensityMetadata` | `RealizationMetadata` + `WaveformMetadata` + `DetectorRegistry` |
+| `PopulationDrawMetadata` (`count`, `num_events`) | `astrogwb.simulators.RealizationMetadata`, Poisson only |
+| `PopulationSimulator(metadata)(key)`, `BackgroundSimulator(waveform, registry)(population)` | `simulate_population(metadata, key)`, `simulate_background(population, waveform, registry)` |
+| `astrogwb.simulators.PopulationMetadata` | `astrogwb.simulators.RealizationMetadata` |
 | `astrogwb.simulators.polarization_power` | `astrogwb.gwb.catalog` |
 | `astrogwb.simulators.core.{write,load,content_key}` | `astrogwb.utils.io` |
 | `spectra_ensemble`, `network_spectra_ensemble(EnsembleRecord, ...)` | `Snakefile` writes the ensemble; `network_spectra_ensemble(root, seed, n, names)` reads it |
 | `scripts/simulate_spectra.py`, `config/simulations/spectrum/` | `astrogwb simulate` |
 | one artifact directory per stage (`metadata.toml` + `data.h5`, `[parent]` references), then realization directories (`metadata.toml` + `source_parameters.h5` + `background.h5`) | one HDF5 file per draw carrying its `SimulationConfig` and version |
 | `PopulationArtifact.write(dir)` / `.open(path)`, `Realization`, `RealizationSimulator`, `simulate_realization` | `simulate(config, key)`; no sources file |
-| `WaveformSimulator`, `Waveforms`, `WaveformArtifact`, `polarization.h5` | removed; `BackgroundSimulator(waveform_metadata, registry)(population)` fuses waveform evaluation and pair projection |
+| `WaveformSimulator`, `Waveforms`, `WaveformArtifact`, `polarization.h5` | removed; `simulate_background(population, waveform_metadata, registry)` fuses waveform evaluation and pair projection |
 | `content_key`, `ContentKeyed`, `Keyed`, `catalog_stem`, `reference_catalog_stem` | removed; files are named by the caller |
 | `BackgroundArtifact.upstream`, `.manifest_path`, `.waveform_key`, `.key()`, `population_key`, `waveform_key`, `background_key` | `BackgroundArtifact.config`; no content keys |
 | `astrogwb simulate population` / `waveforms` / `background`, then `astrogwb simulate DIRECTORY --background --keep-sources` | `astrogwb simulate OUTPUT.h5` with `--population-metadata`, `--waveform-metadata`, `--detector-config`, `--seed` |

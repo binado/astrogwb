@@ -5,10 +5,11 @@ population, the waveform, the detector registry and an optional noise segment
 length. :func:`simulate` draws it at a key in one pass, with two building
 blocks:
 
-1. :class:`PopulationSimulator` draws one realization -- hyperparameters, a
+1. :func:`simulate_population` draws one realization -- hyperparameters, a
    Poisson count, every source's intrinsic and extrinsic parameters -- as a
-   :class:`PopulationArtifact`.
-2. :class:`BackgroundSimulator` generates each chunk's radiation-frame
+   :class:`PopulationArtifact`, its sources through :func:`simulate_sources`,
+   which the importance catalogs of :mod:`astrogwb.gwb` share.
+2. :func:`simulate_background` generates each chunk's radiation-frame
    polarizations through a :class:`~astrogwb.waveform.WaveformMetadata`,
    projects them onto the named networks of a
    :class:`~astrogwb.detector.DetectorRegistry`, and sums the per-pair
@@ -29,30 +30,32 @@ deterministic function of the realization's key.
 from astrogwb.simulators._keys import realization_key
 from astrogwb.simulators.background import (
     BackgroundArtifact,
-    BackgroundSimulator,
     NetworkNoise,
     combine_pair_spectra,
+    simulate_background,
 )
 from astrogwb.simulators.config import SimulationConfig
 from astrogwb.simulators.ensemble import NetworkSpectra, network_spectra_ensemble
 from astrogwb.simulators.population import (
     PopulationArtifact,
-    PopulationMetadata,
-    PopulationSimulator,
+    RealizationMetadata,
+    simulate_population,
 )
 from astrogwb.simulators.simulation import simulate
+from astrogwb.simulators.sources import simulate_sources
 
 __all__ = [
     "BackgroundArtifact",
-    "BackgroundSimulator",
     "NetworkNoise",
     "NetworkSpectra",
     "PopulationArtifact",
-    "PopulationMetadata",
-    "PopulationSimulator",
+    "RealizationMetadata",
     "SimulationConfig",
     "combine_pair_spectra",
     "network_spectra_ensemble",
     "realization_key",
     "simulate",
+    "simulate_background",
+    "simulate_population",
+    "simulate_sources",
 ]

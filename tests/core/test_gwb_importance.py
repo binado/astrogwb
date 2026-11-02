@@ -30,7 +30,7 @@ from astrogwb.gwb.importance import (
     reference_catalog,
 )
 from astrogwb.inference import ImportanceGaussianLikelihood
-from astrogwb.populations import PopulationMetadata, build_population, joint_model
+from astrogwb.populations import BNSCobaPopulation, joint_model
 from astrogwb.simulators import realization_key
 from astrogwb.utils import gauss_legendre_nodes_weights
 from astrogwb.utils.numpyro import sample_and_logprob
@@ -69,16 +69,13 @@ def reference_metadata() -> CatalogMetadata:
                 "frequency_resolution": 0.02,
             }
         ),
-        population=PopulationMetadata(
-            model_name="bns_coba",
-            model_kwargs={
-                "mass_model": "uniform",
-                "minimum_redshift": 0.1,
-                "maximum_redshift": 5.0,
-                # Fine: the brute force reads the table, the spectrum the closed
-                # form, and they agree only to the table's interpolation error.
-                "n_grid": 8192,
-            },
+        population=BNSCobaPopulation(
+            mass_model="uniform",
+            minimum_redshift=0.1,
+            maximum_redshift=5.0,
+            # Fine: the brute force reads the table, the spectrum the closed
+            # form, and they agree only to the table's interpolation error.
+            n_grid=8192,
         ),
         fiducials={
             "H0": 67.66,
@@ -161,10 +158,7 @@ def _spectrum_on_nodes(
     distance, squared.
     """
     population = metadata.population
-    minimum, maximum = (
-        float(population.model_kwargs[name])
-        for name in ("minimum_redshift", "maximum_redshift")
-    )
+    minimum, maximum = population.minimum_redshift, population.maximum_redshift
     redshift, weights = redshift_quadrature(minimum, maximum, NUM_NODES)
     fiducial_model = joint_model(*population.build()(metadata.fiducials))
     samples = sample_and_logprob(
@@ -225,9 +219,7 @@ def _rescaled_and_brute_force(
     """Rescaled and brute-force spectra, or variances, on the same draws and nodes."""
     key = realization_key(41, 0)
     reference = reference_catalog(metadata, key)
-    target = build_population(
-        metadata.population.model_name, **metadata.population.model_kwargs
-    )
+    target = metadata.population.build()
     settings: dict[str, Any] = {
         "population": target,
         "frequencies": waveform_generator(OBSERVED_WAVEFORM).frequencies,
@@ -286,10 +278,7 @@ def test_rescaled_prediction_reweights_like_waveforms_generated_at_every_node(
 def shot_noise_builder(reference_metadata: CatalogMetadata) -> Any:
     """``observation_time -> likelihood`` on one reference catalog."""
     data = reference_catalog(reference_metadata, realization_key(41, 0))
-    target = build_population(
-        reference_metadata.population.model_name,
-        **reference_metadata.population.model_kwargs,
-    )
+    target = reference_metadata.population.build()
 
     def build(observation_time: float) -> ImportanceGaussianLikelihood:
         return ImportanceGaussianLikelihood.from_catalog(
@@ -372,13 +361,8 @@ def test_spectrum_scales_as_a_power_of_h0_and_the_local_merger_rate(
 
 def _at_window_edge(metadata: CatalogMetadata, edge: float) -> CatalogMetadata:
     """``metadata`` with the population's window starting at ``edge``."""
-    kwargs = {**metadata.population.model_kwargs, "minimum_redshift": edge}
     return metadata.model_copy(
-        update={
-            "population": metadata.population.model_copy(
-                update={"model_kwargs": kwargs}
-            )
-        }
+        update={"population": metadata.population.replace(minimum_redshift=edge)}
     )
 
 
@@ -392,9 +376,7 @@ def _bound_predictions(
     likelihood = ImportanceGaussianLikelihood.from_catalog(
         data,
         metadata,
-        population=build_population(
-            metadata.population.model_name, **metadata.population.model_kwargs
-        ),
+        population=metadata.population.build(),
         frequencies=np.asarray(waveform_generator(OBSERVED_WAVEFORM).frequencies),
         num_redshift_nodes=NUM_NODES,
         density_sites=(),

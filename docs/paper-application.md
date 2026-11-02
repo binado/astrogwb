@@ -91,7 +91,7 @@ pyknf. Later fields override earlier fields, tables merge recursively, and
 `${...}` references and `extends` table inheritance are resolved by the shared
 config loader. The merged result is a complete `CatalogMetadata` record: top-level `num_samples`,
 `sampling`, optional `reference_redshift`, and tables for `waveform`,
-`population` (including `population.model_kwargs`), and `fiducials`.
+`population` (its `model_name` and construction settings), and `fiducials`.
 Omit optional null fields and `version`; the installed package supplies its
 version. The seed and execution options (`--chunk-size`, `--platform`, and
 `--cpu-threads`) are command-line arguments, outside the catalog record.

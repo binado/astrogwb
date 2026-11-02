@@ -7,7 +7,28 @@ import numpy as np
 from jax.typing import ArrayLike
 from numpy.polynomial.legendre import leggauss
 
+from astrogwb import __version__
 from astrogwb.constants import SECONDS_PER_YEAR
+
+
+def require_current_version(version: str) -> None:
+    """Raise unless a record's ``version`` is the installed astrogwb version.
+
+    Parameters
+    ----------
+    version
+        The version a metadata record was made with.
+
+    Raises
+    ------
+    ValueError
+        If ``version`` is not :data:`astrogwb.__version__`.
+    """
+    if version != __version__:
+        raise ValueError(
+            f"metadata is for astrogwb {version}, but {__version__} is installed; "
+            "regenerate it"
+        )
 
 
 def years_to_seconds(observation_time_yr: float) -> float:

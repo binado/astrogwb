@@ -15,8 +15,6 @@ use_taper_in_tidal_corrections = true
 
 [population]
 model_name = "bns_coba"
-
-[population.model_kwargs]
 mass_model = "uniform"
 minimum_redshift = 0.35
 maximum_redshift = 20.0

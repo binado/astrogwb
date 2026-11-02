@@ -51,9 +51,10 @@ settings or seeds need different paths; the recorded metadata tells which is whi
    alongside a Ripple approximant is rejected.
    `astrogwb.waveform.waveform_generator(config.catalog.waveform)` builds the
    default draw's generator for a notebook.
-2. `population` -- a `PopulationMetadata`: `model_name`, a key in the
-   `astrogwb.populations` registry, `model_kwargs`, the construction settings
-   bound into it. The named populations live in `config/populations.toml`.
+2. `population` -- an `AnyPopulation`: a `model_name` and that model's
+   construction settings as fields, validated into its `PopulationMetadata`
+   subclass (`BNSCobaPopulation` for `"bns_coba"`). The named populations live
+   in `config/populations.toml`.
    There is no seed in it: a seed picks a realization of the density, so it is
    an input beside the metadata.
 3. `fiducials` -- the hyperparameters the draw is made at, `"${fiducials}"`.
@@ -70,25 +71,31 @@ the file next to the seed.
 
 The version is recorded so that *code* changes are caught too -- but only if it
 is bumped. **Bump `version` in `pyproject.toml` whenever a change alters what a
-population draw or a waveform generator produces.** `draw_catalog` and
+population draw or a waveform generator produces.** `simulate_catalog` and
 `reference_catalog` refuse to draw if the metadata's version differs from the
 installed one; regenerate the catalog.
 
-## The population is a registered model
+## The population is a typed record
 
-A catalog names a population by its key in the `astrogwb.populations`
-registry, and supplies the construction kwargs it takes. The redshift window
-and grid resolution are referenced from `[populations.cosmological]` and the
-hyperparameters from the shared `[fiducials]`; `model_kwargs` is one mapping, passed whole to the factory. The
-population declares its density factors and source outputs.
+A catalog names a population by its `model_name` and states the construction
+settings that model takes, as fields of its `PopulationMetadata` subclass. The
+redshift window (`minimum_redshift`, `maximum_redshift`) is a field of every
+population, declared on the base class. The window and grid resolution are
+referenced from `[populations.cosmological]` and the hyperparameters from the
+shared `[fiducials]`. The population declares its density factors and source
+outputs.
 
-**A registry key, not an import path.** Registry keys change only on purpose;
+**A tag, not an import path.** `model_name` values change only on purpose;
 module paths move as collateral whenever a module is reorganized, so a
-persisted `module:function` string is a reference that silently rots. An
-unknown key fails when the population is built, listing what is registered.
+persisted `module:function` string is a reference that silently rots.
+`AnyPopulation` is a pydantic discriminated union on `model_name`: an unknown
+tag, an unknown setting, a wrong literal (`mass_model = "flat"`) or an
+inconsistent pair (`time_delay = true` without `minimum_delay`) fails when the
+record is validated, when the config loads, not when the population is built.
 
-A registered population is a *factory*: it takes the construction kwargs and
-returns a callable `parameters -> (redshift_distribution, source_model)`. One
+A record's `build()` returns a callable
+`parameters -> (redshift_distribution, source_model)`. Equal records return
+the same callable, so a jitted function closing over it compiles once. One
 call builds the redshift distribution once, so the rate and the redshift
 density come from the same grid. `source_model()` is a no-argument NumPyro
 model of the intrinsic parameters alone, in the source frame; it never sees
@@ -99,18 +106,17 @@ arrays are what `sample_and_logprob` conditions in.
 ```python
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
-    build_population,
+    BNSCobaPopulation,
     joint_model,
 )
 from astrogwb.utils.numpyro import sample_and_logprob
 
-population = build_population(
-    "bns_coba",
+population = BNSCobaPopulation(
     mass_model="uniform",
     minimum_redshift=0.0,
     maximum_redshift=20.0,
     n_grid=4096,
-)
+).build()
 redshift_distribution, source_model = population(params)
 total_merger_rate = redshift_distribution.total_merger_rate()  # shape ()
 model = joint_model(redshift_distribution, source_model)
@@ -131,17 +137,19 @@ normalizations of the same redshift law, so they come from one
 reads the rate and the distances off it directly.
 
 `bns_coba` is the one shipped population, and its variants are construction
-kwargs: `mass_model` (`"uniform"` or `"gaussian"`), `time_delay` (with
+settings: `mass_model` (`"uniform"` or `"gaussian"`), `time_delay` (with
 `minimum_delay`, `maximum_formation_redshift`, `n_delay_nodes`). Modified GW propagation is selected by the
-hyperparameters, not a kwarg: it applies whenever `xi_0` is among them, and is
+hyperparameters, not a setting: it applies whenever `xi_0` is among them, and is
 the identity at `xi_0 = 1`. The contracts each setting carries -- which
 hyperparameters it needs, which only rescale the spectrum (`H0` stops being one
 when `time_delay` is on) -- are documented in
-the `bns_coba_population_fn` docstring and are not checked.
+the `astrogwb.populations.bns_coba` module docstring and are not checked.
 
-The factory's signature *is* the construction-settings schema. A key the named
-population does not take raises `TypeError` naming the population and what it
-accepts, rather than being silently dropped.
+The record's fields *are* the construction-settings schema: a setting the
+named population does not take is rejected by validation rather than being
+silently dropped. To add a population, subclass `PopulationMetadata` with a
+`model_name` literal, implement `_build`, and add the class to
+`AnyPopulation`.
 
 - The joint model's sample and deterministic sites define the stored columns, including
   redshift, source-frame masses, spins, and `luminosity_distance`. Detector-frame
@@ -226,15 +234,16 @@ handle.attrs["metadata"] = metadata.model_dump_json()
 ```
 
 The JSON record nests `waveform` and `population`, and includes `fiducials`,
-`num_samples`, and `version`. The population records its registered
-`model_name` and construction `model_kwargs`. Reading the file back, a caller
-validates the attribute with `CatalogMetadata.model_validate_json()`; Pydantic
-handles the serialization and validation without a field-by-field HDF5 codec.
+`num_samples`, and `version`. The population records its
+`model_name` and its construction settings as fields. Reading the file back, a
+caller validates the attribute with `CatalogMetadata.model_validate_json()`
+(or `read_catalog(path)`), and the discriminated union restores the
+population's subclass; Pydantic handles the serialization and validation
+without a field-by-field HDF5 codec.
 
-What is *not* stored is a callable: `metadata.population.build()`
-looks the name up in the registry and binds the recorded settings, returning
-both callables at once (they hash by identity, so two getters would force a
-recompile on every call).
+What is *not* stored is a callable: `metadata.population.build()` returns
+both halves at once, cached on the record, so equal records share one
+callable and a jitted consumer compiles once.
 
 That is enough to reconstruct the exact map from hyperparameters to source
 density. With the version, it is the file's whole `CatalogMetadata` --
@@ -265,11 +274,12 @@ For a catalog, the root holds `frequencies` `(F,)`, `polarization_power`
 `(F, N)` and a `source_parameters/` group of `(N,)` columns. There are no
 format names or version files: the path says which node, metadata and inputs a
 file answers, and `load(path, MetadataType)` returns `(data, metadata, attrs)` to a
-caller that was handed a file by path.
+caller that was handed a file by path; `astrogwb.gwb.catalog.read_catalog(path)`
+is that call for a catalog, returning `(data, metadata, seed)`.
 The arrays are used as read (the writer is the only source of files, so they
-are not re-validated), and `metadata.population.build()` rebuilds the recorded population from the registry: an
-unknown name raises `KeyError` listing what is registered, and a construction
-setting the population does not take raises `TypeError`. Bin widths are not
+are not re-validated), and `metadata.population.build()` rebuilds the recorded population: an unknown
+`model_name` or a construction setting the population does not take is a
+validation error when the metadata is read. Bin widths are not
 stored; they are derived from `frequencies`.
 
 ## The cache
@@ -279,7 +289,7 @@ Persistence and cache locations belong to the callers. The core `write` and
 
 | | simulator | metadata | input | data |
 | --- | --- | --- | --- | --- |
-| catalogs | `draw_catalog` | `CatalogMetadata` | one JAX key | `PolarizationPowerData` |
+| catalogs | `simulate_catalog` | `CatalogMetadata` | one JAX key | `PolarizationPowerData` |
 | reference catalogs | `reference_catalog` | `CatalogMetadata` | one JAX key | `PolarizationPowerData` |
 
 Catalog files are written to caller-chosen paths, atomically, with the metadata,
@@ -338,7 +348,7 @@ catalog and spectrum artifacts are not compatible and must be regenerated.
 ## What is *not* in the file: the analysis window
 
 The recorded settings are the *generation* window, `[0.0, 20.0]`. The analysis
-window is narrower — `analysis.population.model_kwargs.minimum_redshift = 0.3`
+window is narrower — `analysis.population.minimum_redshift = 0.3`
 in the analysis setup — so the per-sample log density cannot be
 baked into the catalog: it depends on a truncation the run chooses, not on
 anything generation knows.

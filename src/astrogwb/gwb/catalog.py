@@ -3,13 +3,15 @@
 :class:`CatalogMetadata` is the record a catalog is drawn from and cached
 under. :func:`polarization_power_data` turns a generator and source columns
 into :class:`PolarizationPowerData`, one power column per source; where the
-sources come from is the caller's. :func:`draw_catalog` is the plain catalog --
-the population a record names, drawn at its fiducials from one key -- and
-:func:`~astrogwb.gwb.importance.reference_catalog` draws at the redshift
-window's lower edge.
+sources come from is the caller's. :func:`simulate_catalog` is the plain
+catalog -- the population a record names, drawn at its fiducials from one key
+-- and :func:`~astrogwb.gwb.importance.reference_catalog` draws at the redshift
+window's lower edge. :func:`read_catalog` reads back what
+:func:`~astrogwb.utils.io.write` stored.
 
-These are fixed-size draws for importance weighting, not Poisson realizations;
-those are :mod:`astrogwb.simulators`.
+These are fixed-size draws for importance weighting, not Poisson realizations
+(:func:`~astrogwb.simulators.simulate_population`); both draw their sources
+through :func:`~astrogwb.simulators.simulate_sources`.
 """
 
 from __future__ import annotations
@@ -17,7 +19,8 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from functools import partial
-from typing import Annotated, Any, Literal, Self, TypedDict
+from pathlib import Path
+from typing import Annotated, Any, Self, TypedDict, cast
 
 import jax
 import numpy as np
@@ -26,19 +29,21 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from astrogwb import __version__
 from astrogwb.populations.joint import fix_extrinsic_parameters, joint_model
-from astrogwb.populations.metadata import PopulationMetadata
-from astrogwb.utils.numpyro import sample_and_logprob
+from astrogwb.populations.metadata import AnyPopulation
+from astrogwb.simulators.sources import Sampling, simulate_sources
+from astrogwb.utils import require_current_version
+from astrogwb.utils.io import load
 from astrogwb.waveform.base import WaveformGenerator
 from astrogwb.waveform.factory import waveform_generator
 from astrogwb.waveform.metadata import WaveformMetadata
 
 __all__ = [
-    "REDSHIFT_SITE",
-    "REDSHIFT_WINDOW_KWARGS",
     "CatalogMetadata",
     "PolarizationPowerData",
-    "draw_catalog",
     "polarization_power_data",
+    "read_catalog",
+    "simulate_catalog",
+    "validate_matching_frequency_grids",
 ]
 
 logger = logging.getLogger(__name__)
@@ -47,7 +52,7 @@ logger = logging.getLogger(__name__)
 class CatalogMetadata(BaseModel):
     """Everything that determines a polarization-power catalog's contents.
 
-    Both the request and the provenance: :func:`draw_catalog` turns it and a
+    Both the request and the provenance: :func:`simulate_catalog` turns it and a
     PRNG key into a catalog, stored beside it by
     :func:`~astrogwb.utils.io.write`. The seed is not part of it.
 
@@ -67,10 +72,10 @@ class CatalogMetadata(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
 
     waveform: WaveformMetadata
-    population: PopulationMetadata
+    population: AnyPopulation
     fiducials: dict[str, float]
     num_samples: Annotated[int, Field(gt=0)]
-    sampling: Literal["random", "sobol"] = "random"
+    sampling: Sampling = "random"
     reference_redshift: Annotated[float, Field(ge=0.0)] | None = None
     version: str = __version__
 
@@ -136,7 +141,7 @@ def polarization_power_data(
     }
 
 
-def draw_catalog(
+def simulate_catalog(
     metadata: CatalogMetadata, key: jax.Array, *, chunk_size: int | None = None
 ) -> PolarizationPowerData:
     """The plain catalog ``key`` draws: ``num_samples`` sources at the fiducials.
@@ -153,31 +158,60 @@ def draw_catalog(
     # Before the draw: ripplegw enables x64 on import, but only once the
     # generator runs, after the sources are sampled.
     jax.config.update("jax_enable_x64", True)
-    if metadata.version != __version__:
-        raise ValueError(
-            f"metadata is for astrogwb {metadata.version}, but {__version__} "
-            "is installed; regenerate the catalog"
-        )
+    require_current_version(metadata.version)
     logger.info(
-        "Catalog: population=%s num_samples=%d kwargs=%s",
-        metadata.population.model_name,
+        "Catalog: num_samples=%d population=%r",
         metadata.num_samples,
-        metadata.population.model_kwargs,
+        metadata.population,
     )
     model = fix_extrinsic_parameters(
         joint_model(*metadata.population.build()(metadata.fiducials))
     )
-    samples, _ = sample_and_logprob(
-        model, key, num_samples=metadata.num_samples, density_sites=()
-    )
+    sources = simulate_sources(model, key, metadata.num_samples)
     return polarization_power_data(
-        waveform_generator(metadata.waveform), samples, chunk_size=chunk_size
+        waveform_generator(metadata.waveform), sources, chunk_size=chunk_size
     )
 
 
-#: The redshift site every population must declare; its density is never
-#: excluded.
-REDSHIFT_SITE = "redshift"
+def read_catalog(
+    path: str | Path,
+) -> tuple[PolarizationPowerData, CatalogMetadata, int]:
+    """The catalog at ``path``, its record and the seed it was drawn at.
 
-#: Construction kwargs defining a population's redshift window.
-REDSHIFT_WINDOW_KWARGS = ("minimum_redshift", "maximum_redshift")
+    ``astrogwb model-catalog`` writes it; nothing here draws.
+
+    Parameters
+    ----------
+    path
+        File path.
+
+    Raises
+    ------
+    FileNotFoundError
+        If ``path`` does not exist.
+    """
+    if not Path(path).is_file():
+        raise FileNotFoundError(f"no catalog at {path}")
+    data, metadata, attrs = load(path, CatalogMetadata)
+    return cast(PolarizationPowerData, data), metadata, int(attrs["seed"])
+
+
+def validate_matching_frequency_grids(
+    first: ArrayLike, second: ArrayLike, *, label: str = "injection and proposal"
+) -> None:
+    """Require two catalogs to share the exact frequency grid.
+
+    Parameters
+    ----------
+    first, second
+        The catalogs' frequency grids.
+    label
+        Label used in error messages.
+
+    Raises
+    ------
+    ValueError
+        If the grids differ.
+    """
+    if not np.array_equal(np.asarray(first), np.asarray(second)):
+        raise ValueError(f"{label} catalogs must have identical frequency grids")
