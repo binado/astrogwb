@@ -37,7 +37,6 @@ with app.setup(hide_code=True):
     from astrogwb.gwb.catalog import CatalogMetadata, draw_catalog
     from astrogwb.gwb.spectral import spectral_density as catalog_spectral_density
     from astrogwb.paper.config import load_config
-    from astrogwb.paper.config.runs import FIGURES_DIR
     from astrogwb.paper.plotting import (
         DETECTOR_COMPARISON_LEGEND,
         DETECTOR_NETWORKS,
@@ -94,7 +93,7 @@ def _():
 
     #: Where this notebook's figures go: under the one output root the workflow,
     #: the figure scripts and `config/plotting.toml` all agree on.
-    BASE_DIR = ROOT_DIR / FIGURES_DIR / "fiducial_spectrum"
+    BASE_DIR = ROOT_DIR / "outputs" / "figures" / "fiducial_spectrum"
 
     # The shared [fiducials]; `root=` because accessors resolve against the cwd.
     FIDUCIALS = load_config(ROOT_DIR / "config").fiducials

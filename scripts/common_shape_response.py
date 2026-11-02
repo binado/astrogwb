@@ -32,6 +32,7 @@ The reference catalog is the cached one of ``notebooks/shot_noise_coverage.py``
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from astrogwb.runtime import configure_runtime
 
@@ -52,7 +53,6 @@ from astrogwb.gwb.catalog import CatalogMetadata
 from astrogwb.gwb.importance import reference_catalog
 from astrogwb.inference import ImportanceGaussianLikelihood, Network
 from astrogwb.paper.config import load_config
-from astrogwb.paper.config.runs import CATALOGS_ROOT
 from astrogwb.paper.plotting import DETECTOR_NETWORKS
 from astrogwb.populations import build_population
 from astrogwb.simulators import realization_key
@@ -102,7 +102,7 @@ def _likelihood() -> tuple[ImportanceGaussianLikelihood, NDArray[np.float64], di
         num_samples=NUM_SAMPLES,
         sampling="sobol",
     )
-    path = CATALOGS_ROOT / f"common-shape-response-{CATALOG_SEED}.h5"
+    path = Path("outputs/catalogs") / f"common-shape-response-{CATALOG_SEED}.h5"
     if path.is_file():
         data, recorded, attrs = load(path, CatalogMetadata)
         if recorded != metadata or attrs.get("seed") != CATALOG_SEED:

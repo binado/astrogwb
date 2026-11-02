@@ -46,7 +46,6 @@ from astrogwb.inference import ImportanceGaussianLikelihood
 from astrogwb.inference import Network as LikelihoodNetwork
 from astrogwb.paper.catalogs import read_reference_catalog
 from astrogwb.paper.config import load_config
-from astrogwb.paper.config.runs import CATALOGS_ROOT, ENSEMBLES_ROOT, FIGURES_DIR
 from astrogwb.paper.plotting import DETECTOR_NETWORKS
 from astrogwb.paper.posteriors import network_pair_data
 from astrogwb.populations import build_population
@@ -114,7 +113,7 @@ def term_response(
     )
 
 
-OUTPUT = ROOT_DIR / FIGURES_DIR / "shot_noise_budget"
+OUTPUT = ROOT_DIR / "outputs" / "figures" / "shot_noise_budget"
 
 
 def variance_budget(row: pd.Series) -> dict[str, float]:
@@ -202,13 +201,13 @@ def main() -> None:
     parser.add_argument(
         "--ensemble",
         type=Path,
-        default=ENSEMBLES_ROOT / "fiducial",
+        default=Path("outputs/ensembles") / "fiducial",
         help="ensemble root holding the draws (default: %(default)s)",
     )
     parser.add_argument(
         "--reference-catalog",
         type=Path,
-        default=CATALOGS_ROOT / "reference-fiducial.h5",
+        default=Path("outputs/catalogs") / "reference-fiducial.h5",
         help="(default: %(default)s)",
     )
     args = parser.parse_args()

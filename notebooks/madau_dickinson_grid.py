@@ -37,7 +37,6 @@ with app.setup(hide_code=True):
         validate_matching_frequency_grids,
     )
     from astrogwb.paper.config import load_config
-    from astrogwb.paper.config.runs import CATALOGS_ROOT, ENSEMBLES_ROOT, FIGURES_DIR
     from astrogwb.paper.plotting import (
         DETECTOR_NETWORKS,
         plot_corner,
@@ -190,7 +189,7 @@ def _():
 @app.cell
 def _():
     ROOT_DIR = Path(__file__).resolve().parents[1]
-    FIGURES = ROOT_DIR / FIGURES_DIR / "madau_dickinson_grid"
+    FIGURES = ROOT_DIR / "outputs" / "figures" / "madau_dickinson_grid"
 
     # The injection's seed; the reference catalog is drawn at another, so the
     # injection is not a subset of the catalog.
@@ -235,8 +234,8 @@ def _():
     # The same inputs as cosmology_grid_posteriors.py, written by
     # Snakefile and only read here: the injection ensemble,
     # its detector noise and the reference catalog.
-    ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / "fiducial"
-    reference_catalog_path = ROOT_DIR / CATALOGS_ROOT / "reference-fiducial.h5"
+    ensemble_root = ROOT_DIR / "outputs" / "ensembles" / "fiducial"
+    reference_catalog_path = ROOT_DIR / "outputs" / "catalogs" / "reference-fiducial.h5"
     background = BackgroundArtifact.open(ensemble_root / f"{data_seed}-0.h5")
     noise = background.noise()
     frequencies = background.frequencies

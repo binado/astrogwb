@@ -34,7 +34,6 @@ with app.setup(hide_code=True):
     from astrogwb.inference.fisher import spectral_density_jacobian
     from astrogwb.paper.catalogs import read_reference_catalog
     from astrogwb.paper.config import load_config
-    from astrogwb.paper.config.runs import CATALOGS_ROOT, FIGURES_DIR
     from astrogwb.paper.plotting import parameter_label, save_figures, use_paper_style
     from astrogwb.populations import Population, build_population
     from astrogwb.simulators import realization_key
@@ -106,7 +105,7 @@ def _():
 @app.cell
 def _():
     ROOT_DIR = Path(__file__).resolve().parents[1]
-    FIGURES = ROOT_DIR / FIGURES_DIR / "importance_convergence"
+    FIGURES = ROOT_DIR / "outputs" / "figures" / "importance_convergence"
 
     # Redshift ladder: one fixed set of 256 i.i.d. draws at seed 100, read from
     # the file the workflow writes; the top rung is the reference.
@@ -142,7 +141,7 @@ def _():
         "xi_n": (0.3, 3.0),
     }
 
-    ladder_path = ROOT_DIR / CATALOGS_ROOT / "reference-ladder.h5"
+    ladder_path = ROOT_DIR / "outputs" / "catalogs" / "reference-ladder.h5"
 
     evaluation_points: dict[str, dict[str, float]] = {"fiducial": dict(FIDUCIALS)}
     for _name, _values in edges.items():

@@ -54,7 +54,6 @@ from astrogwb.distributions.config import DistributionConfig
 from astrogwb.inference import ImportanceGaussianLikelihood, Network, shot_noise_modes
 from astrogwb.paper.catalogs import read_reference_catalog
 from astrogwb.paper.config import load_config
-from astrogwb.paper.config.runs import CATALOGS_ROOT, ENSEMBLES_ROOT
 from astrogwb.paper.plotting import DETECTOR_NETWORKS
 from astrogwb.paper.posteriors import network_data
 from astrogwb.populations import build_population
@@ -186,11 +185,13 @@ def main() -> None:
         "--variants", nargs="+", default=["amplitude", "fixed+response", "modes"]
     )
     parser.add_argument("--problems", nargs="+", default=["H0", "H0_Omega_m"])
-    parser.add_argument("--ensemble", type=Path, default=ENSEMBLES_ROOT / "fiducial")
+    parser.add_argument(
+        "--ensemble", type=Path, default=Path("outputs/ensembles") / "fiducial"
+    )
     parser.add_argument(
         "--reference-catalog",
         type=Path,
-        default=CATALOGS_ROOT / "reference-fiducial.h5",
+        default=Path("outputs/catalogs") / "reference-fiducial.h5",
     )
     parser.add_argument("--tolerance", type=float, default=1e-3)
     args = parser.parse_args()

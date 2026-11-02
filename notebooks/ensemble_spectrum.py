@@ -48,7 +48,6 @@ with app.setup(hide_code=True):
     from astrogwb.inference import Network as LikelihoodNetwork
     from astrogwb.paper.catalogs import read_reference_catalog
     from astrogwb.paper.config import load_config
-    from astrogwb.paper.config.runs import CATALOGS_ROOT, ENSEMBLES_ROOT, FIGURES_DIR
     from astrogwb.paper.plotting import (
         DETECTOR_COMPARISON_LEGEND,
         DETECTOR_NETWORKS,
@@ -165,7 +164,7 @@ def _():
     minimum_frequencies = [2.0, 5.0, 10.0, 20.0]
     #: Where this notebook's figures and tables go: one folder per notebook under
     #: the figures root, named after the notebook file.
-    BASE_DIR = ROOT_DIR / FIGURES_DIR / Path(__file__).stem
+    BASE_DIR = ROOT_DIR / "outputs" / "figures" / Path(__file__).stem
     use_paper_style(root=ROOT_DIR)
     # Percentiles of the plotted bands (16-84%).
     percentiles = (16.0, 50.0, 84.0)
@@ -173,7 +172,7 @@ def _():
     # The fiducial ensemble of Snakefile, shared with
     # shot_noise_coverage.py: the default waveform and grid. Its population is
     # draw 0's record.
-    ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / "fiducial"
+    ensemble_root = ROOT_DIR / "outputs" / "ensembles" / "fiducial"
     ensemble_population = BackgroundArtifact.open(
         ensemble_root / f"{seed}-0.h5"
     ).config.population
@@ -892,7 +891,7 @@ def _(ROOT_DIR):
     # below every window of the scan,
     # on a reference grid from the lowest observed frequency to past the
     # detector-frame merger there.
-    scan_catalog_path = ROOT_DIR / CATALOGS_ROOT / "reference-fiducial.h5"
+    scan_catalog_path = ROOT_DIR / "outputs" / "catalogs" / "reference-fiducial.h5"
     scan_redshift_nodes = 32  # converged to 1e-4 down to z_min = 0.01
     # Geometric where the curves are steep, uniform where the plot is linear.
     scan_redshifts = np.concatenate(
