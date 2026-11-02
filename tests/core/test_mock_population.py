@@ -19,13 +19,13 @@ from astrogwb_mock_population import (
 )
 from reference_population import reference_merger_rate_distance_and_logprob
 
-from astrogwb.constants import ISCO_ALPHA
-from astrogwb.distributions.rates import madau_dickinson_rate
-from astrogwb.gwb import (
+from astrogwb.background import (
     analytic_spectral_density_from_mass_moments,
     spectral_density,
     uniform_prior_mass_moments,
 )
+from astrogwb.constants import ISCO_ALPHA
+from astrogwb.distributions.rates import madau_dickinson_rate
 
 CATALOG_DF = 8.0
 SMALL_CATALOG_SIZE = 256

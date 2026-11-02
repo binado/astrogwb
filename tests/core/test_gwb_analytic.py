@@ -11,8 +11,7 @@ import numpy as np
 import pytest
 from numpyro.distributions import TruncatedNormal
 
-from astrogwb.constants import ISCO_ALPHA, SOLAR_MASS_IN_SECONDS
-from astrogwb.gwb import (
+from astrogwb.background import (
     JointMassFunction,
     PopulationFunction,
     analytic_spectral_density,
@@ -20,6 +19,7 @@ from astrogwb.gwb import (
     precompute_cumulative_mass_moments,
     uniform_prior_mass_moments,
 )
+from astrogwb.constants import ISCO_ALPHA, SOLAR_MASS_IN_SECONDS
 
 
 class IntegrationBounds(TypedDict):

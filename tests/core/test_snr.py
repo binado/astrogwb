@@ -3,13 +3,13 @@ from __future__ import annotations
 import jax.numpy as jnp
 import numpy as np
 
-from astrogwb.detector import log_frequency_noise_scale
-from astrogwb.frequency import bin_widths
-from astrogwb.gwb import (
+from astrogwb.background import (
     spectral_snr_squared,
     spectral_snr_squared_per_bin,
     spectral_snr_squared_per_log_frequency,
 )
+from astrogwb.detector import log_frequency_noise_scale
+from astrogwb.frequency import bin_widths
 from astrogwb.utils import years_to_seconds
 
 

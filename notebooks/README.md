@@ -31,7 +31,7 @@ A missing input is a `FileNotFoundError`, never a simulation.
   from a zero-noise Poisson injection as each network records it
   (`network_spectra_ensemble` over the fiducial ensemble: one catalog, six
   spectra through the per-source antenna patterns), modeled with the rescaled
-  reference-redshift spectrum (`astrogwb.gwb.importance`: $2^{14}$ intrinsic
+  reference-redshift spectrum (`astrogwb.background.importance`: $2^{14}$ intrinsic
   draws on a scrambled Sobol net, one waveform each at reference redshift $10^{-4}$, rescaled to 32 redshift
   nodes; catalog seed 42, the injection being seed 41). The log densities are computed on every run. Each
   grid point is predicted once and shared by all six networks

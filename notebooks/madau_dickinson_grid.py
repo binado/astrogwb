@@ -28,13 +28,13 @@ with app.setup(hide_code=True):
     from numpy.typing import NDArray
     from xarray import DataTree
 
-    from astrogwb.config import load_config
-    from astrogwb.detector import sample_pair_response
-    from astrogwb.distributions.config import DistributionConfig
-    from astrogwb.gwb.catalog import (
+    from astrogwb.background.catalog import (
         read_catalog,
         validate_matching_frequency_grids,
     )
+    from astrogwb.config import load_config
+    from astrogwb.detector import sample_pair_response
+    from astrogwb.distributions.config import DistributionConfig
     from astrogwb.inference import ImportanceGaussianLikelihood
     from astrogwb.inference import Network as LikelihoodNetwork
     from astrogwb.paper.plotting import (

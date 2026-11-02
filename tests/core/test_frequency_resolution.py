@@ -29,14 +29,14 @@ from astrogwb_mock_population import (
     build_reference_spectrum,
 )
 
-from astrogwb.constants import SECONDS_PER_YEAR
-from astrogwb.detector import effective_psd, gaussian_bin_scale, load_detector
-from astrogwb.frequency import frequency_mask
-from astrogwb.gwb import spectral_snr_squared
-from astrogwb.gwb.catalog import (
+from astrogwb.background import spectral_snr_squared
+from astrogwb.background.catalog import (
     CatalogMetadata,
     PolarizationPowerData,
 )
+from astrogwb.constants import SECONDS_PER_YEAR
+from astrogwb.detector import effective_psd, gaussian_bin_scale, load_detector
+from astrogwb.frequency import frequency_mask
 
 #: Reference resolution, and the band the refinement study runs over.
 FINE_DF = 0.25

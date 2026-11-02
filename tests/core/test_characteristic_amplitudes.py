@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from astrogwb.gwb import (
+from astrogwb.background import (
     characteristic_noise,
     characteristic_strain,
     spectral_snr_squared_per_log_frequency,

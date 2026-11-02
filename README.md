@@ -24,15 +24,15 @@ pip install astrogwb[io]
   so results are bit-comparable with LALSimulation and ripple.
 - `astrogwb.detector` loads bundled detector geometry and sensitivity data and
   evaluates overlap-reduction functions and effective PSDs.
-- `astrogwb.gwb` provides spectral-density, Omega-GW conversion, and SNR
-  calculations. `astrogwb.gwb.analytic` evaluates the inspiral-only
+- `astrogwb.background` provides spectral-density, Omega-GW conversion, and SNR
+  calculations. `astrogwb.background.analytic` evaluates the inspiral-only
   background in closed form, truncated on the same dimensionless `alpha` as
   `astrogwb.waveform`.
 - `astrogwb.populations` declares source populations as NumPyro models,
   addressed by registered name. One declaration serves both generation and
   density evaluation, so a catalog and the weights that reweight it can never
   disagree about the law behind it.
-- `astrogwb.gwb.importance` reweights the intrinsic draws of a reference catalog
+- `astrogwb.background.importance` reweights the intrinsic draws of a reference catalog
   to a target population and integrates redshift by closed-form quadrature.
 - `astrogwb.inference` exposes the caller-prepared NumPyro model.
 - `astrogwb.catalog` provides an array-native catalog that records the
@@ -61,7 +61,7 @@ the declaration that produced it:
 ```python
 import jax
 
-from astrogwb.gwb.catalog import CatalogMetadata, simulate_catalog
+from astrogwb.background.catalog import CatalogMetadata, simulate_catalog
 from astrogwb.populations import BNSCobaPopulation
 from astrogwb.utils.io import write
 from astrogwb.waveform import WaveformMetadata
@@ -107,7 +107,7 @@ closed-form quadrature, so it needs no weights at all.
 import jax
 import numpy as np
 
-from astrogwb.gwb.importance import reference_catalog
+from astrogwb.background.importance import reference_catalog
 from astrogwb.inference import ImportanceGaussianLikelihood
 
 reference = reference_catalog(metadata, jax.random.key(42))

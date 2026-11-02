@@ -84,17 +84,17 @@ from jax.typing import ArrayLike
 from numpy.typing import NDArray
 from numpyro import handlers
 
+from astrogwb.background.catalog import (
+    CatalogMetadata,
+    PolarizationPowerData,
+    polarization_power_data,
+)
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import (
     hubble_distance,
     normalized_hubble_parameter,
 )
 from astrogwb.distributions.rates import total_merger_rate
-from astrogwb.gwb.catalog import (
-    CatalogMetadata,
-    PolarizationPowerData,
-    polarization_power_data,
-)
 from astrogwb.populations._types import Population, PopulationModel, SourceModel
 from astrogwb.populations.joint import (
     REDSHIFT_SITE,

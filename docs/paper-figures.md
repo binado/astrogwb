@@ -39,7 +39,7 @@ and sliders, is
 the posteriors of `H0`, `(H0, Omega_m)` and `(xi_0, xi_n)` on a grid for all six
 networks, with no sampler. The data are a zero-noise Poisson injection
 (`data_seed = 41`); the model spectrum is the rescaled reference-redshift
-spectrum of `astrogwb.gwb.importance` (`catalog_seed = 42`): `2^14` intrinsic
+spectrum of `astrogwb.background.importance` (`catalog_seed = 42`): `2^14` intrinsic
 draws, each generated once at reference redshift `1e-4` by `reference_catalog`,
 and `ImportanceGaussianLikelihood` rescaling their mean power to 32 Gauss-Legendre
 nodes in the scale factor `1/(1 + z)` at each grid point, with no intrinsic
