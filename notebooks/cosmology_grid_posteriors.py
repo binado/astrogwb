@@ -23,6 +23,7 @@ with app.setup(hide_code=True):
     from matplotlib.projections import register_projection
     from numpy.typing import NDArray
 
+    from astrogwb.config import load_config
     from astrogwb.detector import sample_pair_response
     from astrogwb.inference import (
         ImportanceGaussianLikelihood,
@@ -33,7 +34,6 @@ with app.setup(hide_code=True):
         read_reference_catalog,
         validate_matching_frequency_grids,
     )
-    from astrogwb.paper.config import load_config
     from astrogwb.paper.plotting import (
         DETECTOR_NETWORKS,
         TRUTH,

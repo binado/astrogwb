@@ -39,13 +39,13 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
+from astrogwb.config import load_config
 from astrogwb.detector.overlap import stokes_cross_power
 from astrogwb.detector.response import _isotropic_angles
 from astrogwb.gwb.importance import INCLINATION_SECOND_MOMENT
 from astrogwb.inference import ImportanceGaussianLikelihood
 from astrogwb.inference import Network as LikelihoodNetwork
 from astrogwb.paper.catalogs import read_reference_catalog
-from astrogwb.paper.config import load_config
 from astrogwb.paper.plotting import DETECTOR_NETWORKS
 from astrogwb.paper.posteriors import network_pair_data
 from astrogwb.populations import build_population

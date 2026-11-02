@@ -22,6 +22,7 @@ with app.setup(hide_code=True):
     from matplotlib.projections import register_projection
     from numpy.typing import NDArray
 
+    from astrogwb.config import load_config
     from astrogwb.detector import effective_psd, gaussian_bin_scale
     from astrogwb.detector.config import DetectorRegistry
     from astrogwb.frequency import frequency_mask
@@ -33,7 +34,6 @@ with app.setup(hide_code=True):
     from astrogwb.inference import ImportanceGaussianLikelihood
     from astrogwb.inference.fisher import spectral_density_jacobian
     from astrogwb.paper.catalogs import read_reference_catalog
-    from astrogwb.paper.config import load_config
     from astrogwb.paper.plotting import parameter_label, save_figures, use_paper_style
     from astrogwb.populations import Population, build_population
     from astrogwb.simulators import realization_key

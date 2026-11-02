@@ -8,8 +8,8 @@ from repo import REPO_ROOT
 
 matplotlib = pytest.importorskip("matplotlib")
 
+from astrogwb.config import load_config
 from astrogwb.paper import plotting
-from astrogwb.paper.config import load_config
 from astrogwb.paper.plotting import Network
 
 

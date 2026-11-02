@@ -9,8 +9,8 @@ import pytest
 from pydantic import ValidationError
 from repo import REPO_ROOT
 
+from astrogwb.config import load_config
 from astrogwb.detector.config import load_detector_config
-from astrogwb.paper.config import load_config
 from astrogwb.paper.utils import deep_merge, load_mapping
 
 PAPER_ROOT = REPO_ROOT

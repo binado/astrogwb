@@ -22,6 +22,7 @@ with app.setup(hide_code=True):
     from matplotlib.projections import register_projection
     from matplotlib.ticker import LogFormatterMathtext, ScalarFormatter
 
+    from astrogwb.config import load_config
     from astrogwb.detector import (
         effective_psd,
         log_frequency_noise_scale,
@@ -36,7 +37,6 @@ with app.setup(hide_code=True):
     )
     from astrogwb.gwb.catalog import CatalogMetadata, draw_catalog
     from astrogwb.gwb.spectral import spectral_density as catalog_spectral_density
-    from astrogwb.paper.config import load_config
     from astrogwb.paper.plotting import (
         DETECTOR_COMPARISON_LEGEND,
         DETECTOR_NETWORKS,

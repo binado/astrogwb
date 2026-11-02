@@ -28,6 +28,7 @@ with app.setup(hide_code=True):
     from numpy.typing import NDArray
     from xarray import DataTree
 
+    from astrogwb.config import load_config
     from astrogwb.detector import sample_pair_response
     from astrogwb.distributions.config import DistributionConfig
     from astrogwb.inference import ImportanceGaussianLikelihood
@@ -36,7 +37,6 @@ with app.setup(hide_code=True):
         read_reference_catalog,
         validate_matching_frequency_grids,
     )
-    from astrogwb.paper.config import load_config
     from astrogwb.paper.plotting import (
         DETECTOR_NETWORKS,
         plot_corner,

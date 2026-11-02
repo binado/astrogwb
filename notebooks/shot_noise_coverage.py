@@ -24,6 +24,7 @@ with app.setup(hide_code=True):
     from numpy.typing import NDArray
     from scipy import stats
 
+    from astrogwb.config import load_config
     from astrogwb.detector import sample_pair_response
     from astrogwb.gwb.importance import INCLINATION_SECOND_MOMENT
     from astrogwb.inference import (
@@ -33,7 +34,6 @@ with app.setup(hide_code=True):
     )
     from astrogwb.inference import Network as LikelihoodNetwork
     from astrogwb.paper.catalogs import read_reference_catalog
-    from astrogwb.paper.config import load_config
     from astrogwb.paper.plotting import (
         DETECTOR_COMPARISON_LEGEND,
         DETECTOR_NETWORKS,

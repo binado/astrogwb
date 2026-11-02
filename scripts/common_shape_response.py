@@ -43,6 +43,7 @@ import jax.numpy as jnp
 import numpy as np
 from numpy.typing import NDArray
 
+from astrogwb.config import load_config
 from astrogwb.detector import (
     effective_psd,
     gaussian_bin_scale,
@@ -52,7 +53,6 @@ from astrogwb.frequency import frequency_mask
 from astrogwb.gwb.catalog import CatalogMetadata
 from astrogwb.gwb.importance import reference_catalog
 from astrogwb.inference import ImportanceGaussianLikelihood, Network
-from astrogwb.paper.config import load_config
 from astrogwb.paper.plotting import DETECTOR_NETWORKS
 from astrogwb.populations import build_population
 from astrogwb.simulators import realization_key

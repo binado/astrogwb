@@ -109,7 +109,7 @@ just run-notebook notebooks/ensemble_spectrum.py
 ```
 
 The shared fiducials, detector registry, and default draw's waveform and
-population come from `astrogwb.paper.config`. Each notebook's analysis window,
+population come from `astrogwb.config`. Each notebook's analysis window,
 draw seed, and plotting choices live in its own editable configuration cell.
 Editing the shared analysis table does not update those local controls; mirror
 the change there by hand.
@@ -118,7 +118,7 @@ For the shared scientific values on their own, without standing in for a
 particular run, read them from the package rather than retyping them:
 
 ```python
-from astrogwb.paper.config import load_config
+from astrogwb.config import load_config
 
 config = load_config()
 fid = config.fiducials

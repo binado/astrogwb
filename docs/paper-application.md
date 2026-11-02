@@ -69,11 +69,9 @@ The simulator registry loader lives in `astrogwb.detector.config`, so core simul
 names only. The registry passed to a reader is trusted and must remain fixed
 for that dataset; changing it requires regenerating outputs.
 
-The notebooks consume the same bytes through
-`astrogwb.paper.config.fiducials()` / `priors()` / `networks()` /
-`detector_registry()`. Each accessor takes keyword overrides merged over the
-file, so a notebook can vary one value without editing TOML or retyping the
-table.
+The notebooks consume the shared settings through `astrogwb.config.load_config()`.
+The returned model exposes fiducials, prior specifications, the detector
+registry, and catalog metadata. Pass ordered override files to vary settings.
 
 See [`docs/`](.) for catalog generation and paper figures.
 
