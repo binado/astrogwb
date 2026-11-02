@@ -23,6 +23,7 @@ with app.setup(hide_code=True):
     from matplotlib.projections import register_projection
     from numpy.typing import NDArray
 
+    from astrogwb.config import load_config
     from astrogwb.detector import sample_pair_response
     from astrogwb.inference import (
         ImportanceGaussianLikelihood,
@@ -33,8 +34,6 @@ with app.setup(hide_code=True):
         read_reference_catalog,
         validate_matching_frequency_grids,
     )
-    from astrogwb.paper.config import detector_registry, fiducials, priors
-    from astrogwb.paper.config.runs import CATALOGS_ROOT, ENSEMBLES_ROOT, FIGURES_DIR
     from astrogwb.paper.plotting import (
         DETECTOR_NETWORKS,
         TRUTH,
@@ -160,7 +159,7 @@ def _():
 @app.cell
 def _():
     ROOT_DIR = Path(__file__).resolve().parents[1]
-    FIGURES = ROOT_DIR / FIGURES_DIR / "cosmology_grid_posteriors"
+    FIGURES = ROOT_DIR / "outputs" / "figures" / "cosmology_grid_posteriors"
 
     # The injection's seed; the reference catalog is drawn at another, 42, so
     # the injection is not a subset of the catalog.
@@ -220,9 +219,12 @@ def _():
         },
     }
 
-    FIDUCIALS = fiducials(root=ROOT_DIR)
-    PRIORS = priors(root=ROOT_DIR)
-    registry = detector_registry(root=ROOT_DIR)
+    FIDUCIALS = load_config(ROOT_DIR / "config").fiducials
+    PRIORS = {
+        name: spec.build()
+        for name, spec in (load_config(ROOT_DIR / "config").priors).items()
+    }
+    registry = load_config(ROOT_DIR / "config").registry
 
     # The inputs, written by Snakefile and only read here:
     # the injection ensemble (draw 0 of `data_seed` is the injection, the
@@ -231,8 +233,8 @@ def _():
     # net at seed 42 on geometric bins 1% wide past the BNS merger
     # (importance_convergence.py sizes it). Both are drawn from the shared
     # population and approximant.
-    ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / "fiducial"
-    reference_catalog_path = ROOT_DIR / CATALOGS_ROOT / "reference-fiducial.h5"
+    ensemble_root = ROOT_DIR / "outputs" / "ensembles" / "fiducial"
+    reference_catalog_path = ROOT_DIR / "outputs" / "catalogs" / "reference-fiducial.h5"
     background = BackgroundArtifact.open(ensemble_root / f"{data_seed}-0.h5")
     noise = background.noise()
     frequencies = background.frequencies

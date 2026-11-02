@@ -22,6 +22,7 @@ with app.setup(hide_code=True):
     from matplotlib.projections import register_projection
     from numpy.typing import NDArray
 
+    from astrogwb.config import load_config
     from astrogwb.detector import effective_psd, gaussian_bin_scale
     from astrogwb.detector.config import DetectorRegistry
     from astrogwb.frequency import frequency_mask
@@ -33,17 +34,10 @@ with app.setup(hide_code=True):
     from astrogwb.inference import ImportanceGaussianLikelihood
     from astrogwb.inference.fisher import spectral_density_jacobian
     from astrogwb.paper.catalogs import read_reference_catalog
-    from astrogwb.paper.config import (
-        detector_registry,
-        fiducials,
-        population_metadata,
-        waveform_metadata,
-    )
-    from astrogwb.paper.config.runs import CATALOGS_ROOT, FIGURES_DIR
     from astrogwb.paper.plotting import parameter_label, save_figures, use_paper_style
     from astrogwb.populations import Population, build_population
     from astrogwb.simulators import realization_key
-    from astrogwb.waveform import waveform_generator
+    from astrogwb.waveform import WaveformMetadata, waveform_generator
 
     # One compiled spectrum for every catalog: the likelihood is a pytree
     # argument, so its catalog is a traced input, not a constant, and catalogs
@@ -111,7 +105,7 @@ def _():
 @app.cell
 def _():
     ROOT_DIR = Path(__file__).resolve().parents[1]
-    FIGURES = ROOT_DIR / FIGURES_DIR / "importance_convergence"
+    FIGURES = ROOT_DIR / "outputs" / "figures" / "importance_convergence"
 
     # Redshift ladder: one fixed set of 256 i.i.d. draws at seed 100, read from
     # the file the workflow writes; the top rung is the reference.
@@ -138,7 +132,7 @@ def _():
     yardstick_network = "ET-2L-aligned-CE-Hanford"  # the most sensitive
     peak_parameters = ("H0", "Omega_m", "xi_0")
 
-    FIDUCIALS = fiducials(root=ROOT_DIR)
+    FIDUCIALS = load_config(ROOT_DIR / "config").fiducials
     # The grid posteriors' window edges, one parameter moved at a time.
     edges = {
         "H0": (60.0, 76.0),
@@ -147,7 +141,7 @@ def _():
         "xi_n": (0.3, 3.0),
     }
 
-    ladder_path = ROOT_DIR / CATALOGS_ROOT / "reference-ladder.h5"
+    ladder_path = ROOT_DIR / "outputs" / "catalogs" / "reference-ladder.h5"
 
     evaluation_points: dict[str, dict[str, float]] = {"fiducial": dict(FIDUCIALS)}
     for _name, _values in edges.items():
@@ -156,19 +150,21 @@ def _():
 
     # The observed grid, and the reference grid: geometric bins 1% wide from
     # the observed f_min to past the detector-frame BNS merger at z_min.
-    waveform = waveform_metadata(root=ROOT_DIR)
-    reference_waveform = waveform_metadata(
-        root=ROOT_DIR,
-        frequency_spacing="log",
-        minimum_frequency=minimum_frequency,
-        maximum_frequency=4000.0,
-        frequency_resolution=0.02,
-        turnover_frequency=None,
+    waveform = load_config(ROOT_DIR / "config").catalog.waveform
+    reference_waveform = WaveformMetadata.model_validate(
+        {
+            **load_config(ROOT_DIR / "config").catalog.waveform.model_dump(),
+            "frequency_spacing": "log",
+            "minimum_frequency": minimum_frequency,
+            "maximum_frequency": 4000.0,
+            "frequency_resolution": 0.02,
+            "turnover_frequency": None,
+        }
     )
     frequencies = np.asarray(waveform_generator(waveform).frequencies)
-    population = population_metadata(root=ROOT_DIR)
+    population = load_config(ROOT_DIR / "config").catalog.population
     target = build_population(population.model_name, **population.model_kwargs)
-    registry = detector_registry(root=ROOT_DIR)
+    registry = load_config(ROOT_DIR / "config").registry
 
     write_figures = mo.ui.switch(value=True, label="Write figures")
     write_figures

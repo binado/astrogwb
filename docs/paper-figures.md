@@ -10,7 +10,7 @@ piece, and they live in `astrogwb.paper.plotting.DETECTOR_NETWORKS` as ordered
 nothing reads it without also needing the order it sits in. The detectors of
 each network come from the shared `[networks]` table in
 [`config/detectors.toml`](../config/detectors.toml), through
-`astrogwb.paper.config.networks()` and `detector_registry()`.
+`astrogwb.config.load_config().registry`.
 
 Values live in [`config/plotting.toml`](../config/plotting.toml): the LaTeX
 label for each *parameter*, plus `figure_dpi` and `figure_format`. Notebooks
@@ -19,8 +19,7 @@ reach them through `astrogwb.paper.plotting.parameter_label`, `figure_dpi` and
 `paper.mplstyle` declares neither.
 
 Shared scientific values -- fiducials, priors, detector networks -- come from
-`astrogwb.paper.config.fiducials()` / `priors()` / `networks()`, which read the
-same files. Each notebook keeps its analysis window (`observation_time`, the
+`astrogwb.config.load_config()`, which reads the same files. Each notebook keeps its analysis window (`observation_time`, the
 frequency band, the redshift bounds) and local plotting choices as literals in
 its configuration cell. These mirror the `[analysis]` table in
 `config/defaults.toml`, so editing that table does not change the figures --

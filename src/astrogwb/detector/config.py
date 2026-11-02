@@ -16,8 +16,6 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from astrogwb.config import merge_layers
-
 from .geometry import Detector, DetectorGeometry
 from .psd import resolve_psd_path
 from .sensitivity import Sensitivity
@@ -208,6 +206,8 @@ def load_detector_config(paths: Sequence[Path]) -> DetectorRegistry:
         "Detector config layers (merge order): %s",
         " -> ".join(str(path) for path in (*DETECTOR_DEFAULT_PATHS, *paths)),
     )
+    from astrogwb.config import merge_layers
+
     merged = merge_layers([*DETECTOR_DEFAULT_PATHS, *paths])
     return DetectorRegistry.model_validate(merged)
 

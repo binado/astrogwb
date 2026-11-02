@@ -24,6 +24,7 @@ with app.setup(hide_code=True):
     from numpy.typing import NDArray
     from scipy import stats
 
+    from astrogwb.config import load_config
     from astrogwb.detector import sample_pair_response
     from astrogwb.gwb.importance import INCLINATION_SECOND_MOMENT
     from astrogwb.inference import (
@@ -33,8 +34,6 @@ with app.setup(hide_code=True):
     )
     from astrogwb.inference import Network as LikelihoodNetwork
     from astrogwb.paper.catalogs import read_reference_catalog
-    from astrogwb.paper.config import detector_registry, fiducials, priors
-    from astrogwb.paper.config.runs import CATALOGS_ROOT, ENSEMBLES_ROOT, FIGURES_DIR
     from astrogwb.paper.plotting import (
         DETECTOR_COMPARISON_LEGEND,
         DETECTOR_NETWORKS,
@@ -313,7 +312,7 @@ def _():
 @app.cell
 def _():
     ROOT_DIR = Path(__file__).resolve().parents[1]
-    FIGURES = ROOT_DIR / FIGURES_DIR / "shot_noise_coverage"
+    FIGURES = ROOT_DIR / "outputs" / "figures" / "shot_noise_coverage"
 
     # The injections are the draws of the fiducial ensemble, which
     # ensemble_spectrum.py reads too, as each network records them.
@@ -339,16 +338,19 @@ def _():
     network_names = [name for name, _ in DETECTOR_NETWORKS]
     h0_window, h0_size = (60.0, 76.0), 321
 
-    FIDUCIALS = fiducials(root=ROOT_DIR)
-    PRIORS = priors(root=ROOT_DIR)
-    registry = detector_registry(root=ROOT_DIR)
+    FIDUCIALS = load_config(ROOT_DIR / "config").fiducials
+    PRIORS = {
+        name: spec.build()
+        for name, spec in (load_config(ROOT_DIR / "config").priors).items()
+    }
+    registry = load_config(ROOT_DIR / "config").registry
 
     # The inputs, written by Snakefile and only read here:
     # the fiducial ensemble, its detector noise, and the reference catalog of
     # the same waveform, 2^14 draws on a scrambled Sobol net at seed 42,
     # independent of the injections (importance_convergence.py sizes it).
-    ensemble_root = ROOT_DIR / ENSEMBLES_ROOT / "fiducial"
-    reference_catalog_path = ROOT_DIR / CATALOGS_ROOT / "reference-fiducial.h5"
+    ensemble_root = ROOT_DIR / "outputs" / "ensembles" / "fiducial"
+    reference_catalog_path = ROOT_DIR / "outputs" / "catalogs" / "reference-fiducial.h5"
     background = BackgroundArtifact.open(ensemble_root / f"{ensemble_seed}-0.h5")
     injected_metadata = background.config.population
     noise = background.noise()

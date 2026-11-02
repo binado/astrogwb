@@ -49,8 +49,8 @@ settings or seeds need different paths; the recorded metadata tells which is whi
    the only approximant accepting the optional `alpha` key (the inspiral
    termination constant, defaulting to the Schwarzschild ISCO value); naming it
    alongside a Ripple approximant is rejected.
-   `astrogwb.paper.config.waveform_generator()` builds the default draw's
-   generator for a notebook.
+   `astrogwb.waveform.waveform_generator(config.catalog.waveform)` builds the
+   default draw's generator for a notebook.
 2. `population` -- a `PopulationMetadata`: `model_name`, a key in the
    `astrogwb.populations` registry, `model_kwargs`, the construction settings
    bound into it. The named populations live in `config/populations.toml`.
@@ -60,8 +60,7 @@ settings or seeds need different paths; the recorded metadata tells which is whi
 4. `num_samples` -- the draw's size.
 
 The shared default draw is `[catalog]` in `config/defaults.toml`;
-`astrogwb.paper.config.waveform_metadata()` and `population_metadata()` return
-its records.
+`astrogwb.config.load_config().catalog` contains its records.
 
 ### What the record holds, and the version
 
@@ -195,16 +194,17 @@ From Python, the cached node draws on a miss and reads on a hit:
 ```python
 import numpy as np
 
-from astrogwb.paper.config import fiducials, population_metadata, waveform_metadata
+from astrogwb.config import load_config
 from astrogwb.gwb.catalog import (
     CatalogMetadata,
     polarization_power,
 )
 
+config = load_config()
 metadata = CatalogMetadata(
-    waveform=waveform_metadata(),
-    population=population_metadata(),
-    fiducials=fiducials(),
+    waveform=config.catalog.waveform,
+    population=config.catalog.population,
+    fiducials=config.fiducials,
     num_samples=32768,
 )
 data = polarization_power(
