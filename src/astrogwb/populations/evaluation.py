@@ -1,70 +1,22 @@
 from __future__ import annotations
 
-import operator
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, Self
+from typing import Any
 
 import jax
 import jax.numpy as jnp
 import numpyro
 from jax.typing import ArrayLike
 from numpyro import handlers
-from numpyro.distributions.util import is_identically_one
 from numpyro.infer import Predictive
 from numpyro.primitives import Messenger
 from scipy.stats import qmc
 
 from astrogwb.populations._types import PopulationModel
-from astrogwb.utils.numpyro import InverseCDF
+from astrogwb.utils import numpyro as numpyro_utils
 
 #: The plate :func:`evaluate_sources` executes a source model under.
 _SOURCES_PLATE = "sources"
-
-
-class DensityAccumulator(Messenger):
-    """Sum ``fn.log_prob(value)`` over selected sample sites in one execution.
-
-    Other sites are ignored. Around a conditioned model, the sum reproduces
-    :func:`numpyro.infer.util.compute_log_probs` operation for operation,
-    including ``intermediates`` and plate ``scale``, so values are bit-identical.
-    """
-
-    def __init__(
-        self, fn: Callable[..., Any] | None = None, *, sites: Sequence[str]
-    ) -> None:
-        self.sites = frozenset(sites)
-        self._log_probs: list[jax.Array] = []
-        super().__init__(fn)
-
-    def __enter__(self) -> Self:
-        super().__enter__()
-        self._log_probs = []
-        return self
-
-    def postprocess_message(self, msg: dict[str, Any]) -> None:
-        """Accumulate the density contribution from a selected sample site.
-
-        Parameters
-        ----------
-        msg
-            NumPyro effect message.
-        """
-        if msg["type"] != "sample" or msg["name"] not in self.sites:
-            return
-        intermediates = msg["intermediates"]
-        if intermediates:
-            log_prob = msg["fn"].log_prob(msg["value"], intermediates)
-        else:
-            log_prob = msg["fn"].log_prob(msg["value"])
-        scale = msg["scale"]
-        if scale is not None and not is_identically_one(scale):
-            log_prob = scale * log_prob
-        self._log_probs.append(log_prob)
-
-    @property
-    def log_prob(self) -> jax.Array:
-        """Selected density, shape ``(N,)`` or ``()`` when no sites matched."""
-        return jax.tree.reduce(operator.add, self._log_probs, initializer=jnp.zeros(()))
 
 
 def compute_model_and_log_probs(
@@ -93,7 +45,7 @@ def compute_model_and_log_probs(
         Keyword arguments passed to the model.
     """
     with handlers.block():
-        accumulator = DensityAccumulator(model, sites=density_sites)
+        accumulator = numpyro_utils.DensityAccumulator(model, sites=density_sites)
         result = accumulator(*model_args, **model_kwargs)
     return result, accumulator.log_prob
 
@@ -250,7 +202,9 @@ def sample_sources_qmc(
     scramble = int(jax.random.randint(key, (), 0, jnp.iinfo(jnp.int32).max))
     points = qmc.Sobol(len(free), scramble=True, seed=scramble).random_base2(exponent)
     with handlers.block():
-        trace = handlers.trace(InverseCDF(model, points=points)).get_trace()
+        trace = handlers.trace(
+            numpyro_utils.InverseCDF(model, points=points)
+        ).get_trace()
     sampled = {
         name: jnp.broadcast_to(trace[name]["value"], (num_samples,)) for name in samples
     }
@@ -259,7 +213,6 @@ def sample_sources_qmc(
 
 
 __all__ = [
-    "DensityAccumulator",
     "compute_model_and_log_probs",
     "evaluate_sources",
     "sample_sources",

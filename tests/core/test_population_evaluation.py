@@ -26,12 +26,12 @@ from numpyro.infer import MCMC, NUTS
 from numpyro.infer.util import compute_log_probs, log_density
 
 from astrogwb.populations.evaluation import (
-    DensityAccumulator,
     compute_model_and_log_probs,
     evaluate_sources,
     sample_sources,
     sample_sources_qmc,
 )
+from astrogwb.utils.numpyro import DensityAccumulator
 
 FIXED: dict[str, ArrayLike] = {
     "z": jnp.array([0.1, 0.2, 0.3]),
