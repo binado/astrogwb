@@ -62,7 +62,7 @@ Before coherent summation, both polarizations receive the geocentric arrival
 phase :math:`\exp(-2\pi i f t_i)`, with
 :math:`t_i` sampled in seconds relative to segment center within
 :math:`[-\tau_\mathrm{eff}/2, \tau_\mathrm{eff}/2)`. The joint population model
-supplies ``arrival_time``; it is never redrawn or rescaled here. Detector projection applies geometric delays once. Signals remain
+supplies ``coa_time``; it is never redrawn or rescaled here. Detector projection applies geometric delays once. Signals remain
 complete within their assigned segment, without window truncation or boundary
 crossing.
 """

@@ -45,12 +45,12 @@ EXTRINSIC_SITES = (
     "right_ascension",
     "polarization_angle",
     "coa_phase",
-    "arrival_time",
+    "coa_time",
 )
 
 
 def extrinsic_priors(
-    arrival_time_bounds: tuple[float, float] = (-0.5, 0.5),
+    coa_time_bounds: tuple[float, float] = (-0.5, 0.5),
 ) -> dict[str, dist.Distribution]:
     """The prior of each :data:`EXTRINSIC_SITES` entry.
 
@@ -60,7 +60,7 @@ def extrinsic_priors(
 
     Parameters
     ----------
-    arrival_time_bounds
+    coa_time_bounds
         Lower and upper geocentric arrival times in seconds.
     """
     return {
@@ -71,7 +71,7 @@ def extrinsic_priors(
         "right_ascension": dist.Uniform(0.0, 2.0 * math.pi),
         "polarization_angle": dist.Uniform(0.0, math.pi),
         "coa_phase": dist.Uniform(0.0, 2.0 * math.pi),
-        "arrival_time": dist.Uniform(*arrival_time_bounds),
+        "coa_time": dist.Uniform(*coa_time_bounds),
     }
 
 
@@ -99,14 +99,14 @@ def joint_model(
     redshift_distribution: RedshiftDistribution,
     source_model: SourceModel,
     *,
-    arrival_time_bounds: tuple[float, float] = (-0.5, 0.5),
+    coa_time_bounds: tuple[float, float] = (-0.5, 0.5),
 ) -> PopulationModel:
     """The model that samples distances, intrinsic sources and extrinsics.
 
     ``redshift_distribution.distance_model()`` contributes the ``redshift``
     site and the ``luminosity_distance`` deterministic; ``source_model`` the
     intrinsic sites. This model adds isotropic sky coordinates, polarization
-    angle, coalescence phase and ``arrival_time`` uniform within the supplied
+    angle, coalescence phase and ``coa_time`` uniform within the supplied
     bounds in seconds as sample sites. Arrival times are relative to segment
     center in a segmented simulation.
     Identical extrinsic priors cancel in importance ratios. The declared sites
@@ -120,21 +120,21 @@ def joint_model(
         The intrinsic model; it must not declare ``redshift`` or
         ``luminosity_distance``, sky coordinates, polarization angle or coalescence
         phase or arrival time.
-    arrival_time_bounds
+    coa_time_bounds
         Lower and upper geocentric arrival times in seconds, defaulting to
         ``(-0.5, 0.5)``. Simulators supply the observation or effective segment
         bounds; power catalogs condition this site to zero.
     """
-    if not all(math.isfinite(bound) for bound in arrival_time_bounds) or not (
-        arrival_time_bounds[0] < arrival_time_bounds[1]
+    if not all(math.isfinite(bound) for bound in coa_time_bounds) or not (
+        coa_time_bounds[0] < coa_time_bounds[1]
     ):
-        raise ValueError("arrival_time_bounds must be finite and increasing")
+        raise ValueError("coa_time_bounds must be finite and increasing")
     distance_model = redshift_distribution.distance_model()
 
     def model() -> None:
         distance_model()
         source_model()
-        for name, prior in extrinsic_priors(arrival_time_bounds).items():
+        for name, prior in extrinsic_priors(coa_time_bounds).items():
             numpyro.sample(name, prior)
 
     return model

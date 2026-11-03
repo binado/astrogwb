@@ -53,7 +53,7 @@ def test_population_is_reproducible(population: PopulationArtifact) -> None:
     assert redrawn.source_parameters.keys() == population.source_parameters.keys()
     for name, values in population.source_parameters.items():
         np.testing.assert_array_equal(redrawn.source_parameters[name], values)
-    arrival = population.source_parameters["arrival_time"]
+    arrival = population.source_parameters["coa_time"]
     effective = population.observation_seconds / int(
         population.observation_seconds // 60.0
     )
@@ -62,7 +62,7 @@ def test_population_is_reproducible(population: PopulationArtifact) -> None:
 
 
 @pytest.mark.parametrize("segment_duration", [None, 60.0, 600.0])
-def test_arrival_time_bounds_use_the_actual_duration(
+def test_coa_time_bounds_use_the_actual_duration(
     segment_duration: float | None,
 ) -> None:
     metadata = _population(1e-4)
@@ -78,22 +78,22 @@ def test_arrival_time_bounds_use_the_actual_duration(
     # Changing the bounds rescales the same model draw and leaves every other
     # column intact, including source identities and population properties.
     np.testing.assert_allclose(
-        segmented.source_parameters["arrival_time"] / effective,
-        full.source_parameters["arrival_time"] / seconds,
+        segmented.source_parameters["coa_time"] / effective,
+        full.source_parameters["coa_time"] / seconds,
     )
     for name, values in full.source_parameters.items():
-        if name != "arrival_time":
+        if name != "coa_time":
             np.testing.assert_array_equal(segmented.source_parameters[name], values)
 
 
-def test_population_requires_arrival_time(population: PopulationArtifact) -> None:
-    with pytest.raises(ValueError, match="arrival_time.*regenerate"):
+def test_population_requires_coa_time(population: PopulationArtifact) -> None:
+    with pytest.raises(ValueError, match="coa_time.*regenerate"):
         dataclasses.replace(
             population,
             source_parameters={
                 name: values
                 for name, values in population.source_parameters.items()
-                if name != "arrival_time"
+                if name != "coa_time"
             },
         )
 
@@ -102,7 +102,7 @@ def test_population_requires_arrival_time(population: PopulationArtifact) -> Non
     "approximant",
     ["AnalyticInspiral", pytest.param("IMRPhenomD", marks=pytest.mark.integration)],
 )
-def test_arrival_time_shifts_both_polarizations_and_preserves_power(
+def test_coa_time_shifts_both_polarizations_and_preserves_power(
     population: PopulationArtifact, approximant: str
 ) -> None:
     generator = waveform_generator(
@@ -117,7 +117,7 @@ def test_arrival_time_shifts_both_polarizations_and_preserves_power(
     sources = {
         name: values[:2]
         for name, values in population.source_parameters.items()
-        if name != "arrival_time"
+        if name != "coa_time"
     }
     # Opposite quarter-cycle shifts at the first frequency: fixes the sign
     # and checks independent source times rather than a shared batch phase.
@@ -125,7 +125,7 @@ def test_arrival_time_shifts_both_polarizations_and_preserves_power(
     times = np.array([1.0, -1.0]) / (4 * frequencies[0])
     base = generator.generate_polarizations_batch(sources)
     shifted = jax.jit(generator.generate_polarizations_batch)(
-        {**sources, "arrival_time": times}
+        {**sources, "coa_time": times}
     )
     expected = np.exp(-2j * np.pi * times[:, None] * frequencies)
     for original, timed in zip(base, shifted, strict=True):
@@ -135,7 +135,7 @@ def test_arrival_time_shifts_both_polarizations_and_preserves_power(
     )
     np.testing.assert_array_equal(
         generator.generate_batch(sources),
-        generator.generate_batch({**sources, "arrival_time": times}),
+        generator.generate_batch({**sources, "coa_time": times}),
     )
 
     # At each physical site the arrival phase multiplies the strain once;
@@ -399,7 +399,7 @@ def test_spectra_do_not_depend_on_the_segment_batch_size(
 
 
 @pytest.mark.parametrize("opposite_phase", [False, True])
-def test_segment_sums_use_sampled_arrival_times_without_rescaling(
+def test_segment_sums_use_sampled_coa_times_without_rescaling(
     population: PopulationArtifact,
     monkeypatch: pytest.MonkeyPatch,
     opposite_phase: bool,
@@ -420,7 +420,7 @@ def test_segment_sums_use_sampled_arrival_times_without_rescaling(
         name: np.repeat(values[:1], 2)
         for name, values in population.source_parameters.items()
     }
-    sources["arrival_time"] = np.array(
+    sources["coa_time"] = np.array(
         [0.0, 1 / (2 * WAVEFORM.minimum_frequency) if opposite_phase else 0.0]
     )
     twins = dataclasses.replace(

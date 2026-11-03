@@ -6,7 +6,7 @@ hyperparameters (fixed or drawn once), the Poisson count
 and inclination the population model draws, and the extrinsic angles drawn
 by the joint model -- an isotropic direction (``declination``,
 ``right_ascension``), the polarization angle ``polarization_angle`` and the
-coalescence phase ``coa_phase`` and geocentric ``arrival_time`` in seconds. The downstream stages draw nothing.
+coalescence phase ``coa_phase`` and geocentric ``coa_time`` in seconds. The downstream stages draw nothing.
 
 One key splits into independent hyperparameter, count and source streams.
 Sources are drawn in one batch by
@@ -211,7 +211,7 @@ def simulate_population(
     count = int(jax.random.poisson(count_key, rate * metadata.observation_seconds))
     # One sample preserves column names even for an empty realization.
     sources = simulate_sources(
-        joint_model(redshift, source_model, arrival_time_bounds=bounds),
+        joint_model(redshift, source_model, coa_time_bounds=bounds),
         source_key,
         max(count, 1),
     )

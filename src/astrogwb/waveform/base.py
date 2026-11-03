@@ -90,21 +90,21 @@ class WaveformGenerator:
         Parameters
         ----------
         source_parameters
-            Source parameter values by name. Optional ``arrival_time`` gives
+            Source parameter values by name. Optional ``coa_time`` gives
             the geocentric arrival time in seconds relative to the chosen origin,
             one per source, ``(N,)`` (or a scalar shared by all sources).
-            Applies ``exp(-2 pi i f arrival_time)`` to both polarizations.
+            Applies ``exp(-2 pi i f coa_time)`` to both polarizations.
             A missing column leaves them unshifted. Detector delays are applied by
             detector projection; power-only generation is independent of time.
         """
         plus, cross = self._generate_polarizations_batch(source_parameters)
-        arrival_time = source_parameters.get("arrival_time")
-        if arrival_time is None:
+        coa_time = source_parameters.get("coa_time")
+        if coa_time is None:
             return plus, cross
         phase = jnp.exp(
             -2j
             * jnp.pi
-            * jnp.asarray(arrival_time)[..., None]
+            * jnp.asarray(coa_time)[..., None]
             * jnp.asarray(self.frequencies)
         )
         return plus * phase, cross * phase
