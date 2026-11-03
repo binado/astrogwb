@@ -4,7 +4,6 @@ __generated_with = "0.25.0"
 app = marimo.App()
 
 with app.setup(hide_code=True):
-    import dataclasses
     import time
     from collections.abc import Mapping, Sequence
     from pathlib import Path
@@ -29,14 +28,13 @@ with app.setup(hide_code=True):
     from xarray import DataTree
 
     from astrogwb.config import load_config
-    from astrogwb.detector import sample_pair_response
+    from astrogwb.detector import pair_response_moment
     from astrogwb.distributions.config import DistributionConfig
     from astrogwb.importance.catalog import (
         read_catalog,
         validate_matching_frequency_grids,
     )
-    from astrogwb.inference import ImportanceGaussianLikelihood
-    from astrogwb.inference import Network as LikelihoodNetwork
+    from astrogwb.inference import CatalogModel, DenseGaussianLikelihood
     from astrogwb.paper.plotting import (
         DETECTOR_NETWORKS,
         plot_corner,
@@ -44,11 +42,7 @@ with app.setup(hide_code=True):
         save_figures,
         use_paper_style,
     )
-    from astrogwb.paper.posteriors import (
-        network_pair_data,
-        pad_pairs,
-        shot_noise_variant,
-    )
+    from astrogwb.paper.posteriors import pair_network
     from astrogwb.simulators import BackgroundArtifact, network_spectra_ensemble
 
     # Points of the coarse scan that locates the ridge, Newton iterations that
@@ -67,7 +61,7 @@ with app.setup(hide_code=True):
 
     @jax.jit
     def ridge_columns(
-        likelihood: ImportanceGaussianLikelihood,
+        likelihood: DenseGaussianLikelihood,
         fiducial: Mapping[str, ArrayLike],
         gamma: jax.Array,
         kappa: jax.Array,
@@ -88,7 +82,7 @@ with app.setup(hide_code=True):
 
         def log_likelihood(z: jax.Array, g: jax.Array, k: jax.Array) -> jax.Array:
             params = {**fiducial, "z_peak": z, "gamma": g, "kappa": k}
-            return likelihood.log_likelihood(params, likelihood.network)[0]
+            return likelihood.log_likelihood(params)[0]
 
         slope = jax.grad(log_likelihood)
         curvature = jax.grad(slope)
@@ -167,10 +161,9 @@ def _():
     $z_{\mathrm{peak}}$ from a Gaussian of width $\sigma$ about $z^*$ of the
     chosen cell.
 
-    **Likelihood.** `likelihood_variant`: `"detector"`, `"amplitude"`,
-    `"fixed"` or `"modes"`. `"fixed"` holds the shot-noise variance at its
-    fiducial value; `"modes"` keeps the leading eigenmodes of the catalog
-    covariance with the per-source network response.
+    **Likelihood.** `likelihood_variant`: `"detector"` (no shot noise) or
+    `"dense"`, the dense Gaussian with the catalog covariance of the stacked
+    per-pair data under the per-source network response.
 
     **Checks.** Per network: the posterior mass in columns where Newton did not
     converge or the ridge sits on the support edge, and how far the quantiles
@@ -201,14 +194,11 @@ def _():
     fiducial_network = "ET-2L-aligned-CE-Hanford"
     network_names = [name for name, _ in DETECTOR_NETWORKS]
 
-    # "detector" | "amplitude" | "fixed" | "modes": the likelihood every grid
-    # uses. The shape parameters tilt the template, so the shot noise keeps its
-    # perpendicular eigenmodes as well as the amplitude.
-    likelihood_variant = "modes"
-    # Isotropic response draws, which every variant's shot noise carries as
-    # the network injections do, and the "modes" basis at the fiducials.
+    # "detector" | "dense": the likelihood every grid uses.
+    likelihood_variant = "dense"
+    # Isotropic response draws, which the shot noise carries as the network
+    # injections do, reduced once to each network's response moment.
     response_draws, response_seed = 32_768, 0
-    modes_tolerance, max_modes = 1e-3, 32  # dropped eigenvalue sum, noise units
     sampled = ("z_peak", "gamma", "kappa")
     num_gamma, num_kappa = 200, 120  # grid cells over (gamma, kappa)
     num_draws = 20_000  # draws of the posterior, for the plots and summaries
@@ -253,11 +243,9 @@ def _():
         fiducial_network,
         frequencies,
         likelihood_variant,
-        max_modes,
         maximum_frequency,
         minimum_frequency,
         ensemble_root,
-        modes_tolerance,
         network_names,
         noise,
         num_draws,
@@ -290,7 +278,7 @@ def cell_centers(low: float, high: float, num: int) -> NDArray[np.float64]:
 
 @app.function(hide_code=True)
 def ridge_grid(
-    likelihood: ImportanceGaussianLikelihood,
+    likelihood: DenseGaussianLikelihood,
     fiducial: Mapping[str, ArrayLike],
     gamma_range: tuple[float, float],
     kappa_range: tuple[float, float],
@@ -496,10 +484,8 @@ def _():
     mo.md(r"""
     ## Reference catalog and injection
 
-    The reference catalog is built once with
-    `density_sites=()` and the amplitude mode, which holds the squared power
-    and the Gram matrix of the catalog so that every variant can be switched
-    to afterwards and no evaluation contracts the catalog. The injection is one
+    The catalog model is built once with `density_sites=()`, which forms the
+    per-node power moments up front, so no evaluation contracts the catalog. The injection is one
     Poisson catalog recorded by every network, the ensemble's draw 0.
     """)
 
@@ -516,17 +502,15 @@ def _(frequencies, observation_time, redshift_nodes, reference_catalog_path):
         f"{redshift_nodes} redshift nodes"
     )
     target = population.build()
-    likelihood = ImportanceGaussianLikelihood.from_catalog(
+    model = CatalogModel.from_catalog(
         catalog_data,
         catalog_metadata,
         population=target,
         frequencies=frequencies,
         num_redshift_nodes=redshift_nodes,
-        density_sites=(),
-        shot_noise="amplitude",
         observation_time=observation_time,
     )
-    return (likelihood,)
+    return (model,)
 
 
 @app.cell
@@ -536,7 +520,7 @@ def _(data_seed, ensemble_root, frequencies, network_names):
     observed = {}
     for _name, _data in zip(network_names, _drawn, strict=True):
         validate_matching_frequency_grids(_data["frequencies"], frequencies)
-        observed[_name] = pad_pairs(_data["pair_spectral_density"][0])
+        observed[_name] = _data["pair_spectral_density"][0]
     print(
         f"injection: {int(_drawn[0]['n_events'][0]):,} Poisson events, "
         f"recorded by {len(observed)} networks"
@@ -546,14 +530,11 @@ def _(data_seed, ensemble_root, frequencies, network_names):
 
 @app.cell
 def _(
-    FIDUCIALS,
     frequencies,
-    likelihood,
     likelihood_variant,
-    max_modes,
     maximum_frequency,
     minimum_frequency,
-    modes_tolerance,
+    model,
     network_names,
     noise,
     observed,
@@ -561,71 +542,28 @@ def _(
     response_draws,
     response_seed,
 ):
-    per_network = {
-        name: network_pair_data(
+    # Each network scores the per-pair spectra it recorded, on its counted
+    # entries, with the response moment of its per-pair response draws.
+    network_likelihoods = {}
+    for _name in network_names:
+        _network = pair_network(
             frequencies,
-            noise[name],
+            noise[_name],
             minimum_frequency=minimum_frequency,
             maximum_frequency=maximum_frequency,
-        )
-        for name in network_names
-    }
-    # Each network's per-pair response draws, which its shot noise carries,
-    # reduced to what the likelihood holds: the per-node moments (so s^2 is
-    # not projected once per draw at every point; exact, as no density site
-    # varies) and, for the "modes" variant, the basis and node blocks. The
-    # (L, P, F) draws are then dropped.
-    base_networks = {}
-    for _name, _data in per_network.items():
-        _detectors = registry.build_network(_name)
-        _base = LikelihoodNetwork(
-            jnp.asarray(_data["scale"]),
-            jnp.asarray(_data["frequency_mask"]),
-            response=jnp.asarray(
-                pad_pairs(
-                    sample_pair_response(
-                        jax.random.key(response_seed),
-                        response_draws,
-                        frequencies,
-                        _detectors,
-                    )
-                )
+            response_moment=pair_response_moment(
+                jax.random.key(response_seed),
+                response_draws,
+                frequencies,
+                registry.build_network(_name),
             ),
-            pair_overlap=jnp.asarray(_data["pair_overlap"]),
         )
-        _base = _base._replace(
-            response_moments=likelihood.response_moments(FIDUCIALS, _base)
+        network_likelihoods[_name] = DenseGaussianLikelihood(
+            model,
+            _network,
+            _network.compress(observed[_name]),
+            shot_noise=likelihood_variant == "dense",
         )
-        if likelihood_variant == "modes":
-            _base = likelihood.with_shot_noise_modes(
-                FIDUCIALS, _base, tolerance=modes_tolerance, max_modes=max_modes
-            )
-        base_networks[_name] = _base._replace(response=None)
-    # The fiducial s^2 per network; only the "fixed" variant uses it.
-    fiducial_relative_variance = np.array(
-        [
-            float(likelihood.relative_variance(FIDUCIALS, network))
-            for network in base_networks.values()
-        ]
-    )
-    variant_likelihood, _s2 = shot_noise_variant(
-        likelihood_variant, likelihood, fiducial_relative_variance
-    )
-
-    def _network(index: int, name: str) -> LikelihoodNetwork:
-        if _s2 is None:
-            return base_networks[name]
-        return base_networks[name]._replace(relative_variance=jnp.asarray(_s2[index]))
-
-    # Each network scores the spectrum it recorded.
-    network_likelihoods = {
-        name: dataclasses.replace(
-            variant_likelihood,
-            observed=jnp.asarray(observed[name]),
-            network=_network(index, name),
-        )
-        for index, name in enumerate(per_network)
-    }
     labelled_networks = [(n, l) for n, l in DETECTOR_NETWORKS if n in network_names]
     return labelled_networks, network_likelihoods
 

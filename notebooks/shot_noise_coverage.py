@@ -25,15 +25,17 @@ with app.setup(hide_code=True):
     from scipy import stats
 
     from astrogwb.config import load_config
-    from astrogwb.detector import sample_pair_response
+    from astrogwb.detector import pair_response_moment
     from astrogwb.importance.catalog import read_catalog
     from astrogwb.importance.spectrum import INCLINATION_SECOND_MOMENT
     from astrogwb.inference import (
-        ImportanceGaussianLikelihood,
-        amplitude_direction,
-        rank_one_gaussian_log_likelihood,
+        CatalogModel,
+        DenseGaussianLikelihood,
+        grid_log_likelihood,
+        shot_noise_variance,
     )
-    from astrogwb.inference import Network as LikelihoodNetwork
+    from astrogwb.inference.gaussian import Network as LikelihoodNetwork
+    from astrogwb.inference.gaussian import catalog_covariance
     from astrogwb.paper.plotting import (
         DETECTOR_COMPARISON_LEGEND,
         DETECTOR_NETWORKS,
@@ -43,25 +45,10 @@ with app.setup(hide_code=True):
         save_figures,
         use_paper_style,
     )
-    from astrogwb.paper.posteriors import (
-        network_pair_data,
-        pad_pairs,
-    )
+    from astrogwb.paper.posteriors import pair_network
     from astrogwb.simulators import (
         BackgroundArtifact,
         network_spectra_ensemble,
-    )
-
-    # Log-likelihood of every injection at every grid point, (M, G): data is
-    # (M, F), prediction and direction (G, F). One injection at a time, so
-    # memory stays (G, F); compiled once for every network and variant.
-    grid_log_likelihoods = jax.jit(
-        lambda data, prediction, scale, direction, mask: jax.lax.map(
-            lambda observed: rank_one_gaussian_log_likelihood(
-                observed, prediction, scale, direction, mask
-            ),
-            data,
-        )
     )
 
 
@@ -71,7 +58,7 @@ def _():
     # Coverage of the shot-noise likelihood for $H_0$
 
     `notebooks/cosmology_grid_posteriors.py` models the physical shot noise of its
-    one injection as a rank-one term in the covariance of the spectral density.
+    one injection as the dense catalog covariance of the stacked per-pair data.
     This notebook checks that the term is calibrated: over $M$ independent Poisson
     injections at the true values $\Lambda_t$, does the $H_0$ posterior cover
     $H_0^t$ at the nominal rate, and does the detector-only likelihood fail to?
@@ -219,36 +206,29 @@ def _():
 
     ### Likelihood with shot noise
 
-    Marginalizing $\epsilon$ leaves a Gaussian in $S_h^{\rm data}$ with mean
-    $S_h(\Lambda)$ and a rank-one correction to the diagonal detector covariance
-    $D = \mathrm{diag}\big(\Delta S_h^2(f_k)\big)$,
+    The data are the per-pair cross powers $d_{ab,k}$ of every usable detector
+    pair and bin, with mean $\gamma_{ab}(f_k) S_h(f_k|\Lambda)$. The finite
+    catalog adds the covariance of a Poisson sum, the power moment
+    $M_{kl}(\Lambda)$ of the reference catalog times the network's response
+    moment $R_{ab,k;\,cd,l}$, to the diagonal detector covariance
+    $\Sigma = \mathrm{diag}\big(\sigma_{ab,k}^2\big)$:
 
     $$
-    C = D + \mathbf{u}\,\mathbf{u}^T,
+    C(\Lambda) = \Sigma + M(\Lambda) \circ R,
     \qquad
-    \mathbf{u} = \sigma_\epsilon\, S_h(\Lambda).
+    -2 \ln \mathcal{L} = (\mathbf d - \boldsymbol\mu)^T C^{-1} (\mathbf d - \boldsymbol\mu)
+        + \ln\det C + \mathrm{const},
     $$
 
-    With the whitened residual $x_k = [S_h^{\rm data}(f_k) - S_h(f_k|\Lambda)] / \Delta S_h(f_k)$
-    and mode $v_k = u_k / \Delta S_h(f_k)$, the Sherman-Morrison identity gives
+    factorized once per grid point and scored against every injection. Along
+    the template the shot noise is $\sigma_\epsilon^2$; the rest of $M \circ R$
+    is what the common-shape section measures. The variants:
 
-    $$
-    \chi^2 = x^T x - \frac{(x^T v)^2}{1 + v^T v},
-    \qquad
-    \ln\det C = \sum_k \ln \Delta S_h^2(f_k) + \ln\left(1 + v^T v\right),
-    \qquad
-    v^T v = (\rho\,\sigma_\epsilon)^2.
-    $$
-
-    The three likelihood variants differ only in $\mathbf{u}$:
-
-    | Variant | $\mathbf{u}$ |
+    | Variant | Covariance |
     |---|---|
-    | `detector` | $0$ |
-    | `amplitude` | $\sigma_\epsilon(\Lambda)\, S_h(\Lambda)$, with $\sigma_\epsilon$ re-evaluated at every grid point |
-    | `fixed` | $\sigma_\epsilon(\Lambda_t)\, S_h(\Lambda)$, with $\sigma_\epsilon$ frozen at the true values |
-    | `amplitude_sky` | `amplitude` with the sky-averaged $\sigma_\epsilon$, no response: what the response adds |
-    | `modes` | the dense catalog covariance truncated to its leading eigenmodes, $U B(\Lambda) U^T$ with the basis $U$ at the true values: the likelihood of the paper's forecasts |
+    | `detector` | $\Sigma$ |
+    | `dense` | $\Sigma + M(\Lambda) \circ R$, with $R$ from the network's isotropic response draws: the likelihood of the paper's forecasts |
+    | `dense_sky` | `dense` with the sky-averaged response, $R = (355/252)\,\gamma\gamma^T$: what the response adds |
 
     ### Calibration statistics
 
@@ -325,10 +305,6 @@ def _():
     grid_chunk_size = 8
     # Isotropic draws of each network's response, which its shot noise carries.
     response_draws, response_seed = 32_768, 0
-    # The "modes" likelihood keeps the leading eigenmodes of the dense catalog
-    # covariance until the dropped eigenvalues sum below the tolerance, in
-    # detector-noise units; as in cosmology_grid_posteriors.py.
-    modes_tolerance, max_modes = 1e-3, 32
 
     observation_time = 1.0  # years
     minimum_frequency = 2.0
@@ -372,10 +348,8 @@ def _():
         h0_size,
         h0_window,
         injected_metadata,
-        max_modes,
         maximum_frequency,
         minimum_frequency,
-        modes_tolerance,
         network_names,
         noise,
         noise_draws,
@@ -731,12 +705,10 @@ def _():
     mo.md(r"""
     ## Model on the grid
 
-    The rescaled spectrum and its shot-noise variance at every $H_0$ grid
-    point, once; then, with each network's response, $s^2$ at the fiducial
-    (`fixed`) and at every grid point (`amplitude`), and the sky-averaged
-    $s^2$ at every grid point (`amplitude_sky`). For `modes`, the leading
-    eigenmodes of each network's dense catalog covariance at the fiducials,
-    with its mode covariance re-evaluated at every grid point.
+    The rescaled spectrum at every $H_0$ grid point, once; then each network's
+    likelihood network, on its usable entries, with the response moment of its
+    isotropic response draws (`dense`) or of the sky-averaged response
+    (`dense_sky`), and $\sigma_\epsilon^2$ at the fiducials.
     """)
 
 
@@ -747,138 +719,98 @@ def _(
     grid_chunk_size,
     h0_size,
     h0_window,
-    max_modes,
-    modes_tolerance,
     observation_time,
     overlaps,
     per_network,
     redshift_nodes,
     reference_catalog_path,
-    sample_response,
+    response_moments,
 ):
     catalog_data, catalog_metadata, _ = read_catalog(reference_catalog_path)
     population = catalog_metadata.population
     target = population.build()
-    likelihood = ImportanceGaussianLikelihood.from_catalog(
+    model = CatalogModel.from_catalog(
         catalog_data,
         catalog_metadata,
         population=target,
         frequencies=frequencies,
         num_redshift_nodes=redshift_nodes,
-        density_sites=(),
-        shot_noise="amplitude",
-        observation_time=observation_time,
-    )
-    # The truncated dense covariance: what the paper's forecasts use.
-    modes_likelihood = ImportanceGaussianLikelihood.from_catalog(
-        catalog_data,
-        catalog_metadata,
-        population=target,
-        frequencies=frequencies,
-        num_redshift_nodes=redshift_nodes,
-        density_sites=(),
-        shot_noise="modes",
         observation_time=observation_time,
     )
     h0_grid = np.linspace(*h0_window, h0_size)
 
     @jax.jit
-    def _predict(likelihood, h0):
-        def point(value):
-            return likelihood.predict({**FIDUCIALS, "H0": value})[0]
-
-        return jax.lax.map(point, h0, batch_size=grid_chunk_size)
-
-    grid_prediction = _predict(likelihood, jnp.asarray(h0_grid))
-    _fiducial = int(np.argmin(np.abs(h0_grid - FIDUCIALS["H0"])))
-    print(f"grid: {h0_size} H0 points; fiducial node H0 = {h0_grid[_fiducial]:.3f}")
-    fiducial_prediction, fiducial_variance, _ = likelihood.predict(FIDUCIALS)
-
-    # s^2 of each network: the catalog projected on its noise-weighted template.
-    @jax.jit
-    def _relative_variance(likelihood, h0, network):
+    def _predict(model, h0):
         return jax.lax.map(
-            lambda value: likelihood.relative_variance(
-                {**FIDUCIALS, "H0": value}, network
-            ),
+            lambda value: model.spectrum({**FIDUCIALS, "H0": value}),
             h0,
             batch_size=grid_chunk_size,
         )
 
-    def _network(name, response=True):
-        scale, mask = per_network[name]
-        network = LikelihoodNetwork(
-            jnp.asarray(scale),
-            jnp.asarray(mask),
-            pair_overlap=jnp.asarray(overlaps[name]),
-        )
-        if not response:
-            return network
-        network = network._replace(response=sample_response(name))
-        # Held so s^2 is not projected once per response draw at every point;
-        # exact, as no density site varies. The draws are then dropped.
-        network = network._replace(
-            response_moments=likelihood.response_moments(FIDUCIALS, network)
-        )
-        # The "modes" basis of the catalog covariance at the fiducials, and
-        # its node blocks, likewise exact at every grid point.
-        modes_networks[name] = modes_likelihood.with_shot_noise_modes(
-            FIDUCIALS,
-            network,
-            tolerance=modes_tolerance,
-            max_modes=max_modes,
-        )._replace(response=None)
-        return network._replace(response=None)
+    grid_prediction = _predict(model, jnp.asarray(h0_grid))
+    _fiducial = int(np.argmin(np.abs(h0_grid - FIDUCIALS["H0"])))
+    print(f"grid: {h0_size} H0 points; fiducial node H0 = {h0_grid[_fiducial]:.3f}")
+    fiducial_full_prediction = model.predict(FIDUCIALS)
+    fiducial_prediction = fiducial_full_prediction.mean
 
-    modes_networks = {}
-    _networks = {_name: _network(_name) for _name in per_network}
-    grid_relative_variance = {
-        _name: _relative_variance(likelihood, jnp.asarray(h0_grid), _networks[_name])
-        for _name in per_network
-    }
-    sky_relative_variance = {
-        _name: _relative_variance(
-            likelihood, jnp.asarray(h0_grid), _network(_name, response=False)
+    def _network(name, moment):
+        scale, mask = per_network[name]
+        return LikelihoodNetwork.from_pairs(
+            scale.reshape(overlaps[name].shape),
+            overlaps[name],
+            mask.reshape(overlaps[name].shape),
+            response_moment=moment,
         )
+
+    # Each network with its isotropic response moment, and with the
+    # sky-averaged one: the inclination scatter alone, 355/252.
+    likelihood_networks = {
+        _name: {
+            "dense": _network(_name, response_moments[_name]),
+            "dense_sky": _network(
+                _name,
+                INCLINATION_SECOND_MOMENT
+                * np.multiply.outer(overlaps[_name], overlaps[_name]),
+            ),
+        }
         for _name in per_network
     }
     fiducial_relative_variance = {
-        _name: float(likelihood.relative_variance(FIDUCIALS, _networks[_name]))
-        for _name in per_network
+        _name: float(shot_noise_variance(fiducial_full_prediction, _networks["dense"]))
+        for _name, _networks in likelihood_networks.items()
     }
 
-    @jax.jit
-    def _modes_log_likelihoods(likelihood, network, h0, data):
-        # The prediction and the mode covariance at a grid point do not depend
-        # on the data, so vmap evaluates them once for all injections.
-        def point(value):
-            params = {**FIDUCIALS, "H0": value}
-            return jax.vmap(
-                lambda observed: likelihood.log_likelihood(
-                    params, network._replace(observed=observed)
-                )[0]
-            )(data)
+    def grid_log_likelihoods(name, variant, data):
+        """Log-likelihood of every row of ``data`` at every grid point, (M, G).
 
-        return jax.lax.map(point, h0, batch_size=grid_chunk_size).T
-
-    def modes_log_likelihoods(name, data):
-        """Log-likelihood of every row of ``data`` at every grid point, (M, G)."""
-        return _modes_log_likelihoods(
-            modes_likelihood, modes_networks[name], jnp.asarray(h0_grid), data
+        ``data`` is ``(M, P F)``, the network's flattened per-pair spectra.
+        """
+        network = likelihood_networks[name][
+            "dense" if variant == "detector" else variant
+        ]
+        likelihood = DenseGaussianLikelihood(
+            model,
+            network,
+            network.compress(jnp.reshape(data, (data.shape[0], *overlaps[name].shape))),
+            shot_noise=variant != "detector",
         )
+        values = grid_log_likelihood(
+            likelihood,
+            {"H0": jnp.asarray(h0_grid)},
+            fixed={k: v for k, v in FIDUCIALS.items() if k != "H0"},
+            chunk_size=grid_chunk_size,
+        )
+        return values.T
 
-    for _name, _network_modes in modes_networks.items():
-        print(f"{_name}: {_network_modes.modes.shape[1]} shot-noise modes")
     return (
+        fiducial_full_prediction,
         fiducial_prediction,
         fiducial_relative_variance,
-        fiducial_variance,
+        grid_log_likelihoods,
         grid_prediction,
-        grid_relative_variance,
         h0_grid,
-        likelihood,
-        modes_log_likelihoods,
-        sky_relative_variance,
+        likelihood_networks,
+        model,
     )
 
 
@@ -891,21 +823,22 @@ def _(
     noise,
 ):
     # Each network's stacked per-pair data on one flat axis, pair-major:
-    # (scale, mask), (D,) with D = 6 F (pairs padded), and its ORFs (P, F).
+    # (scale, mask), (P F,), unusable entries at unit scale, and its ORFs
+    # (P, F). The usable entries are those `pair_network` counts.
     per_network = {}
     overlaps = {}
     for _name in network_names:
-        _data = network_pair_data(
+        _counted = pair_network(
             frequencies,
             noise[_name],
             minimum_frequency=minimum_frequency,
             maximum_frequency=maximum_frequency,
         )
-        per_network[_name] = (
-            np.asarray(_data["scale"]).ravel(),
-            np.asarray(_data["frequency_mask"]).ravel(),
-        )
-        overlaps[_name] = np.asarray(_data["pair_overlap"])
+        _scale = np.asarray(noise[_name].pair_scale).ravel()
+        _mask = np.zeros(_scale.size, dtype=bool)
+        _mask[np.asarray(_counted.keep)] = True
+        per_network[_name] = (np.where(_mask, _scale, 1.0), _mask)
+        overlaps[_name] = np.asarray(noise[_name].pair_overlap)
 
     def expand(prediction, name):
         """A spectrum ``(..., F)`` as network ``name``'s pair data, ``(..., D)``."""
@@ -917,26 +850,21 @@ def _(
 
 
 @app.cell
-def _(frequencies, registry, response_draws, response_seed):
-    def sample_response(name):
-        """Network ``name``'s per-pair response draws, padded, ``(L, P, F)``.
-
-        Drawn on demand: at (32768, 6, F) they are too large to hold for
-        every network at once.
-        """
-        detectors = registry.build_network(name)
-        return jnp.asarray(
-            pad_pairs(
-                sample_pair_response(
-                    jax.random.key(response_seed),
-                    response_draws,
-                    frequencies,
-                    detectors,
-                )
+def _(frequencies, network_names, registry, response_draws, response_seed):
+    # Each network's response moment over its isotropic per-pair response
+    # draws, (P, F, P, F), reduced once without holding the draws.
+    response_moments = {
+        _name: np.asarray(
+            pair_response_moment(
+                jax.random.key(response_seed),
+                response_draws,
+                frequencies,
+                registry.build_network(_name),
             )
         )
-
-    return (sample_response,)
+        for _name in network_names
+    }
+    return (response_moments,)
 
 
 @app.cell(hide_code=True)
@@ -962,10 +890,9 @@ def _(
     _ensembles = network_spectra_ensemble(
         ensemble_root, ensemble_seed, num_injections, network_names
     )
-    # Each network's per-pair spectra, padded and flattened onto its data
-    # axis: (M, D).
+    # Each network's per-pair spectra, flattened onto its data axis: (M, P F).
     injections = {
-        _name: pad_pairs(_ensemble["pair_spectral_density"]).reshape(
+        _name: np.asarray(_ensemble["pair_spectral_density"]).reshape(
             _ensemble["pair_spectral_density"].shape[0], -1
         )
         for _name, _ensemble in zip(network_names, _ensembles, strict=True)
@@ -1073,8 +1000,8 @@ def _():
 
     **Figure (variance).** The diagonal $\hat C_{kk}$ against frequency, over the
     bins the fiducial network can use, with the model's per-bin
-    $V_k / S_h^t(f_k)^2$ from the reference catalog, with the network's
-    $\langle r_f^2 \rangle$, for comparison.
+    $M_{kk} \langle r_{ab}(f_k)^2 \rangle / S_h^t(f_k)^2$ from the reference
+    catalog and the leading pair's response, for comparison.
 
     **Figure (correlation).** The heatmap of $\hat R_{kl}$. A block of
     correlation close to 1 is the band where shot noise acts as a single
@@ -1085,13 +1012,13 @@ def _():
 @app.cell
 def _(
     expand,
+    fiducial_full_prediction,
     fiducial_network,
     fiducial_prediction,
-    fiducial_variance,
     frequencies,
     injections,
     per_network,
-    sample_response,
+    response_moments,
 ):
     _scale, _entries = per_network[fiducial_network]
     _template = expand(fiducial_prediction, fiducial_network)
@@ -1114,14 +1041,14 @@ def _(
     ) / _template[_mask]
     eps_covariance = np.cov(eps_samples, rowvar=False)
     eps_variance = np.diag(eps_covariance)
-    # The per-bin variance with the pair's <r^2> for the inclination's.
-    _orientation = (
-        np.mean(np.asarray(sample_response(fiducial_network)[:, 0]) ** 2, axis=0)
-        / INCLINATION_SECOND_MOMENT
+    # The model's per-bin variance on the leading pair: the diagonal of the
+    # power moment times the pair's response moment <r_f^2>.
+    _pair_moment = np.diagonal(
+        np.diagonal(response_moments[fiducial_network][0, :, 0, :])
     )
     model_variance = (
-        np.asarray(fiducial_variance)[_mask[:_bins]]
-        * _orientation[_mask[:_bins]]
+        np.diag(np.asarray(fiducial_full_prediction.power_moment))[_mask[:_bins]]
+        * np.asarray(_pair_moment)[_mask[:_bins]]
         / _template[_mask] ** 2
     )
     eps_correlation = eps_covariance / np.sqrt(np.outer(eps_variance, eps_variance))
@@ -1330,15 +1257,13 @@ def _():
     about zero, $\pm\|P C \mathbf{e}\|$.
 
     The covariance is analytic, from Campbell's theorem on the reference
-    catalog (`ImportanceGaussianLikelihood.catalog_covariance`), with no Poisson
+    catalog (`astrogwb.inference.gaussian.catalog_covariance`), with no Poisson
     realizations:
     $\mathrm{Cov}[S_k, S_{k'}] = (\mathcal{R}/T)\,\langle P_k P_{k'} \rangle$,
-    on the redshift nodes and importance weights of the per-bin variance
-    $V_k$, with the network's response correlation
-    $\langle r_k r_{k'} \rangle$ in place of the inclination factor (a
-    Hadamard product). Its diagonal is $V_k$ up to the interpolation order of
-    the square. The response decorrelates the bins, so the perpendicular
-    modes it adds are what the `"modes"` likelihood keeps.
+    on the redshift nodes of the spectrum, times the network's response
+    moment $\langle r_k r_{k'} \rangle$ (a Hadamard product). The response
+    decorrelates the bins, so the perpendicular modes it adds are what the
+    dense likelihood keeps and the common-shape model drops.
 
     **Table.** Per network, $\kappa^2$, the extreme eigenvalues of $\Delta$,
     $\lambda_{\max}(P C P)$, $\|P C \mathbf{e}\|$ and the Kullback-Leibler
@@ -1380,21 +1305,19 @@ def _():
 def _(
     FIDUCIALS,
     expand,
+    fiducial_full_prediction,
     fiducial_prediction,
-    fiducial_variance,
-    likelihood,
+    model,
     overlaps,
     per_network,
-    sample_response,
+    response_moments,
 ):
 
     _shape_parameters = ("z_peak", "gamma", "kappa")
     _derivatives = {
         _name: np.asarray(
             jax.jvp(
-                lambda value, name=_name: likelihood.spectrum(
-                    {**FIDUCIALS, name: value}
-                ),
+                lambda value, name=_name: model.spectrum({**FIDUCIALS, name: value}),
                 (jnp.asarray(FIDUCIALS[_name]),),
                 (jnp.asarray(1.0),),
             )[1]
@@ -1407,33 +1330,15 @@ def _(
     covariance_eigenvalues = {}
     for _name, (_scale, _mask) in per_network.items():
         _template = expand(fiducial_prediction, _name)
-        _positive = _template != 0.0
-        _response = sample_response(_name)
-        _network = LikelihoodNetwork(
-            jnp.asarray(_scale),
-            jnp.asarray(_mask),
-            response=_response,
-            pair_overlap=jnp.asarray(overlaps[_name]),
+        _keep = _mask & (_template != 0.0)
+        _network = LikelihoodNetwork.from_pairs(
+            _scale.reshape(overlaps[_name].shape),
+            overlaps[_name],
+            _keep.reshape(overlaps[_name].shape),
+            response_moment=response_moments[_name],
         )
-        # (D, D) over the network's (pair, bin) entries.
-        _catalog_covariance = np.asarray(
-            likelihood.catalog_covariance(FIDUCIALS, _network)
-        )
-        # Campbell's diagonal squares the interpolated source spectrum; V_k
-        # interpolates the squared one, which can only be larger (Jensen).
-        _orientation = (
-            np.mean(np.asarray(_response).reshape(_response.shape[0], -1) ** 2, axis=0)
-            / INCLINATION_SECOND_MOMENT
-        )
-        del _response, _network
-        _variance = np.tile(np.asarray(fiducial_variance), overlaps[_name].shape[0])
-        _diagonal_ratio = (
-            np.diag(_catalog_covariance)[_positive]
-            / (_variance * _orientation)[_positive]
-        )
-        assert np.all(_diagonal_ratio <= 1.0 + 1e-10), _name
-        _keep = _mask & _positive
-        _covariance = _catalog_covariance[np.ix_(_keep, _keep)]
+        # (D, D) over the network's usable (pair, bin) entries with signal.
+        _covariance = np.asarray(catalog_covariance(fiducial_full_prediction, _network))
         _metrics, delta_eigenvalues[_name] = common_shape_metrics(
             _covariance,
             _template[_keep],
@@ -1445,25 +1350,7 @@ def _(
         )
         _whitened = _covariance / np.outer(_scale[_keep], _scale[_keep])
         covariance_eigenvalues[_name] = np.linalg.eigvalsh(_whitened)[::-1]
-        _relative = float(
-            likelihood.relative_variance(
-                FIDUCIALS,
-                LikelihoodNetwork(
-                    jnp.asarray(_scale),
-                    jnp.asarray(_mask),
-                    response_moments=likelihood.response_moments(
-                        FIDUCIALS,
-                        LikelihoodNetwork(
-                            jnp.asarray(_scale),
-                            jnp.asarray(_mask),
-                            response=sample_response(_name),
-                            pair_overlap=jnp.asarray(overlaps[_name]),
-                        ),
-                    ),
-                    pair_overlap=jnp.asarray(overlaps[_name]),
-                ),
-            )
-        )
+        _relative = float(shot_noise_variance(fiducial_full_prediction, _network))
         np.testing.assert_allclose(
             _metrics["kappa^2"], _metrics["rho"] ** 2 * _relative, rtol=1e-8
         )
@@ -1552,10 +1439,10 @@ def _():
     $$
     \mathrm{Var}(z) = 1 + (\rho\,\sigma_\epsilon)^2 \ \text{(detector)},
     \qquad
-    \mathrm{Var}(z) = 1 \ \text{(amplitude, fixed)},
+    \mathrm{Var}(z) = 1 \ \text{(dense)},
     $$
 
-    and `amplitude_sky` falls short of 1 by the response's share of
+    and `dense_sky` falls short of 1 by the response's share of
     $\sigma_\epsilon^2$. `bias` is the mean of $\bar H_0 - H_0^t$ in
     km/s/Mpc, and `mean z` the same bias in posterior standard deviations.
 
@@ -1568,17 +1455,12 @@ def _():
 def _(
     FIDUCIALS,
     PRIORS,
-    expand,
-    fiducial_relative_variance,
-    grid_prediction,
-    grid_relative_variance,
+    grid_log_likelihoods,
     h0_grid,
     injections,
-    modes_log_likelihoods,
     noise_draws,
     noise_seed,
     per_network,
-    sky_relative_variance,
 ):
     _label = dict(DETECTOR_NETWORKS)
     _log_prior = np.asarray(PRIORS["H0"].log_prob(jnp.asarray(h0_grid)))
@@ -1586,7 +1468,8 @@ def _(
     statistics: dict[tuple[str, str], dict[str, NDArray[np.float64]]] = {}
     _rows = []
     for _k, (_name, (_scale, _mask)) in enumerate(per_network.items()):
-        # (M, R, F) -> (M R, F), injection-major: R noise draws per injection.
+        # (M, R, P F) -> (M R, P F), injection-major: R noise draws per injection.
+        _bins = injections[_name].shape[1]
         _noise = np.asarray(
             jax.random.normal(
                 jax.random.fold_in(jax.random.key(noise_seed), _k),
@@ -1596,29 +1479,10 @@ def _(
         _data = jnp.asarray(
             (injections[_name][:, None, :] + _noise * _scale).reshape(-1, _bins)
         )
-        _s2_fixed = jnp.asarray(fiducial_relative_variance[_name])
-        _s2_grid = grid_relative_variance[_name]
-        # The grid's spectra as this network's pair data, (G, D).
-        _prediction = jnp.asarray(expand(grid_prediction, _name))
-        _directions = {
-            "detector": jnp.zeros_like(_prediction),
-            "amplitude": amplitude_direction(_prediction, _s2_grid),
-            "fixed": amplitude_direction(_prediction, _s2_fixed),
-            "amplitude_sky": amplitude_direction(
-                _prediction, sky_relative_variance[_name]
-            ),
-        }
         _log_likelihoods = {
-            _variant: grid_log_likelihoods(
-                _data,
-                _prediction,
-                jnp.asarray(_scale),
-                _direction,
-                jnp.asarray(_mask),
-            )
-            for _variant, _direction in _directions.items()
+            _variant: grid_log_likelihoods(_name, _variant, _data)
+            for _variant in ("detector", "dense", "dense_sky")
         }
-        _log_likelihoods["modes"] = modes_log_likelihoods(_name, _data)
         for _variant, _values in _log_likelihoods.items():
             _log_density = np.asarray(_values) + _log_prior
             statistics[_name, _variant] = posterior_statistics(
@@ -1641,7 +1505,7 @@ def _():
     mo.md(r"""
     **Figure.** At the fiducial network it plots the distributions of the two
     calibration statistics over the $M$ posteriors, for `detector`
-    (solid) and `amplitude` (dashed). The other variants are in the table but not
+    (solid) and `dense` (dashed). The other variant is in the table but not
     plotted.
 
     - *Left:* a histogram of $\mathrm{PIT}$ against the uniform density,
@@ -1662,7 +1526,7 @@ def _(
     coverage_figure, (_ax_pit, _ax_z) = plt.subplots(1, 2, figsize=(9, 3.6))
     _bins = np.linspace(0.0, 1.0, 11)
     _z_grid = np.linspace(-4.0, 4.0, 201)
-    for _variant, _style in (("detector", "-"), ("amplitude", "--")):
+    for _variant, _style in (("detector", "-"), ("dense", "--")):
         _stats = statistics[fiducial_network, _variant]
         _ax_pit.hist(
             _stats["pit"],
@@ -1704,7 +1568,7 @@ def _():
     - *Left:* `detector`. Without the shot-noise term the posterior is too
       narrow and the curve sags below the diagonal, the more so the larger
       $\rho\,\sigma_\epsilon$.
-    - *Right:* `modes`, the truncated dense catalog covariance of the paper's
+    - *Right:* `dense`, the dense catalog covariance of the paper's
       forecasts.
 
     The grey band holds 95% of the curves of a calibrated likelihood at each
@@ -1733,7 +1597,7 @@ def _(
     )
     for _ax, (_variant, _title) in zip(
         _axes,
-        (("detector", "Detector noise only"), ("modes", "With shot noise")),
+        (("detector", "Detector noise only"), ("dense", "With shot noise")),
         strict=True,
     ):
         _ax.fill_between(

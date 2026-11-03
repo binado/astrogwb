@@ -36,8 +36,8 @@ with app.setup(hide_code=True):
         effective_psd,
         gaussian_bin_scale,
         pair_bin_scale,
+        pair_response_moment,
         pair_terms,
-        sample_pair_response,
     )
     from astrogwb.detector.config import DetectorRegistry
     from astrogwb.frequency import frequency_mask
@@ -46,8 +46,9 @@ with app.setup(hide_code=True):
         IntensityData,
         read_catalog,
     )
-    from astrogwb.inference import ImportanceGaussianLikelihood
-    from astrogwb.inference import Network as LikelihoodNetwork
+    from astrogwb.importance.spectrum import INCLINATION_SECOND_MOMENT
+    from astrogwb.inference import CatalogModel, shot_noise_variance
+    from astrogwb.inference.gaussian import Network as LikelihoodNetwork
     from astrogwb.paper.plotting import (
         DETECTOR_COMPARISON_LEGEND,
         DETECTOR_NETWORKS,
@@ -829,11 +830,11 @@ def _():
     Poisson sum over mergers. Projected on the mean spectrum, the scatter is
     an amplitude offset $\epsilon$; $\rho\,\mathrm{sd}(\epsilon)$ compares
     it with the detector's amplitude error $1/\rho$, over the widest band
-    ($f_{\min}$ = the first cut). The likelihood models it with
-    `astrogwb.inference.ImportanceGaussianLikelihood`;
+    ($f_{\min}$ = the first cut). The likelihood models it with the dense
+    catalog covariance of `astrogwb.inference.DenseGaussianLikelihood`;
     `notebooks/shot_noise_coverage.py` checks the two against each other on
     these draws. A bin correlation of one means the shot noise is a single
-    amplitude mode, which is what the rank-one likelihood assumes.
+    amplitude mode, the common-shape limit of that covariance.
     """)
     return
 
@@ -941,7 +942,7 @@ def minimum_redshift_scan(
     evaluated at ``hyperparameters``; then, per network, :math:`\rho` is the
     SNR of the expected spectrum and :math:`s` the relative standard deviation
     of its shot noise projected on the network's noise-weighted template
-    (:meth:`astrogwb.inference.ImportanceGaussianLikelihood.relative_variance`),
+    (:func:`astrogwb.inference.shot_noise_variance`),
     with the network's per-source response when ``response_draws`` is given.
     The relative uncertainty of the amplitude is :math:`(\rho^{-2} + s^2)^{1/2}`.
 
@@ -968,9 +969,9 @@ def minimum_redshift_scan(
         Quadrature nodes per window.
     response_draws, response_seed
         Isotropic draws of each network's per-pair response
-        (:func:`~astrogwb.detector.sample_pair_response`), which the shot
+        (:func:`~astrogwb.detector.pair_response_moment`), which the shot
         noise of the stacked per-pair data then carries; ``None`` keeps the
-        sky-averaged shot noise.
+        sky-averaged response, :math:`(355/252)\, \gamma \gamma^T`.
 
     Returns
     -------
@@ -982,63 +983,49 @@ def minimum_redshift_scan(
     grid = jnp.asarray(frequencies)
     seconds = years_to_seconds(observation_time)
     band = frequency_mask(grid, fmin=minimum_frequency, fmax=maximum_frequency)
-    likelihoods = [
-        ImportanceGaussianLikelihood.from_catalog(
+    models = [
+        CatalogModel.from_catalog(
             data,
             catalog_metadata,
             population=target,
             frequencies=frequencies,
             num_redshift_nodes=num_redshift_nodes,
-            density_sites=(),
-            shot_noise="amplitude",
             observation_time=observation_time,
             minimum_redshift=float(edge),
         )
         for edge in redshifts
     ]
-    spectra = [likelihood.predict(hyperparameters)[0] for likelihood in likelihoods]
+    predictions = [model.predict(hyperparameters) for model in models]
     records = []
-    # One network at a time: its (L, P, F) per-pair response draws are large.
     for name, label in rows:
         geometry = registry.build_network(name)
         noise = jnp.asarray(effective_psd(grid, geometry))
         combined_keep = band & jnp.isfinite(noise) & (noise > 0.0)
-        scale = pair_bin_scale(grid, geometry, observation_time)
-        keep = band & jnp.isfinite(scale) & (scale > 0.0)
-        network = LikelihoodNetwork(
-            jnp.where(keep, scale, 1.0),
-            keep,
-            response=(
-                None
-                if response_draws is None
-                else sample_pair_response(
-                    jax.random.key(response_seed), response_draws, grid, geometry
-                )
-            ),
-            pair_overlap=jnp.asarray(
-                np.stack([term.overlap for term in pair_terms(grid, geometry)])
-            ),
+        scale = np.asarray(pair_bin_scale(grid, geometry, observation_time))
+        keep = np.asarray(band) & np.isfinite(scale) & (scale > 0.0)
+        overlap = np.stack([term.overlap for term in pair_terms(grid, geometry)])
+        moment = (
+            INCLINATION_SECOND_MOMENT * np.multiply.outer(overlap, overlap)
+            if response_draws is None
+            else pair_response_moment(
+                jax.random.key(response_seed), response_draws, grid, geometry
+            )
         )
-        for edge, likelihood, spectrum in zip(
-            redshifts, likelihoods, spectra, strict=True
-        ):
+        network = LikelihoodNetwork.from_pairs(
+            scale, overlap, keep, response_moment=moment
+        )
+        for edge, prediction in zip(redshifts, predictions, strict=True):
             # The pairs combine to the network's SNR (a sufficient statistic).
             snr = float(
                 spectral_snr(
-                    spectrum, noise, seconds, grid, frequency_mask=combined_keep
+                    prediction.mean,
+                    noise,
+                    seconds,
+                    grid,
+                    frequency_mask=combined_keep,
                 )
             )
-            held = network
-            if network.response is not None:
-                # One fold over the nodes, not one projection per draw.
-                held = network._replace(
-                    response_moments=likelihood.response_moments(
-                        hyperparameters, network
-                    )
-                )
-            scatter = float(
-                jnp.sqrt(likelihood.relative_variance(hyperparameters, held))
-            )
+            scatter = float(jnp.sqrt(shot_noise_variance(prediction, network)))
             records.append(
                 {
                     "network": label,
