@@ -57,6 +57,14 @@ deviation :func:`~astrogwb.detector.pair_bin_scale` for any grid and any
 and noise are folded from the realization's key (streams
 :data:`SEGMENT_STREAM` and :data:`NOISE_STREAM`). Bins where a PSD is not
 finite get no noise. Earth's rotation during a signal is not modelled.
+
+Before coherent summation, both polarizations receive the geocentric arrival
+phase :math:`\exp(-2\pi i f t_i)`, with
+:math:`t_i` sampled in seconds relative to segment center within
+:math:`[-\tau_\mathrm{eff}/2, \tau_\mathrm{eff}/2)`. The joint population model
+supplies ``coa_time``; it is never redrawn or rescaled here. Detector projection applies geometric delays once. Signals remain
+complete within their assigned segment, without window truncation or boundary
+crossing.
 """
 
 from __future__ import annotations
@@ -467,7 +475,8 @@ def simulate_background(
     Parameters
     ----------
     population
-        The realization to project.
+        The realization to project. For a uniform arrival prior over each
+        segment, draw it with the same ``segment_duration`` supplied here.
     waveform
         The waveform its polarizations are generated with.
     registry

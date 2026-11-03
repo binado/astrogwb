@@ -83,15 +83,31 @@ class WaveformGenerator:
 
         :math:`(\tilde h_+, \tilde h_\times)` in each source's radiation frame:
         they depend on the intrinsic parameters, the inclination and the
-        coalescence phase, never on the sky position or the polarization angle,
+        coalescence phase and optional geocentric arrival time, never on the
+        sky position or the polarization angle,
         which enter through the antenna patterns. Trace-safe.
 
         Parameters
         ----------
         source_parameters
-            Source parameter values by name.
+            Source parameter values by name. Optional ``coa_time`` gives
+            the geocentric arrival time in seconds relative to the chosen origin,
+            one per source, ``(N,)`` (or a scalar shared by all sources).
+            Applies ``exp(-2 pi i f coa_time)`` to both polarizations.
+            A missing column leaves them unshifted. Detector delays are applied by
+            detector projection; power-only generation is independent of time.
         """
-        return self._generate_polarizations_batch(source_parameters)
+        plus, cross = self._generate_polarizations_batch(source_parameters)
+        coa_time = source_parameters.get("coa_time")
+        if coa_time is None:
+            return plus, cross
+        phase = jnp.exp(
+            -2j
+            * jnp.pi
+            * jnp.asarray(coa_time)[..., None]
+            * jnp.asarray(self.frequencies)
+        )
+        return plus * phase, cross * phase
 
     def _generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
         """Every source in one vectorized pass; what a concrete generator implements."""

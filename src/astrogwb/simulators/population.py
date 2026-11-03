@@ -6,7 +6,7 @@ hyperparameters (fixed or drawn once), the Poisson count
 and inclination the population model draws, and the extrinsic angles drawn
 by the joint model -- an isotropic direction (``declination``,
 ``right_ascension``), the polarization angle ``polarization_angle`` and the
-coalescence phase ``coa_phase``. The downstream stages draw nothing.
+coalescence phase ``coa_phase`` and geocentric ``coa_time`` in seconds. The downstream stages draw nothing.
 
 One key splits into independent hyperparameter, count and source streams.
 Sources are drawn in one batch by
@@ -57,7 +57,9 @@ class RealizationMetadata(BaseModel):
     in years and sets the Poisson mean :math:`\\mathcal{R}\\, T` and, downstream,
     the spectrum normalization.
 
-    The key is :func:`simulate_population`'s input, not part of the record.
+    The key and requested segment duration are :func:`simulate_population`'s
+    inputs, not part of this record; :class:`SimulationConfig` records the
+    segment duration for an end-to-end run.
     """
 
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
@@ -162,7 +164,10 @@ class PopulationArtifact:
 
 
 def simulate_population(
-    metadata: RealizationMetadata, key: jax.Array
+    metadata: RealizationMetadata,
+    key: jax.Array,
+    *,
+    segment_duration: float | None = None,
 ) -> PopulationArtifact:
     """The realization of ``metadata`` at a single typed JAX key.
 
@@ -173,18 +178,31 @@ def simulate_population(
     key
         A single typed JAX key, e.g. from
         :func:`~astrogwb.simulators.realization_key`.
+    segment_duration
+        Requested segment duration in seconds. Arrival times are sampled
+        relative to segment center using the effective duration
+        ``T / floor(T / segment_duration)``. ``None`` uses the full observation.
+        Supply the same value to the subsequent background stage.
 
     Raises
     ------
     ValueError
         If ``key`` is not a single key, or ``metadata`` is for another astrogwb
-        version.
+        version, or the requested segment duration is invalid.
     """
     # Set precision before creating arrays or initializing the backend.
     jax.config.update("jax_enable_x64", True)
     require_current_version(metadata.version)
     if key.shape != ():
         raise ValueError(f"key must be a single key, got shape {key.shape}")
+    seconds = metadata.observation_seconds
+    if segment_duration is not None:
+        if not np.isfinite(segment_duration) or not 0 < segment_duration <= seconds:
+            raise ValueError(
+                "segment_duration must be positive and no longer than the observation"
+            )
+        seconds /= int(seconds // segment_duration)
+    bounds = (-seconds / 2, seconds / 2)
     theta_key, count_key, source_key = jax.random.split(key, 3)
     with handlers.block():
         theta = dict(handlers.seed(metadata.prior_model(), theta_key)())
@@ -193,7 +211,9 @@ def simulate_population(
     count = int(jax.random.poisson(count_key, rate * metadata.observation_seconds))
     # One sample preserves column names even for an empty realization.
     sources = simulate_sources(
-        joint_model(redshift, source_model), source_key, max(count, 1)
+        joint_model(redshift, source_model, coa_time_bounds=bounds),
+        source_key,
+        max(count, 1),
     )
     return PopulationArtifact(
         metadata=metadata,

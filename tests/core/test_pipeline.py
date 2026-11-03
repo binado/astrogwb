@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import dataclasses
 
+import jax
 import numpy as np
 import pytest
 from astrogwb_tiny_pipeline import NETWORKS, WAVEFORM
 from astrogwb_tiny_pipeline import population_metadata as _population
+from numpy.typing import NDArray
 
 from astrogwb.detector import DetectorRegistry, isotropic_overlap_reduction_function
+from astrogwb.detector.projection import project_polarizations_fd
 from astrogwb.populations.joint import EXTRINSIC_SITES
 from astrogwb.simulators import (
     BackgroundArtifact,
@@ -24,6 +27,8 @@ from astrogwb.simulators import (
     simulate_background,
     simulate_population,
 )
+from astrogwb.simulators import background as background_module
+from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import WaveformMetadata, polarization_power, waveform_generator
 
 #: Standard errors a Monte Carlo mean may sit from its expectation.
@@ -33,17 +38,129 @@ MAX_STANDARD_ERRORS = 5.0
 @pytest.fixture(scope="module")
 def population() -> PopulationArtifact:
     """About fifty sources."""
-    return simulate_population(_population(1e-4), realization_key(41, 0))
+    return simulate_population(
+        _population(1e-4), realization_key(41, 0), segment_duration=60.0
+    )
 
 
 def test_population_is_reproducible(population: PopulationArtifact) -> None:
-    redrawn = simulate_population(_population(1e-4), realization_key(41, 0))
+    redrawn = simulate_population(
+        _population(1e-4), realization_key(41, 0), segment_duration=60.0
+    )
 
     assert population.count > 0
     assert set(EXTRINSIC_SITES) <= set(population.source_parameters)
     assert redrawn.source_parameters.keys() == population.source_parameters.keys()
     for name, values in population.source_parameters.items():
         np.testing.assert_array_equal(redrawn.source_parameters[name], values)
+    arrival = population.source_parameters["coa_time"]
+    effective = population.observation_seconds / int(
+        population.observation_seconds // 60.0
+    )
+    assert np.all((arrival >= -effective / 2) & (arrival < effective / 2))
+    assert np.unique(arrival).size == population.count
+
+
+@pytest.mark.parametrize("segment_duration", [None, 60.0, 600.0])
+def test_coa_time_bounds_use_the_actual_duration(
+    segment_duration: float | None,
+) -> None:
+    metadata = _population(1e-4)
+    key = realization_key(41, 0)
+    full = simulate_population(metadata, key)
+    segmented = simulate_population(metadata, key, segment_duration=segment_duration)
+    seconds = metadata.observation_seconds
+    effective = (
+        seconds
+        if segment_duration is None
+        else seconds / int(seconds // segment_duration)
+    )
+    # Changing the bounds rescales the same model draw and leaves every other
+    # column intact, including source identities and population properties.
+    np.testing.assert_allclose(
+        segmented.source_parameters["coa_time"] / effective,
+        full.source_parameters["coa_time"] / seconds,
+    )
+    for name, values in full.source_parameters.items():
+        if name != "coa_time":
+            np.testing.assert_array_equal(segmented.source_parameters[name], values)
+
+
+def test_population_requires_coa_time(population: PopulationArtifact) -> None:
+    with pytest.raises(ValueError, match="coa_time.*regenerate"):
+        dataclasses.replace(
+            population,
+            source_parameters={
+                name: values
+                for name, values in population.source_parameters.items()
+                if name != "coa_time"
+            },
+        )
+
+
+@pytest.mark.parametrize(
+    "approximant",
+    ["AnalyticInspiral", pytest.param("IMRPhenomD", marks=pytest.mark.integration)],
+)
+def test_coa_time_shifts_both_polarizations_and_preserves_power(
+    population: PopulationArtifact, approximant: str
+) -> None:
+    generator = waveform_generator(
+        WaveformMetadata.model_validate(
+            {
+                **WAVEFORM.model_dump(exclude={"alpha"}),
+                "approximant": approximant,
+                "frequency_resolution": 1.0,
+            }
+        )
+    )
+    sources = {
+        name: values[:2]
+        for name, values in population.source_parameters.items()
+        if name != "coa_time"
+    }
+    # Opposite quarter-cycle shifts at the first frequency: fixes the sign
+    # and checks independent source times rather than a shared batch phase.
+    frequencies = np.asarray(generator.frequencies)
+    times = np.array([1.0, -1.0]) / (4 * frequencies[0])
+    base = generator.generate_polarizations_batch(sources)
+    shifted = jax.jit(generator.generate_polarizations_batch)(
+        {**sources, "coa_time": times}
+    )
+    expected = np.exp(-2j * np.pi * times[:, None] * frequencies)
+    for original, timed in zip(base, shifted, strict=True):
+        np.testing.assert_allclose(timed / original, expected)
+    np.testing.assert_allclose(
+        polarization_power(*shifted) / polarization_power(*base), 1.0
+    )
+    np.testing.assert_array_equal(
+        generator.generate_batch(sources),
+        generator.generate_batch({**sources, "coa_time": times}),
+    )
+
+    # At each physical site the arrival phase multiplies the strain once;
+    # the baseline already includes that site's geometric delay.
+    projected = []
+    for detector in NETWORKS.build_network("pair"):
+        coordinates = {
+            name: sources[name]
+            for name in ("right_ascension", "declination", "polarization_angle")
+        }
+        args = (
+            detector.geometry.response_tensor,
+            detector.geometry.location,
+            frequencies,
+        )
+        original = project_polarizations_fd(*args, *base, 0.0, **coordinates)
+        timed = project_polarizations_fd(
+            *args, shifted[0], shifted[1], 0.0, **coordinates
+        )
+        np.testing.assert_allclose(timed / original, expected)
+        projected.append((original, timed))
+    first, second = projected
+    np.testing.assert_allclose(
+        (np.conj(first[1]) * second[1]) / (np.conj(first[0]) * second[0]), 1.0
+    )
 
 
 @pytest.mark.parametrize(
@@ -254,10 +371,12 @@ def test_pure_noise_matches_the_pair_scale(empty: PopulationArtifact) -> None:
     assert abs(residuals.var() - 1.0) < variance_bound
 
 
+@pytest.mark.parametrize("chunk_size,batch_size", [(8, 7), (3, 11), (128, 64)])
 def test_spectra_do_not_depend_on_the_segment_batch_size(
     population: PopulationArtifact,
+    chunk_size: int,
+    batch_size: int,
 ) -> None:
-    batch_size = 7
     reference = simulate_background(
         population,
         WAVEFORM,
@@ -270,13 +389,58 @@ def test_spectra_do_not_depend_on_the_segment_batch_size(
         population,
         WAVEFORM,
         NETWORKS,
-        chunk_size=8,
+        chunk_size=chunk_size,
         segment_duration=60.0,
         segment_batch_size=batch_size,
     )
 
     for name, spectrum in reference.spectra.items():
         np.testing.assert_allclose(batched.spectra[name], spectrum)
+
+
+@pytest.mark.parametrize("opposite_phase", [False, True])
+def test_segment_sums_use_sampled_coa_times_without_rescaling(
+    population: PopulationArtifact,
+    monkeypatch: pytest.MonkeyPatch,
+    opposite_phase: bool,
+) -> None:
+    # With detector noise disabled, two identical sources interfere either
+    # constructively or destructively at the first frequency.
+    geometry = background_module._network_geometry
+
+    def without_noise(
+        registry: DetectorRegistry, frequencies: NDArray[np.float64]
+    ) -> background_module._Geometry:
+        result = geometry(registry, frequencies)
+        return result._replace(psds=np.full_like(result.psds, np.inf))
+
+    monkeypatch.setattr(background_module, "_network_geometry", without_noise)
+    seconds = 0.25
+    sources = {
+        name: np.repeat(values[:1], 2)
+        for name, values in population.source_parameters.items()
+    }
+    sources["coa_time"] = np.array(
+        [0.0, 1 / (2 * WAVEFORM.minimum_frequency) if opposite_phase else 0.0]
+    )
+    twins = dataclasses.replace(
+        population,
+        metadata=population.metadata.model_copy(
+            update={"observation_time": seconds / years_to_seconds(1.0)}
+        ),
+        source_parameters=sources,
+    )
+    baseline = simulate_background(twins, WAVEFORM, NETWORKS)
+    # Arrival times are already in seconds and are passed through unchanged.
+    segmented = simulate_background(
+        twins, WAVEFORM, NETWORKS, segment_duration=0.2, chunk_size=1
+    )
+    ratio = 1 / np.sqrt(seconds * WAVEFORM.frequency_resolution)
+    for name, spectrum in baseline.spectra.items():
+        np.testing.assert_allclose(
+            (segmented.spectra[name][:, 0] / spectrum[:, 0] - 1) / ratio,
+            -1.0 if opposite_phase else 1.0,
+        )
 
 
 def test_noisy_background_averages_to_the_incoherent_signal(

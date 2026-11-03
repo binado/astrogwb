@@ -31,7 +31,6 @@ from collections.abc import Callable, Mapping
 from typing import Annotated, Literal, Self
 
 import jax
-import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
 from pydantic import Field, model_validator
@@ -147,7 +146,7 @@ def _bns_coba_population(config: BNSCobaPopulation) -> Population:
         parameters: Parameters,
     ) -> tuple[RedshiftDistribution, SourceModel]:
         def _source_model() -> None:
-            mass_1, _ = draw_masses(parameters)
+            draw_masses(parameters)
 
             spin_dist = dist.Uniform(-spin_bound, spin_bound, validate_args=True)
             numpyro.sample("spin_1z", spin_dist)
@@ -159,9 +158,6 @@ def _bns_coba_population(config: BNSCobaPopulation) -> Population:
             numpyro.sample("lambda_1", lambda_dist)
             numpyro.sample("lambda_2", lambda_dist)
 
-            # Time-aligned; inclination is a separate stochastic site.
-            zeros = jnp.zeros_like(mass_1)
-            numpyro.deterministic("coa_time", zeros)
             numpyro.sample("inclination", UniformCosineDistribution(validate_args=True))
 
         return _redshift_distribution(parameters, config), _source_model

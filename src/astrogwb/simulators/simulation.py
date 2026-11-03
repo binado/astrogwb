@@ -42,7 +42,9 @@ def simulate(
         The pair spectra, carrying ``config``.
     """
     return simulate_background(
-        simulate_population(config.population, key),
+        simulate_population(
+            config.population, key, segment_duration=config.segment_duration
+        ),
         config.waveform,
         config.detectors,
         chunk_size=chunk_size,
