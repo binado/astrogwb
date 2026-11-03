@@ -53,7 +53,7 @@ from astrogwb.inference import (
 )
 from astrogwb.inference.gaussian import Network
 from astrogwb.paper.plotting import DETECTOR_NETWORKS
-from astrogwb.paper.posteriors import network_pair_data
+from astrogwb.paper.posteriors import pair_network
 from astrogwb.simulators import BackgroundArtifact
 from astrogwb.waveform import quadrupolar_stokes_factors
 
@@ -245,23 +245,19 @@ def main() -> None:
     rows = []
     for name, label in DETECTOR_NETWORKS:
         detectors = registry.build_network(name)
-        data = network_pair_data(
-            frequencies,
-            noise[name],
-            minimum_frequency=MINIMUM_FREQUENCY,
-            maximum_frequency=MAXIMUM_FREQUENCY,
-            num_pairs=len(detectors) * (len(detectors) - 1) // 2,
-        )
-        overlap = np.asarray(data["pair_overlap"])
+        overlap = np.asarray(noise[name].pair_overlap)
 
-        def relative_variance(moment: ArrayLike, data=data) -> float:
-            network = Network.from_pairs(
-                data["scale"],
-                data["pair_overlap"],
-                data["frequency_mask"],
+        def network(moment: ArrayLike | None = None, name=name) -> Network:
+            return pair_network(
+                frequencies,
+                noise[name],
+                minimum_frequency=MINIMUM_FREQUENCY,
+                maximum_frequency=MAXIMUM_FREQUENCY,
                 response_moment=moment,
             )
-            return float(shot_noise_variance(prediction, network))
+
+        def relative_variance(moment: ArrayLike) -> float:
+            return float(shot_noise_variance(prediction, network(moment)))
 
         # The sky-averaged response: the inclination scatter alone, 355/252.
         sky = relative_variance(
@@ -276,12 +272,7 @@ def main() -> None:
         total = relative_variance(
             response_moment(term_response(frequencies, detectors, angles, np.ones(4)))
         )
-        _, squared_snr = amplitude_template(
-            prediction,
-            Network.from_pairs(
-                data["scale"], data["pair_overlap"], data["frequency_mask"]
-            ),
-        )
+        _, squared_snr = amplitude_template(prediction, network())
         rho = float(np.sqrt(squared_snr))
         rows.append(
             {
