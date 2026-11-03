@@ -9,7 +9,7 @@ with app.setup(hide_code=True):
     from functools import partial
     from pathlib import Path
 
-    from astrogwb.paper.runtime import configure_runtime
+    from astrogwb.runtime import configure_runtime
 
     # Editable sampler settings. Restart the kernel after changing chain count.
     SMOKE_RUN = False  # True: two chains, 50 warmup, 50 retained draws.
@@ -19,12 +19,13 @@ with app.setup(hide_code=True):
     TARGET_ACCEPT = 0.9
     DENSE_MASS = True
     SEED = 42
-    jax, CHAIN_METHOD = configure_runtime(num_chains=NUM_CHAINS)
+    configure_runtime()
 
     import arviz_base as azb
     import arviz_plots as azp
     import arviz_stats as azs
     import h5py
+    import jax
     import jax.numpy as jnp
     import marimo as mo
     import matplotlib.pyplot as plt
@@ -39,6 +40,10 @@ with app.setup(hide_code=True):
     from astrogwb.constants import SECONDS_PER_YEAR
     from astrogwb.distributions.redshift import MadauDickinsonRedshiftDistribution
     from astrogwb.distributions.redshift.base import RedshiftDistribution
+
+    # Configure host devices before any arrays initialize the XLA backend.
+    numpyro.set_host_device_count(NUM_CHAINS)
+    CHAIN_METHOD = "parallel"
 
 
 @app.cell(hide_code=True)
