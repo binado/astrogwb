@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses
-
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -16,22 +14,10 @@ from astrogwb.detector import (
     pair_terms,
 )
 from astrogwb.detector.config import load_detector_config
-from astrogwb.paper.posteriors import (
-    MAX_PAIRS,
-    network_data,
-    network_pair_data,
-    shot_noise_variant,
-)
+from astrogwb.paper.posteriors import network_data, pair_network
 from astrogwb.simulators import NetworkNoise
 
 NETWORK = "ET-2L-aligned-CE-Hanford"
-
-
-@dataclasses.dataclass(frozen=True)
-class _Likelihood:
-    """The one field ``shot_noise_variant`` replaces."""
-
-    shot_noise: str | None
 
 
 @pytest.fixture(scope="module")
@@ -80,49 +66,26 @@ def test_network_data_gives_masked_bins_unit_scale(
     np.testing.assert_array_equal(scale[mask], noise.scale[mask])
 
 
-def test_network_pair_data_pads_to_max_pairs_with_masked_rows(
+def test_pair_network_counts_only_in_band_finite_entries(
     frequencies: np.ndarray, noise: NetworkNoise
 ) -> None:
-    data = network_pair_data(
+    network = pair_network(
         frequencies, noise, minimum_frequency=2.0, maximum_frequency=2048.0
     )
-    mask = np.asarray(data["frequency_mask"])
+    in_band = np.array([False, False, True, True, True, False])
+    counted = in_band & np.isfinite(noise.pair_scale) & (noise.pair_scale > 0.0)
 
-    assert mask.shape == (MAX_PAIRS, frequencies.size)
-    assert not mask[3:].any()
-    np.testing.assert_array_equal(np.asarray(data["pair_overlap"])[3:], 0.0)
-    np.testing.assert_array_equal(np.asarray(data["scale"])[3:], 1.0)
+    np.testing.assert_array_equal(np.asarray(network.keep), np.flatnonzero(counted))
 
 
-def test_network_pair_data_keeps_the_networks_overlaps(
+def test_pair_network_keeps_the_networks_overlaps(
     frequencies: np.ndarray, noise: NetworkNoise
 ) -> None:
-    data = network_pair_data(
+    network = pair_network(
         frequencies, noise, minimum_frequency=2.0, maximum_frequency=2048.0
     )
 
     np.testing.assert_array_equal(
-        np.asarray(data["pair_overlap"])[:3], noise.pair_overlap
+        np.asarray(network.pair_overlap),
+        noise.pair_overlap.reshape(-1)[np.asarray(network.keep)],
     )
-
-
-@pytest.mark.parametrize(
-    ("variant", "mode", "has_variance"),
-    [
-        ("detector", None, False),
-        ("amplitude", "amplitude", False),
-        ("per_frequency", "per_frequency", False),
-        ("modes", "modes", False),
-        ("fixed", "fixed", True),
-    ],
-)
-def test_shot_noise_variant_sets_the_mode(
-    variant: str, mode: str | None, has_variance: bool
-) -> None:
-    likelihood, variance = shot_noise_variant(
-        variant,
-        _Likelihood(shot_noise="amplitude"),  # ty: ignore[invalid-argument-type]
-        jnp.array([0.1, 0.2]),  # ty: ignore[invalid-argument-type]
-    )
-    assert likelihood.shot_noise == mode
-    assert (variance is not None) is has_variance

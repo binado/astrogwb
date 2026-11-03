@@ -24,16 +24,20 @@ with app.setup(hide_code=True):
     from numpy.typing import NDArray
 
     from astrogwb.config import load_config
-    from astrogwb.detector import sample_pair_response
+    from astrogwb.detector import pair_response_moment
     from astrogwb.importance.catalog import (
         read_catalog,
         validate_matching_frequency_grids,
     )
     from astrogwb.inference import (
-        ImportanceGaussianLikelihood,
-        grid_log_posterior,
+        CatalogModel,
+        DenseGaussianLikelihood,
+        amplitude_template,
+        grid_log_likelihood,
+        grid_log_prior,
+        shot_noise_variance,
     )
-    from astrogwb.inference import Network as LikelihoodNetwork
+    from astrogwb.inference.gaussian import Network
     from astrogwb.paper.plotting import (
         DETECTOR_NETWORKS,
         TRUTH,
@@ -44,11 +48,7 @@ with app.setup(hide_code=True):
         save_figures,
         use_paper_style,
     )
-    from astrogwb.paper.posteriors import (
-        network_pair_data,
-        pad_pairs,
-        shot_noise_variant,
-    )
+    from astrogwb.paper.posteriors import pair_network
     from astrogwb.simulators import (
         BackgroundArtifact,
         network_spectra_ensemble,
@@ -98,33 +98,24 @@ def _():
     mo.md(r"""
     ## Method
 
-    **Likelihood.** In each bin the observed spectrum is Gaussian about the
-    predicted one with scale $\sigma_i = S_{\mathrm{eff},i}/\sqrt{2T\Delta f_i}$.
-    The network changes $\sigma$, which bins are usable, the data it recorded
-    and the response its shot noise carries, but not the expected spectrum, so
-    each grid point is predicted once and all six networks' likelihoods are
-    evaluated on that one prediction.
+    **Likelihood.** Every detector pair's cross power in every bin is Gaussian
+    about $\gamma_{ab} S$, with detector-noise scale
+    $\sigma_{ab,k} \propto \sqrt{S_a S_b}/\sqrt{2T\Delta f_k}$. The network
+    changes $\sigma$, which entries are usable, the data it recorded and the
+    response its shot noise carries, but not the expected spectrum; each
+    network is its own likelihood, evaluated over the grid.
 
-    **Shot noise.** The data are one finite catalog, so they also scatter
-    about the expected spectrum $S$ with the per-bin variance $V_f$ of a
+    **Shot noise.** The data are one finite catalog, so the per-pair cross
+    powers also scatter about their mean with the catalog covariance of
+    Sec. 2.7, $M_{kl}(\Lambda) R_{ab,k;\,cd,l}$: the power moment $M$ of a
     Poisson sum (Campbell's theorem), computed from the same reference catalog
-    with every factor of the quadrature squared and the inclination factor
-    replaced by the network's response correlation
-    $\langle r_f r_{f'} \rangle$, from isotropic response draws. Within the
-    band almost all of
-    it is one flat amplitude mode, $S^{\mathrm{cat}} \approx S(1 + \epsilon)$,
-    so it enters as $\epsilon \sim \mathcal{N}(0, s^2)$ marginalized: a
-    rank-one covariance $D + s^2 S S^T$, inverted in closed form, with $s$ the
-    SNR-weighted mean of $\sqrt{V_f}/S_f$. Along the template this is a
-    Gaussian in the amplitude with variance $\rho^{-2} + A^2 s^2$. The
-    variance comes from the model at each grid point, never from the data.
-    Variants: `detector` (no shot noise), `amplitude` ($s^2$ at each point),
-    `fixed` ($s^2$ at the fiducial), `per_frequency` ($u_f =
-    \sqrt{V_f}$, a cross-check where $\Xi_0$ and $n$ tilt the template), and
-    `modes`, which keeps the $k$ leading eigenvectors of the whitened fiducial
-    catalog covariance (dropped eigenvalues summing to at most
-    `modes_tolerance`) with their $k \times k$ block $B$ at each point. The
-    figures and tables show `modes`.
+    at every grid point, times the network's response moment $R$, the second
+    moment of the per-source ORF of every pair over `response_draws` isotropic
+    draws, computed once. The likelihood is the dense Gaussian with covariance
+    $\Sigma + M \circ R$, factorized once per grid point and network. The
+    covariance comes from the model at each grid point, never from the data.
+    Variants: `detector` (no shot noise) and `dense`, which the figures and
+    tables show.
 
     **Prediction.** Every draw $\theta_k$ is generated once, at the window's
     lower edge $z_{\min}$. A $(2,2)$-mode aligned-spin waveform scales
@@ -187,23 +178,17 @@ def _():
     xi_n_window, xi_n_size = (0.3, 3.0), 55  # prior range
 
     # Likelihood variants evaluated per problem, and the one every figure
-    # shows. "modes" keeps the leading eigenmodes of the dense catalog
-    # covariance of the stacked per-pair data, the paper's likelihood;
-    # "amplitude" keeps only the rank-one amplitude term with s^2 evaluated at
-    # each grid point, and "fixed" pins s^2 at the fiducial (the A/B section
-    # compares). Every variant's shot noise carries the per-source network
-    # response, from `response_draws` isotropic draws, as the injections do.
-    likelihood_variant = "modes"
+    # shows: "dense" is the paper's likelihood, the dense catalog covariance of
+    # the stacked per-pair data, with the per-source network response from
+    # `response_draws` isotropic draws, as the injections carry it; "detector"
+    # drops the shot noise.
+    likelihood_variant = "dense"
     problem_variants = {
-        "H0": ("detector", "amplitude", "fixed", "modes"),
-        "H0_Omega_m": ("detector", "amplitude", "fixed", "modes"),
-        # No per_frequency: it reads the per-pair response draws at every
-        # point, (L, P, F) per network, which do not fit stacked.
-        "xi_0_xi_n": ("detector", "amplitude", "fixed", "modes"),
+        "H0": ("detector", "dense"),
+        "H0_Omega_m": ("detector", "dense"),
+        "xi_0_xi_n": ("detector", "dense"),
     }
     response_draws, response_seed = 32_768, 0
-    modes_tolerance, max_modes = 1e-3, 32  # dropped eigenvalue sum, noise units
-    ab_tolerance = 0.05
 
     # (low, high, size) per swept parameter, per problem.
     grid_specs = {
@@ -247,7 +232,6 @@ def _():
         FIDUCIALS,
         FIGURES,
         PRIORS,
-        ab_tolerance,
         data_seed,
         fiducial_network,
         frequencies,
@@ -255,12 +239,10 @@ def _():
         grid_specs,
         likelihood_variant,
         marginal_seed,
-        max_modes,
         maximum_frequency,
         minimum_frequency,
         background,
         ensemble_root,
-        modes_tolerance,
         network_names,
         noise,
         num_marginal_samples,
@@ -285,22 +267,20 @@ def _():
 
 @app.function(hide_code=True)
 def evaluate_grid(
-    likelihood: ImportanceGaussianLikelihood,
+    model: CatalogModel,
     priors: Mapping[str, dist.Distribution],
-    chunk_size: int | None,
+    chunk_size: int,
     axes: Mapping[str, tuple[float, float, int]],
     fixed: Mapping[str, float],
-    per_network: Mapping[str, dict[str, object]],
-    relative_variance: NDArray[np.float64] | None,
+    per_network: Mapping[str, tuple[Network, jax.Array]],
+    shot_noise: bool,
 ) -> tuple[dict[str, NDArray], dict[str, NDArray]]:
     """Evaluate one problem's log posterior on its grid, for every network.
 
     Parameters
     ----------
-    likelihood
-        The problem's likelihood, with its shot-noise mode set. One prediction
-        per grid point, shared by all networks, which differ only in
-        :class:`~astrogwb.inference.Network`.
+    model
+        The catalog model, shared by every network.
     priors
         Prior of every parameter.
     chunk_size
@@ -310,12 +290,10 @@ def evaluate_grid(
     fixed
         Every other parameter, pinned at its fiducial.
     per_network
-        :func:`network_pair_data` by network name, with the network's stacked
-        per-pair ``observed`` data and held ``response_moments``, and
-        ``modes`` and ``mode_blocks`` for the ``"modes"`` mode.
-    relative_variance
-        :math:`s^2` per network, in ``per_network`` order, for the ``"fixed"``
-        mode; ``None`` otherwise.
+        Each network's :class:`~astrogwb.inference.gaussian.Network` and its
+        observed per-pair data on the counted entries, by network name.
+    shot_noise
+        Whether the covariance includes the catalog's shot noise.
 
     Returns
     -------
@@ -325,36 +303,20 @@ def evaluate_grid(
     """
     grids = {name: np.linspace(lo, hi, n) for name, (lo, hi, n) in axes.items()}
     jax_grids = {name: jnp.asarray(grid) for name, grid in grids.items()}
-    names = list(per_network)
-    # Every network scores its own per-pair data through its own response,
-    # held as per-node moments (the draws themselves are too large to stack);
-    # the "modes" mode also reads each network's basis and node blocks.
-    fields = ("observed", "response_moments", "pair_overlap")
-    if likelihood.shot_noise == "modes":
-        fields += ("modes", "mode_blocks")
-    leaves = {
-        field: jnp.stack([jnp.asarray(per_network[n][field]) for n in names])
-        for field in fields
-    }
-    networks = LikelihoodNetwork(
-        scale=jnp.stack([jnp.asarray(per_network[n]["scale"]) for n in names]),
-        mask=jnp.stack([jnp.asarray(per_network[n]["frequency_mask"]) for n in names]),
-        relative_variance=(
-            None if relative_variance is None else jnp.asarray(relative_variance)
-        ),
-        **leaves,
-    )
-    batched = np.asarray(
-        grid_log_posterior(
-            likelihood,
-            priors,
-            jax_grids,
-            fixed=fixed,
-            networks=networks,
-            chunk_size=chunk_size,
+    log_prior = np.asarray(grid_log_prior(priors, jax_grids, fixed=fixed))
+    # One likelihood per network: each compiles at its own number of entries.
+    log_densities = {
+        name: log_prior
+        + np.asarray(
+            grid_log_likelihood(
+                DenseGaussianLikelihood(model, network, observed, shot_noise),
+                jax_grids,
+                fixed=fixed,
+                chunk_size=chunk_size,
+            )
         )
-    )
-    log_densities = {network: batched[i] for i, network in enumerate(names)}
+        for name, (network, observed) in per_network.items()
+    }
     return grids, log_densities
 
 
@@ -362,13 +324,12 @@ def evaluate_grid(
 def problem_posteriors(
     axes: Mapping[str, tuple[float, float, int]],
     variants: Sequence[str],
-    likelihood: ImportanceGaussianLikelihood,
-    fiducial_relative_variance: NDArray[np.float64],
+    model: CatalogModel,
     *,
     priors: Mapping[str, dist.Distribution],
-    chunk_size: int | None,
+    chunk_size: int,
     fiducials: Mapping[str, float],
-    per_network: Mapping[str, dict[str, object]],
+    per_network: Mapping[str, tuple[Network, jax.Array]],
 ) -> dict[str, tuple[dict[str, NDArray], dict[str, NDArray]]]:
     """:func:`evaluate_grid` of one problem for every likelihood variant.
 
@@ -377,13 +338,10 @@ def problem_posteriors(
     axes
         ``(low, high, size)`` of each swept parameter.
     variants
-        :func:`~astrogwb.paper.posteriors.shot_noise_variant` names.
-    likelihood
-        The problem's :class:`ImportanceGaussianLikelihood`, amplitude mode. Its
-        catalog stays a traced input of the compiled evaluator, not a constant
-        baked into it. One catalog serves every variant; each compiles once.
-    fiducial_relative_variance
-        :math:`s^2` per network at the fiducials, for the ``"fixed"`` variant.
+        ``"detector"`` (no shot noise) or ``"dense"``.
+    model
+        The catalog model. Its catalog stays a traced input of the compiled
+        evaluator, not a constant baked into it.
     priors
         Prior of every parameter.
     chunk_size
@@ -399,21 +357,18 @@ def problem_posteriors(
         Per variant, grids by parameter and log densities by network.
     """
     fixed = {k: v for k, v in fiducials.items() if k not in axes}
-    posteriors = {}
-    for variant in variants:
-        variant_likelihood, relative_variance = shot_noise_variant(
-            variant, likelihood, fiducial_relative_variance
-        )
-        posteriors[variant] = evaluate_grid(
-            variant_likelihood,
+    return {
+        variant: evaluate_grid(
+            model,
             priors,
             chunk_size,
             axes,
             fixed,
             per_network,
-            relative_variance,
+            shot_noise=variant == "dense",
         )
-    return posteriors
+        for variant in variants
+    }
 
 
 @app.function(hide_code=True)
@@ -588,12 +543,12 @@ def _():
     ensemble's draw 0 (`network_spectra_ensemble`): each network's pair
     spectra were projected in one waveform pass shared by the networks.
 
-    The rescaled spectrum is built in the same cell as the catalog, once.
-    The population is built a single time because it hashes by identity. Each
-    problem evaluates its grid with `grid_log_posterior`, which predicts every
-    grid point once for all six networks. The likelihood is a pytree passed to
-    it per call, so the catalog is one traced input shared by all three
-    problems rather than a constant compiled into each. The NumPy catalog is dropped there, so only the device copy stays
+    The catalog model is built in the same cell as the catalog, once, with
+    its per-node power moments. The population is built a single time because
+    it hashes by identity. Each problem evaluates its grid with
+    `grid_log_likelihood`, one network at a time. The likelihood is a pytree
+    passed to it per call, so the catalog is one traced input shared by all
+    three problems rather than a constant compiled into each. The NumPy catalog is dropped there, so only the device copy stays
     resident.
     """)
     return
@@ -613,20 +568,17 @@ def _(frequencies, observation_time, redshift_nodes, reference_catalog_path):
         f"{redshift_nodes} redshift nodes"
     )
     target = population.build()
-    # No swept parameter is intrinsic, so no density factor enters a weight.
-    # Built with the amplitude mode, so the squared power is held for every
-    # variant `shot_noise_variant` switches to.
-    likelihood = ImportanceGaussianLikelihood.from_catalog(
+    # No swept parameter is intrinsic, so no density factor enters a weight
+    # and the per-node power moments are formed here, once.
+    model = CatalogModel.from_catalog(
         catalog_data,
         catalog_metadata,
         population=target,
         frequencies=frequencies,
         num_redshift_nodes=redshift_nodes,
-        density_sites=(),
-        shot_noise="amplitude",
         observation_time=observation_time,
     )
-    return (likelihood,)
+    return (model,)
 
 
 @app.cell
@@ -637,7 +589,7 @@ def _(background, data_seed, ensemble_root, frequencies, network_names):
     observed = {}
     for _name, _data in zip(network_names, _drawn, strict=True):
         validate_matching_frequency_grids(_data["frequencies"], frequencies)
-        observed[_name] = pad_pairs(_data["pair_spectral_density"][0])
+        observed[_name] = _data["pair_spectral_density"][0]
     print(
         f"injection: {int(_drawn[0]['n_events'][0]):,} Poisson events, "
         f"recorded by {len(observed)} networks over "
@@ -648,69 +600,33 @@ def _(background, data_seed, ensemble_root, frequencies, network_names):
 
 @app.cell
 def _(
-    FIDUCIALS,
     frequencies,
-    likelihood,
-    max_modes,
     maximum_frequency,
     minimum_frequency,
-    modes_tolerance,
     network_names,
     noise,
     observed,
-    problem_variants,
     registry,
     response_draws,
     response_seed,
 ):
-    per_network = {
-        name: network_pair_data(
+    # Every network on its counted entries, with the response moment of its
+    # per-pair response over the isotropic draws, and its per-pair data.
+    per_network = {}
+    for _name in network_names:
+        _network = pair_network(
             frequencies,
-            noise[name],
+            noise[_name],
             minimum_frequency=minimum_frequency,
             maximum_frequency=maximum_frequency,
-        )
-        for name in network_names
-    }
-    # Every network's per-pair data and the per-node moments under its per-pair
-    # response, held so s^2 is not projected once per draw at every point and
-    # the (L, P, F) draws are dropped; for the "modes" mode, also the basis
-    # and node blocks of the catalog covariance at the fiducials, padded to one
-    # k so networks stack. No density site varies, so the held moments are
-    # exact.
-    _uses_modes = any("modes" in v for v in problem_variants.values())
-    for _name, _data in per_network.items():
-        _detectors = registry.build_network(_name)
-        _network = LikelihoodNetwork(
-            jnp.asarray(_data["scale"]),
-            jnp.asarray(_data["frequency_mask"]),
-            response=jnp.asarray(
-                pad_pairs(
-                    sample_pair_response(
-                        jax.random.key(response_seed),
-                        response_draws,
-                        frequencies,
-                        _detectors,
-                    )
-                )
+            response_moment=pair_response_moment(
+                jax.random.key(response_seed),
+                response_draws,
+                frequencies,
+                registry.build_network(_name),
             ),
-            pair_overlap=jnp.asarray(_data["pair_overlap"]),
         )
-        _data.update(
-            observed=observed[_name],
-            response_moments=likelihood.response_moments(FIDUCIALS, _network),
-        )
-        if not _uses_modes:
-            continue
-        _network = likelihood.with_shot_noise_modes(
-            FIDUCIALS,
-            _network,
-            tolerance=modes_tolerance,
-            max_modes=max_modes,
-            num_modes=max_modes,
-        )
-        _data.update(modes=_network.modes, mode_blocks=_network.mode_blocks)
-    del _network
+        per_network[_name] = (_network, _network.compress(observed[_name]))
     labelled_networks = [(n, l) for n, l in DETECTOR_NETWORKS if n in network_names]
     return labelled_networks, per_network
 
@@ -730,39 +646,20 @@ def _():
 
 
 @app.cell
-def _(FIDUCIALS, likelihood, per_network):
-    _spectrum, _, _ = likelihood.predict(FIDUCIALS)
+def _(FIDUCIALS, model, per_network):
+    _prediction = model.predict(FIDUCIALS)
     _label = dict(DETECTOR_NETWORKS)
     _rows = []
-    for _name, _data in per_network.items():
-        _keep = np.asarray(_data["frequency_mask"])
-        _sigma = np.asarray(_data["scale"])
-        _s2 = float(
-            likelihood.relative_variance(
-                FIDUCIALS,
-                LikelihoodNetwork(
-                    _data["scale"],
-                    _data["frequency_mask"],
-                    response_moments=jnp.asarray(_data["response_moments"]),
-                    pair_overlap=jnp.asarray(_data["pair_overlap"]),
-                ),
-            )
-        )
-        _expected = np.asarray(_data["pair_overlap"]) * np.asarray(_spectrum)
-        _snr = float(np.sqrt(np.sum(np.where(_keep, (_expected / _sigma) ** 2, 0))))
+    for _name, (_network, _) in per_network.items():
+        _, _squared_snr = amplitude_template(_prediction, _network)
+        _snr = float(np.sqrt(_squared_snr))
+        _s = float(np.sqrt(shot_noise_variance(_prediction, _network)))
         _rows.append(
-            {
-                "network": _label[_name],
-                "rho": _snr,
-                "s": np.sqrt(_s2),
-                "rho s": _snr * np.sqrt(_s2),
-                "s2": _s2,
-            }
+            {"network": _label[_name], "rho": _snr, "s": _s, "rho s": _snr * _s}
         )
     shot_noise_table = pd.DataFrame(_rows)
-    fiducial_relative_variance = shot_noise_table["s2"].to_numpy()
-    shot_noise_table.drop(columns="s2")
-    return fiducial_relative_variance, shot_noise_table
+    shot_noise_table
+    return (shot_noise_table,)
 
 
 @app.cell(hide_code=True)
@@ -792,19 +689,17 @@ def _():
 def _(
     FIDUCIALS,
     PRIORS,
-    fiducial_relative_variance,
     grid_chunk_size,
     grid_specs,
     likelihood_variant,
     per_network,
     problem_variants,
-    likelihood,
+    model,
 ):
     h0_posteriors = problem_posteriors(
         grid_specs["H0"],
         problem_variants["H0"],
-        likelihood,
-        fiducial_relative_variance,
+        model,
         priors=PRIORS,
         chunk_size=grid_chunk_size,
         fiducials=FIDUCIALS,
@@ -854,19 +749,17 @@ def _():
 def _(
     FIDUCIALS,
     PRIORS,
-    fiducial_relative_variance,
     grid_chunk_size,
     grid_specs,
     likelihood_variant,
     per_network,
     problem_variants,
-    likelihood,
+    model,
 ):
     h0_omega_m_posteriors = problem_posteriors(
         grid_specs["H0_Omega_m"],
         problem_variants["H0_Omega_m"],
-        likelihood,
-        fiducial_relative_variance,
+        model,
         priors=PRIORS,
         chunk_size=grid_chunk_size,
         fiducials=FIDUCIALS,
@@ -955,19 +848,17 @@ def _():
 def _(
     FIDUCIALS,
     PRIORS,
-    fiducial_relative_variance,
     grid_chunk_size,
     grid_specs,
     likelihood_variant,
     per_network,
     problem_variants,
-    likelihood,
+    model,
 ):
     xi_posteriors = problem_posteriors(
         grid_specs["xi_0_xi_n"],
         problem_variants["xi_0_xi_n"],
-        likelihood,
-        fiducial_relative_variance,
+        model,
         priors=PRIORS,
         chunk_size=grid_chunk_size,
         fiducials=FIDUCIALS,
@@ -1047,16 +938,7 @@ def _():
     cell is already about $0.17\sigma$.
 
     - **Effect of shot noise**: the shift of the mean and the ratio of the
-      standard deviations of each variant against `detector`.
-    - **Modes vs amplitude**: the reported `modes` likelihood against its
-      rank-one limit, in detector $\sigma$.
-    - **A/B, fixed vs per-point $s^2$**: a covariance that depends on the
-      parameters adds its $\ln\det$ to the likelihood, which can carry
-      spurious information. Within the rank-one form, if pinning $s^2$ at the
-      fiducial moves no mean or standard deviation by more than
-      `ab_tolerance` detector $\sigma$, the parameter dependence carries none.
-    - **Leakage**: for $(\Xi_0, n)$, which tilt the template, the
-      per-frequency direction against the reported `modes`.
+      standard deviations of the `dense` likelihood against `detector`.
     """)
     return
 
@@ -1157,7 +1039,7 @@ def _(shot_noise_moments):
             compare_moments(shot_noise_moments, _variant, "detector").assign(
                 likelihood=_variant
             )
-            for _variant in ("modes", "amplitude", "fixed", "per_frequency")
+            for _variant in ("dense",)
             if (shot_noise_moments["likelihood"] == _variant).any()
         ]
     )
@@ -1166,49 +1048,9 @@ def _(shot_noise_moments):
 
 
 @app.cell
-def _(shot_noise_moments):
-    modes_comparison = compare_moments(shot_noise_moments, "modes", "amplitude")
-    modes_comparison
-    return
-
-
-@app.cell
-def _(ab_tolerance, shot_noise_moments):
-    ab_comparison = compare_moments(shot_noise_moments, "fixed", "amplitude")
-    _worst = float(
-        ab_comparison[["mean shift / sigma", "sd change / sigma"]].abs().max().max()
-    )
-    if np.isnan(_worst):
-        _verdict = "no posterior is resolved by its grid: no A/B verdict"
-    elif _worst < ab_tolerance:
-        _verdict = (
-            f"fixed s^2 is within {ab_tolerance} sigma of per-point s^2 "
-            f"everywhere (worst {_worst:.3f}): the per-point ln det carries "
-            "no spurious information"
-        )
-    else:
-        _verdict = (
-            f"fixed s^2 moves a moment by {_worst:.3f} sigma > {ab_tolerance}: "
-            "the covariance must be evaluated at each point"
-        )
-    print(_verdict)
-    ab_comparison
-    return
-
-
-@app.cell
-def _(shot_noise_moments):
-    leakage = compare_moments(shot_noise_moments, "per_frequency", "modes")
-    leakage
-    return
-
-
-@app.cell
 def _(FIDUCIALS, fiducial_network, h0_posteriors):
     shot_noise_variants_figure, _ax = plt.subplots()
-    # Broken lines on top: "amplitude" and "fixed" lie on the reported "modes"
-    # to well below a line width.
-    _styles = {"detector": "-", "modes": "-", "amplitude": "--", "fixed": ":"}
+    _styles = {"detector": "--", "dense": "-"}
     for _variant, (_grids, _log_densities) in h0_posteriors.items():
         _ax.plot(
             _grids["H0"],
