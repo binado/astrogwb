@@ -33,18 +33,15 @@ A missing input is a `FileNotFoundError`, never a simulation.
   spectra through the per-source antenna patterns), modeled with the rescaled
   reference-redshift spectrum (`astrogwb.importance.spectrum`: $2^{14}$ intrinsic
   draws on a scrambled Sobol net, one waveform each at reference redshift $10^{-4}$, rescaled to 32 redshift
-  nodes; catalog seed 42, the injection being seed 41). The log densities are computed on every run. Each
-  grid point is predicted once and shared by all six networks
-  (`grid_log_posterior`); the numbers equal the per-network evaluation. The
+  nodes; catalog seed 42, the injection being seed 41). The log densities are computed on every run, one
+  `DenseGaussianLikelihood` per network (`grid_log_likelihood`). The
   injection is one catalog realization, so its physical shot noise is modeled
-  as a rank-one covariance term from the same reference catalog, with each
-  network's response (`Network.response`, its moments held per network)
-  (`ImportanceGaussianLikelihood`'s `shot_noise` mode); each problem is evaluated with every
-  likelihood variant (`detector`, `amplitude`, `fixed`, `per_frequency`), the
-  figures show `likelihood_variant`, and a comparison section reports the
-  widening, the fixed vs per-point $s^2$ verdict, and the per-frequency
-  leakage check. Writes per-problem marginals and corner plots, and an $H_0$
-  overlay of the variants.
+  by the dense catalog covariance of the stacked per-pair data, the power
+  moment of the same reference catalog times each network's response moment
+  (`pair_response_moment`); each problem is evaluated with both likelihood
+  variants (`detector`, `dense`), the figures show `likelihood_variant`, and a
+  comparison section reports the widening. Writes per-problem marginals and
+  corner plots, and an $H_0$ overlay of the variants.
 - **`madau_dickinson_grid.py`** — marimo notebook. Posteriors on the
   Madau-Dickinson shape $(z_{\mathrm{peak}}, \gamma, \kappa)$ for the six
   detector networks (the paper's astrophysical-parameter section), from the

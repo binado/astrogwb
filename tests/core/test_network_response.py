@@ -14,14 +14,9 @@ import pytest
 from test_detector import _sky_quadrature_orf
 
 from astrogwb.detector import (
-    isotropic_overlap_reduction_function,
     load_detector,
-    network_response,
     overlap_reduction_function,
     pair_response,
-    pair_terms,
-    sample_network_response,
-    sample_pair_response,
     stokes_cross_power,
 )
 from astrogwb.waveform import quadrupolar_stokes_factors
@@ -70,45 +65,6 @@ def test_the_isotropic_mean_of_the_per_source_orf_is_the_isotropic_orf(
     assert np.all(_standard_errors(draws, expected) < MAX_STANDARD_ERRORS)
 
 
-@pytest.mark.parametrize("names", [["S1", "R1"], ["E1", "E2", "E3", "C1"]])
-def test_the_network_response_has_unit_isotropic_mean(names: list[str]) -> None:
-    detectors = [load_detector(name) for name in names]
-    draws = sample_network_response(
-        jax.random.key(2),
-        NUM_DRAWS,
-        FREQUENCIES,
-        detectors,
-    )
-
-    terms = pair_terms(FREQUENCIES, detectors)
-    numerator = sum(
-        term.weight
-        * _sky_quadrature_orf(
-            FREQUENCIES, detectors[term.first], detectors[term.second]
-        )
-        for term in terms
-    )
-    denominator = sum(term.weight * term.overlap for term in terms)
-    assert np.all(
-        _standard_errors(draws, numerator / denominator) < MAX_STANDARD_ERRORS
-    )
-
-
-def test_a_single_pair_response_does_not_depend_on_the_noise() -> None:
-    angles = _isotropic_angles(jax.random.key(3), 100)
-
-    first, second = load_detector("S1"), load_detector("R1")
-    response = network_response(FREQUENCIES, [first, second], *angles)
-    orf = overlap_reduction_function(FREQUENCIES, first, second, *angles)
-
-    np.testing.assert_allclose(
-        np.asarray(response),
-        np.asarray(
-            orf / isotropic_overlap_reduction_function(FREQUENCIES, first, second)
-        ),
-    )
-
-
 @pytest.mark.parametrize(
     ("names", "pairs"),
     [
@@ -144,23 +100,6 @@ def test_pair_response_stacks_each_pairs_orf_in_a_less_than_b_order(
                 )
             ),
         )
-
-
-def test_pair_response_draws_combine_to_the_network_response_draws() -> None:
-    """Same key, same angles: the optimal combination of the pairs is the network."""
-    detectors = [load_detector(name) for name in ("E1", "E2", "E3", "C1")]
-    terms = pair_terms(FREQUENCIES, detectors)
-    weights = np.stack([term.weight for term in terms])
-    denominator = np.sum([term.weight * term.overlap for term in terms], axis=0)
-
-    pairs = sample_pair_response(jax.random.key(5), 200, FREQUENCIES, detectors)
-    network = sample_network_response(jax.random.key(5), 200, FREQUENCIES, detectors)
-
-    np.testing.assert_allclose(
-        np.sum(weights * np.asarray(pairs), axis=1) / denominator,
-        np.asarray(network),
-        rtol=1e-12,
-    )
 
 
 def _random_stokes(key: jax.Array, num_draws: int) -> jax.Array:

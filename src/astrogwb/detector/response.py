@@ -1,32 +1,21 @@
 r"""The response of a cross-correlation network to one source.
 
-A stochastic search weights each detector pair optimally,
-:math:`w_{ab} = \gamma_{ab} / (S_a S_b)` with :math:`\gamma_{ab}` the isotropic
-ORF (:func:`~astrogwb.detector.effective_psd.pair_terms`). A single source does
-not contribute its sky-averaged power to that estimator: it contributes its
-power times the realised network response
+A single source does not contribute its sky-averaged power to a pair's cross
+correlation: it contributes its power times the per-source ORF
+:math:`\gamma_{ab}(\hat n, \psi, \iota; f)`
+(:func:`~astrogwb.detector.overlap.overlap_reduction_function`), whose mean
+over an isotropic sky, uniform polarization and uniform :math:`\cos\iota` is
+the isotropic ORF :math:`\gamma_{ab}(f)`. Its scatter adds to the shot noise;
+it includes the inclination.
 
-.. math::
-
-    r(\hat n, \psi, \iota; f) = \frac{\sum_{a<b} w_{ab}\,
-        \gamma_{ab}(\hat n, \psi, \iota; f)}{\sum_{a<b} w_{ab}\, \gamma_{ab}(f)},
-
-with :math:`\gamma_{ab}(\hat n, \psi, \iota; f)` the per-source
-:func:`~astrogwb.detector.overlap.overlap_reduction_function`. Its mean over an
-isotropic sky, uniform polarization and uniform :math:`\cos\iota` is one at every
-frequency, and its scatter adds to the shot noise. It includes the inclination,
-replacing the quadrupolar factor :math:`g(\iota)` normalized to its mean.
-
-Sky position and orientation are independent of distance and masses, so draws
-of :math:`r` enter the catalog covariance as a Hadamard product with the second
-moment of the power
-(:class:`~astrogwb.inference.likelihood.Network`).
-
-:func:`pair_response` keeps the pairs apart: the per-source ORF
-:math:`\gamma_{ab}(\hat n, \psi, \iota; f)` of every pair, unnormalized, with
-isotropic mean :math:`\gamma_{ab}(f)`. It is the response of the stacked
-per-pair data, whose mean is :math:`\gamma_{ab} S_h`, and does not divide by
-:math:`\gamma_{ab}`, which crosses zero.
+:func:`pair_response` stacks the per-source ORF of every pair, unnormalized:
+it is the response of the stacked per-pair data, whose mean is
+:math:`\gamma_{ab} S_h`, and does not divide by :math:`\gamma_{ab}`, which
+crosses zero. Sky position and orientation are independent of distance and
+masses, so the second moment of the response,
+:func:`pair_response_moment`, multiplies the second moment of the power
+elementwise in the catalog covariance
+(:func:`~astrogwb.inference.gaussian.catalog_covariance`).
 """
 
 from __future__ import annotations
@@ -38,72 +27,14 @@ import jax.numpy as jnp
 import numpy as np
 from jax.typing import ArrayLike
 
-from .effective_psd import pair_terms
 from .geometry import Detector
 from .overlap import overlap_reduction_function
 
 __all__ = [
-    "network_response",
     "pair_response",
     "pair_response_moment",
-    "sample_network_response",
     "sample_pair_response",
 ]
-
-
-def network_response(
-    frequencies: ArrayLike,
-    detectors: Sequence[Detector],
-    right_ascension: ArrayLike,
-    declination: ArrayLike,
-    polarization_angle: ArrayLike,
-    cos_inclination: ArrayLike,
-    *,
-    gmst: ArrayLike = 0.0,
-) -> jax.Array:
-    r"""The network response :math:`r(\hat n, \psi, \iota; f)` to one source.
-
-    Normalized to unit isotropic mean at every frequency (see the module
-    docstring). Bins where no pair has a finite weight return zero; they carry
-    no signal-to-noise either.
-
-    Parameters
-    ----------
-    frequencies
-        Frequencies in Hz, ``(F,)``.
-    detectors
-        Two or more detectors with sensitivities.
-    right_ascension, declination, polarization_angle, cos_inclination
-        The celestial source angles in radians of
-        :func:`~astrogwb.detector.overlap.overlap_reduction_function`,
-        broadcasting to ``(...)``.
-    gmst
-        Greenwich mean sidereal time in radians.
-
-    Returns
-    -------
-    jax.Array
-        Shape ``(..., F)``.
-    """
-    frequencies = np.asarray(frequencies, dtype=float)
-    terms = pair_terms(frequencies, detectors)
-    weights = np.stack([term.weight for term in terms])
-    denominator = np.sum([term.weight * term.overlap for term in terms], axis=0)
-    numerator = jnp.sum(
-        weights
-        * pair_response(
-            frequencies,
-            detectors,
-            right_ascension,
-            declination,
-            polarization_angle,
-            cos_inclination,
-            gmst=gmst,
-        ),
-        axis=-2,
-    )
-    usable = denominator > 0.0
-    return jnp.where(usable, numerator / np.where(usable, denominator, 1.0), 0.0)
 
 
 def pair_response(
@@ -176,33 +107,6 @@ def _isotropic_angles(key: jax.Array, num_draws: int) -> tuple[jax.Array, ...]:
     )
 
 
-def sample_network_response(
-    key: jax.Array,
-    num_draws: int,
-    frequencies: ArrayLike,
-    detectors: Sequence[Detector],
-) -> jax.Array:
-    r""":func:`network_response` at isotropic draws, ``(num_draws, F)``.
-
-    The direction is uniform on the sphere, :math:`\psi` uniform on
-    :math:`[0, \pi)` and :math:`\cos\iota` uniform on :math:`[-1, 1]`. Pass the
-    likelihood's frequency grid to use the draws as a
-    :class:`~astrogwb.inference.likelihood.Network` ``response``.
-
-    Parameters
-    ----------
-    key
-        JAX random key.
-    num_draws
-        Number of random draws.
-    frequencies
-        Frequency grid in Hz.
-    detectors
-        Detectors in the network.
-    """
-    return network_response(frequencies, detectors, *_isotropic_angles(key, num_draws))
-
-
 def sample_pair_response(
     key: jax.Array,
     num_draws: int,
@@ -211,8 +115,8 @@ def sample_pair_response(
 ) -> jax.Array:
     r""":func:`pair_response` at isotropic draws, ``(num_draws, P, F)``.
 
-    The angles are those :func:`sample_network_response` draws from the same
-    ``key``.
+    The direction is uniform on the sphere, :math:`\psi` uniform on
+    :math:`[0, \pi)` and :math:`\cos\iota` uniform on :math:`[-1, 1]`.
 
     Parameters
     ----------

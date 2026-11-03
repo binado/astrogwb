@@ -35,9 +35,9 @@ intensity of a draw generated at the reference redshift :math:`z_{\mathrm{ref}}`
 with :math:`d^{\mathrm{ref}} = d_L(z_{\mathrm{ref}})` at the fiducials. One
 catalog serves every window whose lower edge is at or above
 :math:`z_{\mathrm{ref}}`. :func:`reference_catalog` generates one waveform per
-draw, and :class:`~astrogwb.inference.likelihood.ImportanceGaussianLikelihood`
-rescales their weighted mean to the nodes, interpolating in :math:`\ln f`; the
-node count is the likelihood's, not the catalog's.
+draw, and :class:`~astrogwb.inference.model.CatalogModel` rescales their
+weighted mean to the nodes, interpolating in :math:`\ln f`; the node count is
+the model's, not the catalog's.
 
 A catalog realization over an observation time :math:`T` is a Poisson sum
 :math:`\sum_i P_i / T` over the real mergers, so it scatters about the spectrum

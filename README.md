@@ -111,21 +111,44 @@ import jax
 import numpy as np
 
 from astrogwb.importance.spectrum import reference_catalog
-from astrogwb.inference import ImportanceGaussianLikelihood
+from astrogwb.inference import CatalogModel
 
 reference = reference_catalog(metadata, jax.random.key(42))
 
-likelihood = ImportanceGaussianLikelihood.from_catalog(
+model = CatalogModel.from_catalog(
     reference,
     metadata,
     population=population.build(),
     frequencies=np.arange(10.0, 1000.0, 1.0),
     num_redshift_nodes=32,
+    observation_time=1.0,
     density_sites=("source_frame_mass_1", "source_frame_mass_2"),
 )
-spectrum, _, extras = likelihood.predict(
+spectrum, power_moment, extras = model.predict(
     {**params, "H0": 70.0, "xi_0": 1.2, "xi_n": 1.91}
 )
+```
+
+`spectrum` is the background's mean and `power_moment` the shot-noise moment of
+a Poisson catalog over the observation time. A detector network's likelihood of
+its per-pair cross powers is the dense Gaussian with covariance
+`Sigma + power_moment * R` (elementwise), with `Sigma` the detector noise and
+`R` the network's response moment:
+
+```python
+from astrogwb.detector import pair_response_moment
+from astrogwb.inference import DenseGaussianLikelihood, Network
+
+network = Network.from_pairs(
+    scale,  # (P, F) per-pair detector noise, pair_bin_scale
+    pair_overlap,  # (P, F) isotropic ORFs
+    mask,  # (P, F) usable entries
+    response_moment=pair_response_moment(
+        jax.random.key(0), 32_768, frequencies, detectors
+    ),
+)
+likelihood = DenseGaussianLikelihood(model, network, network.compress(observed))
+log_likelihood, extras = likelihood.log_likelihood(params)
 ```
 
 ## The manuscript application

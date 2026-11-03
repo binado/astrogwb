@@ -41,7 +41,7 @@ networks, with no sampler. The data are a zero-noise Poisson injection
 (`data_seed = 41`); the model spectrum is the rescaled reference-redshift
 spectrum of `astrogwb.importance.spectrum` (`catalog_seed = 42`): `2^14` intrinsic
 draws, each generated once at reference redshift `1e-4` by `reference_catalog`,
-and `ImportanceGaussianLikelihood` rescaling their mean power to 32 Gauss-Legendre
+and `CatalogModel` rescaling their mean power to 32 Gauss-Legendre
 nodes in the scale factor `1/(1 + z)` at each grid point, with no intrinsic
 reweighting. The log densities are computed on every run. The notebook reads
 its inputs and never generates them: the injection ensemble
