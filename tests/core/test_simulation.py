@@ -76,13 +76,24 @@ def test_a_file_of_another_version_is_refused(written: Path, tmp_path: Path) -> 
         BackgroundArtifact.open(stale)
 
 
+@pytest.mark.parametrize("segment_duration", [None, 60.0])
 def test_simulate_is_the_two_building_blocks_composed(
-    simulated: BackgroundArtifact,
+    segment_duration: float | None,
 ) -> None:
-    config = _config()
-    population = simulate_population(config.population, realization_key(SEED, 0))
+    config = _config(segment_duration)
+    key = realization_key(SEED, 0)
+    simulated = simulate(config, key, chunk_size=CHUNK)
+    population = simulate_population(
+        config.population, key, segment_duration=segment_duration
+    )
 
-    by_hand = simulate_background(population, WAVEFORM, NETWORKS, chunk_size=CHUNK)
+    by_hand = simulate_background(
+        population,
+        WAVEFORM,
+        NETWORKS,
+        chunk_size=CHUNK,
+        segment_duration=segment_duration,
+    )
 
     assert_same_spectra(simulated, by_hand)
     assert simulated.rng_key == population.rng_key

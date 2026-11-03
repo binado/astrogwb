@@ -36,7 +36,8 @@ hyperparameters (fixed, or drawn from their priors), a Poisson count
 - the extrinsic angles: `right_ascension` uniform on `[0, 2 pi)`,
   `declination = arcsin(uniform(-1, 1))` (an isotropic celestial direction),
   `polarization_angle` uniform on `[0, pi)`, and `coa_phase`. Angles are radians.
-- the dimensionless extrinsic `arrival_fraction`, uniform on `[-0.5, 0.5)`.
+- the extrinsic `arrival_time` in seconds, uniform about segment center over
+  the effective segment duration (or the full observation when unsegmented).
 
 All sources are drawn in one batch through `simulate_sources`, which the
 importance catalogs of `astrogwb.importance` share, with independent
@@ -126,24 +127,33 @@ carry noise. With `C_ab = sum_s Re[conj(h_a^s + n_a^s)(h_b^s + n_b^s)]` and
 
 Before projection and coherent summation, each source's two polarizations
 are shifted by `exp(-2 pi i f arrival_time)`, where
-`arrival_time = tau_eff * arrival_fraction` is its geocentric time in seconds
-relative to segment center. The population supplies this fraction; the
-background never redraws it. Detector projection then applies each geometric
-delay once. Same-source equal-frequency cross powers and power-only waveform
-generation are unchanged. The common waveform interface accepts an optional
-`arrival_time` keyword, defaulting to no shift, for every backend.
+`arrival_time` is sampled directly in seconds relative to segment center
+from `Uniform(-tau_eff / 2, tau_eff / 2)`. The population supplies this column;
+the background never redraws or rescales it. Detector projection then applies
+each geometric delay once. Same-source equal-frequency cross powers and power-only waveform
+generation are unchanged. The common waveform interface reads an optional
+`arrival_time` column in the source-parameter mapping, defaulting to no shift,
+for every backend. `joint_model(..., arrival_time_bounds=(low, high))` controls
+the sampling bounds in seconds (default `(-0.5, 0.5)` for general model use).
+The one-pass simulator forwards `segment_duration` into the population stage,
+which computes the effective duration and passes the centered bounds to the
+joint model. When calling the stages separately, supply the same
+`segment_duration` to `simulate_population` and `simulate_background`; omission
+at the population stage samples over the full observation duration.
 
 This retains the complete-signal-in-segment approximation and fixed sidereal
 geometry: signals are not truncated at segment edges, moved across boundaries,
 or rotated with the Earth. Coarse-bin variance rescaling is unchanged.
 
-New source draws carry an `arrival_fraction` column. As with the other required
+New source draws carry an `arrival_time` column. As with the other required
 extrinsics, `PopulationArtifact` rejects realizations missing it; regenerate
 older realizations rather than supplying a new random draw downstream.
 Importance power catalogs fix this extrinsic to zero alongside the angles;
 their intrinsic density selection excludes it, consistent with cancellation
 of identical arrival priors in reference and target. Existing power catalogs
-remain usable by the intrinsic importance integrator. No config fields change.
+remain usable by the intrinsic importance integrator. No config fields change;
+the existing `segment_duration` now also controls the population arrival-time
+prior.
 
 The mean is the incoherent signal; the zero-mean part is scaled by `r`, so the
 noise-by-noise term has the standard deviation of `pair_bin_scale` for any

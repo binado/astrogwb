@@ -60,9 +60,9 @@ finite get no noise. Earth's rotation during a signal is not modelled.
 
 Before coherent summation, both polarizations receive the geocentric arrival
 phase :math:`\exp(-2\pi i f t_i)`, with
-:math:`t_i = \tau_\mathrm{eff}\,\mathrm{arrival\_fraction}_i` relative to segment
-center. The joint population model supplies the fraction; it is never redrawn
-here. Detector projection applies geometric delays once. Signals remain
+:math:`t_i` sampled in seconds relative to segment center within
+:math:`[-\tau_\mathrm{eff}/2, \tau_\mathrm{eff}/2)`. The joint population model
+supplies ``arrival_time``; it is never redrawn or rescaled here. Detector projection applies geometric delays once. Signals remain
 complete within their assigned segment, without window truncation or boundary
 crossing.
 """
@@ -80,7 +80,6 @@ from typing import NamedTuple, Self
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax.typing import ArrayLike as JaxArrayLike
 from numpy.typing import ArrayLike, NDArray
 
 from astrogwb import __version__
@@ -380,15 +379,12 @@ def _kernels(
         valid: jax.Array,
         tensors: jax.Array,
         locations: jax.Array,
-        arrival_time: JaxArrayLike | None = None,
     ) -> jax.Array:
         """The ``(D, n, F)`` complex detector strains of one padded chunk.
 
         Padding rows have zero strain.
         """
-        plus, cross = generator.generate_polarizations_batch(
-            sources, arrival_time=arrival_time
-        )
+        plus, cross = generator.generate_polarizations_batch(sources)
         real = (jnp.arange(plus.shape[0]) < valid)[:, None]
         plus = jnp.where(real, plus, 0.0)
         cross = jnp.where(real, cross, 0.0)
@@ -430,7 +426,6 @@ def _kernels(
         sources: Mapping[str, jax.Array],
         valid: jax.Array,
         local_ids: jax.Array,
-        arrival_time: JaxArrayLike,
         tensors: jax.Array,
         locations: jax.Array,
         *,
@@ -443,7 +438,7 @@ def _kernels(
         segment, ``local_ids`` being the segment of each row relative to the
         batch.
         """
-        strain = strains(frequencies, sources, valid, tensors, locations, arrival_time)
+        strain = strains(frequencies, sources, valid, tensors, locations)
         coherent = jax.ops.segment_sum(
             jnp.moveaxis(strain, 1, 0), local_ids, num_segments=num_segments
         )
@@ -480,7 +475,8 @@ def simulate_background(
     Parameters
     ----------
     population
-        The realization to project.
+        The realization to project. For a uniform arrival prior over each
+        segment, draw it with the same ``segment_duration`` supplied here.
     waveform
         The waveform its polarizations are generated with.
     registry
@@ -634,7 +630,6 @@ def _segmented(
                 chunk,
                 jnp.asarray(valid),
                 jnp.asarray(ids),
-                chunk["arrival_fraction"] * effective,
                 tensors,
                 locations,
                 num_segments=batch,

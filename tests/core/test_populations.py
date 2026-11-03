@@ -80,7 +80,7 @@ STOCHASTIC_SITES = frozenset(
         "right_ascension",
         "polarization_angle",
         "coa_phase",
-        "arrival_fraction",
+        "arrival_time",
     }
 )
 DETERMINISTIC_SITES = frozenset(
@@ -100,7 +100,7 @@ def sample_values(redshift: jax.Array = SAMPLE_REDSHIFTS) -> dict[str, jax.Array
         "right_ascension": 0.2 * ones,
         "polarization_angle": 0.3 * ones,
         "coa_phase": 0.4 * ones,
-        "arrival_fraction": 0.2 * ones,
+        "arrival_time": 0.2 * ones,
         "source_frame_mass_1": 1.4 * ones,
         "source_frame_mass_2": 1.3 * ones,
         "spin_1z": 0.01 * ones,
@@ -190,36 +190,56 @@ DELAYED = BNSCobaPopulation(
 # --------------------------------------------------------------------------- #
 # Explicit site metadata and recomputation
 # --------------------------------------------------------------------------- #
-def test_joint_model_extrinsics_are_conditionable_sample_sites() -> None:
-    model = joint_model(*mock_population()(POPULATION_PARAMS))
+@pytest.mark.parametrize("arrival_time_bounds", [(-0.5, 0.5), (-20.0, 40.0)])
+def test_joint_model_extrinsics_are_conditionable_sample_sites(
+    arrival_time_bounds: tuple[float, float],
+) -> None:
+    model = joint_model(
+        *mock_population()(POPULATION_PARAMS), arrival_time_bounds=arrival_time_bounds
+    )
     fixed: dict[str, ArrayLike] = {
         "declination": 0.1,
         "right_ascension": 0.2,
         "polarization_angle": 0.3,
         "coa_phase": 0.4,
-        "arrival_fraction": 0.2,
+        "arrival_time": 0.2,
     }
     conditioned = handlers.condition(model, data=fixed)
     trace = handlers.trace(handlers.seed(conditioned, 0)).get_trace()
-    arrival_prior = trace["arrival_fraction"]["fn"]
+    arrival_prior = trace["arrival_time"]["fn"]
     assert isinstance(arrival_prior, dist.Uniform)
-    assert arrival_prior.low == -0.5
-    assert arrival_prior.high == 0.5
+    assert arrival_prior.low == arrival_time_bounds[0]
+    assert arrival_prior.high == arrival_time_bounds[1]
     for name, value in fixed.items():
         assert trace[name]["type"] == "sample"
         assert trace[name]["is_observed"]
         assert trace[name]["value"] == value
 
 
-def test_identical_arrival_priors_cancel_from_importance_ratios() -> None:
+@pytest.mark.parametrize("arrival_time_bounds", [(-0.5, 0.5), (-20.0, 40.0)])
+def test_identical_arrival_priors_cancel_from_importance_ratios(
+    arrival_time_bounds: tuple[float, float],
+) -> None:
     values = sample_values()
     population = mock_population()
-    _, target = evaluate(population, OFF_FIDUCIALS, values)
-    _, reference = evaluate(population, POPULATION_PARAMS, values)
-    sites = (*DEFAULT_DENSITY_SITES, "arrival_fraction")
-    _, target_with_arrival = evaluate(population, OFF_FIDUCIALS, values, sites)
-    _, reference_with_arrival = evaluate(population, POPULATION_PARAMS, values, sites)
-    np.testing.assert_array_equal(
+    target, _ = evaluate(population, OFF_FIDUCIALS, values)
+    reference, _ = evaluate(population, POPULATION_PARAMS, values)
+    sites = (*DEFAULT_DENSITY_SITES, "arrival_time")
+    _, target_with_arrival = sample_and_logprob(
+        joint_model(
+            *population(OFF_FIDUCIALS), arrival_time_bounds=arrival_time_bounds
+        ),
+        values=values,
+        density_sites=sites,
+    )
+    _, reference_with_arrival = sample_and_logprob(
+        joint_model(
+            *population(POPULATION_PARAMS), arrival_time_bounds=arrival_time_bounds
+        ),
+        values=values,
+        density_sites=sites,
+    )
+    np.testing.assert_allclose(
         target_with_arrival - reference_with_arrival, target - reference
     )
 

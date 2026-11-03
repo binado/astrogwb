@@ -18,7 +18,8 @@ class SimulationConfig(BaseModel):
 
     ``population`` sets the sources, ``waveform`` their polarizations and
     ``detectors`` the networks they are projected onto. A ``segment_duration``
-    in seconds adds per-segment detector noise (see
+    in seconds sets the population arrival-time bounds and adds per-segment
+    detector noise (see
     :mod:`astrogwb.simulators.background`); ``None`` leaves the spectra
     noiseless. The draw, a seed and an index, is not configuration: it is the
     key the configuration is simulated at. Execution details such as chunk

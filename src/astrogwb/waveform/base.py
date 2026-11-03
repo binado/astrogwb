@@ -7,7 +7,6 @@ from dataclasses import dataclass
 
 import jax
 import jax.numpy as jnp
-from jax.typing import ArrayLike as JaxArrayLike
 from numpy.typing import ArrayLike
 
 from astrogwb.waveform.metadata import WaveformMetadata
@@ -78,30 +77,28 @@ class WaveformGenerator:
         return _chunked(self._generate_batch, source_parameters, chunk_size)
 
     def generate_polarizations_batch(
-        self,
-        source_parameters: Mapping[str, ArrayLike],
-        *,
-        arrival_time: JaxArrayLike | None = None,
+        self, source_parameters: Mapping[str, ArrayLike]
     ) -> tuple[jax.Array, jax.Array]:
         r"""Generate the complex polarizations of a catalog, each ``(N, F)``.
 
         :math:`(\tilde h_+, \tilde h_\times)` in each source's radiation frame:
         they depend on the intrinsic parameters, the inclination and the
-        coalescence phase, never on the sky position or the polarization angle,
+        coalescence phase and optional geocentric arrival time, never on the
+        sky position or the polarization angle,
         which enter through the antenna patterns. Trace-safe.
 
         Parameters
         ----------
         source_parameters
-            Source parameter values by name.
-        arrival_time
-            Geocentric arrival time in seconds relative to the chosen origin,
+            Source parameter values by name. Optional ``arrival_time`` gives
+            the geocentric arrival time in seconds relative to the chosen origin,
             one per source, ``(N,)`` (or a scalar shared by all sources).
             Applies ``exp(-2 pi i f arrival_time)`` to both polarizations.
-            ``None`` leaves them unshifted. Detector delays are applied by
+            A missing column leaves them unshifted. Detector delays are applied by
             detector projection; power-only generation is independent of time.
         """
         plus, cross = self._generate_polarizations_batch(source_parameters)
+        arrival_time = source_parameters.get("arrival_time")
         if arrival_time is None:
             return plus, cross
         phase = jnp.exp(

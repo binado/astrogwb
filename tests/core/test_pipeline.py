@@ -38,30 +38,62 @@ MAX_STANDARD_ERRORS = 5.0
 @pytest.fixture(scope="module")
 def population() -> PopulationArtifact:
     """About fifty sources."""
-    return simulate_population(_population(1e-4), realization_key(41, 0))
+    return simulate_population(
+        _population(1e-4), realization_key(41, 0), segment_duration=60.0
+    )
 
 
 def test_population_is_reproducible(population: PopulationArtifact) -> None:
-    redrawn = simulate_population(_population(1e-4), realization_key(41, 0))
+    redrawn = simulate_population(
+        _population(1e-4), realization_key(41, 0), segment_duration=60.0
+    )
 
     assert population.count > 0
     assert set(EXTRINSIC_SITES) <= set(population.source_parameters)
     assert redrawn.source_parameters.keys() == population.source_parameters.keys()
     for name, values in population.source_parameters.items():
         np.testing.assert_array_equal(redrawn.source_parameters[name], values)
-    arrival = population.source_parameters["arrival_fraction"]
-    assert np.all((arrival >= -0.5) & (arrival < 0.5))
+    arrival = population.source_parameters["arrival_time"]
+    effective = population.observation_seconds / int(
+        population.observation_seconds // 60.0
+    )
+    assert np.all((arrival >= -effective / 2) & (arrival < effective / 2))
     assert np.unique(arrival).size == population.count
 
 
-def test_population_requires_arrival_fraction(population: PopulationArtifact) -> None:
-    with pytest.raises(ValueError, match="arrival_fraction.*regenerate"):
+@pytest.mark.parametrize("segment_duration", [None, 60.0, 600.0])
+def test_arrival_time_bounds_use_the_actual_duration(
+    segment_duration: float | None,
+) -> None:
+    metadata = _population(1e-4)
+    key = realization_key(41, 0)
+    full = simulate_population(metadata, key)
+    segmented = simulate_population(metadata, key, segment_duration=segment_duration)
+    seconds = metadata.observation_seconds
+    effective = (
+        seconds
+        if segment_duration is None
+        else seconds / int(seconds // segment_duration)
+    )
+    # Changing the bounds rescales the same model draw and leaves every other
+    # column intact, including source identities and population properties.
+    np.testing.assert_allclose(
+        segmented.source_parameters["arrival_time"] / effective,
+        full.source_parameters["arrival_time"] / seconds,
+    )
+    for name, values in full.source_parameters.items():
+        if name != "arrival_time":
+            np.testing.assert_array_equal(segmented.source_parameters[name], values)
+
+
+def test_population_requires_arrival_time(population: PopulationArtifact) -> None:
+    with pytest.raises(ValueError, match="arrival_time.*regenerate"):
         dataclasses.replace(
             population,
             source_parameters={
                 name: values
                 for name, values in population.source_parameters.items()
-                if name != "arrival_fraction"
+                if name != "arrival_time"
             },
         )
 
@@ -83,7 +115,9 @@ def test_arrival_time_shifts_both_polarizations_and_preserves_power(
         )
     )
     sources = {
-        name: values[:2] for name, values in population.source_parameters.items()
+        name: values[:2]
+        for name, values in population.source_parameters.items()
+        if name != "arrival_time"
     }
     # Opposite quarter-cycle shifts at the first frequency: fixes the sign
     # and checks independent source times rather than a shared batch phase.
@@ -91,7 +125,7 @@ def test_arrival_time_shifts_both_polarizations_and_preserves_power(
     times = np.array([1.0, -1.0]) / (4 * frequencies[0])
     base = generator.generate_polarizations_batch(sources)
     shifted = jax.jit(generator.generate_polarizations_batch)(
-        sources, arrival_time=times
+        {**sources, "arrival_time": times}
     )
     expected = np.exp(-2j * np.pi * times[:, None] * frequencies)
     for original, timed in zip(base, shifted, strict=True):
@@ -101,7 +135,7 @@ def test_arrival_time_shifts_both_polarizations_and_preserves_power(
     )
     np.testing.assert_array_equal(
         generator.generate_batch(sources),
-        generator.generate_batch({**sources, "arrival_fraction": times}),
+        generator.generate_batch({**sources, "arrival_time": times}),
     )
 
     # At each physical site the arrival phase multiplies the strain once;
@@ -365,7 +399,7 @@ def test_spectra_do_not_depend_on_the_segment_batch_size(
 
 
 @pytest.mark.parametrize("opposite_phase", [False, True])
-def test_segment_sums_shift_sources_using_the_effective_duration(
+def test_segment_sums_use_sampled_arrival_times_without_rescaling(
     population: PopulationArtifact,
     monkeypatch: pytest.MonkeyPatch,
     opposite_phase: bool,
@@ -386,8 +420,8 @@ def test_segment_sums_shift_sources_using_the_effective_duration(
         name: np.repeat(values[:1], 2)
         for name, values in population.source_parameters.items()
     }
-    sources["arrival_fraction"] = np.array(
-        [0.0, 1 / (2 * WAVEFORM.minimum_frequency * seconds) if opposite_phase else 0.0]
+    sources["arrival_time"] = np.array(
+        [0.0, 1 / (2 * WAVEFORM.minimum_frequency) if opposite_phase else 0.0]
     )
     twins = dataclasses.replace(
         population,
@@ -397,7 +431,7 @@ def test_segment_sums_shift_sources_using_the_effective_duration(
         source_parameters=sources,
     )
     baseline = simulate_background(twins, WAVEFORM, NETWORKS)
-    # floor(T / requested) = 1, so the effective duration is T, not requested.
+    # Arrival times are already in seconds and are passed through unchanged.
     segmented = simulate_background(
         twins, WAVEFORM, NETWORKS, segment_duration=0.2, chunk_size=1
     )
