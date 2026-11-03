@@ -42,6 +42,8 @@ __all__ = [
     "Evaluation",
     "GaussianFactor",
     "Network",
+    "catalog_covariance",
+    "expected_data",
 ]
 
 _LOG_TWO_PI = math.log(2.0 * math.pi)
@@ -166,17 +168,50 @@ class Evaluation(NamedTuple):
     factor: GaussianFactor
 
 
+def expected_data(prediction: Prediction, network: Network) -> jax.Array:
+    r"""The mean :math:`\gamma_{ab}(f_k) S(f_k)` on the counted entries, ``(D,)``.
+
+    Parameters
+    ----------
+    prediction
+        The model's prediction.
+    network
+        The detector network.
+    """
+    return network.pair_overlap * prediction.mean[network.bins]
+
+
+def catalog_covariance(prediction: Prediction, network: Network) -> jax.Array:
+    r"""The shot-noise covariance :math:`M_{kl} R_{ab,k;\,cd,l}`, ``(D, D)``.
+
+    Parameters
+    ----------
+    prediction
+        The model's prediction, with a power moment.
+    network
+        The detector network, with a response moment.
+
+    Raises
+    ------
+    ValueError
+        If either the power moment or the response moment is missing.
+    """
+    if prediction.power_moment is None or network.response_moment is None:
+        raise ValueError(
+            "the catalog covariance needs a power moment and network.response_moment"
+        )
+    return (
+        prediction.power_moment[network.bins][:, network.bins] * network.response_moment
+    )
+
+
 def _factorize(prediction: Prediction, network: Network) -> GaussianFactor:
-    mean = network.pair_overlap * prediction.mean[network.bins]
+    mean = expected_data(prediction, network)
     if prediction.power_moment is None:
         return GaussianFactor(
             mean, network.scale, 2.0 * jnp.sum(jnp.log(network.scale))
         )
-    if network.response_moment is None:
-        raise ValueError("a shot-noise likelihood needs network.response_moment")
-    covariance = (
-        prediction.power_moment[network.bins][:, network.bins] * network.response_moment
-    ) + jnp.diag(network.scale**2)
+    covariance = catalog_covariance(prediction, network) + jnp.diag(network.scale**2)
     cholesky = jnp.linalg.cholesky(covariance)
     return GaussianFactor(mean, cholesky, 2.0 * jnp.sum(jnp.log(jnp.diag(cholesky))))
 

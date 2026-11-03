@@ -1,4 +1,4 @@
-"""The catalog model, the dense Gaussian likelihood, the response moment and the grid.
+"""The catalog model, the dense Gaussian likelihood and what is derived from it.
 
 The catalog-bound tests use the closed-form mock reference catalog of
 ``astrogwb_mock_population`` on a 12-bin grid and two synthetic detector pairs
@@ -23,6 +23,7 @@ from astrogwb_mock_population import (
     build_reference_spectrum,
     mock_population,
 )
+from jax.scipy.linalg import solve_triangular
 from jax.typing import ArrayLike
 
 from astrogwb.detector import load_detector, pair_response_moment
@@ -30,8 +31,16 @@ from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.inference import (
     CatalogModel,
     DenseGaussianLikelihood,
+    Prediction,
+    amplitude_cumulants,
+    amplitude_template,
+    dense_fisher_matrix,
+    fisher_matrix_per_bin,
     grid_log_likelihood,
     grid_log_prior,
+    shape_correction,
+    shot_noise_variance,
+    whitened_catalog_covariance,
 )
 from astrogwb.inference import Network as StackedNetwork
 from astrogwb.inference.gaussian import Network
@@ -400,3 +409,119 @@ def test_grid_log_prior_outside_the_support_is_negative_infinite() -> None:
     assert prior.shape == (3, 2)
     assert bool(jnp.all(jnp.isneginf(prior[0])))
     assert bool(jnp.all(jnp.isfinite(prior[1:])))
+
+
+# --------------------------------------------------------------------------- #
+# Diagnostics
+# --------------------------------------------------------------------------- #
+@pytest.fixture(scope="module")
+def prediction(model: CatalogModel) -> Prediction:
+    return model.predict(OFF_FIDUCIAL)
+
+
+def test_shape_correction_and_shot_variance_give_the_amplitude_information(
+    likelihood: DenseGaussianLikelihood, prediction: Prediction, network: Network
+) -> None:
+    r""":math:`\mu^T C^{-1} \mu = \rho^2 / (1 + \rho^2 \sigma^2 - \delta)` (App. B)."""
+    _, factor = likelihood.evaluate(OFF_FIDUCIAL)
+    whitened = solve_triangular(factor.cholesky, factor.mean, lower=True)
+    _, squared_snr = amplitude_template(prediction, network)
+    shot = shot_noise_variance(prediction, network)
+    delta = shape_correction(prediction, network)
+
+    assert float(whitened @ whitened) == pytest.approx(
+        float(squared_snr / (1.0 + squared_snr * shot - delta)), rel=1e-9
+    )
+
+
+def test_shape_correction_is_bounded_by_the_largest_orthogonal_eigenvalue(
+    prediction: Prediction, network: Network
+) -> None:
+    _, squared_snr = amplitude_template(prediction, network)
+    shot = float(squared_snr * shot_noise_variance(prediction, network))
+    largest = float(
+        jnp.max(
+            jnp.linalg.eigvalsh(
+                whitened_catalog_covariance(prediction, network, orthogonal=True)
+            )
+        )
+    )
+    delta = float(shape_correction(prediction, network))
+
+    assert 0.0 <= delta <= shot * largest / (1.0 + largest) * (1.0 + 1e-12)
+
+
+def test_orthogonal_whitened_covariance_annihilates_the_mean_direction(
+    prediction: Prediction, network: Network
+) -> None:
+    direction = network.pair_overlap * prediction.mean[network.bins] / network.scale
+    projected = whitened_catalog_covariance(prediction, network, orthogonal=True)
+    full = whitened_catalog_covariance(prediction, network)
+
+    assert float(jnp.linalg.norm(projected @ direction)) <= 1e-12 * float(
+        jnp.linalg.norm(full @ direction)
+    )
+
+
+def test_amplitude_cumulants_shot_variance_is_the_response_moment_variance(
+    model: CatalogModel,
+    prediction: Prediction,
+    network: Network,
+    response_draws: jax.Array,
+) -> None:
+    """The per-draw catalog sum and the held moment of the same draws agree."""
+    cumulants = amplitude_cumulants(model, OFF_FIDUCIAL, network, response_draws)
+
+    assert float(cumulants.shot_variance) == pytest.approx(
+        float(shot_noise_variance(prediction, network)), rel=1e-10
+    )
+
+
+def test_amplitude_cumulants_of_a_positive_template_are_right_skewed(
+    model: CatalogModel, pair_leaves: dict[str, np.ndarray], response_draws: jax.Array
+) -> None:
+    """Positive overlaps and responses make every source's contribution positive."""
+    leaves = {**pair_leaves, "pair_overlap": np.abs(pair_leaves["pair_overlap"])}
+    network = Network.from_pairs(**leaves)
+
+    cumulants = amplitude_cumulants(model, OFF_FIDUCIAL, network, response_draws)
+
+    assert float(cumulants.third_cumulant) > 0.0
+    assert float(cumulants.skewness) > 0.0
+
+
+# --------------------------------------------------------------------------- #
+# The dense Fisher matrix
+# --------------------------------------------------------------------------- #
+FISHER_PARAMETERS = ("H0", "Omega_m")
+
+
+def test_dense_fisher_without_shot_noise_is_the_per_bin_fisher_sum(
+    model: CatalogModel, pair_leaves: dict[str, np.ndarray]
+) -> None:
+    """One pair of unit overlap is the combined spectrum the per-bin matrix scores."""
+    scale = pair_leaves["scale"][0]
+    network = Network.from_pairs(scale[None], np.ones((1, NUM_BINS)))
+    likelihood = DenseGaussianLikelihood(
+        model, network, jnp.zeros(NUM_BINS), shot_noise=False
+    )
+
+    fisher = dense_fisher_matrix(likelihood, OFF_FIDUCIAL, FISHER_PARAMETERS)
+    per_bin = fisher_matrix_per_bin(
+        model.spectrum, OFF_FIDUCIAL, FISHER_PARAMETERS, scale=jnp.asarray(scale)
+    )
+
+    np.testing.assert_allclose(fisher.total, per_bin.sum(axis=0), rtol=1e-10)
+    np.testing.assert_array_equal(fisher.covariance, 0.0)
+
+
+def test_dense_fisher_covariance_term_is_symmetric_positive_semidefinite(
+    likelihood: DenseGaussianLikelihood,
+) -> None:
+    covariance = np.asarray(
+        dense_fisher_matrix(likelihood, OFF_FIDUCIAL, FISHER_PARAMETERS).covariance
+    )
+
+    np.testing.assert_allclose(covariance, covariance.T, rtol=1e-12)
+    assert np.linalg.eigvalsh(covariance).min() >= -1e-12 * np.abs(covariance).max()
+    assert np.abs(covariance).max() > 0.0

@@ -268,10 +268,80 @@ class CatalogModel:
 
         A second moment of the intensity carries the distance rescaling twice.
         """
+        return shared.kernel * self._squared_distance_ratio(shared)
+
+    def _squared_distance_ratio(self, shared: _SharedTerms) -> jax.Array:
+        r""":math:`(d^{\mathrm{ref}}/d_{GW})^2` at each redshift node, ``(Z,)``."""
         gw_distance = shared.distance_ratio * luminosity_distance(
             self.redshift, shared.hubble_constant, shared.omega_m
         )
-        return shared.kernel * (self.reference_distance / gw_distance) ** 2
+        return (self.reference_distance / gw_distance) ** 2
+
+    def _pullback(self, projector: jax.Array) -> jax.Array:
+        r""":math:`W_z^T \mathbf v` at every node, ``(Z, F_ref)``, for ``projector`` ``(F,)``."""
+
+        def node(index: jax.Array, weight: jax.Array) -> jax.Array:
+            reference = jnp.zeros(self.log_reference_frequencies.shape[0])
+            reference = reference.at[index].add(weight[:, 0] * projector)
+            return reference.at[index + 1].add(weight[:, 1] * projector)
+
+        return jax.vmap(node)(self.interpolation_index, self.interpolation_weight)
+
+    def projected_cumulants(
+        self,
+        params: Mapping[str, ArrayLike],
+        projectors: ArrayLike,
+        orders: tuple[int, ...] = (2, 3),
+    ) -> jax.Array:
+        r"""Cumulants of a catalog realization projected on a per-source random template.
+
+        A realization over :math:`T` is the compound-Poisson sum
+        :math:`\sum_i \beta_i` over its sources, with
+        :math:`\beta_i = (2/5)\, \mathbf v_{l_i}^T \mathbf P_i / T`, source
+        :math:`i`'s face-on intensity on the observed grid projected on
+        ``projectors[l_i]``, its row drawn uniformly per source (a response draw
+        folded into the template). Its :math:`n`-th cumulant is the expected
+        count times the raw moment,
+
+        .. math::
+
+            \kappa_n = \sum_{z, j} a_{zj}\, \frac{1}{L} \sum_l \beta_{zjl}^n,
+            \qquad a_{zj} = \frac{T \kappa^{\rm mean}_z}{q_z} \frac{w_j}{N},
+
+        with :math:`q_z = (d^{\mathrm{ref}}/d_{GW})^2` moved from the counts
+        into :math:`\beta`. The second cumulant along constant rows
+        :math:`\mathbf v` is :math:`\mathbf v^T M \mathbf v`. Costs
+        :math:`L Z F_{\rm ref} N`.
+
+        Parameters
+        ----------
+        params
+            Model parameter values.
+        projectors
+            Per-draw templates :math:`\mathbf v_l` on the observed grid, ``(L, F)``.
+        orders
+            Cumulant orders, each at least one; static.
+
+        Returns
+        -------
+        jax.Array
+            :math:`\kappa_n` for each of ``orders``, ``(len(orders),)``.
+        """
+        shared = self._shared(params)
+        ratio = self._squared_distance_ratio(shared)
+        weights = jnp.exp(shared.log_weights) / shared.log_weights.shape[0]
+        counts = (self.observation_seconds * shared.kernel / ratio)[:, None] * weights
+        scale = (INCLINATION_MEAN * ratio * self.amplitude / self.observation_seconds)[
+            :, None
+        ]
+
+        def per_draw(projector: jax.Array) -> jax.Array:
+            contributions = scale * (self._pullback(projector) @ self.intensity)
+            return jnp.stack(
+                [jnp.sum(counts * contributions**order) for order in orders]
+            )
+
+        return jnp.mean(jax.lax.map(per_draw, jnp.asarray(projectors)), axis=0)
 
     def _mean(self, shared: _SharedTerms) -> jax.Array:
         mean_intensity = self.mean_intensity

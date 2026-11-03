@@ -32,15 +32,26 @@ boundary term.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 
+from astrogwb.inference.gaussian import (
+    DenseGaussianLikelihood,
+    catalog_covariance,
+    expected_data,
+)
 from astrogwb.inference.protocol import SpectrumFn
 
-__all__ = ["fisher_matrix_per_bin", "spectral_density_jacobian"]
+__all__ = [
+    "DenseFisher",
+    "dense_fisher_matrix",
+    "fisher_matrix_per_bin",
+    "spectral_density_jacobian",
+]
 
 
 def spectral_density_jacobian(
@@ -62,19 +73,9 @@ def spectral_density_jacobian(
     parameter_names
         Names of parameters to differentiate.
     """
-    missing = sorted(set(parameter_names) - params.keys())
-    if missing:
-        raise KeyError(f"parameters {missing} are not in params")
-    free = {name: jnp.asarray(params[name], dtype=float) for name in parameter_names}
-    fixed = {
-        name: value for name, value in params.items() if name not in parameter_names
-    }
-
-    def spectrum(free_params: dict[str, jax.Array]) -> jax.Array:
-        return spectral_density_fn({**fixed, **free_params})
-
-    columns = jax.jacfwd(spectrum)(free)
-    return jnp.stack([columns[name] for name in parameter_names], axis=-1)
+    return _jacobian(
+        lambda full: (spectral_density_fn(full),), params, parameter_names
+    )[0]
 
 
 def fisher_matrix_per_bin(
@@ -110,3 +111,95 @@ def fisher_matrix_per_bin(
     if frequency_mask is not None:
         inverse_variance = jnp.where(jnp.asarray(frequency_mask), inverse_variance, 0.0)
     return inverse_variance[:, None, None] * jacobian[:, :, None] * jacobian[:, None, :]
+
+
+class DenseFisher(NamedTuple):
+    r"""The two terms of a dense Gaussian's Fisher matrix, each ``(P, P)``.
+
+    Attributes
+    ----------
+    mean
+        :math:`\partial_a \boldsymbol\mu^T C^{-1} \partial_b \boldsymbol\mu`.
+    covariance
+        :math:`\tfrac12 \mathrm{Tr}[C^{-1} \partial_a C\, C^{-1} \partial_b C]`.
+    """
+
+    mean: jax.Array
+    covariance: jax.Array
+
+    @property
+    def total(self) -> jax.Array:
+        """The Fisher matrix, ``(P, P)``."""
+        return self.mean + self.covariance
+
+
+def dense_fisher_matrix(
+    likelihood: DenseGaussianLikelihood,
+    params: Mapping[str, ArrayLike],
+    parameter_names: Sequence[str],
+) -> DenseFisher:
+    r"""The Fisher matrix of ``likelihood`` at ``params``, split into its two terms.
+
+    For a Gaussian whose mean and covariance both depend on the parameters,
+
+    .. math::
+
+        F_{ab} = \partial_a \boldsymbol\mu^T C^{-1} \partial_b \boldsymbol\mu
+            + \tfrac12 \mathrm{Tr}\!\left[C^{-1} \partial_a C\,
+              C^{-1} \partial_b C\right],
+
+    keeping the terms apart so the covariance term can be checked against the
+    mean term. Forward mode, holding ``P`` covariance derivatives of shape
+    ``(D, D)``. The derivative caveats of the module docstring apply.
+
+    Parameters
+    ----------
+    likelihood
+        The likelihood; its data are not used.
+    params
+        Model parameter values.
+    parameter_names
+        Names of parameters to differentiate.
+    """
+    network = likelihood.network
+
+    def moments(full: Mapping[str, ArrayLike]) -> tuple[jax.Array, jax.Array]:
+        prediction = likelihood.model.predict(full, shot_noise=likelihood.shot_noise)
+        covariance = jnp.diag(network.scale**2)
+        if likelihood.shot_noise:
+            covariance = covariance + catalog_covariance(prediction, network)
+        return expected_data(prediction, network), covariance
+
+    mean_derivative, covariance_derivative = _jacobian(moments, params, parameter_names)
+    _, covariance = moments(params)
+    factor = jax.scipy.linalg.cho_factor(covariance, lower=True)
+    whitened_mean = jax.scipy.linalg.cho_solve(factor, mean_derivative)
+    # C^{-1} dC_a for every parameter, (P, D, D).
+    whitened_covariance = jax.vmap(
+        lambda derivative: jax.scipy.linalg.cho_solve(factor, derivative),
+        in_axes=-1,
+    )(covariance_derivative)
+    return DenseFisher(
+        mean_derivative.T @ whitened_mean,
+        0.5 * jnp.einsum("aij,bji->ab", whitened_covariance, whitened_covariance),
+    )
+
+
+def _jacobian(
+    fn: Callable[[Mapping[str, ArrayLike]], tuple[jax.Array, ...]],
+    params: Mapping[str, ArrayLike],
+    parameter_names: Sequence[str],
+) -> tuple[jax.Array, ...]:
+    """Forward-mode derivatives of each of ``fn``'s outputs, parameters on a trailing axis."""
+    missing = sorted(set(parameter_names) - params.keys())
+    if missing:
+        raise KeyError(f"parameters {missing} are not in params")
+    free = {name: jnp.asarray(params[name], dtype=float) for name in parameter_names}
+    fixed = {
+        name: value for name, value in params.items() if name not in parameter_names
+    }
+    columns = jax.jacfwd(lambda free_params: fn({**fixed, **free_params}))(free)
+    return tuple(
+        jnp.stack([output[name] for name in parameter_names], axis=-1)
+        for output in columns
+    )
