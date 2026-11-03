@@ -6,13 +6,15 @@ Every notebook here drives the `astrogwb.paper` configuration layer, so they all
 
 ## Inputs
 
-The notebooks read simulation data and never generate it. Each configuration
-cell names its inputs, all under `outputs/`:
+The notebooks read simulation data and never generate it, except for
+reference catalogs small enough to draw in memory: `fiducial_spectrum` and
+`importance_convergence` build their own. Each configuration cell names its
+inputs, all under `outputs/`:
 
 | Input | Read by |
 | --- | --- |
 | `ensembles/fiducial/` | `cosmology_grid_posteriors`, `madau_dickinson_grid`, `shot_noise_coverage`, `ensemble_spectrum` |
-| `catalogs/reference-fiducial.h5` | `fiducial_spectrum`, `cosmology_grid_posteriors`, `madau_dickinson_grid`, `shot_noise_coverage`, `ensemble_spectrum` |
+| `catalogs/reference-fiducial.h5` | `cosmology_grid_posteriors`, `madau_dickinson_grid`, `shot_noise_coverage`, `ensemble_spectrum` |
 | `catalogs/reference-ladder.h5` | `importance_convergence` |
 
 `Snakefile` writes them (`docs/coverage-draws-on-slurm.md`).
@@ -22,8 +24,10 @@ A missing input is a `FileNotFoundError`, never a simulation.
 
 - **`fiducial_spectrum.py`** — marimo notebook. The paper's spectrum figures
   and SNR table, from the model mean spectrum at the fiducials: the
-  `CatalogModel` of `catalogs/reference-fiducial.h5` (32 redshift nodes), as in
-  the grid notebooks. Writes $S_h$ and $\Omega_{\mathrm{GW}}$
+  `CatalogModel` (32 redshift nodes) of its own reference catalog, drawn in
+  memory ($2^{14}$ Sobol draws, seed 42, generated at $z_{\min}$ on a
+  geometric grid with $d\ln f = 0.0035$ to 4000 Hz), evaluated on a geometric
+  observed grid of about 2000 points from 2 to 2048 Hz. Writes $S_h$ and $\Omega_{\mathrm{GW}}$
   (`fiducial_spectrum.pdf`, with the expected number of mergers in one year
   printed for the caption), $h_c$ against each network's $h_n$ over
   $d\mathrm{SNR}^2/d\ln f$ for $T = 1$ yr (`characteristic_amplitudes.pdf`),

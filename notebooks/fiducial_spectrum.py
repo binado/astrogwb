@@ -41,7 +41,8 @@ with app.setup(hide_code=True):
     )
     from astrogwb.detector.config import DetectorRegistry
     from astrogwb.frequency import frequency_grid, frequency_mask
-    from astrogwb.importance.catalog import read_catalog
+    from astrogwb.importance.catalog import CatalogMetadata
+    from astrogwb.importance.spectrum import reference_catalog
     from astrogwb.inference import CatalogModel, Prediction, shot_noise_variance
     from astrogwb.inference import Network as LikelihoodNetwork
     from astrogwb.paper.plotting import (
@@ -55,6 +56,7 @@ with app.setup(hide_code=True):
         use_paper_style,
     )
     from astrogwb.utils import years_to_seconds
+    from astrogwb.waveform import WaveformMetadata
 
     # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes.
     # Restore them so plotting behaves as expected after the imports above.
@@ -81,8 +83,10 @@ def _():
     $s \approx 0.2\%$, so its SNR differs from the SNR of the mean only at
     order $s^2$. The ensemble check lives in `notebooks/ensemble_spectrum.py`.
 
-    The catalog is read, never simulated: `Snakefile` rule
-    `reference_catalog` writes `outputs/catalogs/reference-fiducial.h5`.
+    The notebook draws its own reference catalog in memory, in a few
+    seconds, so its settings follow this notebook's needs. It differs from the
+    production `outputs/catalogs/reference-fiducial.h5` only in its reference
+    grid and reference redshift.
     """)
     return
 
@@ -105,29 +109,49 @@ def _():
 
     observation_time = 1.0  # years
     minimum_frequencies = [2.0, 5.0, 10.0, 20.0]
-    # The shared reference catalog, written by Snakefile: 2^14 Sobol draws at
-    # the default approximant, generated at reference redshift 1e-4. Its
-    # population holds the analysis window (z in [0.35, 20]).
-    catalog_path = ROOT_DIR / "outputs" / "catalogs" / "reference-fiducial.h5"
     num_redshift_nodes = 32
     # The shot noise carries each network's per-source response, from these
     # isotropic draws, as in the grid and coverage notebooks.
     response_draws, response_seed = 32_768, 0
 
-    # The observed grid of the default waveform: the grid of the fiducial
-    # ensemble and of the likelihood.
-    _waveform = load_config(ROOT_DIR / "config").waveforms["default"]
-    frequencies = frequency_grid(
-        _waveform.frequency_spacing,
-        _waveform.minimum_frequency,
-        _waveform.maximum_frequency,
-        _waveform.frequency_resolution,
-        _waveform.turnover_frequency,
-        dlogf=_waveform.dlogf,
-    )
+    # A geometric grid over the default waveform's band, about 2000 points
+    # (d ln f = 0.0035). The likelihood's loglinear grid is linear at 1 Hz
+    # below 100 Hz, too coarse at the low-frequency noise wall: there it
+    # overestimates the SNR above 10 Hz by about 2.5%. This grid agrees with
+    # one twice as fine to 0.1%.
+    _config = load_config(ROOT_DIR / "config")
+    _waveform = _config.catalog.waveform
     maximum_frequency = float(_waveform.maximum_frequency)
+    frequencies = frequency_grid(
+        "log", _waveform.minimum_frequency, maximum_frequency, 0.007
+    )
 
-    registry = load_config(ROOT_DIR / "config").registry
+    # This notebook's reference catalog: 2^14 Sobol draws of the shared
+    # population and default approximant, generated at the window's lower edge
+    # (reference_redshift None) on a geometric grid as fine as the observed
+    # one. A node at redshift z reads it at f (1 + z) / (1 + z_min), so it
+    # reaches 4000 Hz, past the source-frame merger over (1 + z_min).
+    catalog_metadata = CatalogMetadata.model_validate(
+        {
+            **_config.catalog.model_dump(),
+            "waveform": WaveformMetadata.model_validate(
+                {
+                    **_waveform.model_dump(),
+                    "frequency_spacing": "log",
+                    "maximum_frequency": 4000.0,
+                    "frequency_resolution": 0.007,
+                    "turnover_frequency": None,
+                    "dlogf": None,
+                }
+            ),
+            "num_samples": 2**14,
+            "sampling": "sobol",
+            "reference_redshift": None,
+        }
+    )
+    catalog_seed, catalog_chunk_size = 42, 4096
+
+    registry = _config.registry
     network_rows = DETECTOR_NETWORKS
     # Order is load-bearing: detector_network_styles colors by first appearance.
     plotted_networks = tuple(
@@ -138,7 +162,9 @@ def _():
     return (
         BASE_DIR,
         ROOT_DIR,
-        catalog_path,
+        catalog_chunk_size,
+        catalog_metadata,
+        catalog_seed,
         frequencies,
         maximum_frequency,
         minimum_frequencies,
@@ -453,33 +479,42 @@ def _():
     mo.md(r"""
     ## The model at the fiducial
 
-    The reference catalog bound to its own population on the observed grid,
-    evaluated at the catalog's fiducials. The expected number of mergers in the
-    window over $T$ is the observer-frame total rate times $T$.
+    The notebook's reference catalog, drawn here, bound to its own population
+    on the observed grid and evaluated at the catalog's fiducials. The
+    expected number of mergers in the window over $T$ is the observer-frame
+    total rate times $T$.
 
-    The reference grid stops at 4000 Hz, and a node at redshift $z$ reads it at
-    $f(1+z)/(1+z_{\mathrm{ref}})$, so the top observed bins see only the low
-    nodes; queries past the edge contribute zero. The BNS signal there is
-    already negligible: dropping the last 100, 50 or 20 Hz of the reference
-    grid changes the spectrum by at most $2 \times 10^{-4}$, $5 \times 10^{-5}$
-    or $3 \times 10^{-6}$ (all at about 2 kHz), so the part past the edge is
-    smaller still.
+    A node at redshift $z$ reads the reference grid at
+    $f(1+z)/(1+z_{\min})$; queries past its 4000 Hz edge contribute zero.
+    Generated at $z_{\min}$, the reference waveforms need only reach the
+    source-frame merger over $1 + z_{\min}$. Raising the edge to 6000 Hz
+    changes the spectrum by at most $2 \times 10^{-5}$ (near 2 kHz), while
+    lowering it to 2500 Hz would cut it by 27% there.
     """)
     return
 
 
 @app.cell
-def _(catalog_path, frequencies, num_redshift_nodes, observation_time):
-    _data, _metadata, _ = read_catalog(catalog_path)
+def _(
+    catalog_chunk_size,
+    catalog_metadata,
+    catalog_seed,
+    frequencies,
+    num_redshift_nodes,
+    observation_time,
+):
+    _data = reference_catalog(
+        catalog_metadata, jax.random.key(catalog_seed), chunk_size=catalog_chunk_size
+    )
     _model = CatalogModel.from_catalog(
         _data,
-        _metadata,
-        population=_metadata.population.build(),
+        catalog_metadata,
+        population=catalog_metadata.population.build(),
         frequencies=frequencies,
         num_redshift_nodes=num_redshift_nodes,
         observation_time=observation_time,
     )
-    fiducials = dict(_metadata.fiducials)
+    fiducials = dict(catalog_metadata.fiducials)
     prediction = _model.predict(fiducials)
     expected_mergers = float(prediction.extras["total_merger_rate"]) * years_to_seconds(
         observation_time
@@ -636,8 +671,10 @@ def _(
             f"realization for $f_{{\\min}} = {minimum_frequencies[0]:g}$ Hz."
         ),
         label="tab:mean-spectrum-snr-coba",
+        # A measured SNR scatters by sqrt(1 + (rho s)^2), between 1.1 and 1.8
+        # here, so decimals are below the noise.
         formatters=[
-            *(["{:.1f}".format] * len(minimum_frequencies)),
+            *(["{:.0f}".format] * len(minimum_frequencies)),
             "{:.2f}".format,
         ],
     )
