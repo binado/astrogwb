@@ -90,7 +90,10 @@ def inclination_quadrature(num_nodes: int) -> tuple[np.ndarray, np.ndarray]:
 
     A source's power scales with
     :math:`\tilde F(c) = (1 + 6 c^2 + c^4) / 3.2` in :math:`c = \cos\iota`,
-    uniform on :math:`[0, 1]`, normalized to unit mean. ``num_nodes`` nodes
+    uniform on :math:`[0, 1]`, normalized to unit mean. This assumes an
+    aligned-spin dominant-quadrupole waveform; multiply face-on polarization
+    power by :math:`(2/5) \tilde F` to obtain the inclined power.
+    ``num_nodes`` nodes
     integrate polynomials of degree :math:`2 n - 1` exactly, so from three on
     the mean and from five on the second moment
     (:data:`~astrogwb.importance.spectrum.INCLINATION_SECOND_MOMENT`) are exact.

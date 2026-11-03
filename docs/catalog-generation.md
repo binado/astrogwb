@@ -325,7 +325,7 @@ versions are refused; regenerate them.
 
 ## Inclination convention
 
-The shipped BNS population always samples isotropic inclination:
+Physical simulated populations and plain `simulate_catalog` draws sample isotropic inclination:
 `cos(iota)` is uniform on `[-1, 1]`, and the returned `inclination` sample site
 is in radians. Polarization-power catalogs store this column, and density
 reconstruction conditions on the recorded values even though inclination is
@@ -336,11 +336,24 @@ Poisson realizations of the background -- a population, its waveforms and the
 spectra a network records -- are not catalogs: `astrogwb.simulators` simulates
 them in one pass into one file, described in [the simulator pipeline](simulator-pipeline.md).
 
-Earlier versions could omit the inclination site and column
-(`sample_inclination = false`) and rescale face-on power by the analytic `2/5`
-factor. That path is gone: inclination is always sampled, and contraction never
-rescales. Catalogs drawn without the column are not reused, since the
-population record and the version are part of the metadata.
+Reference/integration catalogs instead fix `inclination = 0` (face-on), and
+serialize `reference_inclination = 0.0` in their metadata. In both cases,
+`polarization_power` remains the literal `|h_plus|^2 + |h_cross|^2`.
+For supported aligned-spin, quasi-circular dominant-quadrupole models, the
+population mean multiplies face-on power by `2/5`, and the raw same-source
+power product multiplies the face-on product by `71/315`. The latter is not
+`(2/5)^2`; the relative second moment is still `355/252`. Each raw moment
+uses one intrinsic importance weight. Redshift and distance rescaling are
+unchanged.
+
+Network response draws already include inclination scatter and have unit
+isotropic mean (or the pair overlap for unnormalized pair responses). With
+these draws, each source contribution uses `(2/5) P0 r`; the covariance uses
+`(2/5)^2 E[P0(f) P0(g)] E[r(f) r(g)]`, without another inclination average
+or division by a pair overlap. Compound-Poisson points use the same convention.
+These analytic conversions are rejected for higher-mode or precessing models.
+
+The new metadata changes catalog cache keys; existing configuration files need no edits.
 
 Version **0.6.0** replaces the `bns_md_*` populations with `bns_coba`. Older
 catalog and spectrum artifacts are not compatible and must be regenerated.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import jax
@@ -20,19 +21,26 @@ from astrogwb.distributions.rates import madau_dickinson_rate, total_merger_rate
 from astrogwb.importance.catalog import (
     CatalogMetadata,
     polarization_power_data,
+    read_catalog,
 )
 from astrogwb.importance.spectrum import (
-    EFFECTIVE_INCLINATION,
+    INCLINATION_MEAN,
+    INCLINATION_RAW_SECOND_MOMENT,
     INCLINATION_SECOND_MOMENT,
+    REFERENCE_INCLINATION,
     _pin_redshift_and_inclination,
     phinney_kernel,
     redshift_quadrature,
     reference_catalog,
 )
-from astrogwb.inference import ImportanceGaussianLikelihood
+from astrogwb.inference import (
+    ImportanceCompoundPoissonLikelihood,
+    ImportanceGaussianLikelihood,
+)
 from astrogwb.populations import BNSCobaPopulation, joint_model
 from astrogwb.simulators import realization_key
 from astrogwb.utils import gauss_legendre_nodes_weights
+from astrogwb.utils.io import write
 from astrogwb.utils.numpyro import sample_and_logprob
 from astrogwb.waveform import WaveformMetadata, inclination_factor, waveform_generator
 
@@ -91,9 +99,9 @@ def reference_metadata() -> CatalogMetadata:
     )
 
 
-def test_effective_inclination_gives_the_isotropic_mean_factor() -> None:
-    assert float(inclination_factor(EFFECTIVE_INCLINATION)) == pytest.approx(
-        0.8, rel=1e-14
+def test_reference_inclination_is_face_on() -> None:
+    assert float(inclination_factor(REFERENCE_INCLINATION)) == pytest.approx(
+        2.0, rel=1e-14
     )
 
 
@@ -131,7 +139,7 @@ def test_sobol_reference_catalog_stratifies_the_primary_mass(
     columns = data["source_parameters"]
     np.testing.assert_array_equal(columns["redshift"], np.full(8, 0.1))
     np.testing.assert_array_equal(
-        columns["inclination"], np.full(8, EFFECTIVE_INCLINATION)
+        columns["inclination"], np.full(8, REFERENCE_INCLINATION)
     )
     fiducials = metadata.fiducials
     primary = MaxOfTwoUniformsDistribution(
@@ -148,6 +156,8 @@ def _spectrum_on_nodes(
     key: jax.Array,
     params: dict[str, float],
     density_sites: tuple[str, ...],
+    *,
+    covariance: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """The quadrature by brute force: every draw generated at every node.
 
@@ -176,11 +186,24 @@ def _spectrum_on_nodes(
         for name, values in samples.items()
     }
     tiled["redshift"] = np.repeat(redshift, count)
-    tiled["inclination"] = np.full(count * redshift.size, EFFECTIVE_INCLINATION)
+    tiled["inclination"] = np.full(count * redshift.size, REFERENCE_INCLINATION)
     outputs, _ = sample_and_logprob(fiducial_model, density_sites=(), values=tiled)
     rows = {name: np.asarray(values) for name, values in outputs.items()}
-    power = polarization_power_data(waveform_generator(OBSERVED_WAVEFORM), rows)
-    power = np.asarray(power["polarization_power"]).reshape(-1, NUM_NODES, 6)
+    # Independent inclination integral: generate actual waveforms at each
+    # Gauss-Legendre node, rather than using the production moment constants.
+    cosine, orientation_weights = np.polynomial.legendre.leggauss(5)
+    generator = waveform_generator(OBSERVED_WAVEFORM)
+    powers = np.stack(
+        [
+            polarization_power_data(
+                generator,
+                {**rows, "inclination": np.full(count * redshift.size, np.arccos(c))},
+            )["polarization_power"]
+            for c in cosine
+        ]
+    ).reshape(5, -1, NUM_NODES, count)
+    power = np.einsum("l,lfzn->fzn", orientation_weights / 2, powers)
+    squared_power = np.einsum("l,lfzn->fzn", orientation_weights / 2, powers**2)
 
     redshift_distribution, source_model = population.build()(params)
     merger_rate = redshift_distribution.total_merger_rate()
@@ -199,13 +222,25 @@ def _spectrum_on_nodes(
     importance = np.exp(np.asarray(target) - np.asarray(drawn))
     rate = float(merger_rate)
     spectrum = rate * np.einsum("fzn,z,n->f", target_power, density, importance) / 6
-    second_moment = np.einsum("fzn,z,n->f", target_power**2, density, importance) / 6
-    variance = (
-        INCLINATION_SECOND_MOMENT
-        * rate
-        * second_moment
-        / (OBSERVATION_TIME * SECONDS_PER_YEAR)
+    target_squared_power = squared_power * distance_ratio.reshape(NUM_NODES, 6) ** 4
+    second_moment = (
+        np.einsum("fzn,z,n->f", target_squared_power, density, importance) / 6
     )
+    variance = rate * second_moment / (OBSERVATION_TIME * SECONDS_PER_YEAR)
+    if covariance:
+        target_powers = powers * distance_ratio.reshape(NUM_NODES, count) ** 2
+        raw_product = (
+            np.einsum(
+                "l,lfzn,lgzn,z,n->fg",
+                orientation_weights / 2,
+                target_powers,
+                target_powers,
+                density,
+                importance,
+            )
+            / count
+        )
+        return spectrum, rate * raw_product / (OBSERVATION_TIME * SECONDS_PER_YEAR)
     return spectrum, variance
 
 
@@ -427,3 +462,128 @@ def test_reference_catalog_distance_is_at_the_reference_redshift(
     np.testing.assert_allclose(
         columns["luminosity_distance"], float(expected), rtol=1e-6
     )
+
+
+@pytest.mark.parametrize("moment", [1, 2])
+def test_face_on_moments_match_independent_inclination_integral(moment: int) -> None:
+    cosine, weights = np.polynomial.legendre.leggauss(8)
+    relative_power = np.asarray(inclination_factor(np.arccos(cosine))) / float(
+        inclination_factor(0.0)
+    )
+    expected = (INCLINATION_MEAN, INCLINATION_RAW_SECOND_MOMENT)[moment - 1]
+    assert np.dot(weights / 2, relative_power**moment) == pytest.approx(expected)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("moment", [1, 2])
+@pytest.mark.parametrize(
+    "approximant", ["AnalyticInspiral", "TaylorF2", "IMRPhenomXAS_NRTidalv3"]
+)
+def test_face_on_and_mean_inclination_waveforms_give_equivalent_moments(
+    reference_metadata: CatalogMetadata, moment: int, approximant: str
+) -> None:
+    reference_metadata = reference_metadata.model_copy(
+        update={
+            "waveform": reference_metadata.waveform.model_copy(
+                update={"approximant": approximant}
+            )
+        }
+    )
+    data = reference_catalog(reference_metadata, realization_key(41, 0))
+    effective_inclination = float(np.arccos(np.sqrt(np.sqrt(11.2) - 3.0)))
+    columns = {
+        **data["source_parameters"],
+        "inclination": np.full(reference_metadata.num_samples, effective_inclination),
+    }
+    effective = polarization_power_data(
+        waveform_generator(reference_metadata.waveform), columns
+    )
+    old_factor = 1.0 if moment == 1 else INCLINATION_SECOND_MOMENT
+    new_factor = INCLINATION_MEAN if moment == 1 else INCLINATION_RAW_SECOND_MOMENT
+    np.testing.assert_allclose(
+        new_factor * data["polarization_power"] ** moment,
+        old_factor * effective["polarization_power"] ** moment,
+        atol=0,
+    )
+
+
+def test_reference_inclination_round_trips_in_metadata(
+    reference_metadata: CatalogMetadata, tmp_path: Path
+) -> None:
+    path = write(tmp_path / "catalog.h5", {}, reference_metadata, seed=41)
+    _, metadata, _ = read_catalog(path)
+    assert metadata == reference_metadata
+    assert metadata.reference_inclination == 0.0
+
+
+@pytest.mark.parametrize("approximant", ["IMRPhenomHM", "IMRPhenomXP_NRTidalv3"])
+def test_reference_conversion_rejects_higher_modes_and_precession(
+    reference_metadata: CatalogMetadata, approximant: str
+) -> None:
+    metadata = reference_metadata.model_copy(
+        update={
+            "waveform": reference_metadata.waveform.model_copy(
+                update={"approximant": approximant}
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="dominant-quadrupole"):
+        reference_catalog(metadata, realization_key(41, 0))
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "density_sites", [(), ("source_frame_mass_1", "source_frame_mass_2")]
+)
+def test_dense_covariance_matches_physical_inclination_quadrature(
+    reference_metadata: CatalogMetadata, density_sites: tuple[str, ...]
+) -> None:
+    key = realization_key(41, 0)
+    params = {**reference_metadata.fiducials, "minimum_mass": 0.9, "mass_width": 1.6}
+    likelihood = ImportanceGaussianLikelihood.from_catalog(
+        reference_catalog(reference_metadata, key),
+        reference_metadata,
+        population=reference_metadata.population.build(),
+        frequencies=np.asarray(waveform_generator(OBSERVED_WAVEFORM).frequencies),
+        num_redshift_nodes=NUM_NODES,
+        density_sites=density_sites,
+        observation_time=OBSERVATION_TIME,
+        shot_noise="modes",
+    )
+    _, expected = _spectrum_on_nodes(
+        reference_metadata, key, params, density_sites, covariance=True
+    )
+    # The reference power uses log-frequency interpolation; the oracle generates
+    # each waveform at its actual redshift. This bound covers that grid error.
+    np.testing.assert_allclose(
+        likelihood.catalog_covariance(params), expected, rtol=1e-5, atol=0
+    )
+
+
+@pytest.mark.parametrize("inclination", [None, 1.0])
+@pytest.mark.parametrize(
+    "likelihood_class",
+    [ImportanceGaussianLikelihood, ImportanceCompoundPoissonLikelihood],
+)
+def test_reference_likelihood_rejects_non_face_on_source_columns(
+    reference_metadata: CatalogMetadata,
+    inclination: float | None,
+    likelihood_class: type[
+        ImportanceGaussianLikelihood | ImportanceCompoundPoissonLikelihood
+    ],
+) -> None:
+    columns = {} if inclination is None else {"inclination": np.full(6, inclination)}
+    with pytest.raises(ValueError, match="inclinations must all be face-on"):
+        likelihood_class.from_catalog(
+            {
+                "frequencies": np.array([20.0]),
+                "polarization_power": np.ones((1, 6)),
+                "source_parameters": columns,
+            },
+            reference_metadata,
+            population=reference_metadata.population.build(),
+            frequencies=np.array([20.0]),
+            num_redshift_nodes=3,
+            density_sites=(),
+            observation_time=1.0,
+        )

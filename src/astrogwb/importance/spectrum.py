@@ -9,7 +9,7 @@ draws is placed at each of :math:`Z` nodes, so
 .. math::
 
     S(f; \Lambda) = \sum_j w_j\, K(z_j \mid \Lambda)
-        \frac{1}{N} \sum_k \omega_k(\Lambda)\, P(f; \theta_k, z_j),
+        \frac{1}{N} \sum_k \omega_k(\Lambda)\, (2/5) P(f; \theta_k, z_j),
 
 with :math:`P` the power at reference distance :math:`d^{\mathrm{ref}}`,
 :math:`\omega_k` the ratio of the target to the drawn intrinsic density
@@ -17,10 +17,9 @@ with :math:`P` the power at reference distance :math:`d^{\mathrm{ref}}`,
 closed-form :func:`phinney_kernel`: the merger rate density times
 :math:`[d^{\mathrm{ref}}/d_{GW}]^2`, in which the comoving distance and the
 redshift density's normalization cancel, so redshift carries no Monte Carlo
-variance. Inclination is fixed at
-:data:`EFFECTIVE_INCLINATION`, where the quadrupolar factor equals its
-isotropic mean; that is exact only for waveforms carrying the :math:`(2, 2)`
-mode alone.
+variance. Inclination is fixed at zero (face-on), and the stored power is literal
+:math:`|h_+|^2 + |h_\times|^2`. The mean receives the explicit factor
+:data:`INCLINATION_MEAN`; this is exact only for the :math:`(2, 2)` mode alone.
 
 The power is not generated at every node. For a :math:`(2, 2)`-mode,
 aligned-spin, quasi-circular waveform the strain depends on mass only through
@@ -43,8 +42,8 @@ node count is the likelihood's, not the catalog's.
 A catalog realization over an observation time :math:`T` is a Poisson sum
 :math:`\sum_i P_i / T` over the real mergers, so it scatters about the spectrum
 above. By Campbell's theorem its variance in each bin is the rate times the
-second moment of the power, over :math:`T`, and every factor of the quadrature
-enters squared:
+second moment of the power, over :math:`T`. Waveform-power rescalings enter
+squared; quadrature and importance weights each enter once:
 
 .. math::
 
@@ -52,7 +51,7 @@ enters squared:
         \left[\frac{d^{\mathrm{ref}}}{d_{GW}(z_j)}\right]^2 s_j^8\,
         \frac{1}{N} \sum_k \omega_k(\Lambda)\, P_{\mathrm{ref}}^2(f s_j; \theta_k),
 
-with :math:`c_\iota` = :data:`INCLINATION_SECOND_MOMENT` restoring the
+with :math:`c_\iota` = :data:`INCLINATION_RAW_SECOND_MOMENT` restoring the
 inclination scatter the pinned catalog lacks. Its redshift integrand is steeper
 than the mean's near :math:`z_{\min}`, so its node count needs its own
 convergence check.
@@ -107,8 +106,10 @@ from astrogwb.utils.numpyro import sample_and_logprob
 from astrogwb.waveform.factory import waveform_generator
 
 __all__ = [
-    "EFFECTIVE_INCLINATION",
+    "INCLINATION_MEAN",
+    "INCLINATION_RAW_SECOND_MOMENT",
     "INCLINATION_SECOND_MOMENT",
+    "REFERENCE_INCLINATION",
     "phinney_kernel",
     "redshift_quadrature",
     "reference_catalog",
@@ -120,17 +121,40 @@ logger = logging.getLogger(__name__)
 #: The inclination site, fixed rather than drawn.
 INCLINATION_SITE = "inclination"
 
-#: The inclination where the quadrupolar factor
-#: :math:`g(\iota) = ((1 + \cos^2\iota)/2)^2 + \cos^2\iota` equals its
-#: isotropic mean, 4/5: :math:`\cos^2\iota^* = \sqrt{11.2} - 3`.
-EFFECTIVE_INCLINATION = float(np.arccos(np.sqrt(np.sqrt(11.2) - 3.0)))
+#: Reference waveforms are face-on; power remains |h_plus|^2 + |h_cross|^2.
+REFERENCE_INCLINATION = 0.0
 
-#: The isotropic second moment of the quadrupolar factor over its squared
-#: mean, :math:`\langle g^2 \rangle / \langle g \rangle^2 = 355/252`. A catalog
-#: pinned at :data:`EFFECTIVE_INCLINATION` carries the mean of :math:`g` but
-#: none of its scatter; this factor restores the scatter in a second moment of
-#: the power. Exact for the :math:`(2, 2)` mode alone, as the pin is.
+#: Isotropic mean relative to face-on power, for the (2, 2) mode alone.
+INCLINATION_MEAN = 2.0 / 5.0
+
+#: Isotropic raw power product relative to the face-on product.
+INCLINATION_RAW_SECOND_MOMENT = 71.0 / 315.0
+
+#: Relative second moment <P^2>/<P>^2 for unit-mean inclination response draws.
 INCLINATION_SECOND_MOMENT = 355.0 / 252.0
+
+# Analytic averaging and redshift rescaling require aligned-spin,
+# quasi-circular dominant-quadrupole waveforms, excluding higher modes.
+_REFERENCE_APPROXIMANTS = frozenset(
+    {
+        "AnalyticInspiral",
+        "TaylorF2",
+        "IMRPhenomD",
+        "IMRPhenomD_NRTidalv2",
+        "IMRPhenomXAS",
+        "IMRPhenomXAS_NRTidalv3",
+    }
+)
+
+
+def _require_quadrupole_waveform(metadata: CatalogMetadata) -> None:
+    """Restrict analytic inclination conversion to supported quadrupole models."""
+    if metadata.waveform.approximant not in _REFERENCE_APPROXIMANTS:
+        raise ValueError(
+            "reference integration requires a supported dominant-quadrupole, "
+            "aligned-spin approximant; higher modes and precession are unsupported"
+        )
+
 
 #: The luminosity distance declared by a source model.
 _LUMINOSITY_DISTANCE = "luminosity_distance"
@@ -174,7 +198,7 @@ def _intrinsic_log_prob(
 ) -> jax.Array:
     _, log_prob = sample_and_logprob(
         handlers.condition(
-            source_model, data={INCLINATION_SITE: EFFECTIVE_INCLINATION}
+            source_model, data={INCLINATION_SITE: REFERENCE_INCLINATION}
         ),
         density_sites=density_sites,
         values=intrinsic,
@@ -265,7 +289,7 @@ def _pin_redshift_and_inclination(
             model,
             data={
                 REDSHIFT_SITE: jnp.asarray(redshift),
-                INCLINATION_SITE: EFFECTIVE_INCLINATION,
+                INCLINATION_SITE: REFERENCE_INCLINATION,
             },
         )
     )
@@ -280,7 +304,7 @@ def reference_catalog(
     """Every draw of ``metadata`` placed at its reference redshift: power ``(F, N)``.
 
     The model is conditioned on :func:`reference_redshift` and
-    :data:`EFFECTIVE_INCLINATION`, and the extrinsic parameters are fixed at
+    :data:`REFERENCE_INCLINATION`, and the extrinsic parameters are fixed at
     zero, so they consume no Sobol coordinates. The intrinsic parameters are
     drawn i.i.d. or, with ``metadata.sampling == "sobol"``, on a scrambled
     Sobol net. ``chunk_size`` is
@@ -303,6 +327,7 @@ def reference_catalog(
         metadata.num_samples,
         metadata.population,
     )
+    _require_quadrupole_waveform(metadata)
     reference = reference_redshift(metadata)
     population = metadata.population
     if reference < population.minimum_redshift:
@@ -420,6 +445,12 @@ def _rescaling_arrays(
         frequencies would fall below the reference grid, where
         :func:`_node_power` clamps instead of following the power law.
     """
+    _require_quadrupole_waveform(metadata)
+    inclination = np.asarray(data["source_parameters"].get(INCLINATION_SITE))
+    if not np.all(inclination == REFERENCE_INCLINATION):
+        raise ValueError(
+            "reference catalog source inclinations must all be face-on (0)"
+        )
     maximum_redshift = metadata.population.maximum_redshift
     if minimum_redshift is None:
         minimum_redshift = metadata.population.minimum_redshift

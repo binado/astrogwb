@@ -67,6 +67,9 @@ class CatalogMetadata(BaseModel):
     window's lower edge. Set it below the edge to let one catalog serve every
     window that starts at or above it
     (:func:`~astrogwb.importance.spectrum.reference_redshift`).
+    ``reference_inclination`` records the reference-only face-on convention.
+    It does not condition plain :func:`simulate_catalog` draws. Power always
+    means the literal sum of squared polarization amplitudes.
     """
 
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
@@ -77,6 +80,8 @@ class CatalogMetadata(BaseModel):
     num_samples: Annotated[int, Field(gt=0)]
     sampling: Sampling = "random"
     reference_redshift: Annotated[float, Field(ge=0.0)] | None = None
+    # Reference catalogs only; physical catalogs retain sampled inclinations.
+    reference_inclination: Annotated[float, Field(ge=0.0, le=0.0)] = 0.0
     version: str = __version__
 
     @model_validator(mode="after")

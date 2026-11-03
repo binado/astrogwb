@@ -38,7 +38,8 @@ from astrogwb.cosmology import luminosity_distance
 from astrogwb.importance.catalog import CatalogMetadata, PolarizationPowerData
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.importance.spectrum import (
-    INCLINATION_SECOND_MOMENT,
+    INCLINATION_MEAN,
+    INCLINATION_RAW_SECOND_MOMENT,
     _node_power,
     _rescaling_arrays,
     _shared_terms,
@@ -126,9 +127,10 @@ class Network(NamedTuple):
                 \langle P_f P_{f'} \rangle\,
                 \frac{1}{L} \sum_l r_l(f)\, r_l(f'),
 
-        with :math:`P` the catalog power at the effective inclination. The
-        response carries the inclination, so it replaces
-        :data:`~astrogwb.importance.spectrum.INCLINATION_SECOND_MOMENT` everywhere.
+        with :math:`P = (2/5) P_0` the isotropic mean of the face-on catalog power. The
+        response carries inclination scatter; its second moment multiplies
+        the raw face-on power product by :math:`(2/5)^2` without an additional
+        analytic inclination second moment.
         ``None`` keeps the sky-averaged power. With pairs, the covariance
         indices run over (pair, bin).
     modes
@@ -217,29 +219,31 @@ def _observed(observed: jax.Array | None, network: Network) -> jax.Array:
 def _orientation_covariance(network: Network | None) -> jax.Array | float:
     r"""The orientation factor of a second moment of the power, ``()`` or ``(D, D)``.
 
-    :data:`~astrogwb.importance.spectrum.INCLINATION_SECOND_MOMENT` for the
+    :data:`~astrogwb.importance.spectrum.INCLINATION_RAW_SECOND_MOMENT` for the
     sky-averaged power of a combined spectrum, that constant times
     :math:`\gamma_{ab} \gamma_{cd}` for the sky-averaged power of pairs, else
-    :math:`\langle r_{ab}(f)\, r_{cd}(f') \rangle` of the network's response
+    :math:`(2/5)^2 \langle r_{ab}(f)\, r_{cd}(f') \rangle` of the network's response
     draws. It multiplies the moment, tiled over the pairs, elementwise.
     """
     if network is None or network.response is None:
         if network is None or network.pair_overlap is None:
-            return INCLINATION_SECOND_MOMENT
+            return INCLINATION_RAW_SECOND_MOMENT
         overlap = jnp.reshape(network.pair_overlap, -1)
-        return INCLINATION_SECOND_MOMENT * jnp.outer(overlap, overlap)
+        return INCLINATION_RAW_SECOND_MOMENT * jnp.outer(overlap, overlap)
     draws = jnp.reshape(network.response, (network.response.shape[0], -1))
-    return draws.T @ draws / draws.shape[0]
+    return INCLINATION_MEAN**2 * (draws.T @ draws / draws.shape[0])
 
 
 def _orientation_variance(network: Network) -> jax.Array | float:
     r"""The diagonal of :func:`_orientation_covariance`, ``()`` or ``(D,)``."""
     if network.response is None:
         if network.pair_overlap is None:
-            return INCLINATION_SECOND_MOMENT
-        return INCLINATION_SECOND_MOMENT * jnp.reshape(network.pair_overlap, -1) ** 2
+            return INCLINATION_RAW_SECOND_MOMENT
+        return (
+            INCLINATION_RAW_SECOND_MOMENT * jnp.reshape(network.pair_overlap, -1) ** 2
+        )
     draws = jnp.reshape(network.response, (network.response.shape[0], -1))
-    return jnp.mean(draws**2, axis=0)
+    return INCLINATION_MEAN**2 * jnp.mean(draws**2, axis=0)
 
 
 def _collapsed_response(
@@ -260,11 +264,11 @@ def _collapsed_response(
     pairs = jnp.reshape(weights, (-1, num_bins))
     if network.response is None:
         overlap = _pair_overlap(network, num_bins)
-        return jnp.sum(pairs * overlap, axis=0)[None], INCLINATION_SECOND_MOMENT
+        return jnp.sum(pairs * overlap, axis=0)[None], INCLINATION_RAW_SECOND_MOMENT
     draws = jnp.reshape(
         network.response, (network.response.shape[0], pairs.shape[0], num_bins)
     )
-    return jnp.sum(pairs * draws, axis=1), 1.0
+    return jnp.sum(pairs * draws, axis=1), INCLINATION_MEAN**2
 
 
 def gaussian_log_likelihood(
@@ -518,7 +522,7 @@ class _ImportanceCatalog:
             "total_merger_rate": shared.total_rate,
             "importance_relative_ess": relative_ess(shared.log_weights),
         }
-        return node_power @ shared.kernel, extras
+        return INCLINATION_MEAN * (node_power @ shared.kernel), extras
 
     def spectrum(self, params: Mapping[str, ArrayLike]) -> jax.Array:
         """The spectrum at ``params``, ``(F,)``: a :data:`~astrogwb.inference.protocol.SpectrumFn`.
@@ -596,7 +600,7 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
     Attributes
     ----------
     power
-        Reference-catalog polarization power, ``(F_ref, N)``.
+        Literal face-on reference-catalog polarization power, ``(F_ref, N)``.
     squared_power
         ``power`` squared; ``None`` unless ``shot_noise`` is ``"amplitude"`` or
         ``"per_frequency"``.
@@ -736,7 +740,7 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         ``"amplitude"`` and ``"per_frequency"`` modes: the weighted mean of
         ``squared_power`` is rescaled with ``amplitude**2`` (:math:`s_j^8`),
         integrated with :meth:`_variance_kernel` and multiplied by
-        :data:`~astrogwb.importance.spectrum.INCLINATION_SECOND_MOMENT` over
+        :data:`~astrogwb.importance.spectrum.INCLINATION_RAW_SECOND_MOMENT` over
         ``observation_seconds``; :meth:`log_likelihood_from_prediction` swaps
         that factor for the network's response. ``extras`` holds ``total_merger_rate``
         (observer frame, mergers per second) and ``importance_relative_ess``,
@@ -772,7 +776,7 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
                 self.amplitude**2,
             )
             variance = (
-                INCLINATION_SECOND_MOMENT
+                INCLINATION_RAW_SECOND_MOMENT
                 * (squared_node_power @ self._variance_kernel(shared))
                 / self.observation_seconds
             )
@@ -989,7 +993,7 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
                 * _pair_overlap(network, num_bins),
                 axis=1,
             )
-            return INCLINATION_SECOND_MOMENT * self._projected_cross_moment(
+            return INCLINATION_RAW_SECOND_MOMENT * self._projected_cross_moment(
                 shared, collapsed
             )
         orientation = _orientation_covariance(network)
@@ -1017,9 +1021,9 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
 
             M_z = \tilde U^T \left( s_z^4 W_z G W_z^T \circ R \right) \tilde U,
 
-        with :math:`R = \langle r_f r_{f'} \rangle` under a
+        with :math:`R = (2/5)^2 \langle r_f r_{f'} \rangle` under a
         ``network.response`` and the constant
-        :data:`~astrogwb.importance.spectrum.INCLINATION_SECOND_MOMENT` otherwise
+        :data:`~astrogwb.importance.spectrum.INCLINATION_RAW_SECOND_MOMENT` otherwise
         (then contracted as projections, without the dense moment). The
         whitened shot-noise covariance in the basis is
         :math:`B = \sum_z \kappa_z M_z / T`, with :math:`\kappa_z` the
@@ -1049,7 +1053,7 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         .. math::
 
             \bar R_{ff'} = \sum_{ab, cd} g_{ab,f}\,
-                \langle r_{ab}(f)\, r_{cd}(f') \rangle\, g_{cd,f'}, \qquad
+                (2/5)^2 \langle r_{ab}(f)\, r_{cd}(f') \rangle\, g_{cd,f'}, \qquad
             g_{ab,f} = \gamma_{ab,f} / \sigma_{ab,f}^2,
 
         over the counted entries (:math:`\gamma = 1` for a combined spectrum).
@@ -1167,7 +1171,7 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
             variance = (
                 jnp.tile(variance, _num_pairs(network))
                 * _orientation_variance(network)
-                / INCLINATION_SECOND_MOMENT
+                / INCLINATION_RAW_SECOND_MOMENT
             )
         return shot_noise_log_likelihood(
             mean, variance, _observed(self.observed, network), network, self.shot_noise
@@ -1258,7 +1262,7 @@ class ImportanceCompoundPoissonLikelihood(_ImportanceCatalog):
 
     .. math::
 
-        \beta_{mjl} = \frac{q_m\, P_{mj}\, \tilde F(c_l)}{T \rho^2}, \qquad
+        \beta_{mjl} = \frac{(2/5) q_m\, P_{mj}\, \tilde F(c_l)}{T \rho^2}, \qquad
         a_{mjl} = \frac{T K_m}{q_m}\, \frac{w_j}{N}\, u_l,
 
     with :math:`P_{mj} = \mathbf{c}^T \mathbf{P}_j(z_m)` source :math:`j` at
@@ -1267,8 +1271,8 @@ class ImportanceCompoundPoissonLikelihood(_ImportanceCatalog):
     weights and :math:`(c_l, u_l)` the
     :func:`~astrogwb.inference.compound_poisson.inclination_quadrature`. Under
     a ``network.response`` the nodes :math:`l` are its draws with equal weights,
-    and :math:`P_{mj}\,\tilde F(c_l)` becomes the projection of source
-    :math:`j`'s power times :math:`r_l(f)`. Its first
+    and :math:`(2/5) P_{mj}\,\tilde F(c_l)` becomes the projection of source
+    :math:`j`'s face-on power times :math:`(2/5) r_l(f)`. Its first
     two moments are one and the Gaussian class's
     :meth:`~ImportanceGaussianLikelihood.relative_variance`.
 
@@ -1407,10 +1411,14 @@ class ImportanceCompoundPoissonLikelihood(_ImportanceCatalog):
         if network.response is None:
             pattern, node_weights = inclination_quadrature(self.num_inclination_nodes)
             # (Z, N, L): the inclination scales every source as a whole.
-            projected = self._project(projector)[..., None] * jnp.asarray(pattern)
+            projected = (
+                INCLINATION_MEAN
+                * self._project(projector)[..., None]
+                * jnp.asarray(pattern)
+            )
         else:
             # (Z, N, L): each response draw reweights the source across the band.
-            projected = jnp.moveaxis(
+            projected = INCLINATION_MEAN * jnp.moveaxis(
                 jax.vmap(lambda draw: self._project(projector * draw))(
                     network.response
                 ),
