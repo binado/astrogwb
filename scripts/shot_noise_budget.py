@@ -38,14 +38,20 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
+from jax.typing import ArrayLike
 
 from astrogwb.config import load_config
 from astrogwb.detector.overlap import stokes_cross_power
 from astrogwb.detector.response import _isotropic_angles
 from astrogwb.importance.catalog import read_catalog
 from astrogwb.importance.spectrum import INCLINATION_SECOND_MOMENT
-from astrogwb.inference import ImportanceGaussianLikelihood
-from astrogwb.inference import Network as LikelihoodNetwork
+from astrogwb.inference import (
+    CatalogModel,
+    Prediction,
+    amplitude_template,
+    shot_noise_variance,
+)
+from astrogwb.inference.gaussian import Network
 from astrogwb.paper.plotting import DETECTOR_NETWORKS
 from astrogwb.paper.posteriors import network_pair_data
 from astrogwb.simulators import BackgroundArtifact
@@ -69,22 +75,26 @@ TERMS = {
 }
 
 
-def build_likelihood(
+def build_model(
     catalog_path: Path, frequencies: np.ndarray, observation_time: float
-) -> ImportanceGaussianLikelihood:
-    """The grid notebook's likelihood at the fiducials, amplitude mode."""
+) -> CatalogModel:
+    """The grid notebook's catalog model."""
     data, catalog_metadata, _ = read_catalog(catalog_path)
-    population = catalog_metadata.population
-    return ImportanceGaussianLikelihood.from_catalog(
+    return CatalogModel.from_catalog(
         data,
         catalog_metadata,
-        population=population.build(),
+        population=catalog_metadata.population.build(),
         frequencies=frequencies,
         num_redshift_nodes=REDSHIFT_NODES,
-        density_sites=(),
-        shot_noise="amplitude",
         observation_time=observation_time,
     )
+
+
+def response_moment(draws: jax.Array) -> jax.Array:
+    """The second moment of per-pair response draws ``(L, P, F)``, ``(P, F, P, F)``."""
+    flat = jnp.reshape(draws, (draws.shape[0], -1))
+    moment = flat.T @ flat / draws.shape[0]
+    return jnp.reshape(moment, (*draws.shape[1:], *draws.shape[1:]))
 
 
 def term_response(
@@ -221,14 +231,14 @@ def main() -> None:
     background = BackgroundArtifact.open(args.ensemble / f"{DATA_SEED}-0.h5")
     noise = background.noise()
     frequencies = background.frequencies
-    likelihood = build_likelihood(
+    model = build_model(
         args.reference_catalog,
         frequencies,
         background.config.population.observation_time,
     )
-    spectrum, _, extras = likelihood.predict(fiducial)
-    num_sources = float(extras["total_merger_rate"]) * float(
-        likelihood.observation_seconds
+    prediction: Prediction = model.predict(fiducial)
+    num_sources = float(prediction.extras["total_merger_rate"]) * float(
+        model.observation_seconds
     )
     angles = _isotropic_angles(jax.random.key(RESPONSE_SEED), RESPONSE_DRAWS)
 
@@ -242,37 +252,37 @@ def main() -> None:
             maximum_frequency=MAXIMUM_FREQUENCY,
             num_pairs=len(detectors) * (len(detectors) - 1) // 2,
         )
-        base = LikelihoodNetwork(
-            jnp.asarray(data["scale"]),
-            jnp.asarray(data["frequency_mask"]),
-            pair_overlap=jnp.asarray(data["pair_overlap"]),
-        )
+        overlap = np.asarray(data["pair_overlap"])
 
-        def relative_variance(response: jax.Array | None, base=base) -> float:
-            if response is None:
-                return float(likelihood.relative_variance(fiducial, base))
-            network = base._replace(response=response)
-            network = network._replace(
-                response_moments=likelihood.response_moments(fiducial, network),
-                response=None,
+        def relative_variance(moment: ArrayLike, data=data) -> float:
+            network = Network.from_pairs(
+                data["scale"],
+                data["pair_overlap"],
+                data["frequency_mask"],
+                response_moment=moment,
             )
-            return float(likelihood.relative_variance(fiducial, network))
+            return float(shot_noise_variance(prediction, network))
 
-        sky = relative_variance(None)
+        # The sky-averaged response: the inclination scatter alone, 355/252.
+        sky = relative_variance(
+            INCLINATION_SECOND_MOMENT * np.multiply.outer(overlap, overlap)
+        )
         terms = {
-            term: relative_variance(term_response(frequencies, detectors, angles, mask))
+            term: relative_variance(
+                response_moment(term_response(frequencies, detectors, angles, mask))
+            )
             for term, mask in TERMS.items()
         }
         total = relative_variance(
-            term_response(frequencies, detectors, angles, np.ones(4))
+            response_moment(term_response(frequencies, detectors, angles, np.ones(4)))
         )
-        expected = np.asarray(data["pair_overlap"]) * np.asarray(spectrum)
-        keep = np.asarray(data["frequency_mask"])
-        rho = float(
-            np.sqrt(
-                np.sum(np.where(keep, (expected / np.asarray(data["scale"])) ** 2, 0.0))
-            )
+        _, squared_snr = amplitude_template(
+            prediction,
+            Network.from_pairs(
+                data["scale"], data["pair_overlap"], data["frequency_mask"]
+            ),
         )
+        rho = float(np.sqrt(squared_snr))
         rows.append(
             {
                 "network": label,
