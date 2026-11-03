@@ -1,0 +1,37 @@
+# Named reference catalogs, each a complete
+# astrogwb.importance.catalog.CatalogMetadata:
+#
+#   astrogwb model-catalog OUTPUT.h5 --catalog <name>
+#
+# reads [catalogs.<name>] from the merged config. Regenerate the affected
+# catalogs after an edit, including edits to the tables referenced here.
+
+# The shared reference-catalog settings: 2^14 Sobol draws of the shared
+# population at the shared fiducials, on a geometric grid to 4000 Hz.
+[catalogs.reference]
+num_samples = 16384
+sampling = "sobol"
+population = "${populations.cosmological}"
+fiducials = "${fiducials}"
+
+# Field by field rather than `extends`: the default's loglinear-only fields
+# would not validate on a log grid.
+[catalogs.reference.waveform]
+approximant = "${waveforms.default.approximant}"
+sampling_frequency = "${waveforms.default.sampling_frequency}"
+minimum_frequency = "${waveforms.default.minimum_frequency}"
+maximum_frequency = 4000.0
+reference_frequency = "${waveforms.default.reference_frequency}"
+frequency_spacing = "log"
+frequency_resolution = 0.02
+
+# For posteriors, coverage, and the minimum-redshift scan.
+[catalogs.reference-fiducial]
+extends = "${catalogs.reference}"
+reference_redshift = 1e-4
+
+# For the importance-convergence ladder.
+[catalogs.reference-ladder]
+extends = "${catalogs.reference}"
+num_samples = 256
+sampling = "random"

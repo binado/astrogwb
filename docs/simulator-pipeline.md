@@ -234,21 +234,21 @@ ensemble's files and stacks each network's spectra. It never simulates;
 ## Command line
 
 The `cli` extra installs `astrogwb`. `astrogwb simulate OUTPUT.h5` simulates
-one draw; every config option is required:
+one draw of a named ensemble:
 
 ```bash
-astrogwb simulate root/41-0.h5 --population-metadata population.toml \
-    --waveform-metadata waveform.toml --detector-config config/detectors.toml \
-    --seed 41 --index 0
+astrogwb simulate root/41-0.h5 --ensemble fiducial \
+    --detector-config config/detectors.toml --seed 41 --index 0
 
 # With sampled detector noise, in segments of 2048 s
-astrogwb simulate root/41-0.h5 --population-metadata population.toml \
-    --waveform-metadata waveform.toml --detector-config config/detectors.toml \
-    --seed 41 --segment-duration 2048
+astrogwb simulate root/41-0.h5 --ensemble fiducial \
+    --detector-config config/detectors.toml --seed 41 --segment-duration 2048
 ```
 
-The population and waveform files hold the fields of `RealizationMetadata` and
-`WaveformMetadata` at their top level. Repeat `--detector-config PATH` to merge
+`--ensemble NAME` reads `[ensembles.NAME]` from the shared config merged by
+`astrogwb.config.merge_config` (`--config-dir`, default `config`): its
+`realization` table holds the fields of `RealizationMetadata` and its
+`waveform` table those of `WaveformMetadata`. Repeat `--detector-config PATH` to merge
 registry layers in argument order. Draw `i` of a seed is `--index i`, the key
 `realization_key(seed, i)` that ensembles use. The runtime options
 (`--platform cpu --cpu-threads 8`) are applied before the JAX backend
@@ -274,10 +274,10 @@ mixed.
 | `WaveformSimulator`, `Waveforms`, `WaveformArtifact`, `polarization.h5` | removed; `simulate_background(population, waveform_metadata, registry)` fuses waveform evaluation and pair projection |
 | `content_key`, `ContentKeyed`, `Keyed`, `catalog_stem`, `reference_catalog_stem` | removed; files are named by the caller |
 | `BackgroundArtifact.upstream`, `.manifest_path`, `.waveform_key`, `.key()`, `population_key`, `waveform_key`, `background_key` | `BackgroundArtifact.config`; no content keys |
-| `astrogwb simulate population` / `waveforms` / `background`, then `astrogwb simulate DIRECTORY --background --keep-sources` | `astrogwb simulate OUTPUT.h5` with `--population-metadata`, `--waveform-metadata`, `--detector-config`, `--seed` |
+| `astrogwb simulate population` / `waveforms` / `background`, then `astrogwb simulate DIRECTORY --background --keep-sources` | `astrogwb simulate OUTPUT.h5` with `--ensemble`, `--detector-config`, `--seed` |
 | per-run network metadata snapshots | core `DetectorRegistry`, supplied to simulation and readers |
 | `astrogwb.paper.ensemble.network_spectra_ensemble`, `NetworkSpectra` | `astrogwb.simulators.network_spectra_ensemble`, `NetworkSpectra` |
-| `scripts/write_ensemble_configs.py`, `paper_networks`, `ensemble_metadata` | `config/detectors.toml` and `config/ensembles/<name>/`, edited by hand |
+| `scripts/write_ensemble_configs.py`, `paper_networks`, `ensemble_metadata` | `config/detectors.toml` and `[ensembles.<name>]` in `config/ensembles.toml`, edited by hand |
 | ensemble caches of #389 and #390 (`<cache>/ensembles/<key>/<seed>-<i>/`) | not read; regenerate them with the workflow |
 | one background over the detector union; `BackgroundArtifact.pair_spectra(network)`, `.detectors`, `.pairs` | per-network spectra; `BackgroundArtifact.spectra[name]`, `.pairs[name]` |
 | `Realization.open(dir).background()`, `background.noise(registry)` | `BackgroundArtifact.open(file)`, `background.noise()` |

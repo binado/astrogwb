@@ -20,6 +20,9 @@ Every check is a `just` recipe, and CI runs the same string:
 - `uv sync --extra notebook --group dev`: full development environment.
 - `just lint`, `just typecheck`, `just fmt`.
 - `just test-core`, `just test-paper`, `just test-integration`.
+- `Snakefile` is only a cluster job launcher (`--profile workflow/profiles/slurm`),
+  not workflow management: outputs are regenerated explicitly, so don't design
+  around Snakemake's DAG, rerun triggers or input invalidation.
 
 ## Code conventions and styleguide
 

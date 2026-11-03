@@ -32,8 +32,8 @@ uv run --extra notebook --group notebook marimo edit notebooks/ensemble_spectrum
 
 Every path is relative to the repository root -- library code names no absolute
 path and does not go looking for a checkout. Committed configuration lives
-under `config/`, including the simulation inputs `config/detectors.toml` and
-`config/ensembles/<name>/`;
+under `config/`, including the simulation inputs `config/detectors.toml`,
+`config/ensembles.toml` and `config/catalogs.toml`;
 generated ensembles, catalogs and figures under `outputs/`.
 
 The MCMC pipeline (Snakemake workflow, `run_mcmc`, SLURM profiles and the
@@ -54,11 +54,16 @@ config/waveforms.toml                           [waveforms.<name>] named wavefor
 config/populations.toml                         [populations.<name>] named populations
 config/detectors.toml                           [networks] membership and optional
                                                 [detectors] geometry/PSD/label overrides
+config/catalogs.toml                            [catalogs.<name>] reference catalogs,
+                                                  each a CatalogMetadata
+config/ensembles.toml                           [ensembles.<name>] simulation ensembles:
+                                                  a RealizationMetadata and a
+                                                  WaveformMetadata
 config/plotting.toml                            LaTeX labels and savefig settings
                                                 (presentation; not a config layer)
 ```
 
-The four shared layers (`defaults`, `waveforms`, `populations`, `detectors`)
+The shared layers (every `config/*.toml` but `plotting.toml`, in name order)
 are merged by `knf` (which the `knf` CLI also exposes in the shell). The packaged `geometry.toml` and
 `sensitivity.toml` are merged first, using the same `[detectors.<name>]` tables
 as the shared registry file. After the merge, every `"${a.b}"` string resolves
@@ -72,6 +77,9 @@ for that dataset; changing it requires regenerating outputs.
 The notebooks consume the shared settings through `astrogwb.config.load_config()`.
 The returned model exposes fiducials, prior specifications, the detector
 registry, and catalog metadata. Pass ordered override files to vary settings.
+`astrogwb.config.merge_config()` returns the same merge unvalidated; the CLIs
+use it to validate only the `[catalogs.<name>]` or `[ensembles.<name>]` table
+they run.
 
 See [`docs/`](.) for catalog generation and paper figures.
 
@@ -81,29 +89,27 @@ Generate an importance-integration catalog with the CLI:
 
 ```sh
 uv run astrogwb model-catalog outputs/catalogs/reference-fiducial.h5 \
-    --catalog-metadata config/catalogs/base.toml \
-    --catalog-metadata config/catalogs/reference-fiducial.toml \
-    --seed 42 --chunk-size 4096
+    --catalog reference-fiducial --seed 42 --chunk-size 4096
 ```
 
-Repeat `--catalog-metadata` to merge TOML layers in argument order using
-pyknf. Later fields override earlier fields, tables merge recursively, and
-`${...}` references and `extends` table inheritance are resolved by the shared
-config loader. The merged result is a complete `CatalogMetadata` record: top-level `num_samples`,
+`--catalog NAME` reads `[catalogs.NAME]` from the shared config merged by
+`merge_config` (`--config-dir`, default `config`), so `${...}` references and
+`extends` inheritance resolve against every shared layer. The table is a
+complete `CatalogMetadata` record: top-level `num_samples`,
 `sampling`, optional `reference_redshift`, and tables for `waveform`,
 `population` (its `model_name` and construction settings), and `fiducials`.
 Omit optional null fields and `version`; the installed package supplies its
 version. The seed and execution options (`--chunk-size`, `--platform`, and
 `--cpu-threads`) are command-line arguments, outside the catalog record.
 
-`config/catalogs/base.toml` holds the shared population, waveform, fiducials,
-and default Sobol sample settings. Each `reference-*.toml` is a small override
-layer: fiducial sets `reference_redshift = 1e-4` and serves the posterior,
-coverage, and minimum-redshift-scan calculations; ladder changes the sample
-count and sampling method. These files do not
-inherit changes from the shared paper configuration. Regenerate affected
-outputs after editing the base or variant. `Snakefile`
-tracks both files as inputs and runs the command with the appropriate seeds;
+`[catalogs.reference]` in `config/catalogs.toml` takes the shared population
+and fiducials by reference, with its own waveform grid and the default Sobol
+sample settings. Each `[catalogs.reference-*]` extends it:
+fiducial sets `reference_redshift = 1e-4` and serves the posterior, coverage,
+and minimum-redshift-scan calculations; ladder changes the sample count and
+sampling method. Editing `[fiducials]` or `[populations.cosmological]` changes
+every catalog; regenerate the affected outputs. `Snakefile`
+runs the command with the appropriate seeds;
 notebooks read `reference-fiducial.h5` or `reference-ladder.h5`.
 Regenerate `outputs/catalogs/reference-fiducial.h5` before running the notebooks
 after this change; the former `reference-scan.h5` output is no longer used.

@@ -42,18 +42,21 @@ assert jax.device_count() == 2, f"backend initialized early: {{jax.devices()}}"
 
 @pytest.fixture
 def metadata_files(tmp_path: Path) -> dict[str, Path]:
-    """The tiny population, waveform and two-detector network, as TOML files."""
-    tables = {
-        "population": POPULATION.model_dump(
+    """A config directory naming the tiny ensemble, and a two-detector network."""
+    ensemble = {
+        "realization": POPULATION.model_dump(
             mode="json", exclude={"version"}, exclude_none=True
         ),
         "waveform": WAVEFORM.model_dump(mode="json", exclude_none=True),
-        "detector": {"networks": {"ET": ["S1", "R1"]}},
     }
-    paths = {name: tmp_path / f"{name}.toml" for name in tables}
-    for name, table in tables.items():
-        paths[name].write_bytes(tomli_w.dumps(table).encode())
-    return paths
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "ensembles.toml").write_bytes(
+        tomli_w.dumps({"ensembles": {"tiny": ensemble}}).encode()
+    )
+    detector = tmp_path / "detector.toml"
+    detector.write_bytes(tomli_w.dumps({"networks": {"ET": ["S1", "R1"]}}).encode())
+    return {"config": config_dir, "detector": detector}
 
 
 def _simulate(output: Path, *options: str) -> None:
@@ -67,8 +70,8 @@ def _simulate(output: Path, *options: str) -> None:
 def required(metadata_files: dict[str, Path]) -> list[str]:
     """Every required option of ``simulate``, but the output."""
     return [
-        *("--population-metadata", str(metadata_files["population"])),
-        *("--waveform-metadata", str(metadata_files["waveform"])),
+        *("--ensemble", "tiny"),
+        *("--config-dir", str(metadata_files["config"])),
         *("--detector-config", str(metadata_files["detector"])),
         *("--seed", "41"),
     ]
@@ -87,9 +90,8 @@ def test_a_simulate_run_writes_one_file(tmp_path: Path, required: list[str]) -> 
     assert [path.name for path in tmp_path.glob("*.h5")] == ["41-0.h5"]
     assert sorted(path.name for path in tmp_path.iterdir()) == [
         "41-0.h5",
+        "config",
         "detector.toml",
-        "population.toml",
-        "waveform.toml",
     ]
 
 

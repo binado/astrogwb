@@ -12,9 +12,8 @@ input, per ensemble:
 
 The one ensemble is `fiducial`, the default waveform and grid: the grid
 notebooks' injection, `shot_noise_coverage`'s injections and the draws of
-`ensemble_spectrum`. Its settings are the committed
-`config/ensembles/fiducial/{population,waveform}.toml` and
-`config/detectors.toml`, which supplies the shared frozen detector registry.
+`ensemble_spectrum`. Its settings are `[ensembles.fiducial]` in the committed
+`config/ensembles.toml` and `config/detectors.toml`, which supplies the shared frozen detector registry.
 
 Every file holds each network's pair spectra and carries its configuration. The pairs are projected once per draw, so
 adding a network that shares their detectors costs no waveforms. Draw `i` of a

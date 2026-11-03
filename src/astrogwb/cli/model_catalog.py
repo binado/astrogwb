@@ -8,19 +8,15 @@ from typing import Annotated
 
 import typer
 
-from ._common import _apply_runtime
+from ._common import CONFIG_DIR_OPTION, _apply_runtime
 
 
 def model_catalog(
     output: Annotated[Path, typer.Argument(dir_okay=False, help="HDF5 file to write.")],
-    catalog_metadata: Annotated[
-        list[Path],
-        typer.Option(
-            exists=True,
-            dir_okay=False,
-            help="CatalogMetadata TOML layer; repeat to merge in argument order.",
-        ),
+    catalog: Annotated[
+        str, typer.Option(help="Name of a [catalogs.<name>] table in the config.")
     ],
+    config_dir: Annotated[Path, CONFIG_DIR_OPTION] = Path("config"),
     seed: Annotated[int, typer.Option(help="Seed of the catalog draw.")] = 42,
     chunk_size: Annotated[
         int | None, typer.Option(min=1, help="Waveforms per batch; cost only.")
@@ -38,8 +34,10 @@ def model_catalog(
     ----------
     output
         Output file path.
-    catalog_metadata
-        Catalog metadata layer paths.
+    catalog
+        Name of the catalog table.
+    config_dir
+        Directory of shared TOML layers.
     seed
         Random seed.
     chunk_size
@@ -50,7 +48,7 @@ def model_catalog(
         Number of CPU threads.
     """
     _apply_runtime(platform, cpu_threads)
-    from astrogwb.config import merge_layers
+    from astrogwb.config import merge_config
     from astrogwb.importance.catalog import CatalogMetadata
     from astrogwb.importance.spectrum import (
         reference_catalog as draw_reference_catalog,
@@ -58,7 +56,9 @@ def model_catalog(
     from astrogwb.simulators import realization_key
     from astrogwb.utils.io import write
 
-    metadata = CatalogMetadata.model_validate(merge_layers(catalog_metadata))
+    metadata = CatalogMetadata.model_validate(
+        merge_config(config_dir)["catalogs"][catalog]
+    )
     began = time.perf_counter()
     data = draw_reference_catalog(
         metadata, realization_key(seed, 0), chunk_size=chunk_size

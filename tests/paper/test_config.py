@@ -9,8 +9,11 @@ import pytest
 from pydantic import ValidationError
 from repo import REPO_ROOT
 
-from astrogwb.config import load_config
+from astrogwb.config import load_config, merge_config
 from astrogwb.detector.config import load_detector_config
+from astrogwb.importance.catalog import CatalogMetadata
+from astrogwb.simulators import RealizationMetadata
+from astrogwb.waveform import WaveformMetadata
 
 PAPER_ROOT = REPO_ROOT
 
@@ -87,6 +90,29 @@ def test_load_config_overrides_and_independent_instances(tmp_path: Path) -> None
     assert config.priors["H0"].kwargs == {"loc": 70.0, "scale": 2.0}
     config.fiducials["H0"] = 999.0
     assert load_config(REPO_ROOT / "config").fiducials["H0"] == 67.66
+
+
+def test_named_runs_share_the_fiducials_and_population() -> None:
+    merged = merge_config(REPO_ROOT / "config")
+    config = load_config(REPO_ROOT / "config")
+    catalogs = {
+        name: CatalogMetadata.model_validate(table)
+        for name, table in merged["catalogs"].items()
+    }
+    ensembles = {
+        name: RealizationMetadata.model_validate(tables["realization"])
+        for name, tables in merged["ensembles"].items()
+    }
+    assert {"reference-fiducial", "reference-ladder"} <= catalogs.keys()
+    assert "fiducial" in ensembles
+    for catalog in catalogs.values():
+        assert catalog.fiducials == config.fiducials
+        assert catalog.population == config.catalog.population
+    for name, realization in ensembles.items():
+        assert realization.hyperparameters == config.fiducials
+        assert WaveformMetadata.model_validate(merged["ensembles"][name]["waveform"])
+    assert catalogs["reference-fiducial"].reference_redshift == 1e-4
+    assert catalogs["reference-ladder"].num_samples == 256
 
 
 def test_load_config_rejects_empty_directory(tmp_path: Path) -> None:
