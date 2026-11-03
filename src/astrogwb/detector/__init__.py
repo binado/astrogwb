@@ -28,6 +28,7 @@ from .psd import resolve_psd_path
 from .response import (
     network_response,
     pair_response,
+    pair_response_moment,
     sample_network_response,
     sample_pair_response,
 )
@@ -59,6 +60,7 @@ __all__ = [
     "overlap_reduction_function",
     "pair_bin_scale",
     "pair_response",
+    "pair_response_moment",
     "pair_terms",
     "pairwise_overlap_reduction_function",
     "relative_orientation",
