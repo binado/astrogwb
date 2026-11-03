@@ -114,18 +114,16 @@ def _():
     # isotropic draws, as in the grid and coverage notebooks.
     response_draws, response_seed = 32_768, 0
 
-    # The observed grid of the default waveform: the grid of the fiducial
-    # ensemble and of the likelihood.
+    # A geometric grid over the default waveform's band, about 2000 points
+    # (d ln f = 0.0035). The likelihood's loglinear grid is linear at 1 Hz
+    # below 100 Hz, too coarse at the low-frequency noise wall: there it
+    # overestimates the SNR above 10 Hz by about 2.5%. This grid agrees with
+    # one twice as fine to 0.1%.
     _waveform = load_config(ROOT_DIR / "config").waveforms["default"]
-    frequencies = frequency_grid(
-        _waveform.frequency_spacing,
-        _waveform.minimum_frequency,
-        _waveform.maximum_frequency,
-        _waveform.frequency_resolution,
-        _waveform.turnover_frequency,
-        dlogf=_waveform.dlogf,
-    )
     maximum_frequency = float(_waveform.maximum_frequency)
+    frequencies = frequency_grid(
+        "log", _waveform.minimum_frequency, maximum_frequency, 0.007
+    )
 
     registry = load_config(ROOT_DIR / "config").registry
     network_rows = DETECTOR_NETWORKS
