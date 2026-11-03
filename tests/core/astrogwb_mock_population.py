@@ -22,7 +22,7 @@ from jax.typing import ArrayLike
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.importance.catalog import (
     CatalogMetadata,
-    PolarizationPowerData,
+    IntensityData,
 )
 from astrogwb.importance.spectrum import (
     reference_catalog,
@@ -130,12 +130,12 @@ def mock_catalog(
     source_parameters: dict[str, np.ndarray],
     *,
     generator: AnalyticInspiralGenerator,
-) -> tuple[PolarizationPowerData, CatalogMetadata]:
+) -> tuple[IntensityData, CatalogMetadata]:
     """Pair a mock draw with the metadata of the population that produced it."""
     power = np.asarray(jax.jit(generator.generate_batch)(source_parameters))
-    data = PolarizationPowerData(
+    data = IntensityData(
         frequencies=np.asarray(generator.frequencies),
-        polarization_power=power,
+        intensity=power,
         source_parameters={
             name: np.asarray(values) for name, values in source_parameters.items()
         },
@@ -161,7 +161,7 @@ def build_mock_catalog(
     f_min: float = 2.0,
     f_max: float = 4096.0,
     frequency_resolution: float = 8.0,
-) -> tuple[PolarizationPowerData, CatalogMetadata]:
+) -> tuple[IntensityData, CatalogMetadata]:
     """Build a ``(data, metadata)`` pair from the mock population draw.
 
     The power comes from :class:`~astrogwb.waveform.AnalyticInspiralGenerator`.
@@ -192,7 +192,7 @@ def build_mock_catalog(
     )
 
 
-def catalog_samples(data: PolarizationPowerData) -> dict[str, jax.Array]:
+def catalog_samples(data: IntensityData) -> dict[str, jax.Array]:
     """The draw's source parameters as JAX arrays, keyed by name."""
     return {
         name: jnp.asarray(values) for name, values in data["source_parameters"].items()
@@ -215,7 +215,7 @@ def build_reference_catalog(
     f_min: float = 2.0,
     f_max: float = 4096.0,
     frequency_resolution: float = 8.0,
-) -> tuple[PolarizationPowerData, CatalogMetadata]:
+) -> tuple[IntensityData, CatalogMetadata]:
     """A closed-form reference catalog of the mock population.
 
     Every draw sits at the window's lower edge, as
@@ -251,7 +251,7 @@ def build_reference_catalog(
 
 
 def build_reference_spectrum(
-    data: PolarizationPowerData,
+    data: IntensityData,
     metadata: CatalogMetadata,
     *,
     frequencies: ArrayLike | None = None,

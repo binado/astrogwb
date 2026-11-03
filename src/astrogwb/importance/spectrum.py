@@ -11,20 +11,20 @@ draws is placed at each of :math:`Z` nodes, so
     S(f; \Lambda) = \sum_j w_j\, K(z_j \mid \Lambda)
         \frac{1}{N} \sum_k \omega_k(\Lambda)\, (2/5) P(f; \theta_k, z_j),
 
-with :math:`P` the power at reference distance :math:`d^{\mathrm{ref}}`,
+with :math:`P` the intensity at reference distance :math:`d^{\mathrm{ref}}`,
 :math:`\omega_k` the ratio of the target to the drawn intrinsic density
 (one when the intrinsic hyperparameters are not varied), and :math:`K` the
 closed-form :func:`phinney_kernel`: the merger rate density times
 :math:`[d^{\mathrm{ref}}/d_{GW}]^2`, in which the comoving distance and the
 redshift density's normalization cancel, so redshift carries no Monte Carlo
-variance. Inclination is fixed at zero (face-on), and the stored power is literal
+variance. Inclination is fixed at zero (face-on), and the stored intensity is literal
 :math:`|h_+|^2 + |h_\times|^2`. The mean receives the explicit factor
 :data:`INCLINATION_MEAN`; this is exact only for the :math:`(2, 2)` mode alone.
 
-The power is not generated at every node. For a :math:`(2, 2)`-mode,
+The intensity is not generated at every node. For a :math:`(2, 2)`-mode,
 aligned-spin, quasi-circular waveform the strain depends on mass only through
 :math:`M_d f` and an overall :math:`M_d^2`, with :math:`M_d = M (1 + z)`, so the
-power of a draw generated at the reference redshift :math:`z_{\mathrm{ref}}`
+intensity of a draw generated at the reference redshift :math:`z_{\mathrm{ref}}`
 (by default the window's lower edge) is, at any redshift,
 
 .. math::
@@ -42,7 +42,7 @@ node count is the likelihood's, not the catalog's.
 A catalog realization over an observation time :math:`T` is a Poisson sum
 :math:`\sum_i P_i / T` over the real mergers, so it scatters about the spectrum
 above. By Campbell's theorem its variance in each bin is the rate times the
-second moment of the power, over :math:`T`. Waveform-power rescalings enter
+second moment of the intensity, over :math:`T`. Waveform-intensity rescalings enter
 squared; quadrature and importance weights each enter once:
 
 .. math::
@@ -61,13 +61,13 @@ Unchecked contracts:
 - The population's source model is independent of inclination, which is
   isotropic.
 - The waveform is :math:`(2, 2)`-mode, aligned-spin and quasi-circular: its
-  power is a function of :math:`M_d f` times :math:`M_d^2`.
+  intensity is a function of :math:`M_d f` times :math:`M_d^2`.
 - ``density_sites`` names intrinsic sites only: redshift is integrated, never
   weighted.
 - The catalog's reference redshift is the population window's lower edge.
 - The reference catalog's frequency grid starts at or below the observed
   grid's and extends past the highest detector-frame merger frequency at
-  :math:`z_{\min}`: power above it is zero.
+  :math:`z_{\min}`: intensity above it is zero.
 """
 
 from __future__ import annotations
@@ -91,8 +91,8 @@ from astrogwb.cosmology import (
 from astrogwb.distributions.rates import total_merger_rate
 from astrogwb.importance.catalog import (
     CatalogMetadata,
-    PolarizationPowerData,
-    polarization_power_data,
+    IntensityData,
+    intensity_data,
 )
 from astrogwb.populations._types import Population, PopulationModel, SourceModel
 from astrogwb.populations.joint import (
@@ -121,13 +121,13 @@ logger = logging.getLogger(__name__)
 #: The inclination site, fixed rather than drawn.
 INCLINATION_SITE = "inclination"
 
-#: Reference waveforms are face-on; power remains |h_plus|^2 + |h_cross|^2.
+#: Reference waveforms are face-on; intensity remains |h_plus|^2 + |h_cross|^2.
 REFERENCE_INCLINATION = 0.0
 
-#: Isotropic mean relative to face-on power, for the (2, 2) mode alone.
+#: Isotropic mean relative to face-on intensity, for the (2, 2) mode alone.
 INCLINATION_MEAN = 2.0 / 5.0
 
-#: Isotropic raw power product relative to the face-on product.
+#: Isotropic raw intensity product relative to the face-on product.
 INCLINATION_RAW_SECOND_MOMENT = 71.0 / 315.0
 
 #: Relative second moment <P^2>/<P>^2 for unit-mean inclination response draws.
@@ -237,7 +237,7 @@ def phinney_kernel(
     hubble_constant, omega_m
         Flat :math:`\Lambda`CDM cosmology.
     reference_distance
-        The distance :math:`d^{\mathrm{ref}}` in Mpc the power was generated at.
+        The distance :math:`d^{\mathrm{ref}}` in Mpc the intensity was generated at.
 
     Returns
     -------
@@ -300,8 +300,8 @@ def reference_catalog(
     key: jax.Array,
     *,
     chunk_size: int | None = None,
-) -> PolarizationPowerData:
-    """Every draw of ``metadata`` placed at its reference redshift: power ``(F, N)``.
+) -> IntensityData:
+    """Every draw of ``metadata`` placed at its reference redshift: intensity ``(F, N)``.
 
     The model is conditioned on :func:`reference_redshift` and
     :data:`REFERENCE_INCLINATION`, and the extrinsic parameters are fixed at
@@ -340,29 +340,29 @@ def reference_catalog(
         metadata.num_samples,
         sampling=metadata.sampling,
     )
-    return polarization_power_data(
+    return intensity_data(
         waveform_generator(metadata.waveform), samples, chunk_size=chunk_size
     )
 
 
-def _weighted_mean_power(power: jax.Array, log_weights: jax.Array) -> jax.Array:
-    """The importance-weighted mean of ``power`` ``(F_ref, N)`` over draws: ``(F_ref,)``."""
-    return power @ jnp.exp(log_weights) / log_weights.shape[0]
+def _weighted_mean_intensity(intensity: jax.Array, log_weights: jax.Array) -> jax.Array:
+    """The importance-weighted mean of ``intensity`` ``(F_ref, N)`` over draws: ``(F_ref,)``."""
+    return intensity @ jnp.exp(log_weights) / log_weights.shape[0]
 
 
-def _node_power(
-    mean_power: jax.Array,
+def _node_intensity(
+    mean_intensity: jax.Array,
     log_reference_frequencies: jax.Array,
     query_log_frequencies: jax.Array,
     amplitude: jax.Array,
 ) -> jax.Array:
-    """The mean power ``(F_ref,)`` placed at every node: ``(F, Z)``.
+    """The mean intensity ``(F_ref,)`` placed at every node: ``(F, Z)``.
 
     Interpolated in :math:`\\ln f` at every ``f s_j`` and scaled by
     ``amplitude``, ``(Z,)``.
     """
     return amplitude * jnp.interp(
-        query_log_frequencies, log_reference_frequencies, mean_power, right=0.0
+        query_log_frequencies, log_reference_frequencies, mean_intensity, right=0.0
     )
 
 
@@ -419,14 +419,14 @@ def _shared_terms(
 
 
 def _rescaling_arrays(
-    data: PolarizationPowerData,
+    data: IntensityData,
     metadata: CatalogMetadata,
     frequencies: ArrayLike,
     num_redshift_nodes: int,
     density_sites: Sequence[str],
     minimum_redshift: float | None = None,
 ) -> dict[str, Any]:
-    """Every array a rescaled estimator binds except the catalog's power.
+    """Every array a rescaled estimator binds except the catalog's intensity.
 
     The redshift nodes and weights of the window, the query frequencies
     ``(F, Z)``, the node amplitude :math:`s_j^4`, the intrinsic columns, the
@@ -443,7 +443,7 @@ def _rescaling_arrays(
     ValueError
         If the window's lower edge is below the reference redshift: the query
         frequencies would fall below the reference grid, where
-        :func:`_node_power` clamps instead of following the power law.
+        :func:`_node_intensity` clamps instead of following the power law.
     """
     _require_quadrupole_waveform(metadata)
     inclination = np.asarray(data["source_parameters"].get(INCLINATION_SITE))

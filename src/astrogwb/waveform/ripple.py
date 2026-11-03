@@ -12,8 +12,8 @@ from numpy.typing import ArrayLike
 from astrogwb.frequency import frequency_grid
 from astrogwb.utils import require_x64
 from astrogwb.waveform._ripple import (
+    build_intensity_kernel,
     build_polarization_kernel,
-    build_power_kernel,
     check_sources,
     next_smooth_even,
     ripple_parameters,
@@ -29,7 +29,7 @@ _ALIGNMENT_TOLERANCE_EPS = 64.0
 
 
 class RippleGenerator(WaveformGenerator):
-    """Generate waveforms and polarization power with one fixed Ripple frequency grid.
+    """Generate waveforms and intensity with one fixed Ripple frequency grid.
 
     The frequency axis and kernel are fixed at construction. Generation is
     trace-safe and does not validate physical values; see
@@ -88,7 +88,7 @@ class RippleGenerator(WaveformGenerator):
         object.__setattr__(
             self,
             "_kernel",
-            build_power_kernel(
+            build_intensity_kernel(
                 metadata.approximant, metadata.reference_frequency, **kernel_options
             ),
         )

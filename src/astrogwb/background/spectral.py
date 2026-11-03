@@ -9,7 +9,7 @@ from astrogwb.detector import log_frequency_noise_scale
 
 
 def spectral_density(
-    polarization_power: jax.Array,
+    intensity: jax.Array,
     weights: jax.Array,
     total_merger_rate: float | jax.Array,
 ) -> jax.Array:
@@ -17,8 +17,8 @@ def spectral_density(
 
     Parameters
     ----------
-    polarization_power
-        Polarization power with sources on the last axis.
+    intensity
+        Intensity with sources on the last axis.
     weights
         Per-source importance weights.
     total_merger_rate
@@ -29,7 +29,7 @@ def spectral_density(
     jax.Array
         Weighted spectral density, with the source axis contracted.
     """
-    return total_merger_rate * jnp.dot(polarization_power, weights) / weights.shape[0]
+    return total_merger_rate * jnp.dot(intensity, weights) / weights.shape[0]
 
 
 def omega_gw_from_spectral_density(

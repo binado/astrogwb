@@ -35,16 +35,16 @@ from jax.typing import ArrayLike
 
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import luminosity_distance
-from astrogwb.importance.catalog import CatalogMetadata, PolarizationPowerData
+from astrogwb.importance.catalog import CatalogMetadata, IntensityData
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.importance.spectrum import (
     INCLINATION_MEAN,
     INCLINATION_RAW_SECOND_MOMENT,
-    _node_power,
+    _node_intensity,
     _rescaling_arrays,
     _shared_terms,
     _SharedTerms,
-    _weighted_mean_power,
+    _weighted_mean_intensity,
 )
 from astrogwb.populations._types import Population
 
@@ -127,11 +127,11 @@ class Network(NamedTuple):
                 \langle P_f P_{f'} \rangle\,
                 \frac{1}{L} \sum_l r_l(f)\, r_l(f'),
 
-        with :math:`P = (2/5) P_0` the isotropic mean of the face-on catalog power. The
+        with :math:`P = (2/5) P_0` the isotropic mean of the face-on catalog intensity. The
         response carries inclination scatter; its second moment multiplies
-        the raw face-on power product by :math:`(2/5)^2` without an additional
+        the raw face-on intensity product by :math:`(2/5)^2` without an additional
         analytic inclination second moment.
-        ``None`` keeps the sky-averaged power. With pairs, the covariance
+        ``None`` keeps the sky-averaged intensity. With pairs, the covariance
         indices run over (pair, bin).
     modes
         The shot-noise basis :math:`U` of the ``"modes"`` mode, ``(D, k)``:
@@ -154,7 +154,7 @@ class Network(NamedTuple):
         The data this network recorded, shaped as ``scale``, in place of the
         likelihood's ``observed``; ``None`` uses the likelihood's.
     response_moments
-        The per-node second moments of the power under ``response``, collapsed
+        The per-node second moments of the intensity under ``response``, collapsed
         over the pairs, :math:`s_z^4 W_z G W_z^T \circ \bar R`, ``(Z, F, F)``
         (:meth:`ImportanceGaussianLikelihood.response_moments`), making the
         ``"amplitude"`` mode's :math:`s^2` one quadratic form per node. Valid
@@ -217,11 +217,11 @@ def _observed(observed: jax.Array | None, network: Network) -> jax.Array:
 
 
 def _orientation_covariance(network: Network | None) -> jax.Array | float:
-    r"""The orientation factor of a second moment of the power, ``()`` or ``(D, D)``.
+    r"""The orientation factor of a second moment of the intensity, ``()`` or ``(D, D)``.
 
     :data:`~astrogwb.importance.spectrum.INCLINATION_RAW_SECOND_MOMENT` for the
-    sky-averaged power of a combined spectrum, that constant times
-    :math:`\gamma_{ab} \gamma_{cd}` for the sky-averaged power of pairs, else
+    sky-averaged intensity of a combined spectrum, that constant times
+    :math:`\gamma_{ab} \gamma_{cd}` for the sky-averaged intensity of pairs, else
     :math:`(2/5)^2 \langle r_{ab}(f)\, r_{cd}(f') \rangle` of the network's response
     draws. It multiplies the moment, tiled over the pairs, elementwise.
     """
@@ -453,7 +453,7 @@ class _ImportanceCatalog:
     template. Subclasses register themselves as pytrees with their own fields.
     """
 
-    power: jax.Array
+    intensity: jax.Array
     intrinsic: Mapping[str, jax.Array]
     proposal_log_prob: jax.Array
     log_reference_frequencies: jax.Array
@@ -493,7 +493,7 @@ class _ImportanceCatalog:
     def _squared_distance_ratio(self, shared: _SharedTerms) -> jax.Array:
         r""":math:`(d^{\mathrm{ref}}/d_{GW})^2` at each redshift node, ``(Z,)``.
 
-        A second moment of the power carries the distance rescaling twice. The
+        A second moment of the intensity carries the distance rescaling twice. The
         extra factor uses the pointwise
         :func:`~astrogwb.cosmology.luminosity_distance`, as the kernel does.
         """
@@ -506,14 +506,14 @@ class _ImportanceCatalog:
         r"""The spectrum's kernel times :meth:`_squared_distance_ratio`, ``(Z,)``."""
         return shared.kernel * self._squared_distance_ratio(shared)
 
-    def _mean_power(self, shared: _SharedTerms) -> jax.Array:
-        """The importance-weighted mean of ``power`` over draws, ``(F_ref,)``."""
-        return _weighted_mean_power(self.power, shared.log_weights)
+    def _mean_intensity(self, shared: _SharedTerms) -> jax.Array:
+        """The importance-weighted mean of ``intensity`` over draws, ``(F_ref,)``."""
+        return _weighted_mean_intensity(self.intensity, shared.log_weights)
 
     def _mean(self, shared: _SharedTerms) -> tuple[jax.Array, dict[str, jax.Array]]:
         """The spectrum, ``(F,)``, and the extras every prediction carries."""
-        node_power = _node_power(
-            self._mean_power(shared),
+        node_intensity = _node_intensity(
+            self._mean_intensity(shared),
             self.log_reference_frequencies,
             self.query_log_frequencies,
             self.amplitude,
@@ -522,7 +522,7 @@ class _ImportanceCatalog:
             "total_merger_rate": shared.total_rate,
             "importance_relative_ess": relative_ess(shared.log_weights),
         }
-        return INCLINATION_MEAN * (node_power @ shared.kernel), extras
+        return INCLINATION_MEAN * (node_intensity @ shared.kernel), extras
 
     def spectrum(self, params: Mapping[str, ArrayLike]) -> jax.Array:
         """The spectrum at ``params``, ``(F,)``: a :data:`~astrogwb.inference.protocol.SpectrumFn`.
@@ -559,12 +559,14 @@ class _ImportanceCatalog:
         r"""Every catalog source projected on ``projector``, per node, ``(Z, N)``.
 
         Entry :math:`(m, j)` is :math:`\sum_f c_f P_{f j}(z_m)`, source ``j``'s
-        power interpolated to node ``m``'s observed frequencies, rescaled by
+        intensity interpolated to node ``m``'s observed frequencies, rescaled by
         ``amplitude`` and contracted with :math:`\mathbf{c}` = ``projector``,
         ``(F,)``. The contraction is :meth:`_node_projectors` against the
         catalog, ``(Z, F_ref) @ (F_ref, N)``.
         """
-        return self.amplitude[:, None] * (self._node_projectors(projector) @ self.power)
+        return self.amplitude[:, None] * (
+            self._node_projectors(projector) @ self.intensity
+        )
 
 
 def _template_projector(mean: jax.Array, network: Network) -> jax.Array:
@@ -599,20 +601,20 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
 
     Attributes
     ----------
-    power
-        Literal face-on reference-catalog polarization power, ``(F_ref, N)``.
-    squared_power
-        ``power`` squared; ``None`` unless ``shot_noise`` is ``"amplitude"`` or
+    intensity
+        Literal face-on reference-catalog intensity, ``(F_ref, N)``.
+    squared_intensity
+        ``intensity`` squared; ``None`` unless ``shot_noise`` is ``"amplitude"`` or
         ``"per_frequency"``.
-    mean_power, mean_squared_power
+    mean_intensity, mean_squared_intensity
         Means over draws, ``(F_ref,)``, held only when ``density_sites`` is
-        empty (every weight is one); ``mean_squared_power`` also needs a
-        predicted variance. Caches of ``power``: replacing ``power`` must
+        empty (every weight is one); ``mean_squared_intensity`` also needs a
+        predicted variance. Caches of ``intensity``: replacing ``intensity`` must
         replace them too.
     gram
         The catalog Gram matrix :math:`\sum_i P_i P_i^T / N`,
         ``(F_ref, F_ref)``, held only when ``density_sites`` is empty and
-        ``shot_noise`` is ``"amplitude"`` or ``"modes"``. A cache of ``power``.
+        ``shot_noise`` is ``"amplitude"`` or ``"modes"``. A cache of ``intensity``.
     intrinsic, proposal_log_prob, log_reference_frequencies, query_log_frequencies,
     amplitude, redshift, redshift_weights, reference_distance
         The arrays of :func:`~astrogwb.importance.spectrum._rescaling_arrays`.
@@ -631,16 +633,16 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         The shot-noise mode, or ``None`` for the diagonal Gaussian.
     """
 
-    squared_power: jax.Array | None
-    mean_power: jax.Array | None
-    mean_squared_power: jax.Array | None
+    squared_intensity: jax.Array | None
+    mean_intensity: jax.Array | None
+    mean_squared_intensity: jax.Array | None
     gram: jax.Array | None
     shot_noise: ShotNoiseMode | None
 
     @classmethod
     def from_catalog(
         cls,
-        data: PolarizationPowerData,
+        data: IntensityData,
         metadata: CatalogMetadata,
         *,
         population: Population,
@@ -672,7 +674,7 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         Parameters
         ----------
         data
-            Reference catalog power data.
+            Reference catalog intensity data.
         metadata
             Metadata describing the object.
         population
@@ -694,21 +696,23 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         minimum_redshift
             Lower redshift bound.
         """
-        power = np.asarray(data["polarization_power"], dtype=np.float64)
+        intensity = np.asarray(data["intensity"], dtype=np.float64)
         needs_variance = shot_noise in ("amplitude", "per_frequency")
         # No density site: every weight is one, so the means are constants.
         constant = not density_sites
         return cls(
-            power=jnp.asarray(power),
-            squared_power=jnp.asarray(power * power) if needs_variance else None,
-            mean_power=jnp.asarray(power.mean(axis=1)) if constant else None,
-            mean_squared_power=(
-                jnp.asarray((power * power).mean(axis=1))
+            intensity=jnp.asarray(intensity),
+            squared_intensity=jnp.asarray(intensity * intensity)
+            if needs_variance
+            else None,
+            mean_intensity=jnp.asarray(intensity.mean(axis=1)) if constant else None,
+            mean_squared_intensity=(
+                jnp.asarray((intensity * intensity).mean(axis=1))
                 if constant and needs_variance
                 else None
             ),
             gram=(
-                jnp.asarray(power @ power.T / power.shape[1])
+                jnp.asarray(intensity @ intensity.T / intensity.shape[1])
                 if constant and shot_noise in ("amplitude", "modes")
                 else None
             ),
@@ -738,7 +742,7 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         ``mean`` is the spectrum, ``(F,)``. ``variance`` is the shot-noise
         variance of a Poisson catalog realization about it, ``(F,)``, for the
         ``"amplitude"`` and ``"per_frequency"`` modes: the weighted mean of
-        ``squared_power`` is rescaled with ``amplitude**2`` (:math:`s_j^8`),
+        ``squared_intensity`` is rescaled with ``amplitude**2`` (:math:`s_j^8`),
         integrated with :meth:`_variance_kernel` and multiplied by
         :data:`~astrogwb.importance.spectrum.INCLINATION_RAW_SECOND_MOMENT` over
         ``observation_seconds``; :meth:`log_likelihood_from_prediction` swaps
@@ -753,31 +757,31 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         """
         return self._predict(self._shared(params))
 
-    def _mean_power(self, shared: _SharedTerms) -> jax.Array:
-        if self.mean_power is None:
-            return super()._mean_power(shared)
-        return self.mean_power
+    def _mean_intensity(self, shared: _SharedTerms) -> jax.Array:
+        if self.mean_intensity is None:
+            return super()._mean_intensity(shared)
+        return self.mean_intensity
 
     def _predict(self, shared: _SharedTerms) -> Prediction:
         mean, extras = self._mean(shared)
         variance = None
         if self.shot_noise in ("amplitude", "per_frequency"):
-            assert self.squared_power is not None
+            assert self.squared_intensity is not None
             assert self.observation_seconds is not None
-            mean_squared_power = self.mean_squared_power
-            if mean_squared_power is None:
-                mean_squared_power = _weighted_mean_power(
-                    self.squared_power, shared.log_weights
+            mean_squared_intensity = self.mean_squared_intensity
+            if mean_squared_intensity is None:
+                mean_squared_intensity = _weighted_mean_intensity(
+                    self.squared_intensity, shared.log_weights
                 )
-            squared_node_power = _node_power(
-                mean_squared_power,
+            squared_node_intensity = _node_intensity(
+                mean_squared_intensity,
                 self.log_reference_frequencies,
                 self.query_log_frequencies,
                 self.amplitude**2,
             )
             variance = (
                 INCLINATION_RAW_SECOND_MOMENT
-                * (squared_node_power @ self._variance_kernel(shared))
+                * (squared_node_intensity @ self._variance_kernel(shared))
                 / self.observation_seconds
             )
         return mean, variance, extras
@@ -882,7 +886,7 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         with the average over the redshift nodes and the weighted catalog, as
         in :meth:`predict`. A source sits at one redshift, so the nodes add
         without cross terms. At node :math:`j` the source spectrum is the
-        linear interpolation :math:`W_j` of the reference power, so the
+        linear interpolation :math:`W_j` of the reference intensity, so the
         contribution is :math:`W_j G W_j^T` with the weighted Gram matrix
         :math:`G = \sum_i w_i P_i P_i^T / N` of the catalog, ``(F_ref, F_ref)``,
         formed once.
@@ -923,7 +927,7 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
     ) -> tuple[Any, Any]:
         r"""Scan ``step(carry, moment, kernel)`` over the redshift nodes.
 
-        ``moment`` is node :math:`z`'s second moment of the power on the observed
+        ``moment`` is node :math:`z`'s second moment of the intensity on the observed
         grid, :math:`s_z^4 W_z G W_z^T` (the ``amplitude`` rescaling squared,
         :math:`W_z` the node's interpolation and :math:`G` the weighted Gram
         matrix of the catalog), ``(F, F)``, and ``kernel`` is
@@ -932,7 +936,7 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
         """
         if self.gram is None:
             weights = jnp.exp(shared.log_weights) / shared.log_weights.shape[0]
-            gram = (self.power * weights) @ self.power.T
+            gram = (self.intensity * weights) @ self.intensity.T
         else:
             gram = self.gram
         identity = jnp.eye(self.log_reference_frequencies.shape[0])
@@ -1045,7 +1049,7 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
     def response_moments(
         self, params: Mapping[str, ArrayLike], network: Network | None = None
     ) -> jax.Array:
-        r"""The per-node second moments of the power under ``network.response``.
+        r"""The per-node second moments of the intensity under ``network.response``.
 
         :math:`K_z = s_z^4 W_z G W_z^T \circ \bar R`, ``(Z, F, F)``, with the
         response correlation collapsed over the pairs,
@@ -1214,10 +1218,10 @@ class ImportanceGaussianLikelihood(_ImportanceCatalog):
 jax.tree_util.register_dataclass(
     ImportanceGaussianLikelihood,
     data_fields=[
-        "power",
-        "squared_power",
-        "mean_power",
-        "mean_squared_power",
+        "intensity",
+        "squared_intensity",
+        "mean_intensity",
+        "mean_squared_intensity",
         "gram",
         "intrinsic",
         "proposal_log_prob",
@@ -1272,7 +1276,7 @@ class ImportanceCompoundPoissonLikelihood(_ImportanceCatalog):
     :func:`~astrogwb.inference.compound_poisson.inclination_quadrature`. Under
     a ``network.response`` the nodes :math:`l` are its draws with equal weights,
     and :math:`(2/5) P_{mj}\,\tilde F(c_l)` becomes the projection of source
-    :math:`j`'s face-on power times :math:`(2/5) r_l(f)`. Its first
+    :math:`j`'s face-on intensity times :math:`(2/5) r_l(f)`. Its first
     two moments are one and the Gaussian class's
     :meth:`~ImportanceGaussianLikelihood.relative_variance`.
 
@@ -1282,7 +1286,7 @@ class ImportanceCompoundPoissonLikelihood(_ImportanceCatalog):
 
     Attributes
     ----------
-    power, intrinsic, proposal_log_prob, log_reference_frequencies,
+    intensity, intrinsic, proposal_log_prob, log_reference_frequencies,
     query_log_frequencies, amplitude, redshift, redshift_weights,
     reference_distance, observed, network, population, density_sites
         As for :class:`ImportanceGaussianLikelihood`.
@@ -1311,7 +1315,7 @@ class ImportanceCompoundPoissonLikelihood(_ImportanceCatalog):
     @classmethod
     def from_catalog(
         cls,
-        data: PolarizationPowerData,
+        data: IntensityData,
         metadata: CatalogMetadata,
         *,
         population: Population,
@@ -1336,7 +1340,7 @@ class ImportanceCompoundPoissonLikelihood(_ImportanceCatalog):
         Parameters
         ----------
         data
-            Reference catalog power data.
+            Reference catalog intensity data.
         metadata
             Metadata describing the object.
         population
@@ -1365,7 +1369,7 @@ class ImportanceCompoundPoissonLikelihood(_ImportanceCatalog):
             Number of normalization quadrature nodes.
         """
         return cls(
-            power=jnp.asarray(np.asarray(data["polarization_power"], dtype=np.float64)),
+            intensity=jnp.asarray(np.asarray(data["intensity"], dtype=np.float64)),
             observation_seconds=jnp.asarray(observation_time * SECONDS_PER_YEAR),
             observed=None if observed is None else jnp.asarray(observed),
             network=network,
@@ -1506,7 +1510,7 @@ class ImportanceCompoundPoissonLikelihood(_ImportanceCatalog):
 jax.tree_util.register_dataclass(
     ImportanceCompoundPoissonLikelihood,
     data_fields=[
-        "power",
+        "intensity",
         "intrinsic",
         "proposal_log_prob",
         "log_reference_frequencies",

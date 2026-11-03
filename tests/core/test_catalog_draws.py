@@ -1,4 +1,4 @@
-"""Plain polarization-power catalogs, end to end on the closed-form inspiral.
+"""Plain intensity catalogs, end to end on the closed-form inspiral.
 
 Each test generates for real -- a tiny population, a four-bin grid -- so what
 is checked is the draw, not a mock of it: a key names its realization, and a
@@ -66,7 +66,7 @@ def _same(first: Arrays, second: Arrays) -> None:
 
 
 @pytest.mark.integration
-def test_polarization_power_round_trips_through_a_file(tmp_path: Path) -> None:
+def test_intensity_round_trips_through_a_file(tmp_path: Path) -> None:
     fresh = simulate_catalog(CATALOG, realization_key(41, 0))
     path = write(tmp_path / "catalog.h5", fresh, CATALOG, seed=41)
 
@@ -88,20 +88,18 @@ def test_catalogs_on_different_frequency_grids_are_refused() -> None:
 
 
 @pytest.mark.integration
-def test_polarization_power_key_picks_the_realization() -> None:
+def test_intensity_key_picks_the_realization() -> None:
     one = simulate_catalog(CATALOG, realization_key(41, 0))
     again = simulate_catalog(CATALOG, realization_key(41, 0))
     other = simulate_catalog(CATALOG, realization_key(42, 0))
 
-    np.testing.assert_array_equal(
-        one["polarization_power"], again["polarization_power"]
-    )
-    assert not np.array_equal(one["polarization_power"], other["polarization_power"])
+    np.testing.assert_array_equal(one["intensity"], again["intensity"])
+    assert not np.array_equal(one["intensity"], other["intensity"])
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("chunk_size", [4, 100])
-def test_polarization_power_is_independent_of_chunk_size(chunk_size: int) -> None:
+def test_intensity_is_independent_of_chunk_size(chunk_size: int) -> None:
     key = realization_key(41, 0)
     whole = simulate_catalog(CATALOG, key, chunk_size=None)
     chunked = simulate_catalog(CATALOG, key, chunk_size=chunk_size)
@@ -111,5 +109,5 @@ def test_polarization_power_is_independent_of_chunk_size(chunk_size: int) -> Non
     # differently, which moves the last bit.
     _same(whole["source_parameters"], chunked["source_parameters"])  # ty: ignore[invalid-argument-type]
     np.testing.assert_allclose(
-        chunked["polarization_power"], whole["polarization_power"], rtol=1e-12, atol=0
+        chunked["intensity"], whole["intensity"], rtol=1e-12, atol=0
     )

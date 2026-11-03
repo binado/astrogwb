@@ -386,7 +386,7 @@ def _(
     _rate = _population.build()(FIDUCIALS)[0].total_merger_rate()
     frequencies = jnp.asarray(_catalog["frequencies"])
     spectral_density = catalog_spectral_density(
-        jnp.asarray(_catalog["polarization_power"]), jnp.ones(num_samples), _rate
+        jnp.asarray(_catalog["intensity"]), jnp.ones(num_samples), _rate
     )
 
     {

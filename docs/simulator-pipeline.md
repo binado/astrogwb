@@ -130,7 +130,7 @@ are shifted by `exp(-2 pi i f coa_time)`, where
 `coa_time` is sampled directly in seconds relative to segment center
 from `Uniform(-tau_eff / 2, tau_eff / 2)`. The population supplies this column;
 the background never redraws or rescales it. Detector projection then applies
-each geometric delay once. Same-source equal-frequency cross powers and power-only waveform
+each geometric delay once. Same-source equal-frequency cross powers and intensity-only waveform
 generation are unchanged. The common waveform interface reads an optional
 `coa_time` column in the source-parameter mapping, defaulting to no shift,
 for every backend. `joint_model(..., coa_time_bounds=(low, high))` controls

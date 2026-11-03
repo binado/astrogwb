@@ -29,7 +29,7 @@ from astrogwb.simulators import (
 )
 from astrogwb.simulators import background as background_module
 from astrogwb.utils import years_to_seconds
-from astrogwb.waveform import WaveformMetadata, polarization_power, waveform_generator
+from astrogwb.waveform import WaveformMetadata, intensity, waveform_generator
 
 #: Standard errors a Monte Carlo mean may sit from its expectation.
 MAX_STANDARD_ERRORS = 5.0
@@ -102,7 +102,7 @@ def test_population_requires_coa_time(population: PopulationArtifact) -> None:
     "approximant",
     ["AnalyticInspiral", pytest.param("IMRPhenomD", marks=pytest.mark.integration)],
 )
-def test_coa_time_shifts_both_polarizations_and_preserves_power(
+def test_coa_time_shifts_both_polarizations_and_preserves_intensity(
     population: PopulationArtifact, approximant: str
 ) -> None:
     generator = waveform_generator(
@@ -130,9 +130,7 @@ def test_coa_time_shifts_both_polarizations_and_preserves_power(
     expected = np.exp(-2j * np.pi * times[:, None] * frequencies)
     for original, timed in zip(base, shifted, strict=True):
         np.testing.assert_allclose(timed / original, expected)
-    np.testing.assert_allclose(
-        polarization_power(*shifted) / polarization_power(*base), 1.0
-    )
+    np.testing.assert_allclose(intensity(*shifted) / intensity(*base), 1.0)
     np.testing.assert_array_equal(
         generator.generate_batch(sources),
         generator.generate_batch({**sources, "coa_time": times}),
@@ -167,7 +165,7 @@ def test_coa_time_shifts_both_polarizations_and_preserves_power(
     "approximant",
     ["AnalyticInspiral", pytest.param("IMRPhenomD", marks=pytest.mark.integration)],
 )
-def test_polarizations_reduce_to_the_generators_power(
+def test_polarizations_reduce_to_the_generators_intensity(
     population: PopulationArtifact, approximant: str
 ) -> None:
     # A 1 Hz grid puts the band's edges on Ripple's FFT grid.
@@ -184,12 +182,12 @@ def test_polarizations_reduce_to_the_generators_power(
 
     plus, cross = generator.generate_polarizations_batch(sources)
 
-    power = np.asarray(generator.generate_batch(sources))
+    generated = np.asarray(generator.generate_batch(sources))
     np.testing.assert_allclose(
-        np.asarray(polarization_power(plus, cross)),
-        power,
+        np.asarray(intensity(plus, cross)),
+        generated,
         rtol=1e-10,
-        atol=1e-12 * np.abs(power).max(),
+        atol=1e-12 * np.abs(generated).max(),
     )
 
 
@@ -214,11 +212,11 @@ def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum() -> No
             for name, values in realization.source_parameters.items()
         }
         part = dataclasses.replace(realization, source_parameters=sources)
-        power = np.asarray(generator.generate_batch(sources)).sum(axis=1)
+        generated = np.asarray(generator.generate_batch(sources)).sum(axis=1)
         spectra = simulate_background(part, WAVEFORM, triangle, chunk_size=8).spectra[
             "triangle"
         ]
-        ratios.append(spectra / (power / realization.observation_seconds))
+        ratios.append(spectra / (generated / realization.observation_seconds))
     ratios = np.asarray(ratios)
     expected = np.stack(
         [

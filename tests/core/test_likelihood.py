@@ -335,12 +335,12 @@ def _walk(jaxpr: Any) -> Iterator[Any]:
 
 
 @pytest.mark.parametrize("mode", ["amplitude", "per_frequency"])
-def test_the_held_mean_power_matches_the_weighted_mean(
+def test_the_held_mean_intensity_matches_the_weighted_mean(
     catalog: Any, networks: Network, mode: str | None
 ) -> None:
     held = _likelihood(catalog, mode, density_sites=())
     weighted = dataclasses.replace(
-        held, mean_power=None, mean_squared_power=None, gram=None
+        held, mean_intensity=None, mean_squared_intensity=None, gram=None
     )
     params = {**FIDUCIALS, "H0": 70.0}
     network = _single(networks, 1)
@@ -362,7 +362,7 @@ def test_the_catalog_is_not_contracted_per_evaluation_without_density_sites(
     catalog: Any, networks: Network, mode: str | None
 ) -> None:
     likelihood = _likelihood(catalog, mode, density_sites=())
-    power_shape = likelihood.power.shape
+    power_shape = likelihood.intensity.shape
 
     jaxpr = jax.make_jaxpr(likelihood.log_likelihood)(FIDUCIALS, _single(networks, 1))
 
@@ -385,7 +385,7 @@ def test_a_catalog_is_a_traced_input_that_compiles_once_per_shape(
         return likelihood.spectrum(params)
 
     first = _likelihood(catalog, None)
-    second = dataclasses.replace(first, power=1.1 * first.power)
+    second = dataclasses.replace(first, intensity=1.1 * first.intensity)
     results = [np.asarray(spectrum(lik, FIDUCIALS)) for lik in (first, second)]
 
     assert len(traces) == 1
@@ -467,7 +467,7 @@ def test_grid_log_posterior_compiles_once_per_likelihood_structure(
     fixed = {"Omega_m": jnp.asarray(0.31)}
 
     first = _likelihood(catalog, None)
-    second = dataclasses.replace(first, power=1.1 * first.power)
+    second = dataclasses.replace(first, intensity=1.1 * first.intensity)
     results = [
         grid_log_posterior(lik, priors, grids, fixed=fixed, networks=networks)
         for lik in (first, second)

@@ -1,4 +1,4 @@
-"""Tests for waveform-owned polarization-power generators."""
+"""Tests for waveform-owned intensity generators."""
 
 from __future__ import annotations
 
@@ -148,7 +148,7 @@ def test_ripple_generator_calls_its_kernel_with_the_full_grid_above_dc(
     kernel = Mock(return_value=jnp.ones((n_grid, 2), dtype=jnp.float64))
     object.__setattr__(ripple_generator, "_kernel", kernel)
 
-    power = ripple_generator.generate_batch(_ripple_sources())
+    intensity = ripple_generator.generate_batch(_ripple_sources())
 
     kernel.assert_called_once()
     frequencies, events = kernel.call_args.args
@@ -157,7 +157,7 @@ def test_ripple_generator_calls_its_kernel_with_the_full_grid_above_dc(
     )
     assert set(events) >= {"M_c", "eta", "d_L", "iota"}
     np.testing.assert_array_equal(
-        power, np.ones((ripple_generator.frequencies.size, 2))
+        intensity, np.ones((ripple_generator.frequencies.size, 2))
     )
 
 
@@ -181,14 +181,14 @@ def test_ripple_generator_evaluates_a_non_uniform_grid_directly() -> None:
     kernel = Mock(return_value=jnp.ones((frequencies.size, 2), dtype=jnp.float64))
     object.__setattr__(generator, "_kernel", kernel)
 
-    power = generator.generate_batch(_ripple_sources())
+    intensity = generator.generate_batch(_ripple_sources())
 
     kernel.assert_called_once()
     np.testing.assert_array_equal(np.asarray(kernel.call_args.args[0]), frequencies)
     assert frequencies[0] == 20.0
     assert frequencies[-1] == 100.0
     assert np.ptp(np.diff(frequencies)) > 0.0
-    assert power.shape == (frequencies.size, 2)
+    assert intensity.shape == (frequencies.size, 2)
     assert generator.n_samples is None
     assert generator.segment_duration is None
 
@@ -203,12 +203,12 @@ def test_ripple_generate_batch_has_no_nan_gradient(
     """
     sources = _ripple_sources()
 
-    def total_power(distance: jax.Array) -> jax.Array:
+    def total_intensity(distance: jax.Array) -> jax.Array:
         return ripple_generator.generate_batch(
             {**sources, "luminosity_distance": distance}
         ).sum()
 
-    gradient = jax.grad(total_power)(
+    gradient = jax.grad(total_intensity)(
         jnp.asarray(sources["luminosity_distance"], dtype=jnp.float64)
     )
 
@@ -308,8 +308,8 @@ def test_generate_batch_does_not_validate_values(
     with pytest.raises(ValueError, match="non-negative"):
         ripple_generator.check_sources(sources)
 
-    power = ripple_generator.generate_batch(sources)
-    assert power.shape == (ripple_generator.frequencies.size, 2)
+    intensity = ripple_generator.generate_batch(sources)
+    assert intensity.shape == (ripple_generator.frequencies.size, 2)
 
 
 @pytest.mark.parametrize(
@@ -344,7 +344,7 @@ def _source_frame_sources(redshift: np.ndarray) -> dict[str, np.ndarray]:
     }
 
 
-def test_source_frame_masses_and_redshift_give_the_detector_frame_power(
+def test_source_frame_masses_and_redshift_give_the_detector_frame_intensity(
     ripple_generator: RippleGenerator,
 ) -> None:
     """Either form of the masses reaches the same waveform."""
@@ -385,7 +385,7 @@ def _gwmock_reference(
     reference_frequency: float,
     segment_duration: float,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Frequency axis and in-band power from ``gwmock_signal.RippleBackend``."""
+    """Frequency axis and in-band intensity from ``gwmock_signal.RippleBackend``."""
     from gwmock_signal.waveform import RippleBackend
 
     backend = RippleBackend(
@@ -400,11 +400,11 @@ def _gwmock_reference(
     mask = (polarizations.frequencies >= minimum_frequency) & (
         polarizations.frequencies <= maximum_frequency
     )
-    power = (
+    intensity = (
         jnp.abs(polarizations.plus[:, mask]) ** 2
         + jnp.abs(polarizations.cross[:, mask]) ** 2
     ).T
-    return np.asarray(polarizations.frequencies[mask]), np.asarray(power)
+    return np.asarray(polarizations.frequencies[mask]), np.asarray(intensity)
 
 
 #: Sources spanning every degree of freedom the supported families take.
@@ -437,10 +437,10 @@ def _parity_sources(approximant: str) -> dict[str, np.ndarray]:
 
 @pytest.mark.integration
 @pytest.mark.parametrize("approximant", SUPPORTED_APPROXIMANTS)
-def test_power_matches_the_gwmock_backend(approximant: str) -> None:
+def test_intensity_matches_the_gwmock_backend(approximant: str) -> None:
     """Families supported by both adapters agree with gwmock-signal's backend.
 
-    Exact on the frequency axis. On power, ``rtol=1e-11`` with ``atol=0``: the
+    Exact on the frequency axis. On intensity, ``rtol=1e-11`` with ``atol=0``: the
     residual is XLA fusion, at most ~2e-13 (``IMRPhenomHM``).
     """
     settings = {
@@ -455,7 +455,7 @@ def test_power_matches_the_gwmock_backend(approximant: str) -> None:
             {"approximant": approximant, "frequency_resolution": 1.0, **settings}
         )
     )
-    frequencies, power = _gwmock_reference(
+    frequencies, intensity = _gwmock_reference(
         approximant, sources, segment_duration=1.0, **settings
     )
 
@@ -464,13 +464,13 @@ def test_power_matches_the_gwmock_backend(approximant: str) -> None:
     ours = jax.jit(generator.generate_batch)(sources)
 
     np.testing.assert_array_equal(np.asarray(generator.frequencies), frequencies)
-    np.testing.assert_allclose(np.asarray(ours), power, rtol=1e-11, atol=0.0)
+    np.testing.assert_allclose(np.asarray(ours), intensity, rtol=1e-11, atol=0.0)
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("approximant", SUPPORTED_APPROXIMANTS)
-def test_loglinear_power_agrees_with_a_dense_uniform_grid(approximant: str) -> None:
-    """Handing Ripple a lin-log grid instead of the FFT grid changes no power.
+def test_loglinear_intensity_agrees_with_a_dense_uniform_grid(approximant: str) -> None:
+    """Handing Ripple a lin-log grid instead of the FFT grid changes no intensity.
 
     The reference is the same kernel on the union of a dense 0.25 Hz lattice and
     the lin-log points: no interpolation, a different ``f[1] - f[0]`` and the
@@ -503,22 +503,25 @@ def test_loglinear_power_agrees_with_a_dense_uniform_grid(approximant: str) -> N
     assert union[1] - union[0] == 0.25
     assert union[-1] == frequencies[-1]
 
-    power = np.asarray(jax.jit(loglinear.generate_batch)(sources))
-    union_power = np.asarray(
+    intensity = np.asarray(jax.jit(loglinear.generate_batch)(sources))
+    union_intensity = np.asarray(
         jax.jit(dense._kernel)(
             jnp.asarray(union), ripple_parameters(approximant, sources)
         )
     )
 
-    assert np.all(np.isfinite(power))
-    assert np.all(power >= 0.0)
+    assert np.all(np.isfinite(intensity))
+    assert np.all(intensity >= 0.0)
     np.testing.assert_allclose(
-        power, union_power[np.searchsorted(union, frequencies)], rtol=1e-11, atol=0.0
+        intensity,
+        union_intensity[np.searchsorted(union, frequencies)],
+        rtol=1e-11,
+        atol=0.0,
     )
 
 
 @pytest.mark.integration
-def test_untapered_nrtidal_power_survives_the_normal_merger_cutoff() -> None:
+def test_untapered_nrtidal_intensity_survives_the_normal_merger_cutoff() -> None:
     sources = {
         "detector_frame_mass_1": np.array([1.4]),
         "detector_frame_mass_2": np.array([1.3]),
@@ -549,12 +552,12 @@ def test_untapered_nrtidal_power_survives_the_normal_merger_cutoff() -> None:
         )
     )
 
-    frequencies, tapered_power = tapered(sources)
-    _, untapered_power = untapered(sources)
+    frequencies, tapered_intensity = tapered(sources)
+    _, untapered_intensity = untapered(sources)
     high_frequency = np.asarray(frequencies) > 3000.0
 
-    assert np.all(np.asarray(tapered_power)[high_frequency] == 0.0)
-    assert np.all(np.asarray(untapered_power)[high_frequency] > 0.0)
+    assert np.all(np.asarray(tapered_intensity)[high_frequency] == 0.0)
+    assert np.all(np.asarray(untapered_intensity)[high_frequency] > 0.0)
 
 
 @pytest.mark.integration

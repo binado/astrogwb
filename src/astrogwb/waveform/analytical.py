@@ -1,7 +1,7 @@
-r"""Closed-form quadrupolar, inspiral-only polarization power.
+r"""Closed-form quadrupolar, inspiral-only intensity.
 
 The leading-order stationary-phase amplitude of a circular, non-spinning
-compact binary gives the polarization power in closed form:
+compact binary gives the intensity in closed form:
 
 .. math::
 
@@ -25,7 +25,7 @@ Schwarzschild test-particle ISCO; nothing here defaults to it.
 
     The power, about :math:`10^{-47}\,\mathrm{Hz}^{-2}` for a BNS at a few
     hundred Mpc, silently underflows in float32, so
-    :func:`inspiral_polarization_power` requires ``jax_enable_x64``.
+    :func:`inspiral_intensity` requires ``jax_enable_x64``.
 """
 
 from __future__ import annotations
@@ -44,13 +44,13 @@ from astrogwb.constants import MPC_IN_SECONDS, SOLAR_MASS_IN_SECONDS
 from astrogwb.frequency import frequency_grid
 from astrogwb.utils import require_x64
 from astrogwb.waveform.base import WaveformGenerator
-from astrogwb.waveform.polarization_power import quadrupolar_polarizations
+from astrogwb.waveform.intensity import quadrupolar_polarizations
 
 __all__ = [
     "AnalyticInspiralGenerator",
     "chirp_mass",
     "inclination_factor",
-    "inspiral_polarization_power",
+    "inspiral_intensity",
     "termination_frequency",
 ]
 
@@ -196,7 +196,7 @@ def _normalize_source_parameters(
     )
 
 
-def _single_source_inspiral_power(
+def _single_source_inspiral_intensity(
     frequencies: jax.Array,
     source_frame_mass_1: jax.Array,
     source_frame_mass_2: jax.Array,
@@ -229,20 +229,20 @@ def _single_source_inspiral_power(
     return jnp.where(inside_band, power, 0.0)
 
 
-_batched_inspiral_power = jax.vmap(
-    _single_source_inspiral_power,
+_batched_inspiral_intensity = jax.vmap(
+    _single_source_inspiral_intensity,
     in_axes=(None, 0, 0, 0, 0, 0, None),
 )
 
 
 @require_x64
-def inspiral_polarization_power(
+def inspiral_intensity(
     frequencies: JaxArrayLike,
     parameters: Mapping[str, JaxArrayLike],
     *,
     alpha: JaxArrayLike,
 ) -> jax.Array:
-    r"""Polarization power $|\tilde h_+|^2 + |\tilde h_\times|^2$ on an ``(N, F)`` grid.
+    r"""Intensity $|\tilde h_+|^2 + |\tilde h_\times|^2$ on an ``(N, F)`` grid.
 
     Evaluates the module's closed form and zeroes the bins above each source's
     :func:`termination_frequency`. Source parameters may be scalars or ``(N,)``
@@ -265,7 +265,7 @@ def inspiral_polarization_power(
     Returns
     -------
     jax.Array
-        Polarization power of shape ``(N, F)`` in $\mathrm{Hz}^{-2}$.
+        Intensity of shape ``(N, F)`` in $\mathrm{Hz}^{-2}$.
     """
     frequency_grid = _require_frequency_grid(frequencies)
     alpha_value = _require_scalar_alpha(alpha)
@@ -276,12 +276,12 @@ def inspiral_polarization_power(
         luminosity_distance=parameters["luminosity_distance"],
         inclination=parameters.get("inclination"),
     )
-    return _batched_inspiral_power(frequency_grid, *source_parameters, alpha_value)
+    return _batched_inspiral_intensity(frequency_grid, *source_parameters, alpha_value)
 
 
 @dataclass(frozen=True, slots=True)
 class AnalyticInspiralGenerator(WaveformGenerator):
-    """Generate inspiral-only polarization power on the descriptor grid."""
+    """Generate inspiral-only intensity on the descriptor grid."""
 
     @property
     def frequencies(self) -> np.ndarray:
@@ -301,7 +301,7 @@ class AnalyticInspiralGenerator(WaveformGenerator):
         }
         frequencies = self.frequencies
         assert self.metadata.alpha is not None
-        return inspiral_polarization_power(
+        return inspiral_intensity(
             frequencies, prepared_parameters, alpha=self.metadata.alpha
         ).T
 
@@ -324,7 +324,7 @@ class AnalyticInspiralGenerator(WaveformGenerator):
         assert self.metadata.alpha is not None
         count = next(iter(prepared_parameters.values())).shape[0]
         inclination = prepared_parameters.get("inclination", jnp.zeros(count))
-        face_on = inspiral_polarization_power(
+        face_on = inspiral_intensity(
             self.frequencies,
             {**prepared_parameters, "inclination": jnp.zeros_like(inclination)},
             alpha=self.metadata.alpha,

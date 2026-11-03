@@ -20,7 +20,7 @@ from astrogwb.distributions.mass import MaxOfTwoUniformsDistribution
 from astrogwb.distributions.rates import madau_dickinson_rate, total_merger_rate
 from astrogwb.importance.catalog import (
     CatalogMetadata,
-    polarization_power_data,
+    intensity_data,
     read_catalog,
 )
 from astrogwb.importance.spectrum import (
@@ -195,10 +195,10 @@ def _spectrum_on_nodes(
     generator = waveform_generator(OBSERVED_WAVEFORM)
     powers = np.stack(
         [
-            polarization_power_data(
+            intensity_data(
                 generator,
                 {**rows, "inclination": np.full(count * redshift.size, np.arccos(c))},
-            )["polarization_power"]
+            )["intensity"]
             for c in cosine
         ]
     ).reshape(5, -1, NUM_NODES, count)
@@ -495,14 +495,12 @@ def test_face_on_and_mean_inclination_waveforms_give_equivalent_moments(
         **data["source_parameters"],
         "inclination": np.full(reference_metadata.num_samples, effective_inclination),
     }
-    effective = polarization_power_data(
-        waveform_generator(reference_metadata.waveform), columns
-    )
+    effective = intensity_data(waveform_generator(reference_metadata.waveform), columns)
     old_factor = 1.0 if moment == 1 else INCLINATION_SECOND_MOMENT
     new_factor = INCLINATION_MEAN if moment == 1 else INCLINATION_RAW_SECOND_MOMENT
     np.testing.assert_allclose(
-        new_factor * data["polarization_power"] ** moment,
-        old_factor * effective["polarization_power"] ** moment,
+        new_factor * data["intensity"] ** moment,
+        old_factor * effective["intensity"] ** moment,
         atol=0,
     )
 
@@ -577,7 +575,7 @@ def test_reference_likelihood_rejects_non_face_on_source_columns(
         likelihood_class.from_catalog(
             {
                 "frequencies": np.array([20.0]),
-                "polarization_power": np.ones((1, 6)),
+                "intensity": np.ones((1, 6)),
                 "source_parameters": columns,
             },
             reference_metadata,

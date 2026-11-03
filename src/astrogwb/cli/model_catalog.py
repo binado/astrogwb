@@ -32,7 +32,7 @@ def model_catalog(
         int | None, typer.Option(min=1, help="Cap OMP/BLAS/XLA CPU threads.")
     ] = None,
 ) -> None:
-    """Write fixed source draws and waveform powers for importance weighting.
+    """Write fixed source draws and waveform intensities for importance weighting.
 
     Parameters
     ----------
