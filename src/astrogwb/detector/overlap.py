@@ -20,7 +20,7 @@ from jax.typing import ArrayLike as JaxArrayLike
 from numpy.typing import ArrayLike, NDArray
 
 from astrogwb.constants import SPEED_OF_LIGHT
-from astrogwb.waveform.polarization_power import quadrupolar_stokes_factors
+from astrogwb.waveform.intensity import quadrupolar_stokes_factors
 
 from .geometry import Detector, DetectorGeometry
 
@@ -30,7 +30,7 @@ from .geometry import Detector, DetectorGeometry
 # at the threshold is ~1e-20; the closed form's there is ~1e-15.
 _SERIES_ALPHA_THRESHOLD = 1.0
 
-# Taylor coefficients of g1, g2, g3 in powers of alpha^2, lowest first.
+# Taylor coefficients of g1, g2, g3 in intensities of alpha^2, lowest first.
 _G1_SERIES: tuple[float, ...] = (
     1.0,
     -5.0 / 42.0,

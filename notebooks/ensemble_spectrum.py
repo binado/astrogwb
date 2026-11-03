@@ -43,7 +43,7 @@ with app.setup(hide_code=True):
     from astrogwb.frequency import frequency_mask
     from astrogwb.importance.catalog import (
         CatalogMetadata,
-        PolarizationPowerData,
+        IntensityData,
         read_catalog,
     )
     from astrogwb.inference import ImportanceGaussianLikelihood
@@ -919,7 +919,7 @@ def _(ROOT_DIR):
 
 @app.function(hide_code=True)
 def minimum_redshift_scan(
-    data: PolarizationPowerData,
+    data: IntensityData,
     catalog_metadata: CatalogMetadata,
     population: AnyPopulation,
     registry: DetectorRegistry,

@@ -35,7 +35,7 @@ from astrogwb.detector import effective_psd, gaussian_bin_scale, load_detector
 from astrogwb.frequency import frequency_mask
 from astrogwb.importance.catalog import (
     CatalogMetadata,
-    PolarizationPowerData,
+    IntensityData,
 )
 
 #: Reference resolution, and the band the refinement study runs over.
@@ -69,7 +69,7 @@ FIRST_STEP_TOLERANCE = 5e-3
 @pytest.fixture(scope="module")
 def fine_catalog(
     mock_population: dict[str, np.ndarray],
-) -> tuple[PolarizationPowerData, CatalogMetadata]:
+) -> tuple[IntensityData, CatalogMetadata]:
     """The reference catalog every coarser grid is subsampled from."""
     return build_mock_catalog(
         mock_population,
@@ -82,7 +82,7 @@ def fine_catalog(
 
 def test_subsampling_a_fine_catalog_matches_a_coarse_one(
     mock_population: dict[str, np.ndarray],
-    fine_catalog: tuple[PolarizationPowerData, CatalogMetadata],
+    fine_catalog: tuple[IntensityData, CatalogMetadata],
 ) -> None:
     """``[::k]`` of a fine catalog *is* the catalog built at ``k * df``.
 
@@ -90,7 +90,7 @@ def test_subsampling_a_fine_catalog_matches_a_coarse_one(
     """
     fine_data, _ = fine_catalog
     fine_frequencies = np.asarray(fine_data["frequencies"])
-    fine_power = np.asarray(fine_data["polarization_power"])
+    fine_intensity = np.asarray(fine_data["intensity"])
 
     for factor in SUBSAMPLE_FACTORS:
         coarse, _ = build_mock_catalog(
@@ -104,7 +104,7 @@ def test_subsampling_a_fine_catalog_matches_a_coarse_one(
             fine_frequencies[::factor], np.asarray(coarse["frequencies"])
         )
         np.testing.assert_allclose(
-            fine_power[::factor], np.asarray(coarse["polarization_power"])
+            fine_intensity[::factor], np.asarray(coarse["intensity"])
         )
 
 
@@ -133,7 +133,7 @@ def _analysis_at(frequencies: jax.Array) -> dict[str, Any]:
 
 
 @pytest.fixture(scope="module")
-def reference() -> tuple[PolarizationPowerData, CatalogMetadata]:
+def reference() -> tuple[IntensityData, CatalogMetadata]:
     """One reference catalog every observed grid is predicted from.
 
     It reaches past the detector-frame merger frequency at the window's lower
@@ -149,7 +149,7 @@ def reference() -> tuple[PolarizationPowerData, CatalogMetadata]:
 
 @pytest.fixture(scope="module")
 def resolutions(
-    reference: tuple[PolarizationPowerData, CatalogMetadata],
+    reference: tuple[IntensityData, CatalogMetadata],
 ) -> dict[int, dict[str, Any]]:
     """Masked analysis inputs, mock observations, and SNR^2 at each resolution."""
     data, _ = reference

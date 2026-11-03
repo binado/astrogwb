@@ -33,7 +33,7 @@ pip install astrogwb[io]
   density evaluation, so a catalog and the weights that reweight it can never
   disagree about the law behind it.
 - `astrogwb.importance` owns importance weighting: `astrogwb.importance.catalog`
-  draws fixed-size reference catalogs and their polarization power,
+  draws fixed-size reference catalogs and their intensity,
   `astrogwb.importance.spectrum` reweights their intrinsic draws to a target
   population and integrates redshift by closed-form quadrature, and
   `astrogwb.importance.diagnostics` reports effective sample sizes.
@@ -41,7 +41,7 @@ pip install astrogwb[io]
 - `astrogwb.catalog` provides an array-native catalog that records the
   population that drew it, and reads and writes it as HDF5 behind the `io`
   extra.
-- `astrogwb.waveform` owns polarization-power generators, reduces raw
+- `astrogwb.waveform` owns intensity generators, reduces raw
   plus/cross polarizations to power, applies GW-distance corrections to plain
   arrays, and provides a closed-form quadrupolar inspiral model. Persistence
   and labelled-array policy stay with applications.
@@ -58,7 +58,7 @@ hanford = load_detector("H1")
 sensitivity = load_sensitivity("H1")
 ```
 
-A population is drawn, reduced to polarization power, and stored together with
+A population is drawn, reduced to intensity, and stored together with
 the declaration that produced it:
 
 ```python

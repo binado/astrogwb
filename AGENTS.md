@@ -5,7 +5,7 @@
 One package, `astrogwb`, with the reproducibility application inside it:
 
 - `src/astrogwb/`: publishable scientific library (cosmology, detectors, GWB
-  contractions, NumPyro source populations, importance weighting, waveform power
+  contractions, NumPyro source populations, importance weighting, waveform intensity
   reduction, HDF5 catalog serialization).
 - `src/astrogwb/paper/`: the reproducibility application (configuration, runtime
   setup, plotting style).

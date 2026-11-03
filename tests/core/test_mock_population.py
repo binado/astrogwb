@@ -69,7 +69,7 @@ def test_catalog_contraction_matches_the_analytic_spectrum(
         maximum_redshift=Z_MAX,
         minimum_component_mass=MOCK_MINIMUM_COMPONENT_MASS,
         maximum_component_mass=MOCK_MAXIMUM_COMPONENT_MASS,
-        # The same truncation the catalog's polarization power was built with.
+        # The same truncation the catalog's intensity was built with.
         alpha=ISCO_ALPHA,
     )
     analytic = analytic_spectral_density_from_mass_moments(
@@ -83,7 +83,7 @@ def test_catalog_contraction_matches_the_analytic_spectrum(
 
     ratios: dict[int, np.ndarray] = {}
     for num_sources, (data, _) in catalogs.items():
-        polarization_power = jnp.asarray(data["polarization_power"])
+        intensity = jnp.asarray(data["intensity"])
         samples = catalog_samples(data)
         total_merger_rate, _, _ = reference_merger_rate_distance_and_logprob(
             POPULATION_PARAMS,
@@ -91,7 +91,7 @@ def test_catalog_contraction_matches_the_analytic_spectrum(
             redshift_grid=make_redshift_grid(),
         )
         contracted = spectral_density(
-            polarization_power,
+            intensity,
             jnp.ones(num_sources),
             total_merger_rate,
         )
@@ -100,7 +100,7 @@ def test_catalog_contraction_matches_the_analytic_spectrum(
         # Above the smallest sampled cutoff, a finite catalog can be exactly
         # zero even while the analytic population spectrum remains positive.
         # Compare only on the common support where every sampled source emits.
-        valid = np.all(np.asarray(polarization_power) > 0.0, axis=1)
+        valid = np.all(np.asarray(intensity) > 0.0, axis=1)
         ratios[num_sources] = contracted_values[valid] / analytic_values[valid]
         assert np.all(np.isfinite(ratios[num_sources]))
 

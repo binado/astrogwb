@@ -1,7 +1,7 @@
 """Shared pytest configuration for the core package.
 
 Enables JAX double precision for the whole suite, as
-``astrogwb.runtime`` does: polarization power underflows float32. The
+``astrogwb.runtime`` does: intensity underflows float32. The
 mock-population fixtures wrap :mod:`astrogwb_mock_population`.
 """
 
@@ -26,7 +26,7 @@ from astrogwb_mock_population import (
 
 from astrogwb.importance.catalog import (
     CatalogMetadata,
-    PolarizationPowerData,
+    IntensityData,
 )
 
 
@@ -44,7 +44,7 @@ def mock_population() -> dict[str, np.ndarray]:
 @pytest.fixture(scope="session")
 def mock_catalog_factory(
     mock_population: dict[str, np.ndarray],
-) -> Callable[..., tuple[PolarizationPowerData, CatalogMetadata]]:
+) -> Callable[..., tuple[IntensityData, CatalogMetadata]]:
     """Build a ``(data, metadata)`` pair from the mock population draw, once per worker."""
 
     # `partial` keeps build_mock_catalog's signature for type checkers.

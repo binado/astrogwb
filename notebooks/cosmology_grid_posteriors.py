@@ -605,7 +605,7 @@ def _(frequencies, observation_time, redshift_nodes, reference_catalog_path):
     # copy made by the likelihood exists: the power and its square.
     catalog_data, catalog_metadata, _seed = read_catalog(reference_catalog_path)
     population = catalog_metadata.population
-    power = catalog_data["polarization_power"]
+    power = catalog_data["intensity"]
     print(
         f"reference catalog: {catalog_metadata.num_samples:,} draws at seed "
         f"{_seed}, "

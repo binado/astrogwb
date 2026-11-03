@@ -12,7 +12,7 @@ from astrogwb.constants import ISCO_ALPHA
 from astrogwb.waveform import (
     AnalyticInspiralGenerator,
     WaveformMetadata,
-    inspiral_polarization_power,
+    inspiral_intensity,
 )
 
 
@@ -45,9 +45,7 @@ def test_analytic_generator_evaluates_on_exact_metadata_grid(
 
     frequencies, actual = generator(source_parameters)
     expected = np.asarray(
-        inspiral_polarization_power(
-            generator.frequencies, source_parameters, alpha=ISCO_ALPHA
-        )
+        inspiral_intensity(generator.frequencies, source_parameters, alpha=ISCO_ALPHA)
     ).T
 
     np.testing.assert_array_equal(frequencies, generator.frequencies)
@@ -88,7 +86,7 @@ def test_analytic_generator_evaluates_on_a_log_spaced_grid(
 
     frequencies, actual = generator(source_parameters)
     expected = np.asarray(
-        inspiral_polarization_power(frequencies, source_parameters, alpha=ISCO_ALPHA)
+        inspiral_intensity(frequencies, source_parameters, alpha=ISCO_ALPHA)
     ).T
 
     assert frequencies[0] == 10.0

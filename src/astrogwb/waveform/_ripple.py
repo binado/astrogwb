@@ -40,11 +40,11 @@ import jax
 import jax.numpy as jnp
 from numpy.typing import ArrayLike
 
-from astrogwb.waveform.polarization_power import polarization_power
+from astrogwb.waveform.intensity import intensity
 
 __all__ = [
+    "build_intensity_kernel",
     "build_polarization_kernel",
-    "build_power_kernel",
     "check_sources",
     "next_smooth_even",
     "ripple_parameters",
@@ -315,7 +315,7 @@ def check_sources(approximant: str, source_parameters: Mapping[str, ArrayLike]) 
             raise ValueError(f"{name} must be non-negative")
 
 
-def build_power_kernel(
+def build_intensity_kernel(
     approximant: str,
     reference_frequency: float,
     *,
@@ -343,7 +343,7 @@ def build_power_kernel(
 
     if isinstance(waveform, AmplitudePhaseWaveform):
 
-        def amplitude_power(
+        def amplitude_intensity(
             frequencies: jax.Array, events: Mapping[str, jax.Array]
         ) -> jax.Array:
             amplitudes = jax.vmap(
@@ -355,17 +355,17 @@ def build_power_kernel(
             power = amplitudes**2 * inclination_factor[:, None]
             return jnp.nan_to_num(power).T.astype(jnp.float64)
 
-        return amplitude_power
+        return amplitude_intensity
 
     evaluate_polarizations = _polarization_evaluator(waveform)
 
-    def full_polarization_power(
+    def full_intensity(
         frequencies: jax.Array, events: Mapping[str, jax.Array]
     ) -> jax.Array:
         plus, cross = evaluate_polarizations(frequencies, events)
-        return polarization_power(plus, cross)
+        return intensity(plus, cross)
 
-    return full_polarization_power
+    return full_intensity
 
 
 def build_polarization_kernel(
@@ -378,7 +378,7 @@ def build_polarization_kernel(
 
     Every model, amplitude-phase ones included, evaluates its full complex
     polarizations here. Not jitted, and NaN-guarded, as
-    :func:`build_power_kernel` is.
+    :func:`build_intensity_kernel` is.
     """
     return _polarization_evaluator(
         _build_ripple_waveform(

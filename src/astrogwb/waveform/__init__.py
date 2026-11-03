@@ -4,17 +4,17 @@ from astrogwb.waveform.analytical import (
     AnalyticInspiralGenerator,
     chirp_mass,
     inclination_factor,
-    inspiral_polarization_power,
+    inspiral_intensity,
     termination_frequency,
 )
 from astrogwb.waveform.base import WaveformGenerator
 from astrogwb.waveform.factory import waveform_generator
-from astrogwb.waveform.metadata import WaveformMetadata
-from astrogwb.waveform.polarization_power import (
-    polarization_power,
+from astrogwb.waveform.intensity import (
+    intensity,
     quadrupolar_polarizations,
     quadrupolar_stokes_factors,
 )
+from astrogwb.waveform.metadata import WaveformMetadata
 from astrogwb.waveform.ripple import RippleGenerator
 
 __all__ = [
@@ -24,8 +24,8 @@ __all__ = [
     "WaveformMetadata",
     "chirp_mass",
     "inclination_factor",
-    "inspiral_polarization_power",
-    "polarization_power",
+    "inspiral_intensity",
+    "intensity",
     "quadrupolar_polarizations",
     "quadrupolar_stokes_factors",
     "termination_frequency",

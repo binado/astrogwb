@@ -1,7 +1,7 @@
 # Catalog generation
 
 A **catalog** is one persisted waveform draw: a population drawn from a
-registered NumPyro model, with its frequency-domain polarization power reduced
+registered NumPyro model, with its frequency-domain intensity reduced
 and written to an explicit path.
 Catalogs are the expensive artifact of the analysis.
 
@@ -205,7 +205,7 @@ import numpy as np
 from astrogwb.config import load_config
 from astrogwb.importance.catalog import (
     CatalogMetadata,
-    polarization_power,
+    intensity,
 )
 
 config = load_config()
@@ -215,13 +215,13 @@ metadata = CatalogMetadata(
     fiducials=config.fiducials,
     num_samples=32768,
 )
-data = polarization_power(
+data = intensity(
     {"seed": np.uint64(41)}, metadata, cache_dir="outputs/catalogs"
 )
 ```
 
 A hit is read and checked against the metadata it was asked for; a miss is
-generated and saved under the name `polarization_power.path` gives, written
+generated and saved under the name `intensity.path` gives, written
 atomically so an interrupted job never leaves a partial file.
 
 ## Catalogs record the density that drew them
@@ -270,8 +270,11 @@ Every catalog uses the same layout, through `astrogwb.utils.io.write`:
 | optional root attributes `seed`, `batch_size` | the caller's draw settings |
 | root datasets and groups | the data: a nested dict maps to subgroups, an array to a dataset |
 
-For a catalog, the root holds `frequencies` `(F,)`, `polarization_power`
-`(F, N)` and a `source_parameters/` group of `(N,)` columns. There are no
+For a catalog, the root holds `frequencies` `(F,)`, `intensity`
+`(F, N)` and a `source_parameters/` group of `(N,)` columns. The intensity
+dataset was called `polarization_power` before the rename to `intensity`, and
+there is no legacy fallback: catalogs written under the old key must be
+regenerated. There are no
 format names or version files: the path says which node, metadata and inputs a
 file answers, and `load(path, MetadataType)` returns `(data, metadata, attrs)` to a
 caller that was handed a file by path; `astrogwb.importance.catalog.read_catalog(path)`
@@ -289,8 +292,8 @@ Persistence and cache locations belong to the callers. The core `write` and
 
 | | simulator | metadata | input | data |
 | --- | --- | --- | --- | --- |
-| catalogs | `simulate_catalog` | `CatalogMetadata` | one JAX key | `PolarizationPowerData` |
-| reference catalogs | `reference_catalog` | `CatalogMetadata` | one JAX key | `PolarizationPowerData` |
+| catalogs | `simulate_catalog` | `CatalogMetadata` | one JAX key | `IntensityData` |
+| reference catalogs | `reference_catalog` | `CatalogMetadata` | one JAX key | `IntensityData` |
 
 Catalog files are written to caller-chosen paths, atomically, with the metadata,
 seed and version recorded inside. Settings such as `chunk_size` are bound in the
@@ -327,7 +330,7 @@ versions are refused; regenerate them.
 
 Physical simulated populations and plain `simulate_catalog` draws sample isotropic inclination:
 `cos(iota)` is uniform on `[-1, 1]`, and the returned `inclination` sample site
-is in radians. Polarization-power catalogs store this column, and density
+is in radians. Intensity catalogs store this column, and density
 reconstruction conditions on the recorded values even though inclination is
 excluded from the default importance-weight factors. The common,
 hyperparameter-independent inclination law cancels in those weights.
@@ -338,7 +341,7 @@ them in one pass into one file, described in [the simulator pipeline](simulator-
 
 Reference/integration catalogs instead fix `inclination = 0` (face-on), and
 serialize `reference_inclination = 0.0` in their metadata. In both cases,
-`polarization_power` remains the literal `|h_plus|^2 + |h_cross|^2`.
+`intensity` remains the literal `|h_plus|^2 + |h_cross|^2`.
 For supported aligned-spin, quasi-circular dominant-quadrupole models, the
 population mean multiplies face-on power by `2/5`, and the raw same-source
 power product multiplies the face-on product by `71/315`. The latter is not

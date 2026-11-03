@@ -8,7 +8,7 @@ polarization angle, are
     I = |h_+|^2 + |h_\times|^2, \qquad Q = |h_+|^2 - |h_\times|^2, \qquad
     U = 2\,\mathrm{Re}(h_+^* h_\times), \qquad V = 2\,\mathrm{Im}(h_+^* h_\times).
 
-:math:`I` is the polarization power. :math:`Q, U, V` carry what the power drops
+:math:`I` is the intensity. :math:`Q, U, V` carry what the power drops
 and what a detector pair needs: :math:`Q` and :math:`U` the linear polarization
 and :math:`V` the circular one. One source is fully polarized at every
 frequency, :math:`I^2 = Q^2 + U^2 + V^2`, whatever its mode content; only a sum
@@ -24,13 +24,13 @@ import jax.numpy as jnp
 from jax.typing import ArrayLike
 
 __all__ = [
-    "polarization_power",
+    "intensity",
     "quadrupolar_polarizations",
     "quadrupolar_stokes_factors",
 ]
 
 
-def polarization_power(plus: ArrayLike, cross: ArrayLike) -> jax.Array:
+def intensity(plus: ArrayLike, cross: ArrayLike) -> jax.Array:
     """Reduce ``(n, F)`` complex polarization arrays to ``(F, n)`` float64 power.
 
     Returns ``|h+|^2 + |hx|^2`` per sample and frequency, transposed to the

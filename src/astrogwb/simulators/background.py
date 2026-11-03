@@ -23,7 +23,7 @@ normalized by the observation time :math:`T` as
 
 Over an isotropic sky and uniform polarization angle
 :math:`\langle K_{ab} \rangle = I \gamma_{ab} / 5`, with :math:`I` the
-polarization power and :math:`\gamma_{ab}` the normalized isotropic overlap
+intensity and :math:`\gamma_{ab}` the normalized isotropic overlap
 reduction function of the native geometry. For an isotropic, unpolarized
 population this gives :math:`E[Y_{ab}] = \gamma_{ab} S_h`. The sum is never
 divided by the realized count.

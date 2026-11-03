@@ -1,8 +1,8 @@
-"""Importance-integration reference catalogs: per-source polarization power.
+"""Importance-integration reference catalogs: per-source intensity.
 
 :class:`CatalogMetadata` is the record a catalog is drawn from and cached
-under. :func:`polarization_power_data` turns a generator and source columns
-into :class:`PolarizationPowerData`, one power column per source; where the
+under. :func:`intensity_data` turns a generator and source columns
+into :class:`IntensityData`, one intensity column per source; where the
 sources come from is the caller's. :func:`simulate_catalog` is the plain
 catalog -- the population a record names, drawn at its fiducials from one key
 -- and :func:`~astrogwb.importance.spectrum.reference_catalog` draws at the redshift
@@ -39,8 +39,8 @@ from astrogwb.waveform.metadata import WaveformMetadata
 
 __all__ = [
     "CatalogMetadata",
-    "PolarizationPowerData",
-    "polarization_power_data",
+    "IntensityData",
+    "intensity_data",
     "read_catalog",
     "simulate_catalog",
     "validate_matching_frequency_grids",
@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 
 
 class CatalogMetadata(BaseModel):
-    """Everything that determines a polarization-power catalog's contents.
+    """Everything that determines an intensity catalog's contents.
 
     Both the request and the provenance: :func:`simulate_catalog` turns it and a
     PRNG key into a catalog, stored beside it by
@@ -68,7 +68,7 @@ class CatalogMetadata(BaseModel):
     window that starts at or above it
     (:func:`~astrogwb.importance.spectrum.reference_redshift`).
     ``reference_inclination`` records the reference-only face-on convention.
-    It does not condition plain :func:`simulate_catalog` draws. Power always
+    It does not condition plain :func:`simulate_catalog` draws. Intensity always
     means the literal sum of squared polarization amplitudes.
     """
 
@@ -94,24 +94,24 @@ class CatalogMetadata(BaseModel):
         return self
 
 
-class PolarizationPowerData(TypedDict):
-    """One catalog: ``frequencies`` ``(F,)``, ``polarization_power`` ``(F, N)``.
+class IntensityData(TypedDict):
+    """One catalog: ``frequencies`` ``(F,)``, ``intensity`` ``(F, N)``.
 
     ``source_parameters`` columns are each ``(N,)``.
     """
 
     frequencies: NDArray[np.float64]
-    polarization_power: NDArray[np.float64]
+    intensity: NDArray[np.float64]
     source_parameters: dict[str, NDArray[Any]]
 
 
-def polarization_power_data(
+def intensity_data(
     generator: WaveformGenerator,
     source_parameters: Mapping[str, ArrayLike],
     *,
     chunk_size: int | None = None,
-) -> PolarizationPowerData:
-    """The power of ``source_parameters`` as a catalog, generated eagerly.
+) -> IntensityData:
+    """The intensity of ``source_parameters`` as a catalog, generated eagerly.
 
     Values are checked here, eagerly: traced generation would silently drop a
     degree of freedom the approximant cannot represent. ``chunk_size`` is
@@ -138,17 +138,17 @@ def polarization_power_data(
     generator.check_sources(columns)
     # Generators are jit-free to compose inside NumPyro models; eagerly, an
     # unfused graph would hold every waveform intermediate at once.
-    power = jax.jit(partial(generator.generate_batch, chunk_size=chunk_size))
+    generate = jax.jit(partial(generator.generate_batch, chunk_size=chunk_size))
     return {
         "frequencies": np.asarray(generator.frequencies),
-        "polarization_power": np.asarray(power(columns)),
+        "intensity": np.asarray(generate(columns)),
         "source_parameters": columns,
     }
 
 
 def simulate_catalog(
     metadata: CatalogMetadata, key: jax.Array, *, chunk_size: int | None = None
-) -> PolarizationPowerData:
+) -> IntensityData:
     """The plain catalog ``key`` draws: ``num_samples`` sources at the fiducials.
 
     Parameters
@@ -173,14 +173,14 @@ def simulate_catalog(
         joint_model(*metadata.population.build()(metadata.fiducials))
     )
     sources = simulate_sources(model, key, metadata.num_samples)
-    return polarization_power_data(
+    return intensity_data(
         waveform_generator(metadata.waveform), sources, chunk_size=chunk_size
     )
 
 
 def read_catalog(
     path: str | Path,
-) -> tuple[PolarizationPowerData, CatalogMetadata, int]:
+) -> tuple[IntensityData, CatalogMetadata, int]:
     """The catalog at ``path``, its record and the seed it was drawn at.
 
     ``astrogwb model-catalog`` writes it; nothing here draws.
@@ -198,7 +198,7 @@ def read_catalog(
     if not Path(path).is_file():
         raise FileNotFoundError(f"no catalog at {path}")
     data, metadata, attrs = load(path, CatalogMetadata)
-    return cast(PolarizationPowerData, data), metadata, int(attrs["seed"])
+    return cast(IntensityData, data), metadata, int(attrs["seed"])
 
 
 def validate_matching_frequency_grids(

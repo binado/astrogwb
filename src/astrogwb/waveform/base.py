@@ -95,7 +95,7 @@ class WaveformGenerator:
             one per source, ``(N,)`` (or a scalar shared by all sources).
             Applies ``exp(-2 pi i f coa_time)`` to both polarizations.
             A missing column leaves them unshifted. Detector delays are applied by
-            detector projection; power-only generation is independent of time.
+            detector projection; intensity-only generation is independent of time.
         """
         plus, cross = self._generate_polarizations_batch(source_parameters)
         coa_time = source_parameters.get("coa_time")

@@ -1,4 +1,4 @@
-"""Tests for the closed-form quadrupolar inspiral polarization power.
+"""Tests for the closed-form quadrupolar inspiral intensity.
 
 The scaling tests check exponents through ratios, so they are invariant under
 the overall constant; the amplitude prefactor is not covered.
@@ -21,7 +21,7 @@ from astrogwb.constants import (
 )
 from astrogwb.waveform import (
     inclination_factor,
-    inspiral_polarization_power,
+    inspiral_intensity,
     termination_frequency,
 )
 
@@ -39,18 +39,18 @@ def bns() -> dict[str, jax.Array]:
 
 
 @pytest.fixture
-def bns_power(bns: dict[str, jax.Array]) -> Callable[..., jax.Array]:
-    """Power for the reference BNS, with any source parameter overridden."""
+def bns_intensity(bns: dict[str, jax.Array]) -> Callable[..., jax.Array]:
+    """Intensity for the reference BNS, with any source parameter overridden."""
 
-    def _power(
+    def _intensity(
         frequencies: jax.Array,
         *,
         alpha: float = ISCO_ALPHA,
         **overrides: jax.Array,
     ) -> jax.Array:
-        return inspiral_polarization_power(frequencies, bns | overrides, alpha=alpha)
+        return inspiral_intensity(frequencies, bns | overrides, alpha=alpha)
 
-    return _power
+    return _intensity
 
 
 @pytest.fixture
@@ -87,25 +87,27 @@ def test_mean_inclination_factor_is_the_analytic_inclination_constant() -> None:
 
 
 def test_scales_as_inverse_distance_squared(
-    bns: dict[str, jax.Array], bns_power: Callable[..., jax.Array]
+    bns: dict[str, jax.Array], bns_intensity: Callable[..., jax.Array]
 ) -> None:
     frequencies = jnp.array([50.0, 100.0])
 
-    near = bns_power(frequencies)
-    far = bns_power(frequencies, luminosity_distance=2.0 * bns["luminosity_distance"])
+    near = bns_intensity(frequencies)
+    far = bns_intensity(
+        frequencies, luminosity_distance=2.0 * bns["luminosity_distance"]
+    )
 
     np.testing.assert_allclose(far, near / 4.0, rtol=1e-12)
 
 
 def test_scales_as_chirp_mass_to_the_five_thirds(
-    bns: dict[str, jax.Array], bns_power: Callable[..., jax.Array]
+    bns: dict[str, jax.Array], bns_intensity: Callable[..., jax.Array]
 ) -> None:
     frequencies = jnp.array([50.0, 100.0])
 
-    light = bns_power(frequencies)
+    light = bns_intensity(frequencies)
     # Doubling both components doubles Mc -- and halves the cutoff, so these
     # frequencies stay well inside the band for both.
-    heavy = bns_power(
+    heavy = bns_intensity(
         frequencies,
         source_frame_mass_1=2.0 * bns["source_frame_mass_1"],
         source_frame_mass_2=2.0 * bns["source_frame_mass_2"],
@@ -115,20 +117,22 @@ def test_scales_as_chirp_mass_to_the_five_thirds(
 
 
 def test_scales_as_frequency_to_the_minus_seven_thirds(
-    bns_power: Callable[..., jax.Array],
+    bns_intensity: Callable[..., jax.Array],
 ) -> None:
-    power = bns_power(jnp.array([100.0, 200.0]))
+    intensity = bns_intensity(jnp.array([100.0, 200.0]))
 
     np.testing.assert_allclose(
-        power[0, 1], power[0, 0] * 2.0 ** (-7.0 / 3.0), rtol=1e-12
+        intensity[0, 1], intensity[0, 0] * 2.0 ** (-7.0 / 3.0), rtol=1e-12
     )
 
 
-def test_scales_with_inclination_factor(bns_power: Callable[..., jax.Array]) -> None:
+def test_scales_with_inclination_factor(
+    bns_intensity: Callable[..., jax.Array],
+) -> None:
     frequencies = jnp.array([100.0])
 
-    face_on = bns_power(frequencies)
-    edge_on = bns_power(frequencies, inclination=jnp.array([math.pi / 2.0]))
+    face_on = bns_intensity(frequencies)
+    edge_on = bns_intensity(frequencies, inclination=jnp.array([math.pi / 2.0]))
 
     np.testing.assert_allclose(
         edge_on, face_on * 0.25 / FACE_ON_INCLINATION_FACTOR, rtol=1e-12
@@ -136,7 +140,7 @@ def test_scales_with_inclination_factor(bns_power: Callable[..., jax.Array]) -> 
 
 
 def test_redshift_enters_only_through_detector_frame_masses(
-    bns: dict[str, jax.Array], bns_power: Callable[..., jax.Array]
+    bns: dict[str, jax.Array], bns_intensity: Callable[..., jax.Array]
 ) -> None:
     """z is degenerate with a (1 + z) rescaling of both component masses.
 
@@ -146,8 +150,8 @@ def test_redshift_enters_only_through_detector_frame_masses(
     frequencies = jnp.linspace(10.0, 3000.0, 400)
     redshift = 0.7
 
-    redshifted = bns_power(frequencies, redshift=jnp.array([redshift]))
-    rescaled = bns_power(
+    redshifted = bns_intensity(frequencies, redshift=jnp.array([redshift]))
+    rescaled = bns_intensity(
         frequencies,
         redshift=jnp.array([0.0]),
         source_frame_mass_1=(1.0 + redshift) * bns["source_frame_mass_1"],
@@ -157,27 +161,27 @@ def test_redshift_enters_only_through_detector_frame_masses(
     np.testing.assert_allclose(redshifted, rescaled, rtol=1e-12)
 
 
-def test_power_is_zero_above_the_termination_frequency(
-    bns_power: Callable[..., jax.Array], bns_cutoff: Callable[..., float]
+def test_intensity_is_zero_above_the_termination_frequency(
+    bns_intensity: Callable[..., jax.Array], bns_cutoff: Callable[..., float]
 ) -> None:
     cutoff = bns_cutoff()
     frequencies = jnp.array([cutoff * 0.999, cutoff, cutoff * 1.001, 2.0 * cutoff])
 
-    power = bns_power(frequencies)
+    intensity = bns_intensity(frequencies)
 
-    assert power[0, 0] > 0.0
-    assert power[0, 1] > 0.0  # the cutoff bin itself is inclusive
-    assert power[0, 2] == 0.0
-    assert power[0, 3] == 0.0
+    assert intensity[0, 0] > 0.0
+    assert intensity[0, 1] > 0.0  # the cutoff bin itself is inclusive
+    assert intensity[0, 2] == 0.0
+    assert intensity[0, 3] == 0.0
 
 
 def test_zero_frequency_bin_is_zero_not_nan(
-    bns_power: Callable[..., jax.Array],
+    bns_intensity: Callable[..., jax.Array],
 ) -> None:
-    power = bns_power(jnp.array([0.0, 100.0]))
+    intensity = bns_intensity(jnp.array([0.0, 100.0]))
 
-    assert power[0, 0] == 0.0
-    assert bool(jnp.all(jnp.isfinite(power)))
+    assert intensity[0, 0] == 0.0
+    assert bool(jnp.all(jnp.isfinite(intensity)))
 
 
 def test_batched_sources_match_stacked_single_source_calls() -> None:
@@ -189,10 +193,10 @@ def test_batched_sources_match_stacked_single_source_calls() -> None:
         "luminosity_distance": jnp.array([500.0, 2000.0, 8000.0]),
         "inclination": jnp.array([0.0, 0.5, 1.0]),
     }
-    batched = inspiral_polarization_power(frequencies, sources, alpha=ISCO_ALPHA)
+    batched = inspiral_intensity(frequencies, sources, alpha=ISCO_ALPHA)
     independent = jnp.concatenate(
         [
-            inspiral_polarization_power(
+            inspiral_intensity(
                 frequencies,
                 {name: values[index] for name, values in sources.items()},
                 alpha=ISCO_ALPHA,
@@ -210,16 +214,16 @@ def test_gradient_is_finite_across_the_cutoff(bns: dict[str, jax.Array]) -> None
     # Below the band, inside it, and above the ~1570 Hz cutoff.
     frequencies = jnp.array([0.0, 100.0, 5000.0])
 
-    def total_power(luminosity_distance: jax.Array) -> jax.Array:
+    def total_intensity(luminosity_distance: jax.Array) -> jax.Array:
         return jnp.sum(
-            inspiral_polarization_power(
+            inspiral_intensity(
                 frequencies,
                 bns | {"luminosity_distance": luminosity_distance},
                 alpha=ISCO_ALPHA,
             )
         )
 
-    gradient = jax.grad(total_power)(bns["luminosity_distance"])
+    gradient = jax.grad(total_intensity)(bns["luminosity_distance"])
 
     assert bool(jnp.all(jnp.isfinite(gradient)))
-    assert float(gradient[0]) < 0.0  # power falls with distance
+    assert float(gradient[0]) < 0.0  # intensity falls with distance

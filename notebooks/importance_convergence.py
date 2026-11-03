@@ -28,7 +28,7 @@ with app.setup(hide_code=True):
     from astrogwb.frequency import frequency_mask
     from astrogwb.importance.catalog import (
         CatalogMetadata,
-        PolarizationPowerData,
+        IntensityData,
         read_catalog,
     )
     from astrogwb.importance.spectrum import reference_catalog
@@ -210,16 +210,16 @@ def _():
 
 @app.function(hide_code=True)
 def prefix_catalog(
-    data: PolarizationPowerData, metadata: CatalogMetadata, n: int
-) -> tuple[PolarizationPowerData, CatalogMetadata]:
+    data: IntensityData, metadata: CatalogMetadata, n: int
+) -> tuple[IntensityData, CatalogMetadata]:
     """The reference catalog of its first ``n`` draws.
 
     The first ``n`` of ``N`` iid draws are themselves an iid sample, so every
     smaller size is read off one catalog.
     """
-    sliced: PolarizationPowerData = {
+    sliced: IntensityData = {
         "frequencies": data["frequencies"],
-        "polarization_power": np.asarray(data["polarization_power"])[:, :n],
+        "intensity": np.asarray(data["intensity"])[:, :n],
         "source_parameters": {
             name: np.asarray(values)[:n]
             for name, values in data["source_parameters"].items()
@@ -276,7 +276,7 @@ def spectra_at(
 
 @app.function(hide_code=True)
 def rescaled_fn(
-    data: PolarizationPowerData,
+    data: IntensityData,
     metadata: CatalogMetadata,
     target: Population,
     frequencies: NDArray[np.float64],
