@@ -12,7 +12,7 @@ cell names its inputs, all under `outputs/`:
 | Input | Read by |
 | --- | --- |
 | `ensembles/fiducial/` | `cosmology_grid_posteriors`, `madau_dickinson_grid`, `shot_noise_coverage`, `ensemble_spectrum` |
-| `catalogs/reference-fiducial.h5` | `cosmology_grid_posteriors`, `madau_dickinson_grid`, `shot_noise_coverage`, `ensemble_spectrum` |
+| `catalogs/reference-fiducial.h5` | `fiducial_spectrum`, `cosmology_grid_posteriors`, `madau_dickinson_grid`, `shot_noise_coverage`, `ensemble_spectrum` |
 | `catalogs/reference-ladder.h5` | `importance_convergence` |
 
 `Snakefile` writes them (`docs/coverage-draws-on-slurm.md`).
@@ -20,12 +20,15 @@ A missing input is a `FileNotFoundError`, never a simulation.
 
 ## Notebooks
 
-- **`fiducial_spectrum.py`** — marimo notebook. Interactive explorer of one
-  seeded forward-model draw: characteristic amplitudes $h_c$ / $h_n$ (or
-  $S_h$ / $\Omega_{\mathrm{GW}}$), network $S_{\mathrm{eff}}$, $\sigma$, and
-  cumulative per-network SNR, with sliders for approximant, resolution and
-  observation time. No catalog file, and no paper SNR table: a single draw is
-  not the quoted number (see `ensemble_spectrum.py`).
+- **`fiducial_spectrum.py`** — marimo notebook. The paper's spectrum figures
+  and SNR table, from the model mean spectrum at the fiducials: the
+  `CatalogModel` of `catalogs/reference-fiducial.h5` (32 redshift nodes), as in
+  the grid notebooks. Writes $S_h$ and $\Omega_{\mathrm{GW}}$
+  (`fiducial_spectrum.pdf`, with the expected number of mergers in one year
+  printed for the caption), $h_c$ against each network's $h_n$ over
+  $d\mathrm{SNR}^2/d\ln f$ for $T = 1$ yr (`characteristic_amplitudes.pdf`),
+  and each network's SNR for $f_{\min} = 2, 5, 10, 20$ Hz with the shot
+  noise $\rho s$ of one realization (`mean_spectrum_snr.tex`).
 - **`cosmology_grid_posteriors.py`** — marimo notebook. Grid posteriors for
   $H_0$, $(H_0, \Omega_m)$ and $(\Xi_0, n)$ across the six detector networks,
   from a zero-noise Poisson injection as each network records it
@@ -68,8 +71,9 @@ A missing input is a `FileNotFoundError`, never a simulation.
   Sobol catalogs (`CatalogMetadata(sampling="sobol")`), compared at equal $N$
   (`sampling_comparison.pdf`). Errors are in units of the most
   sensitive network's per-bin noise and of each parameter's Fisher width.
-- **`ensemble_spectrum.py`** — marimo notebook. The paper's spectrum
-  figure and SNR tables, from a 1000-draw Poisson ensemble (`IMRPhenomXAS_NRTidalv3`,
+- **`ensemble_spectrum.py`** — marimo notebook. Validation, not a paper
+  notebook: checks the model mean spectrum of `fiducial_spectrum.py` against
+  a 1000-draw Poisson ensemble (`IMRPhenomXAS_NRTidalv3`,
   seed 41): per-network SNR and low-frequency cut as the mean over draws of
   each draw's SNR with its 16-84% range (LaTeX table),
   the characteristic amplitudes $h_c$ (median) against $h_n$ and

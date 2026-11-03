@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.24.2"
+__generated_with = "0.25.1"
 app = marimo.App()
 
 with app.setup(hide_code=True):
@@ -9,6 +9,7 @@ with app.setup(hide_code=True):
 
     from astrogwb.runtime import configure_runtime
 
+    # Backend configuration precedes array creation.
     configure_runtime()
 
     import jax
@@ -16,29 +17,33 @@ with app.setup(hide_code=True):
     import marimo as mo
     import matplotlib.pyplot as plt
     import numpy as np
+    import pandas as pd
     from matplotlib.axes import Axes as MplAxes
     from matplotlib.figure import Figure
     from matplotlib.lines import Line2D
     from matplotlib.projections import register_projection
     from matplotlib.ticker import LogFormatterMathtext, ScalarFormatter
+    from numpy.typing import NDArray
 
     from astrogwb.background import (
         characteristic_noise,
         characteristic_strain,
         omega_gw_from_spectral_density,
-        spectral_snr_squared_per_bin,
+        spectral_snr,
         spectral_snr_squared_per_log_frequency,
-    )
-    from astrogwb.background.spectral import (
-        spectral_density as catalog_spectral_density,
     )
     from astrogwb.config import load_config
     from astrogwb.detector import (
         effective_psd,
-        log_frequency_noise_scale,
+        pair_bin_scale,
+        pair_response_moment,
+        pair_terms,
     )
-    from astrogwb.frequency import frequency_mask as make_frequency_mask
-    from astrogwb.importance.catalog import CatalogMetadata, simulate_catalog
+    from astrogwb.detector.config import DetectorRegistry
+    from astrogwb.frequency import frequency_grid, frequency_mask
+    from astrogwb.importance.catalog import read_catalog
+    from astrogwb.inference import CatalogModel, Prediction, shot_noise_variance
+    from astrogwb.inference import Network as LikelihoodNetwork
     from astrogwb.paper.plotting import (
         DETECTOR_COMPARISON_LEGEND,
         DETECTOR_NETWORKS,
@@ -50,182 +55,110 @@ with app.setup(hide_code=True):
         use_paper_style,
     )
     from astrogwb.utils import years_to_seconds
-    from astrogwb.waveform import WaveformMetadata
-
-
-@app.cell(hide_code=True)
-def _():
-    mo.md(r"""
-    # Plotting the spectral density and network sensitivies
-
-    An interactive explorer for the expected gravitational-wave background of a
-    population of binary neutron stars, $S_h = \mathcal{R}\,\langle P \rangle$,
-    the model prediction the likelihood computes, here from one plain catalog. We plot its characteristic strain
-    $h_c(f)$ (or $S_h(f)$, $\Omega_{\mathrm{GW}}(f)$) against the characteristic noise
-    $h_n(f)$ of different detector network configurations comprised of
-    Einstein Telescope (ET) and Cosmic Explorer (CE), and where the SNR accrues.
-
-    The paper's figure and SNR tables come from the Poisson ensemble in
-    `notebooks/ensemble_spectrum.py`, whose realizations scatter about it.
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _():
-    mo.md(r"""
-    ## Notebook configuration
-    """)
-    return
-
-
-@app.cell
-def _():
-    # This file lives in notebooks/, so the repository root is its grandparent.
-    # `__file__` is the notebook path under `marimo edit` and when the file is
-    # run as a script.
-    ROOT_DIR = Path(__file__).resolve().parents[1]
 
     # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes.
-    # Restore matplotlib axes so plotting behaves as expected after importing
-    # detector utilities.
+    # Restore them so plotting behaves as expected after the imports above.
     register_projection(MplAxes)
-
-    use_paper_style(root=ROOT_DIR)
-
-    #: Where this notebook's figures go: under the one output root the workflow,
-    #: the figure scripts and `config/plotting.toml` all agree on.
-    BASE_DIR = ROOT_DIR / "outputs" / "figures" / "fiducial_spectrum"
-
-    # The shared [fiducials]; `root=` because accessors resolve against the cwd.
-    FIDUCIALS = load_config(ROOT_DIR / "config").fiducials
-
-    # Mirrors the shared [analysis] table. The frequency band is [analysis]; the
-    # redshift bounds are analysis.population. The approximant
-    # and observation time are the controls in the next cells.
-    minimum_frequency = 2.0
-    maximum_frequency = 4096.0
-    minimum_redshift = 0.35
-    maximum_redshift = 20.0
-
-    # The catalog the expected spectrum is averaged over; chunk_size chunks
-    # its waveform generation.
-    seed = 41
-    num_samples = 16_384
-    chunk_size = 1024
-
-    # Ordered legend from astrogwb.paper.plotting.DETECTOR_NETWORKS, detectors from
-    # the shared [networks] table. Order is load-bearing: detector_network_styles
-    # colors by first appearance, matching the other network figures.
-    registry = load_config(ROOT_DIR / "config").registry
-    NETWORKS: tuple[Network, ...] = tuple(
-        Network(name, label, registry.networks[name], registry)
-        for name, label in DETECTOR_NETWORKS
-    )
-
-    # Caps the Omega_GW panels above the signal: the L-shaped networks'
-    # calibration-line spikes otherwise stretch the axis to ~1e2.
-    OMEGA_GW_MAX: float | None = 1e-4
-    return (
-        BASE_DIR,
-        FIDUCIALS,
-        NETWORKS,
-        OMEGA_GW_MAX,
-        ROOT_DIR,
-        chunk_size,
-        maximum_frequency,
-        maximum_redshift,
-        minimum_frequency,
-        minimum_redshift,
-        num_samples,
-        seed,
-    )
 
 
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    ## Interactive configuration options
+    # The expected spectrum at the fiducial
+
+    The paper's spectrum figures and SNR table, from the model mean spectrum
+    $S_h(f) = \mathbb{E}[S_h](f)$ at the fiducial hyperparameters: the
+    importance-sampled `CatalogModel` of the shared reference catalog, the
+    same model the grid-posterior notebooks evaluate. It writes
+
+    - `fiducial_spectrum.pdf`: $S_h(f)$ and $\Omega_{\mathrm{GW}}(f)$;
+    - `characteristic_amplitudes.pdf`: $h_c$ against each network's $h_n$,
+      over $d\mathrm{SNR}^2/d\ln f$, for $T = 1$ yr;
+    - `mean_spectrum_snr.tex`: each network's SNR as the lower band edge
+      $f_{\min}$ is raised, and the shot noise $\rho s$ of one realization.
+
+    A single Poisson realization scatters about this spectrum by a relative
+    $s \approx 0.2\%$, so its SNR differs from the SNR of the mean only at
+    order $s^2$. The ensemble check lives in `notebooks/ensemble_spectrum.py`.
+
+    The catalog is read, never simulated: `Snakefile` rule
+    `reference_catalog` writes `outputs/catalogs/reference-fiducial.h5`.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## Configuration
     """)
     return
 
 
 @app.cell
 def _():
-    approximant_choice = mo.ui.dropdown(
-        options=[
-            "TaylorF2",
-            "IMRPhenomXAS",
-            "IMRPhenomXAS_NRTidalv3",
-        ],
-        value="IMRPhenomXAS",
-        label="Approximant",
+    ROOT_DIR = Path(__file__).resolve().parents[1]
+    #: Where this notebook's figures and table go: one folder per notebook under
+    #: the figures root, named after the notebook file.
+    BASE_DIR = ROOT_DIR / "outputs" / "figures" / Path(__file__).stem
+    use_paper_style(root=ROOT_DIR)
+
+    observation_time = 1.0  # years
+    minimum_frequencies = [2.0, 5.0, 10.0, 20.0]
+    # The shared reference catalog, written by Snakefile: 2^14 Sobol draws at
+    # the default approximant, generated at reference redshift 1e-4. Its
+    # population holds the analysis window (z in [0.35, 20]).
+    catalog_path = ROOT_DIR / "outputs" / "catalogs" / "reference-fiducial.h5"
+    num_redshift_nodes = 32
+    # The shot noise carries each network's per-source response, from these
+    # isotropic draws, as in the grid and coverage notebooks.
+    response_draws, response_seed = 32_768, 0
+
+    # The observed grid of the default waveform: the grid of the fiducial
+    # ensemble and of the likelihood.
+    _waveform = load_config(ROOT_DIR / "config").waveforms["default"]
+    frequencies = frequency_grid(
+        _waveform.frequency_spacing,
+        _waveform.minimum_frequency,
+        _waveform.maximum_frequency,
+        _waveform.frequency_resolution,
+        _waveform.turnover_frequency,
+        dlogf=_waveform.dlogf,
     )
-    spectrum_choice = mo.ui.dropdown(
-        options=["h_c / h_n", "Omega_GW", "S_h"],
-        value="h_c / h_n",
-        label="Plot spectrum",
+    maximum_frequency = float(_waveform.maximum_frequency)
+
+    registry = load_config(ROOT_DIR / "config").registry
+    network_rows = DETECTOR_NETWORKS
+    # Order is load-bearing: detector_network_styles colors by first appearance.
+    plotted_networks = tuple(
+        Network(name, label, registry.networks[name], registry)
+        for name, label in network_rows
     )
-    # Notebook-only finer uniform grids resolve the SNR peak at ~5-10 Hz, where
-    # the shared waveform's 1 Hz bins leave few points per e-fold.
-    frequency_resolution_choice = mo.ui.dropdown(
-        options={"1": 1.0, "0.5": 0.5, "0.25": 0.25, "0.125": 0.125},
-        value="0.25",
-        label="Frequency resolution (Hz)",
-    )
-    observation_time_slider = mo.ui.slider(
-        start=1,
-        stop=10,
-        step=1,
-        value=1,
-        debounce=True,
-        show_value=True,
-        label="Observation time (years)",
-    )
-    include_cosmic_explorer_switch = mo.ui.switch(
-        value=True,
-        label="Include Cosmic Explorer",
-    )
-    write_figures_switch = mo.ui.switch(
-        value=True,
-        label="Write figures",
-    )
-    mo.vstack(
-        [
-            approximant_choice,
-            spectrum_choice,
-            frequency_resolution_choice,
-            observation_time_slider,
-            include_cosmic_explorer_switch,
-            write_figures_switch,
-        ]
-    )
+    plotted_colors, plotted_linestyles = detector_network_styles(plotted_networks)
     return (
-        approximant_choice,
-        frequency_resolution_choice,
-        include_cosmic_explorer_switch,
-        observation_time_slider,
-        spectrum_choice,
-        write_figures_switch,
+        BASE_DIR,
+        ROOT_DIR,
+        catalog_path,
+        frequencies,
+        maximum_frequency,
+        minimum_frequencies,
+        network_rows,
+        num_redshift_nodes,
+        observation_time,
+        plotted_colors,
+        plotted_linestyles,
+        plotted_networks,
+        registry,
+        response_draws,
+        response_seed,
     )
 
 
 @app.cell
-def _(
-    approximant_choice,
-    frequency_resolution_choice,
-    observation_time_slider,
-):
-    approximant = approximant_choice.value
-    frequency_resolution = float(frequency_resolution_choice.value)
-    observation_time = float(observation_time_slider.value)
-    return approximant, frequency_resolution, observation_time
-
-
-@app.cell
-def _(include_cosmic_explorer_switch):
-    include_cosmic_explorer = include_cosmic_explorer_switch.value
-    return (include_cosmic_explorer,)
+def _():
+    write_figures_switch = mo.ui.switch(value=True, label="Write figures")
+    write_figures_switch
+    return (write_figures_switch,)
 
 
 @app.cell
@@ -237,815 +170,418 @@ def _(write_figures_switch):
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    ## Plot helpers
-
-    Shared band-limiting and SNR accumulation used by the spectrum panels.
+    ## Toolbox
     """)
     return
 
 
-@app.cell(hide_code=True)
-def _():
-    def band_limited_spectrum(
-        frequencies: jax.Array,
-        spectral_density_arr: jax.Array,
-        frequency_mask: jax.Array,
-        *,
-        h0: float,
-        effective_psd_arr: jax.Array | np.ndarray | None = None,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None, np.ndarray]:
-        """Restrict $S_h$, $\\Omega_{\\mathrm{GW}}$, and optional $S_{\\mathrm{eff}}$ to the band.
-
-        The last element is the boolean selection *on the full grid*, so a
-        quantity that needs bin widths can be computed on the whole axis and
-        masked, never derived from the restricted frequencies.
-        """
-        omega_gw = omega_gw_from_spectral_density(
-            spectral_density_arr,
-            frequencies,
-            hubble_constant=h0,
+@app.function(hide_code=True)
+def format_axis_ticks(axis: MplAxes) -> None:
+    """Render tick labels in mathtext on log and linear axes."""
+    for scale, ticks in (
+        (axis.get_xscale(), axis.xaxis),
+        (axis.get_yscale(), axis.yaxis),
+    ):
+        ticks.set_major_formatter(
+            LogFormatterMathtext()
+            if scale == "log"
+            else ScalarFormatter(useMathText=True)
         )
-        mask = np.asarray(frequency_mask)
-        freq = np.asarray(frequencies)[mask]
-        omega = np.asarray(omega_gw)[mask]
-        sh = np.asarray(spectral_density_arr)[mask]
-        pos = (omega > 0.0) & (sh > 0.0) & (freq > 0.0)
-        seff: np.ndarray | None = None
-        if effective_psd_arr is not None:
-            seff = np.asarray(effective_psd_arr)[mask]
-            pos = pos & np.isfinite(seff) & (seff > 0.0)
-            seff = seff[pos]
-        selected = np.zeros_like(mask)
-        selected[np.flatnonzero(mask)[pos]] = True
-        return freq[pos], omega[pos], sh[pos], seff, selected
 
-    def snr_integrand_and_cumulative(
-        spectral_density: np.ndarray,
-        effective_psd_arr: np.ndarray,
-        observation_time_sec: float,
-        frequencies: np.ndarray,
-        selected: np.ndarray,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Per-bin $\\Delta\\mathrm{SNR}^2$ and cumulative SNR from the left and right.
 
-        Every array is on the full grid and ``selected`` picks the bins to
-        report: widths come from the whole axis, so the bins beside a dropped
-        one keep their true width.
+@app.function(hide_code=True)
+def network_legend_handles(
+    networks: Sequence[Network],
+    colors: Sequence[str],
+    linestyles: Sequence[str],
+) -> list[Line2D]:
+    """One legend line per network, in the colors and styles of its curves."""
+    return [
+        Line2D([], [], color=color, linestyle=linestyle, label=network.label)
+        for network, color, linestyle in zip(networks, colors, linestyles, strict=True)
+    ]
 
-        ``SNR(<f)`` and ``SNR(>f)`` both include the bin at ``f``, so the last
-        left-hand value and the first right-hand value equal the total SNR. Both
-        cumulative curves are divided by that total, mapping them to $[0, 1]$.
-        """
-        snr_squared = np.asarray(
-            spectral_snr_squared_per_bin(
-                jnp.asarray(spectral_density),
-                jnp.asarray(effective_psd_arr),
-                observation_time_sec,
-                jnp.asarray(frequencies),
-                frequency_mask=jnp.asarray(selected),
+
+@app.function(hide_code=True)
+def snr_table(
+    prediction: Prediction,
+    registry: DetectorRegistry,
+    rows: Sequence[tuple[str, str]],
+    frequencies: NDArray[np.float64],
+    observation_time: float,
+    minimum_frequencies: Sequence[float],
+    maximum_frequency: float,
+    *,
+    response_draws: int,
+    response_seed: int,
+) -> pd.DataFrame:
+    r"""SNR of the mean spectrum per network and lower band edge, and its shot noise.
+
+    The SNR columns are :math:`\rho` of ``prediction.mean`` over
+    :math:`[f_{\min}, f_{\max}]` for each of ``minimum_frequencies``. The last
+    column is :math:`\rho s` over the widest band: :math:`s` is the relative
+    standard deviation of one realization's shot noise projected on the
+    network's noise-weighted template
+    (:func:`astrogwb.inference.shot_noise_variance`), with the network's
+    per-source response.
+
+    Parameters
+    ----------
+    prediction
+        The model at the fiducial, with its power moment.
+    registry
+        Source of the networks.
+    rows
+        ``(network name, row label)`` pairs, in row order.
+    frequencies
+        Observed frequency grid ``(F,)``, that of ``prediction``.
+    observation_time
+        Observing time in years.
+    minimum_frequencies
+        Lower band edges in Hz; the first is the widest band.
+    maximum_frequency
+        Upper band edge in Hz.
+    response_draws, response_seed
+        Isotropic draws of each network's per-pair response
+        (:func:`~astrogwb.detector.pair_response_moment`).
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per label, one SNR column per cut and a ``rho s`` column.
+    """
+    grid = jnp.asarray(frequencies)
+    seconds = years_to_seconds(observation_time)
+    columns = [rf"$f_{{\min}} = {fmin:g}$ Hz" for fmin in minimum_frequencies]
+    records = {}
+    for name, label in rows:
+        geometry = registry.build_network(name)
+        noise = jnp.asarray(effective_psd(grid, geometry))
+        finite = jnp.isfinite(noise) & (noise > 0.0)
+        snrs = [
+            float(
+                spectral_snr(
+                    prediction.mean,
+                    noise,
+                    seconds,
+                    grid,
+                    frequency_mask=frequency_mask(
+                        grid, fmin=fmin, fmax=maximum_frequency
+                    )
+                    & finite,
+                )
             )
-        )[selected]
-        snr_lt = np.sqrt(np.cumsum(snr_squared))
-        snr_gt = np.sqrt(np.cumsum(snr_squared[::-1])[::-1])
-        total = snr_lt[-1]
-        return snr_squared, snr_lt / total, snr_gt / total
-
-    def network_legend_handles(
-        networks: Sequence[Network],
-        colors: Sequence[str],
-        linestyles: Sequence[str],
-    ) -> list[Line2D]:
-        return [
-            Line2D([], [], color=color, linestyle=linestyle, label=network.label)
-            for network, color, linestyle in zip(
-                networks, colors, linestyles, strict=True
-            )
+            for fmin in minimum_frequencies
         ]
-
-    def format_axis_ticks(axis: MplAxes) -> None:
-        """Render tick labels in mathtext / TeX on log and linear axes."""
-        if axis.get_xscale() == "log":
-            axis.xaxis.set_major_formatter(LogFormatterMathtext())
-        else:
-            axis.xaxis.set_major_formatter(ScalarFormatter(useMathText=True))
-        if axis.get_yscale() == "log":
-            axis.yaxis.set_major_formatter(LogFormatterMathtext())
-        else:
-            axis.yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
-
-    return (
-        band_limited_spectrum,
-        format_axis_ticks,
-        network_legend_handles,
-        snr_integrand_and_cumulative,
+        band = np.asarray(
+            frequency_mask(grid, fmin=minimum_frequencies[0], fmax=maximum_frequency)
+        )
+        scale = np.asarray(pair_bin_scale(grid, geometry, observation_time))
+        overlap = np.stack([term.overlap for term in pair_terms(grid, geometry)])
+        network = LikelihoodNetwork.from_pairs(
+            scale,
+            overlap,
+            band & np.isfinite(scale) & (scale > 0.0),
+            response_moment=pair_response_moment(
+                jax.random.key(response_seed), response_draws, grid, geometry
+            ),
+        )
+        scatter = float(jnp.sqrt(shot_noise_variance(prediction, network)))
+        records[label] = [*snrs, snrs[0] * scatter]
+        del network
+    return pd.DataFrame.from_dict(
+        records, orient="index", columns=[*columns, r"$\rho s$"]
     )
 
 
-@app.cell(hide_code=True)
-def _():
-    mo.md(r"""
-    ## The expected gravitational-wave background
-    """)
-    return
-
-
-@app.cell
-def _(
-    FIDUCIALS,
-    ROOT_DIR,
-    approximant,
-    chunk_size,
-    frequency_resolution,
-    maximum_frequency,
-    maximum_redshift,
-    minimum_redshift,
-    num_samples,
-    seed,
-):
-    # The expected spectrum: the population's total rate times the mean power
-    # of a plain catalog drawn at the fiducials.
-    _population = load_config(ROOT_DIR / "config").catalog.population.replace(
-        minimum_redshift=minimum_redshift, maximum_redshift=maximum_redshift
-    )
-    _metadata = CatalogMetadata(
-        waveform=WaveformMetadata.model_validate(
-            {
-                **load_config(ROOT_DIR / "config").catalog.waveform.model_dump(),
-                "approximant": approximant,
-                "maximum_frequency": maximum_frequency,
-                "frequency_spacing": "linear",
-                "frequency_resolution": frequency_resolution,
-                "turnover_frequency": None,
-            }
-        ),
-        population=_population,
-        fiducials=FIDUCIALS,
-        num_samples=num_samples,
-    )
-    _catalog = simulate_catalog(_metadata, jax.random.key(seed), chunk_size=chunk_size)
-    _rate = _population.build()(FIDUCIALS)[0].total_merger_rate()
-    frequencies = jnp.asarray(_catalog["frequencies"])
-    spectral_density = catalog_spectral_density(
-        jnp.asarray(_catalog["intensity"]), jnp.ones(num_samples), _rate
-    )
-
-    {
-        "Catalog sources": num_samples,
-        "Total merger rate (1/yr)": float(_rate) * years_to_seconds(1.0),
-    }
-    return frequencies, spectral_density
-
-
-@app.cell
-def _(
-    FIDUCIALS,
-    NETWORKS: tuple[Network, ...],
-    band_limited_spectrum,
-    frequencies,
-    maximum_frequency,
-    minimum_frequency,
-    observation_time,
-    snr_integrand_and_cumulative,
-    spectral_density,
-):
-    frequency_mask = make_frequency_mask(
-        frequencies,
-        fmin=minimum_frequency,
-        fmax=maximum_frequency,
-    )
-
-    detector_colors, detector_linestyles = detector_network_styles(NETWORKS)
-
-    effective_psds: dict[str, jax.Array] = {}
-    for _network in NETWORKS:
-        _geometry = _network.detector_registry.build_detectors(_network.detectors)
-        effective_psds[_network.name] = jnp.asarray(
-            effective_psd(frequencies, _geometry)
-        )
-
-    _observation_time_sec = years_to_seconds(observation_time)
-    frequency_by_network: dict[str, np.ndarray] = {}
-    snr_lt_by_network: dict[str, np.ndarray] = {}
-    snr_gt_by_network: dict[str, np.ndarray] = {}
-    snr_density_by_network: dict[str, np.ndarray] = {}
-    sigma_ln_f_by_network: dict[str, np.ndarray] = {}
-    noise_amplitude_by_network: dict[str, np.ndarray] = {}
-    omega_sigma_ln_f_by_network: dict[str, np.ndarray] = {}
-    for _network in NETWORKS:
-        _band_freq, _, _band_sh, _band_seff, _selected = band_limited_spectrum(
-            frequencies,
-            spectral_density,
-            frequency_mask,
-            h0=FIDUCIALS["H0"],
-            effective_psd_arr=effective_psds[_network.name],
-        )
-        if _band_seff is None:
-            raise RuntimeError(f"{_network.name} effective PSD was not restricted")
-        _, _snr_lt, _snr_gt = snr_integrand_and_cumulative(
-            spectral_density,
-            effective_psds[_network.name],
-            _observation_time_sec,
-            frequencies,
-            _selected,
-        )
-        # Per e-fold rather than per bin, so neither curve moves with the grid.
-        _sigma_ln_f = np.asarray(
-            log_frequency_noise_scale(
-                jnp.asarray(_band_seff),
-                jnp.asarray(_band_freq),
-                observation_time,
-            )
-        )
-        frequency_by_network[_network.name] = _band_freq
-        snr_lt_by_network[_network.name] = _snr_lt
-        snr_gt_by_network[_network.name] = _snr_gt
-        snr_density_by_network[_network.name] = np.asarray(
-            spectral_snr_squared_per_log_frequency(
-                jnp.asarray(_band_sh),
-                jnp.asarray(_band_seff),
-                jnp.asarray(_band_freq),
-                _observation_time_sec,
-            )
-        )
-        sigma_ln_f_by_network[_network.name] = _sigma_ln_f
-        noise_amplitude_by_network[_network.name] = np.asarray(
-            characteristic_noise(
-                jnp.asarray(_band_seff), jnp.asarray(_band_freq), observation_time
-            )
-        )
-        omega_sigma_ln_f_by_network[_network.name] = np.asarray(
-            omega_gw_from_spectral_density(
-                jnp.asarray(_sigma_ln_f),
-                jnp.asarray(_band_freq),
-                hubble_constant=FIDUCIALS["H0"],
-            )
-        )
-    fiducial_freq, fiducial_omega, fiducial_sh, _, _ = band_limited_spectrum(
-        frequencies,
+@app.function(hide_code=True)
+def plot_spectral_density(
+    frequency: NDArray[np.float64],
+    spectral_density: NDArray[np.float64],
+    omega_gw: NDArray[np.float64],
+) -> Figure:
+    r""":math:`S_h(f)` and :math:`\Omega_{\mathrm{GW}}(f)` on twin log axes."""
+    fig, ax_sh = plt.subplots()
+    ax_omega = ax_sh.twinx()
+    (line_sh,) = ax_sh.loglog(
+        frequency,
         spectral_density,
-        frequency_mask,
-        h0=FIDUCIALS["H0"],
+        color=SPECTRUM["sh"],
+        linestyle=SPECTRUM_LINESTYLES["sh"],
+        label=r"$S_h$",
     )
-    fiducial_strain = np.asarray(
-        characteristic_strain(jnp.asarray(fiducial_sh), jnp.asarray(fiducial_freq))
+    (line_omega,) = ax_omega.loglog(
+        frequency,
+        omega_gw,
+        color=SPECTRUM["omega_gw"],
+        linestyle=SPECTRUM_LINESTYLES["omega_gw"],
+        label=r"$\Omega_{\mathrm{GW}}$",
     )
-    return (
-        detector_colors,
-        detector_linestyles,
-        effective_psds,
-        fiducial_freq,
-        fiducial_omega,
-        fiducial_sh,
-        fiducial_strain,
-        frequency_by_network,
-        frequency_mask,
-        noise_amplitude_by_network,
-        omega_sigma_ln_f_by_network,
-        sigma_ln_f_by_network,
-        snr_density_by_network,
-        snr_gt_by_network,
-        snr_lt_by_network,
-    )
+    ax_sh.set_xlabel(r"$f\ \mathrm{(Hz)}$")
+    ax_sh.set_ylabel(r"$S_h(f)\ \mathrm{[Hz^{-1}]}$")
+    ax_omega.set_ylabel(r"$\Omega_{\mathrm{GW}}(f)$")
+    ax_sh.set_axisbelow(True)
+    ax_sh.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
+    for axis in (ax_sh, ax_omega):
+        format_axis_ticks(axis)
+    ax_sh.legend(handles=[line_sh, line_omega], loc="lower center", frameon=False)
+    fig.tight_layout()
+    return fig
 
 
-@app.cell
-def _(
-    NETWORKS: tuple[Network, ...],
-    detector_colors,
-    detector_linestyles,
-    include_cosmic_explorer,
-):
-    # Styles stay assigned on the full network tuple, so dropping the CE
-    # companions keeps each ET geometry's color.
-    if include_cosmic_explorer:
-        plotted_networks = NETWORKS
-        plotted_colors = detector_colors
-        plotted_linestyles = detector_linestyles
-    else:
-        _kept = tuple(
-            (network, color, linestyle)
-            for network, color, linestyle in zip(
-                NETWORKS,
-                detector_colors,
-                detector_linestyles,
-                strict=True,
-            )
-            if not network.name.endswith("-CE-Hanford")
+@app.function(hide_code=True)
+def amplitude_curves(
+    spectral_density: jax.Array,
+    registry: DetectorRegistry,
+    networks: Sequence[Network],
+    frequencies: NDArray[np.float64],
+    observation_time: float,
+    band: NDArray[np.bool_],
+) -> dict[str, dict[str, NDArray[np.float64]]]:
+    r"""Each network's :math:`h_n` and :math:`d\mathrm{SNR}^2/d\ln f` on its finite bins.
+
+    Parameters
+    ----------
+    spectral_density
+        The spectrum ``(F,)``.
+    registry, networks
+        Source of the networks and the networks.
+    frequencies
+        Observed frequency grid ``(F,)``.
+    observation_time
+        Observing time in years.
+    band
+        Plotted bins ``(F,)``.
+
+    Returns
+    -------
+    dict
+        Per network name, the frequencies of its finite plotted bins
+        (``"frequency"``), its :math:`h_n` (``"noise"``) and
+        :math:`d\mathrm{SNR}^2/d\ln f` (``"density"``) there.
+    """
+    grid = jnp.asarray(frequencies)
+    seconds = years_to_seconds(observation_time)
+    curves = {}
+    for network in networks:
+        noise = jnp.asarray(effective_psd(grid, registry.build_network(network.name)))
+        keep = band & np.isfinite(np.asarray(noise)) & (np.asarray(noise) > 0.0)
+        curves[network.name] = {
+            "frequency": np.asarray(grid)[keep],
+            "noise": np.asarray(characteristic_noise(noise, grid, observation_time))[
+                keep
+            ],
+            "density": np.asarray(
+                spectral_snr_squared_per_log_frequency(
+                    spectral_density, noise, grid, seconds
+                )
+            )[keep],
+        }
+    return curves
+
+
+@app.function(hide_code=True)
+def plot_characteristic_amplitudes(
+    frequency: NDArray[np.float64],
+    strain: NDArray[np.float64],
+    curves: Mapping[str, Mapping[str, NDArray[np.float64]]],
+    networks: Sequence[Network],
+    colors: Sequence[str],
+    linestyles: Sequence[str],
+    observation_time: float,
+) -> Figure:
+    r"""Stack :math:`h_c` against each :math:`h_n` over :math:`d\mathrm{SNR}^2/d\ln f`.
+
+    The fourth power of the ratio of the two top-panel curves is that
+    network's SNR density, shown in the bottom panel on the shared frequency
+    axis, so the comparison lines up with where the SNR accrues. On a log
+    frequency axis the area under a density curve is the network's
+    :math:`\mathrm{SNR}^2`.
+    """
+    width, height = plt.rcParams["figure.figsize"]
+    fig, (ax, ax_density) = plt.subplots(
+        2,
+        1,
+        sharex=True,
+        figsize=(width, 1.6 * height),
+        gridspec_kw={"height_ratios": (3, 2)},
+    )
+    positive = strain > 0.0
+    ax.loglog(
+        frequency[positive], strain[positive], color=SPECTRUM["sh"], linestyle=":"
+    )
+    for network, color, linestyle in zip(networks, colors, linestyles, strict=True):
+        curve = curves[network.name]
+        ax.loglog(curve["frequency"], curve["noise"], color=color, linestyle=linestyle)
+        ax_density.semilogx(
+            curve["frequency"], curve["density"], color=color, linestyle=linestyle
         )
-        plotted_networks = tuple(network for network, _, _ in _kept)
-        plotted_colors = [color for _, color, _ in _kept]
-        plotted_linestyles = [linestyle for _, _, linestyle in _kept]
-    return plotted_colors, plotted_linestyles, plotted_networks
+    ax.set_ylim(0.3 * strain[positive].min(), 20.0 * strain.max())
+    ax.set_ylabel(r"$h_c(f), \, h_n(f)$")
+    ax_density.set_xlabel(r"$f\ \mathrm{(Hz)}$")
+    ax_density.set_ylabel(r"$d\mathrm{SNR}^{2}/d\ln f$")
+    ax_density.text(
+        0.98,
+        0.92,
+        rf"$T = {observation_time:g}\ \mathrm{{yr}}$",
+        transform=ax_density.transAxes,
+        ha="right",
+        va="top",
+    )
+    for panel in (ax, ax_density):
+        panel.set_axisbelow(True)
+        panel.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
+        format_axis_ticks(panel)
+    signal_legend = ax.legend(
+        handles=[Line2D([], [], color=SPECTRUM["sh"], linestyle=":")],
+        labels=[r"$h_c$"],
+        loc="upper right",
+        frameon=False,
+        handlelength=2.5,
+    )
+    ax.add_artist(signal_legend)
+    ax.legend(
+        handles=network_legend_handles(networks, colors, linestyles),
+        **DETECTOR_COMPARISON_LEGEND,
+    )
+    fig.tight_layout()
+    return fig
 
 
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    ## Network effective PSDs
+    ## The model at the fiducial
+
+    The reference catalog bound to its own population on the observed grid,
+    evaluated at the catalog's fiducials. The expected number of mergers in the
+    window over $T$ is the observer-frame total rate times $T$.
+
+    The reference grid stops at 4000 Hz, and a node at redshift $z$ reads it at
+    $f(1+z)/(1+z_{\mathrm{ref}})$, so the top observed bins see only the low
+    nodes; queries past the edge contribute zero. The BNS signal there is
+    already negligible: dropping the last 100, 50 or 20 Hz of the reference
+    grid changes the spectrum by at most $2 \times 10^{-4}$, $5 \times 10^{-5}$
+    or $3 \times 10^{-6}$ (all at about 2 kHz), so the part past the edge is
+    smaller still.
     """)
     return
 
 
 @app.cell
-def _(format_axis_ticks, network_legend_handles):
-    def plot_effective_psds(
-        frequencies: jax.Array,
-        networks: Sequence[Network],
-        psds_by_network: Mapping[str, jax.Array | np.ndarray],
-        *,
-        colors: Sequence[str],
-        linestyles: Sequence[str],
-        frequency_mask: jax.Array,
-    ) -> Figure:
-        """Overlay network effective PSDs on shared log–log axes."""
-        if len(networks) != len(colors) or len(networks) != len(linestyles):
-            raise ValueError("color and linestyle counts must match the networks")
-
-        _fig, ax = plt.subplots()
-        mask = np.asarray(frequency_mask)
-        freq = np.asarray(frequencies)[mask]
-        for network, color, linestyle in zip(networks, colors, linestyles, strict=True):
-            psd = np.asarray(psds_by_network[network.name])[mask]
-            pos = np.isfinite(psd) & (psd > 0.0) & (freq > 0.0)
-            ax.loglog(
-                freq[pos],
-                psd[pos],
-                color=color,
-                linestyle=linestyle,
-            )
-
-        ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
-        ax.set_ylabel(r"$S_{\mathrm{eff}}(f)\ \mathrm{[Hz^{-1}]}$")
-        ax.set_axisbelow(True)
-        ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
-        format_axis_ticks(ax)
-        ax.legend(
-            handles=network_legend_handles(networks, colors, linestyles),
-            **DETECTOR_COMPARISON_LEGEND,
-        )
-        _fig.tight_layout()
-        return _fig
-
-    return (plot_effective_psds,)
-
-
-@app.cell
-def _(
-    BASE_DIR,
-    ROOT_DIR,
-    effective_psds: dict[str, jax.Array],
-    frequencies,
-    frequency_mask,
-    plot_effective_psds,
-    plotted_colors,
-    plotted_linestyles,
-    plotted_networks,
-    write_figures,
-):
-    _fig = plot_effective_psds(
-        frequencies,
-        plotted_networks,
-        effective_psds,
-        colors=plotted_colors,
-        linestyles=plotted_linestyles,
-        frequency_mask=frequency_mask,
-    )
-    if write_figures:
-        save_figures({BASE_DIR / "effective_psds.pdf": _fig}, root=ROOT_DIR)
-    _fig
-    return
-
-
-@app.cell(hide_code=True)
-def _():
-    mo.md(r"""
-    ## $S_h$ versus network sensitivity curves
-
-    The sensitivity curves are $\sigma_{\ln f}(f) = S_{\mathrm{eff}}(f)/\sqrt{2Tf}$:
-    the noise over a bandwidth of about $f$, so they do not move with the
-    frequency grid. The squared ratio of a spectrum to a curve is
-    $d\mathrm{SNR}^2/d\ln f$, plotted below. The likelihood still uses the
-    per-bin scale $S_{\mathrm{eff}}/\sqrt{2T\Delta f}$, which is lower by
-    $\sqrt{f/\Delta f}$ and so is not a detectability threshold.
-    """)
-    return
-
-
-@app.cell
-def _(format_axis_ticks, network_legend_handles):
-    def draw_spectrum_and_sensitivities(
-        ax: MplAxes,
-        frequency: np.ndarray,
-        spectrum: np.ndarray,
-        networks: Sequence[Network],
-        frequency_by_network: Mapping[str, np.ndarray],
-        sensitivities_by_network: Mapping[str, np.ndarray],
-        *,
-        colors: Sequence[str],
-        linestyles: Sequence[str],
-        spectrum_label: str,
-        spectrum_color: str,
-        spectrum_linestyle: str,
-        ylabel: str,
-        ymin: float | None = None,
-        ymax: float | None = None,
-        include_spectrum_in_legend: bool = True,
-        spectrum_legend_loc: str | None = None,
-        xlabel: bool = True,
-    ) -> None:
-        """Overlay a fiducial spectrum with per-network sensitivities on ``ax``.
-
-        When ``spectrum_legend_loc`` is set, the spectrum gets its own legend inside
-        the axes (e.g. ``"upper left"``). The network legend still uses
-        ``DETECTOR_COMPARISON_LEGEND`` above the frame and remains ``ax.legend_``
-        so ``tight_layout`` keeps reserving space for it; the inner legend is
-        pinned with ``ax.add_artist``.
-        """
-        if len(networks) != len(colors) or len(networks) != len(linestyles):
-            raise ValueError("color and linestyle counts must match the networks")
-        if include_spectrum_in_legend and spectrum_legend_loc is not None:
-            raise ValueError(
-                "use at most one of include_spectrum_in_legend and spectrum_legend_loc"
-            )
-
-        (line_spectrum,) = ax.loglog(
-            frequency,
-            spectrum,
-            color=spectrum_color,
-            linestyle=spectrum_linestyle,
-            label=spectrum_label,
-        )
-        for network, color, linestyle in zip(networks, colors, linestyles, strict=True):
-            network_frequency = np.asarray(frequency_by_network[network.name])
-            sensitivity = np.asarray(sensitivities_by_network[network.name])
-            pos = (
-                np.isfinite(sensitivity)
-                & (sensitivity > 0.0)
-                & (network_frequency > 0.0)
-            )
-            ax.loglog(
-                network_frequency[pos],
-                sensitivity[pos],
-                color=color,
-                linestyle=linestyle,
-            )
-
-        if xlabel:
-            ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
-        ax.set_ylabel(ylabel)
-        # Either bound may be pinned; the other keeps its autoscaled value.
-        auto_ymin, auto_ymax = ax.get_ylim()
-        ax.set_ylim(
-            auto_ymin if ymin is None else ymin,
-            auto_ymax if ymax is None else ymax,
-        )
-        ax.set_axisbelow(True)
-        ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
-        format_axis_ticks(ax)
-        network_handles = network_legend_handles(networks, colors, linestyles)
-        legend_handles = (
-            [line_spectrum, *network_handles]
-            if include_spectrum_in_legend
-            else network_handles
-        )
-        if spectrum_legend_loc is not None:
-            # Keep the detector legend as ax.legend_ so tight_layout still
-            # accounts for the above-axes bbox; pin the spectrum entry separately.
-            spectrum_legend = ax.legend(
-                handles=[line_spectrum],
-                loc=spectrum_legend_loc,
-                frameon=False,
-                handlelength=2.5,
-            )
-            ax.add_artist(spectrum_legend)
-        ax.legend(handles=legend_handles, **DETECTOR_COMPARISON_LEGEND)
-
-    return (draw_spectrum_and_sensitivities,)
-
-
-@app.cell(hide_code=True)
-def _():
-    mo.md(r"""
-    ## Inspecting the SNR of the spectral density
-    """)
-    return
-
-
-@app.cell
-def _(
-    draw_spectrum_and_sensitivities,
-    format_axis_ticks,
-    network_legend_handles,
-):
-    def _draw_snr_curves(
-        ax: MplAxes,
-        networks: Sequence[Network],
-        frequency_by_network: Mapping[str, np.ndarray],
-        values_by_network: Mapping[str, np.ndarray],
-        *,
-        colors: Sequence[str],
-        linestyles: Sequence[str],
-        ylabel: str,
-        loglog: bool = False,
-        legend: bool = True,
-    ) -> None:
-        """Overlay one per-network SNR curve on ``ax`` and style the axes."""
-        if len(networks) != len(colors) or len(networks) != len(linestyles):
-            raise ValueError("color and linestyle counts must match the networks")
-
-        draw = ax.loglog if loglog else ax.semilogx
-        for network, color, linestyle in zip(networks, colors, linestyles, strict=True):
-            draw(
-                frequency_by_network[network.name],
-                values_by_network[network.name],
-                color=color,
-                linestyle=linestyle,
-            )
-
-        ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
-        ax.set_ylabel(ylabel)
-        ax.set_axisbelow(True)
-        ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
-        format_axis_ticks(ax)
-        if legend:
-            ax.legend(
-                handles=network_legend_handles(networks, colors, linestyles),
-                **DETECTOR_COMPARISON_LEGEND,
-            )
-
-    def plot_spectrum_and_snr_density(
-        frequency: np.ndarray,
-        spectrum: np.ndarray,
-        networks: Sequence[Network],
-        frequency_by_network: Mapping[str, np.ndarray],
-        sensitivities_by_network: Mapping[str, np.ndarray],
-        snr_density_by_network: Mapping[str, np.ndarray],
-        *,
-        observation_time: float,
-        colors: Sequence[str],
-        linestyles: Sequence[str],
-        spectrum_label: str,
-        spectrum_color: str,
-        spectrum_linestyle: str,
-        ylabel: str,
-        spectrum_max: float | None = None,
-    ) -> Figure:
-        """Stack the selected spectrum versus sensitivity over the SNR density.
-
-        The squared gap between the spectrum and a network's curve in the top
-        panel is that network's $d\\mathrm{SNR}^2/d\\ln f$ in the bottom one,
-        so the shared frequency axis lines the comparison up with where the
-        SNR accrues. The density is absolute, so each curve's area is its
-        network's $\\mathrm{SNR}^2$ at ``observation_time`` (years), which
-        the bottom panel states.
-        """
-        width, height = plt.rcParams["figure.figsize"]
-        _fig, (ax_top, ax_bottom) = plt.subplots(
-            2,
-            1,
-            sharex=True,
-            figsize=(width, 1.6 * height),
-            gridspec_kw={"height_ratios": (3, 2)},
-        )
-        draw_spectrum_and_sensitivities(
-            ax_top,
-            frequency,
-            spectrum,
-            networks,
-            frequency_by_network,
-            sensitivities_by_network,
-            colors=colors,
-            linestyles=linestyles,
-            spectrum_label=spectrum_label,
-            spectrum_color=spectrum_color,
-            spectrum_linestyle=spectrum_linestyle,
-            ylabel=ylabel,
-            ymax=spectrum_max,
-            include_spectrum_in_legend=False,
-            spectrum_legend_loc="upper left",
-            xlabel=False,
-        )
-        _draw_snr_curves(
-            ax_bottom,
-            networks,
-            frequency_by_network,
-            snr_density_by_network,
-            colors=colors,
-            linestyles=linestyles,
-            ylabel=r"$d\mathrm{SNR}^{2}/d\ln f$",
-            legend=False,
-        )
-        ax_bottom.text(
-            0.98,
-            0.92,
-            rf"$T = {observation_time:g}\ \mathrm{{yr}}$",
-            transform=ax_bottom.transAxes,
-            ha="right",
-            va="top",
-        )
-        # The bottom panel's semilogx reset the shared x formatter.
-        format_axis_ticks(ax_top)
-        _fig.tight_layout(h_pad=0.4)
-        return _fig
-
-    def plot_snr_integrand(
-        networks: Sequence[Network],
-        frequency_by_network: Mapping[str, np.ndarray],
-        snr_density_by_network: Mapping[str, np.ndarray],
-        *,
-        colors: Sequence[str],
-        linestyles: Sequence[str],
-    ) -> Figure:
-        """Plot each network's $d\\mathrm{SNR}^2/d\\ln f$.
-
-        Log x-axis, linear y-axis: the area under a curve over a band is that
-        band's share of $\\mathrm{SNR}^2$.
-        """
-        _fig, ax = plt.subplots()
-        _draw_snr_curves(
-            ax,
-            networks,
-            frequency_by_network,
-            snr_density_by_network,
-            colors=colors,
-            linestyles=linestyles,
-            ylabel=r"$d\mathrm{SNR}^{2}/d\ln f$",
-        )
-        _fig.tight_layout()
-        return _fig
-
-    def plot_snr_cumulative_below(
-        networks: Sequence[Network],
-        frequency_by_network: Mapping[str, np.ndarray],
-        snr_lt_by_network: Mapping[str, np.ndarray],
-        *,
-        colors: Sequence[str],
-        linestyles: Sequence[str],
-    ) -> Figure:
-        """Plot each network's SNR accumulated from the low-frequency end."""
-        _fig, ax = plt.subplots()
-        _draw_snr_curves(
-            ax,
-            networks,
-            frequency_by_network,
-            snr_lt_by_network,
-            colors=colors,
-            linestyles=linestyles,
-            ylabel=r"$\mathrm{SNR}(<f) / \mathrm{SNR}_{\mathrm{tot}}$",
-        )
-        _fig.tight_layout()
-        return _fig
-
-    def plot_snr_cumulative_above(
-        networks: Sequence[Network],
-        frequency_by_network: Mapping[str, np.ndarray],
-        snr_gt_by_network: Mapping[str, np.ndarray],
-        *,
-        colors: Sequence[str],
-        linestyles: Sequence[str],
-    ) -> Figure:
-        """Plot each network's SNR accumulated from the high-frequency end."""
-        _fig, ax = plt.subplots()
-        _draw_snr_curves(
-            ax,
-            networks,
-            frequency_by_network,
-            snr_gt_by_network,
-            colors=colors,
-            linestyles=linestyles,
-            ylabel=r"$\mathrm{SNR}(>f) / \mathrm{SNR}_{\mathrm{tot}}$",
-        )
-        _fig.tight_layout()
-        return _fig
-
-    return (
-        plot_snr_cumulative_above,
-        plot_snr_cumulative_below,
-        plot_snr_integrand,
-        plot_spectrum_and_snr_density,
-    )
-
-
-@app.cell(hide_code=True)
-def _():
-    mo.md(r"""
-    ### Plotting the SNR density per e-fold of frequency
-
-    $d\mathrm{SNR}^2/d\ln f = 2Tf\,S_h^2/S_{\mathrm{eff}}^2$ on a log
-    frequency axis and a linear y-axis, so equal areas are equal contributions
-    to $\mathrm{SNR}^2$ and the curve does not depend on the frequency grid.
-    """)
-    return
-
-
-@app.cell
-def _(
-    BASE_DIR,
-    ROOT_DIR,
-    frequency_by_network: dict[str, np.ndarray],
-    plot_snr_integrand,
-    plotted_colors,
-    plotted_linestyles,
-    plotted_networks,
-    snr_density_by_network: dict[str, np.ndarray],
-    write_figures,
-):
-    _fig = plot_snr_integrand(
-        plotted_networks,
-        frequency_by_network,
-        snr_density_by_network,
-        colors=plotted_colors,
-        linestyles=plotted_linestyles,
-    )
-    if write_figures:
-        save_figures({BASE_DIR / "snr_integrand.pdf": _fig}, root=ROOT_DIR)
-    _fig
-    return
-
-
-@app.cell(hide_code=True)
-def _():
-    mo.md(r"""
-    ### Network sensitivity and SNR density, stacked
-
-    The configured spectrum against each network's sensitivity
-    ($h_n$, $\sigma_{\ln f}$ or their $\Omega_{\mathrm{GW}}$ counterpart) on top, and below it $d\mathrm{SNR}^2/d\ln f$, whose
-    area in $\ln f$ is each network's $\mathrm{SNR}^2$ at the chosen
-    observation time. The ET geometries share nearly one shape, so the curves
-    separate by amplitude; the dashed +CE curves also extend to 10--30 Hz.
-    """)
-    return
-
-
-@app.cell
-def _(
-    BASE_DIR,
-    OMEGA_GW_MAX: float | None,
-    ROOT_DIR,
-    fiducial_freq,
-    fiducial_omega,
-    fiducial_sh,
-    fiducial_strain,
-    frequency_by_network: dict[str, np.ndarray],
-    noise_amplitude_by_network: dict[str, np.ndarray],
-    observation_time,
-    omega_sigma_ln_f_by_network: dict[str, np.ndarray],
-    plot_spectrum_and_snr_density,
-    plotted_colors,
-    plotted_linestyles,
-    plotted_networks,
-    sigma_ln_f_by_network: dict[str, np.ndarray],
-    snr_density_by_network: dict[str, np.ndarray],
-    spectrum_choice,
-    write_figures,
-):
-    if spectrum_choice.value == "h_c / h_n":
-        _spectrum = fiducial_strain
-        _sensitivities = noise_amplitude_by_network
-        _spectrum_label = r"$h_c$"
-        _spectrum_color = SPECTRUM["sh"]
-        _spectrum_linestyle = "-"
-        _ylabel = r"$h_c(f), \, h_n(f)$"
-        _spectrum_max = None
-        _filename = "single_draw_characteristic_amplitudes_and_snr_density.pdf"
-    elif spectrum_choice.value == "Omega_GW":
-        _spectrum = fiducial_omega
-        _sensitivities = omega_sigma_ln_f_by_network
-        _spectrum_label = r"$\Omega_{\mathrm{GW}}$"
-        _spectrum_color = SPECTRUM["omega_gw"]
-        _spectrum_linestyle = ":"
-        _ylabel = r"$\Omega_{\mathrm{GW}}(f), \, \sigma_{\ln f}(f)$"
-        _spectrum_max = OMEGA_GW_MAX
-        _filename = "omega_sensitivity_and_snr_density.pdf"
-    else:
-        _spectrum = fiducial_sh
-        _sensitivities = sigma_ln_f_by_network
-        _spectrum_label = r"$S_h$"
-        _spectrum_color = SPECTRUM["sh"]
-        _spectrum_linestyle = SPECTRUM_LINESTYLES["sh"]
-        _ylabel = r"$S_h(f), \, \sigma_{\ln f}(f)\ \mathrm{[Hz^{-1}]}$"
-        _spectrum_max = None
-        _filename = "sh_sensitivity_and_snr_density.pdf"
-
-    _fig = plot_spectrum_and_snr_density(
-        fiducial_freq,
-        _spectrum,
-        plotted_networks,
-        frequency_by_network,
-        _sensitivities,
-        snr_density_by_network,
+def _(catalog_path, frequencies, num_redshift_nodes, observation_time):
+    _data, _metadata, _ = read_catalog(catalog_path)
+    _model = CatalogModel.from_catalog(
+        _data,
+        _metadata,
+        population=_metadata.population.build(),
+        frequencies=frequencies,
+        num_redshift_nodes=num_redshift_nodes,
         observation_time=observation_time,
-        colors=plotted_colors,
-        linestyles=plotted_linestyles,
-        spectrum_label=_spectrum_label,
-        spectrum_color=_spectrum_color,
-        spectrum_linestyle=_spectrum_linestyle,
-        ylabel=_ylabel,
-        spectrum_max=_spectrum_max,
+    )
+    fiducials = dict(_metadata.fiducials)
+    prediction = _model.predict(fiducials)
+    expected_mergers = float(prediction.extras["total_merger_rate"]) * years_to_seconds(
+        observation_time
+    )
+    print(
+        f"Expected mergers in T = {observation_time:g} yr: {expected_mergers:.4g}; "
+        f"importance relative ESS "
+        f"{float(prediction.extras['importance_relative_ess']):.3f}"
+    )
+    return expected_mergers, fiducials, prediction
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## Spectral density and energy density
+    """)
+    return
+
+
+@app.cell
+def _(
+    BASE_DIR,
+    ROOT_DIR,
+    fiducials,
+    frequencies,
+    maximum_frequency,
+    minimum_frequencies,
+    prediction,
+    write_figures,
+):
+    band = np.asarray(
+        frequency_mask(
+            jnp.asarray(frequencies),
+            fmin=minimum_frequencies[0],
+            fmax=maximum_frequency,
+        )
+    )
+    _omega = np.asarray(
+        omega_gw_from_spectral_density(
+            prediction.mean, jnp.asarray(frequencies), hubble_constant=fiducials["H0"]
+        )
+    )
+    _fig = plot_spectral_density(
+        frequencies[band], np.asarray(prediction.mean)[band], _omega[band]
+    )
+    if write_figures:
+        save_figures({BASE_DIR / "fiducial_spectrum.pdf": _fig}, root=ROOT_DIR)
+    _fig
+    return (band,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## Characteristic amplitudes
+
+    $h_c = \sqrt{2 f S_h}$ against each network's
+    $h_n = \sqrt{2 f S_{\mathrm{eff}}}/(2 T f)^{1/4}$, and below them
+    $(h_c/h_n)^4 = d\mathrm{SNR}^2/d\ln f$, whose area in $\ln f$ is the
+    network's $\mathrm{SNR}^2$.
+    """)
+    return
+
+
+@app.cell
+def _(
+    BASE_DIR,
+    ROOT_DIR,
+    band,
+    frequencies,
+    observation_time,
+    plotted_colors,
+    plotted_linestyles,
+    plotted_networks,
+    prediction,
+    registry,
+    write_figures,
+):
+    _curves = amplitude_curves(
+        prediction.mean,
+        registry,
+        plotted_networks,
+        frequencies,
+        observation_time,
+        band,
+    )
+    _strain = np.asarray(
+        characteristic_strain(prediction.mean, jnp.asarray(frequencies))
+    )
+    _fig = plot_characteristic_amplitudes(
+        frequencies[band],
+        _strain[band],
+        _curves,
+        plotted_networks,
+        plotted_colors,
+        plotted_linestyles,
+        observation_time,
     )
     if write_figures:
         save_figures(
-            {BASE_DIR / _filename: _fig},
+            {BASE_DIR / "characteristic_amplitudes.pdf": _fig},
             root=ROOT_DIR,
         )
     _fig
@@ -1055,7 +591,13 @@ def _(
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    ### Plotting the fraction of SNR below a given frequency
+    ## SNR per network and lower band edge
+
+    $\rho^2 = 2T \sum_f \Delta f\, S_h^2/S_{\mathrm{eff}}^2$ over
+    $[f_{\min}, f_{\max}]$, applied as a mask on the full grid so the band-edge
+    bins keep their widths. The last column is the shot noise of one
+    realization in units of the detector's amplitude error, over the widest
+    band.
     """)
     return
 
@@ -1063,59 +605,47 @@ def _():
 @app.cell
 def _(
     BASE_DIR,
-    ROOT_DIR,
-    frequency_by_network: dict[str, np.ndarray],
-    plot_snr_cumulative_below,
-    plotted_colors,
-    plotted_linestyles,
-    plotted_networks,
-    snr_lt_by_network: dict[str, np.ndarray],
+    frequencies,
+    maximum_frequency,
+    minimum_frequencies,
+    network_rows,
+    observation_time,
+    prediction,
+    registry,
+    response_draws,
+    response_seed,
     write_figures,
 ):
-    _fig = plot_snr_cumulative_below(
-        plotted_networks,
-        frequency_by_network,
-        snr_lt_by_network,
-        colors=plotted_colors,
-        linestyles=plotted_linestyles,
+    table = snr_table(
+        prediction,
+        registry,
+        network_rows,
+        frequencies,
+        observation_time,
+        minimum_frequencies,
+        maximum_frequency,
+        response_draws=response_draws,
+        response_seed=response_seed,
+    )
+    _block = table.to_latex(
+        column_format="l" + "r" * table.shape[1],
+        caption=(
+            "Optimal SNR of the expected background spectrum at the fiducial "
+            f"for {observation_time:g} year of observation, as the lower edge of "
+            r"the analysis band is raised, and the shot noise $\rho s$ of one "
+            f"realization for $f_{{\\min}} = {minimum_frequencies[0]:g}$ Hz."
+        ),
+        label="tab:mean-spectrum-snr-coba",
+        formatters=[
+            *(["{:.1f}".format] * len(minimum_frequencies)),
+            "{:.2f}".format,
+        ],
     )
     if write_figures:
-        save_figures({BASE_DIR / "snr_cumulative_below.pdf": _fig}, root=ROOT_DIR)
-    _fig
-    return
-
-
-@app.cell(hide_code=True)
-def _():
-    mo.md(r"""
-    ### Plotting the fraction of SNR above a given frequency
-    """)
-    return
-
-
-@app.cell
-def _(
-    BASE_DIR,
-    ROOT_DIR,
-    frequency_by_network: dict[str, np.ndarray],
-    plot_snr_cumulative_above,
-    plotted_colors,
-    plotted_linestyles,
-    plotted_networks,
-    snr_gt_by_network: dict[str, np.ndarray],
-    write_figures,
-):
-    _fig = plot_snr_cumulative_above(
-        plotted_networks,
-        frequency_by_network,
-        snr_gt_by_network,
-        colors=plotted_colors,
-        linestyles=plotted_linestyles,
-    )
-    if write_figures:
-        save_figures({BASE_DIR / "snr_cumulative_above.pdf": _fig}, root=ROOT_DIR)
-    _fig
-    return
+        BASE_DIR.mkdir(parents=True, exist_ok=True)
+        (BASE_DIR / "mean_spectrum_snr.tex").write_text(_block, encoding="utf-8")
+    mo.vstack([table, mo.md(f"```latex\n{_block}\n```")])
+    return (table,)
 
 
 if __name__ == "__main__":
