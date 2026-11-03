@@ -45,11 +45,12 @@ EXTRINSIC_SITES = (
     "right_ascension",
     "polarization_angle",
     "coa_phase",
+    "arrival_fraction",
 )
 
 
 def extrinsic_priors() -> dict[str, dist.Distribution]:
-    """The isotropic prior of each :data:`EXTRINSIC_SITES` entry.
+    """The prior of each :data:`EXTRINSIC_SITES` entry.
 
     Declination is the cosine law shifted from colatitude to
     :math:`[-\\pi/2, \\pi/2]`. Built on call: constructing distributions
@@ -63,6 +64,7 @@ def extrinsic_priors() -> dict[str, dist.Distribution]:
         "right_ascension": dist.Uniform(0.0, 2.0 * math.pi),
         "polarization_angle": dist.Uniform(0.0, math.pi),
         "coa_phase": dist.Uniform(0.0, 2.0 * math.pi),
+        "arrival_fraction": dist.Uniform(-0.5, 0.5),
     }
 
 
@@ -89,13 +91,16 @@ def fix_extrinsic_parameters(
 def joint_model(
     redshift_distribution: RedshiftDistribution, source_model: SourceModel
 ) -> PopulationModel:
-    """The model that samples distances, intrinsic sources and extrinsic angles.
+    """The model that samples distances, intrinsic sources and extrinsics.
 
     ``redshift_distribution.distance_model()`` contributes the ``redshift``
     site and the ``luminosity_distance`` deterministic; ``source_model`` the
     intrinsic sites. This model adds isotropic sky coordinates, polarization
-    angle and coalescence phase as sample sites. The declared sites define all
-    source columns. Call it as ``joint_model(*population(params))``.
+    angle, coalescence phase and dimensionless ``arrival_fraction`` uniform
+    on ``[-0.5, 0.5)`` as sample sites. The latter locates a source relative
+    to its segment center when multiplied by the effective segment duration.
+    Identical extrinsic priors cancel in importance ratios. The declared sites
+    define all source columns. Call it as ``joint_model(*population(params))``.
 
     Parameters
     ----------
@@ -104,7 +109,7 @@ def joint_model(
     source_model
         The intrinsic model; it must not declare ``redshift`` or
         ``luminosity_distance``, sky coordinates, polarization angle or coalescence
-        phase.
+        phase or arrival fraction.
     """
     distance_model = redshift_distribution.distance_model()
 

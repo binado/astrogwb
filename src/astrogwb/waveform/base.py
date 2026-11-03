@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 import jax
 import jax.numpy as jnp
+from jax.typing import ArrayLike as JaxArrayLike
 from numpy.typing import ArrayLike
 
 from astrogwb.waveform.metadata import WaveformMetadata
@@ -77,7 +78,10 @@ class WaveformGenerator:
         return _chunked(self._generate_batch, source_parameters, chunk_size)
 
     def generate_polarizations_batch(
-        self, source_parameters: Mapping[str, ArrayLike]
+        self,
+        source_parameters: Mapping[str, ArrayLike],
+        *,
+        arrival_time: JaxArrayLike | None = None,
     ) -> tuple[jax.Array, jax.Array]:
         r"""Generate the complex polarizations of a catalog, each ``(N, F)``.
 
@@ -90,8 +94,23 @@ class WaveformGenerator:
         ----------
         source_parameters
             Source parameter values by name.
+        arrival_time
+            Geocentric arrival time in seconds relative to the chosen origin,
+            one per source, ``(N,)`` (or a scalar shared by all sources).
+            Applies ``exp(-2 pi i f arrival_time)`` to both polarizations.
+            ``None`` leaves them unshifted. Detector delays are applied by
+            detector projection; power-only generation is independent of time.
         """
-        return self._generate_polarizations_batch(source_parameters)
+        plus, cross = self._generate_polarizations_batch(source_parameters)
+        if arrival_time is None:
+            return plus, cross
+        phase = jnp.exp(
+            -2j
+            * jnp.pi
+            * jnp.asarray(arrival_time)[..., None]
+            * jnp.asarray(self.frequencies)
+        )
+        return plus * phase, cross * phase
 
     def _generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
         """Every source in one vectorized pass; what a concrete generator implements."""

@@ -80,6 +80,7 @@ STOCHASTIC_SITES = frozenset(
         "right_ascension",
         "polarization_angle",
         "coa_phase",
+        "arrival_fraction",
     }
 )
 DETERMINISTIC_SITES = frozenset(
@@ -99,6 +100,7 @@ def sample_values(redshift: jax.Array = SAMPLE_REDSHIFTS) -> dict[str, jax.Array
         "right_ascension": 0.2 * ones,
         "polarization_angle": 0.3 * ones,
         "coa_phase": 0.4 * ones,
+        "arrival_fraction": 0.2 * ones,
         "source_frame_mass_1": 1.4 * ones,
         "source_frame_mass_2": 1.3 * ones,
         "spin_1z": 0.01 * ones,
@@ -195,13 +197,31 @@ def test_joint_model_extrinsics_are_conditionable_sample_sites() -> None:
         "right_ascension": 0.2,
         "polarization_angle": 0.3,
         "coa_phase": 0.4,
+        "arrival_fraction": 0.2,
     }
     conditioned = handlers.condition(model, data=fixed)
     trace = handlers.trace(handlers.seed(conditioned, 0)).get_trace()
+    arrival_prior = trace["arrival_fraction"]["fn"]
+    assert isinstance(arrival_prior, dist.Uniform)
+    assert arrival_prior.low == -0.5
+    assert arrival_prior.high == 0.5
     for name, value in fixed.items():
         assert trace[name]["type"] == "sample"
         assert trace[name]["is_observed"]
         assert trace[name]["value"] == value
+
+
+def test_identical_arrival_priors_cancel_from_importance_ratios() -> None:
+    values = sample_values()
+    population = mock_population()
+    _, target = evaluate(population, OFF_FIDUCIALS, values)
+    _, reference = evaluate(population, POPULATION_PARAMS, values)
+    sites = (*DEFAULT_DENSITY_SITES, "arrival_fraction")
+    _, target_with_arrival = evaluate(population, OFF_FIDUCIALS, values, sites)
+    _, reference_with_arrival = evaluate(population, POPULATION_PARAMS, values, sites)
+    np.testing.assert_array_equal(
+        target_with_arrival - reference_with_arrival, target - reference
+    )
 
 
 def test_source_evaluate_needs_no_physical_rate() -> None:
