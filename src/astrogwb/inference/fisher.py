@@ -1,10 +1,9 @@
-r"""Per-frequency Fisher information of the diagonal Gaussian spectrum likelihood.
+r"""Fisher information of the Gaussian spectrum likelihoods.
 
-:class:`~astrogwb.inference.likelihood.GaussianLikelihood`
-compares a predicted spectrum to data bin by bin,
-:math:`d_i \sim \mathcal{N}(S_i(\theta),
-\sigma_i)`, with a scale that does not depend on :math:`\theta`. Its Fisher
-matrix is therefore a sum of per-bin terms,
+A diagonal Gaussian compares a predicted spectrum to data bin by bin,
+:math:`d_i \sim \mathcal{N}(S_i(\theta), \sigma_i)`, with a scale that does
+not depend on :math:`\theta`. Its Fisher matrix is therefore a sum of per-bin
+terms,
 
 .. math::
 
@@ -21,13 +20,15 @@ constrains one direction in parameter space. Per-bin diagonals, or a
 cumulative sum over bins, are meaningful band diagnostics; the inverse of one
 bin's matrix is not.
 
-Any differentiable :data:`~astrogwb.inference.protocol.SpectrumFn` works. For
-the importance spectrum
-(:meth:`~astrogwb.inference.likelihood.ImportanceGaussianLikelihood.spectrum`)
-the derivative is a score-function Monte Carlo estimate whose noise grows as
+Any differentiable :data:`SpectrumFn` works. For the importance spectrum
+(:meth:`~astrogwb.inference.model.CatalogModel.spectrum`) the derivative is a score-function Monte Carlo estimate whose noise grows as
 :func:`~astrogwb.importance.diagnostics.relative_ess` drops, so evaluate near
 the catalog's fiducials. A hyperparameter that moves a support edge misses the
 boundary term.
+
+:func:`dense_fisher_matrix` is the Fisher matrix of the dense Gaussian
+likelihood (:mod:`astrogwb.inference.gaussian`), whose covariance also depends
+on the parameters.
 """
 
 from __future__ import annotations
@@ -44,14 +45,17 @@ from astrogwb.inference.gaussian import (
     catalog_covariance,
     expected_data,
 )
-from astrogwb.inference.protocol import SpectrumFn
 
 __all__ = [
     "DenseFisher",
+    "SpectrumFn",
     "dense_fisher_matrix",
     "fisher_matrix_per_bin",
     "spectral_density_jacobian",
 ]
+
+#: A spectrum on the observed grid: ``params -> (F,)``.
+type SpectrumFn = Callable[[Mapping[str, ArrayLike]], jax.Array]
 
 
 def spectral_density_jacobian(
@@ -90,8 +94,8 @@ def fisher_matrix_per_bin(
 
     ``scale`` is the per-bin standard deviation the likelihood uses, normally
     ``gaussian_bin_scale(psd, time_years, frequencies)``. ``frequency_mask``
-    selects bins as in :class:`~astrogwb.inference.likelihood.Network`: an
-    excluded bin contributes exactly zero, even where its scale is infinite.
+    selects bins: an excluded bin contributes exactly zero, even where its
+    scale is infinite.
 
     Parameters
     ----------

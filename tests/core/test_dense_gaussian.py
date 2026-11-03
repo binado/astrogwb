@@ -20,7 +20,6 @@ from astrogwb_mock_population import (
     INTRINSIC_DENSITY_SITES,
     NUM_REDSHIFT_NODES,
     build_reference_catalog,
-    build_reference_spectrum,
     mock_population,
 )
 from jax.scipy.linalg import solve_triangular
@@ -31,6 +30,7 @@ from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.inference import (
     CatalogModel,
     DenseGaussianLikelihood,
+    Network,
     Prediction,
     amplitude_cumulants,
     amplitude_template,
@@ -42,8 +42,6 @@ from astrogwb.inference import (
     shot_noise_variance,
     whitened_catalog_covariance,
 )
-from astrogwb.inference import Network as StackedNetwork
-from astrogwb.inference.gaussian import Network
 from astrogwb.inference.model import interpolation_weights
 from astrogwb.populations._types import SourceModel
 
@@ -185,39 +183,6 @@ def test_power_moment_is_symmetric_positive_semidefinite(model: CatalogModel) ->
 
     np.testing.assert_array_equal(moment, moment.T)
     assert eigenvalues.min() >= -1e-10 * eigenvalues.max()
-
-
-def test_power_moment_matches_the_stacked_catalog_covariance(
-    catalog: Any,
-    frequencies: np.ndarray,
-    model: CatalogModel,
-    pair_leaves: dict[str, np.ndarray],
-    response_draws: jax.Array,
-) -> None:
-    """The existing dense-interpolation covariance, under the same draws."""
-    data, metadata = catalog
-    stacked = build_reference_spectrum(
-        data,
-        metadata,
-        frequencies=frequencies,
-        population=pinned_target,
-        density_sites=(),
-        shot_noise="amplitude",
-        observation_time=OBSERVATION_TIME,
-    )
-    old = stacked.catalog_covariance(
-        OFF_FIDUCIAL,
-        StackedNetwork(
-            scale=jnp.asarray(pair_leaves["scale"]),
-            response=response_draws,
-            pair_overlap=jnp.asarray(pair_leaves["pair_overlap"]),
-        ),
-    )
-    flat = np.reshape(np.asarray(response_draws), (NUM_DRAWS, -1))
-    moment = np.asarray(model.power_moment(OFF_FIDUCIAL))
-    new = np.tile(moment, (NUM_PAIRS, NUM_PAIRS)) * (flat.T @ flat / NUM_DRAWS)
-
-    np.testing.assert_allclose(new, old, rtol=1e-10, atol=1e-12 * np.abs(old).max())
 
 
 # --------------------------------------------------------------------------- #

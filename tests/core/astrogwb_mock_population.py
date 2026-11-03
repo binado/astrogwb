@@ -12,7 +12,6 @@ tests reweight with.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -27,7 +26,7 @@ from astrogwb.importance.catalog import (
 from astrogwb.importance.spectrum import (
     reference_catalog,
 )
-from astrogwb.inference import ImportanceGaussianLikelihood
+from astrogwb.inference import CatalogModel
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
     BNSCobaPopulation,
@@ -257,19 +256,19 @@ def build_reference_spectrum(
     frequencies: ArrayLike | None = None,
     density_sites: tuple[str, ...] = INTRINSIC_DENSITY_SITES,
     population: Population | None = None,
-    **likelihood_kwargs: Any,
-) -> ImportanceGaussianLikelihood:
-    """The mock reference catalog bound to the mock target, spectrum only.
+    observation_time: float = 1.0,
+) -> CatalogModel:
+    """The mock reference catalog bound to the mock target.
 
-    ``frequencies`` is the observed grid, the catalog's own by default.
-    ``likelihood_kwargs`` are ``from_catalog``'s data and shot-noise arguments.
+    ``frequencies`` is the observed grid, the catalog's own by default;
+    ``observation_time`` in years scales the power moment alone.
     """
-    return ImportanceGaussianLikelihood.from_catalog(
+    return CatalogModel.from_catalog(
         data,
         metadata,
         population=mock_population() if population is None else population,
         frequencies=data["frequencies"] if frequencies is None else frequencies,
         num_redshift_nodes=NUM_REDSHIFT_NODES,
+        observation_time=observation_time,
         density_sites=density_sites,
-        **likelihood_kwargs,
     )

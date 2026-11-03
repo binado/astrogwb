@@ -34,8 +34,7 @@ from astrogwb.importance.spectrum import (
     reference_catalog,
 )
 from astrogwb.inference import (
-    ImportanceCompoundPoissonLikelihood,
-    ImportanceGaussianLikelihood,
+    CatalogModel,
 )
 from astrogwb.populations import BNSCobaPopulation, joint_model
 from astrogwb.simulators import realization_key
@@ -59,6 +58,11 @@ NUM_NODES = 3
 
 #: Observation time of the shot-noise comparisons, in years.
 OBSERVATION_TIME = 1.0
+
+
+def _bin_variance(model: CatalogModel, params: dict[str, Any]) -> np.ndarray:
+    """The per-bin shot-noise variance under the sky-averaged response, ``(F,)``."""
+    return INCLINATION_SECOND_MOMENT * np.diag(np.asarray(model.power_moment(params)))
 
 
 @pytest.fixture
@@ -261,14 +265,13 @@ def _rescaled_and_brute_force(
         "num_redshift_nodes": NUM_NODES,
         "density_sites": density_sites,
     }
-    likelihood = ImportanceGaussianLikelihood.from_catalog(
-        reference,
-        metadata,
-        shot_noise="amplitude" if variance else None,
-        observation_time=OBSERVATION_TIME if variance else None,
-        **settings,
+    model = CatalogModel.from_catalog(
+        reference, metadata, observation_time=OBSERVATION_TIME, **settings
     )
-    rescaled = [np.asarray(likelihood.predict(p)[int(variance)]) for p in points]
+    rescaled = [
+        np.asarray(_bin_variance(model, p) if variance else model.spectrum(p))
+        for p in points
+    ]
     brute_force = [
         _spectrum_on_nodes(metadata, key, p, density_sites)[int(variance)]
         for p in points
@@ -315,15 +318,13 @@ def shot_noise_builder(reference_metadata: CatalogMetadata) -> Any:
     data = reference_catalog(reference_metadata, realization_key(41, 0))
     target = reference_metadata.population.build()
 
-    def build(observation_time: float) -> ImportanceGaussianLikelihood:
-        return ImportanceGaussianLikelihood.from_catalog(
+    def build(observation_time: float) -> CatalogModel:
+        return CatalogModel.from_catalog(
             data,
             reference_metadata,
             population=target,
             frequencies=np.asarray(waveform_generator(OBSERVED_WAVEFORM).frequencies),
             num_redshift_nodes=NUM_NODES,
-            density_sites=(),
-            shot_noise="amplitude",
             observation_time=observation_time,
         )
 
@@ -338,9 +339,9 @@ def test_rescaled_shot_noise_grows_linearly_with_the_hubble_constant(
     """The squared kernel goes as :math:`D_H / \\chi^2 \\propto H_0`."""
     hubble_constant = 90.0
     fiducials = reference_metadata.fiducials
-    likelihood = shot_noise_builder(OBSERVATION_TIME)
-    shifted = np.asarray(likelihood.predict({**fiducials, "H0": hubble_constant})[1])
-    ratio = shifted / np.asarray(likelihood.predict(fiducials)[1])
+    model = shot_noise_builder(OBSERVATION_TIME)
+    shifted = np.asarray(_bin_variance(model, {**fiducials, "H0": hubble_constant}))
+    ratio = shifted / np.asarray(_bin_variance(model, fiducials))
 
     np.testing.assert_allclose(ratio, hubble_constant / fiducials["H0"], rtol=1e-12)
 
@@ -408,19 +409,19 @@ def _bound_predictions(
     minimum_redshift: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """The spectrum and shot-noise variance of ``data`` at the fiducials."""
-    likelihood = ImportanceGaussianLikelihood.from_catalog(
+    model = CatalogModel.from_catalog(
         data,
         metadata,
         population=metadata.population.build(),
         frequencies=np.asarray(waveform_generator(OBSERVED_WAVEFORM).frequencies),
         num_redshift_nodes=NUM_NODES,
-        density_sites=(),
-        shot_noise="amplitude",
         observation_time=OBSERVATION_TIME,
         minimum_redshift=minimum_redshift,
     )
-    mean, variance, _ = likelihood.predict(metadata.fiducials)
-    return np.asarray(mean), np.asarray(variance)
+    return (
+        np.asarray(model.spectrum(metadata.fiducials)),
+        np.asarray(_bin_variance(model, metadata.fiducials)),
+    )
 
 
 @pytest.mark.integration
@@ -538,7 +539,7 @@ def test_dense_covariance_matches_physical_inclination_quadrature(
 ) -> None:
     key = realization_key(41, 0)
     params = {**reference_metadata.fiducials, "minimum_mass": 0.9, "mass_width": 1.6}
-    likelihood = ImportanceGaussianLikelihood.from_catalog(
+    model = CatalogModel.from_catalog(
         reference_catalog(reference_metadata, key),
         reference_metadata,
         population=reference_metadata.population.build(),
@@ -546,7 +547,6 @@ def test_dense_covariance_matches_physical_inclination_quadrature(
         num_redshift_nodes=NUM_NODES,
         density_sites=density_sites,
         observation_time=OBSERVATION_TIME,
-        shot_noise="modes",
     )
     _, expected = _spectrum_on_nodes(
         reference_metadata, key, params, density_sites, covariance=True
@@ -554,25 +554,21 @@ def test_dense_covariance_matches_physical_inclination_quadrature(
     # The reference power uses log-frequency interpolation; the oracle generates
     # each waveform at its actual redshift. This bound covers that grid error.
     np.testing.assert_allclose(
-        likelihood.catalog_covariance(params), expected, rtol=1e-5, atol=0
+        INCLINATION_SECOND_MOMENT * model.power_moment(params),
+        expected,
+        rtol=1e-5,
+        atol=0,
     )
 
 
 @pytest.mark.parametrize("inclination", [None, 1.0])
-@pytest.mark.parametrize(
-    "likelihood_class",
-    [ImportanceGaussianLikelihood, ImportanceCompoundPoissonLikelihood],
-)
-def test_reference_likelihood_rejects_non_face_on_source_columns(
+def test_catalog_model_rejects_non_face_on_source_columns(
     reference_metadata: CatalogMetadata,
     inclination: float | None,
-    likelihood_class: type[
-        ImportanceGaussianLikelihood | ImportanceCompoundPoissonLikelihood
-    ],
 ) -> None:
     columns = {} if inclination is None else {"inclination": np.full(6, inclination)}
     with pytest.raises(ValueError, match="inclinations must all be face-on"):
-        likelihood_class.from_catalog(
+        CatalogModel.from_catalog(
             {
                 "frequencies": np.array([20.0]),
                 "intensity": np.ones((1, 6)),

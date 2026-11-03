@@ -1,8 +1,7 @@
 # Design: the dense Gaussian likelihood
 
-Status: proposal. Supersedes the likelihood parts of
-[`stacked-pair-likelihood.md`](stacked-pair-likelihood.md), whose per-pair data
-layout (D1, D2) and simulator output (D5) are already on `main` and are kept.
+Status: implemented. Supersedes the likelihood parts of the stacked-pair
+design (#382), whose per-pair data layout and simulator output are kept.
 
 ## Purpose
 
@@ -42,7 +41,7 @@ $M$ is `(F, F)` and depends on $\Lambda$ but not on the network. $R$ is
 `(D, D)` and depends on the network but not on $\Lambda$. Every design decision
 below follows from that split.
 
-Units are those of `stacked-pair-likelihood.md` D1: unnormalized cross powers
+Units are those of the stacked-pair design: unnormalized cross powers
 with mean $\mu_{ab,k} = \gamma_{ab}(f_k) S_h(f_k|\Lambda)$, which differ from
 the paper's normalized $\bar C_{ab}$ by a fixed per-entry rescaling and give
 the same posterior. The $\langle g \rangle^2 \gamma\gamma$ in $R$ is that

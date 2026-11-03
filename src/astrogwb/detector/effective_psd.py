@@ -54,10 +54,8 @@ def pair_terms(
 ) -> list[PairTerms]:
     r"""The optimal weight and isotropic ORF of every pair :math:`a < b`.
 
-    Shared by :func:`effective_psd` (:math:`S_{\mathrm{eff}}^{-2} \propto
-    \sum w_{ab} \gamma_{ab}`) and
-    :func:`~astrogwb.detector.response.network_response`. Evaluated on the
-    host, outside JIT.
+    Used by :func:`effective_psd` (:math:`S_{\mathrm{eff}}^{-2} \propto
+    \sum w_{ab} \gamma_{ab}`). Evaluated on the host, outside JIT.
 
     Parameters
     ----------
