@@ -90,8 +90,9 @@ def _():
     `Snakefile`, one background per draw holding every
     network's spectra (`astrogwb.simulators.network_spectra_ensemble`),
     shared with `notebooks/shot_noise_coverage.py`, which uses its draws as
-    injections. So is the reference catalog of the minimum-redshift scan. A
-    single interactive draw lives in `notebooks/fiducial_spectrum.py`.
+    injections. So is the reference catalog of the minimum-redshift scan. The
+    paper's figures and table come from the model mean spectrum in
+    `notebooks/fiducial_spectrum.py`; this notebook validates it.
     """)
     return
 
