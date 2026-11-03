@@ -11,6 +11,13 @@ DETECTOR_CONFIG_OPTION = typer.Option(
     help="Detector registry TOML layer; repeat to merge.",
 )
 
+CONFIG_DIR_OPTION = typer.Option(
+    "--config-dir",
+    exists=True,
+    file_okay=False,
+    help="Directory of shared TOML layers, merged by astrogwb.config.merge_config.",
+)
+
 
 def _apply_runtime(platform: str, cpu_threads: int | None) -> None:
     """Apply the runtime settings; runs before anything touches JAX."""

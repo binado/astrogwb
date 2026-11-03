@@ -1,0 +1,18 @@
+# Named simulation ensembles:
+#
+#   astrogwb simulate OUTPUT.h5 --ensemble <name> --detector-config ...
+#
+# reads [ensembles.<name>] from the merged config: its `realization`, an
+# astrogwb.simulators.RealizationMetadata, and its `waveform`, an
+# astrogwb.waveform.WaveformMetadata. Regenerate outputs/ensembles/<name>
+# after an edit, including edits to the tables referenced here.
+
+# The shared population at the fiducials, observed for the analysis time, with
+# the default 400-bin waveform.
+[ensembles.fiducial]
+waveform = "${waveforms.default}"
+
+[ensembles.fiducial.realization]
+population = "${populations.cosmological}"
+hyperparameters = "${fiducials}"
+observation_time = "${analysis.observation_time}"

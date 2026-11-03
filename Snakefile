@@ -4,15 +4,15 @@
 #       --profile workflow/profiles/slurm --dry-run
 #
 # Notebooks never simulate: they read what this writes and fail with a
-# FileNotFoundError when it is missing. Per ensemble <name> (the committed
-# config/ensembles/<name>/{population,waveform}.toml and config/detectors.toml):
+# FileNotFoundError when it is missing. Per ensemble <name> (the
+# [ensembles.<name>] table of the shared config and config/detectors.toml):
 #
 #   outputs/ensembles/<name>/<seed>-<index>.h5   one file per `astrogwb
 #       simulate` job: every paper network's pair spectra, with the
 #       configuration it was simulated from;
 #
-# and the reference catalogs the notebooks name, by
-# `astrogwb model-catalog`, under outputs/catalogs/.
+# and the reference catalogs the notebooks name, the [catalogs.<name>] tables,
+# by `astrogwb model-catalog`, under outputs/catalogs/.
 #
 # A draw is fixed by (seed, index) alone, so jobs are independent, finished
 # files merge by copying, and a file that exists is not redrawn. Each file is
@@ -45,8 +45,8 @@ DRAWS = {
     "fiducial": {41: 1000, 42: 1},
 }
 
-# Catalog variants layered over config/catalogs/base.toml, with draw seeds
-# and execution-only chunk sizes.
+# The [catalogs.<name>] tables of the shared config, with draw seeds and
+# execution-only chunk sizes.
 CATALOGS = {
     "fiducial": {
         "reference-fiducial": "--seed 42 --chunk-size 4096",
@@ -111,8 +111,6 @@ _RUN = """
 
 rule simulate:
     input:
-        population="config/ensembles/{ensemble}/population.toml",
-        waveform="config/ensembles/{ensemble}/waveform.toml",
         detectors="config/detectors.toml",
     output:
         f"{ENSEMBLES_ROOT}/{{ensemble}}/{{seed}}-{{index}}.h5",
@@ -124,9 +122,8 @@ rule simulate:
     shell:
         _RUN
         + """ astrogwb simulate {output:q} \
-            --population-metadata {input.population:q} \
+            --ensemble {wildcards.ensemble:q} \
             --seed {wildcards.seed} --index {wildcards.index} \
-            --waveform-metadata {input.waveform:q} \
             --detector-config {input.detectors:q} \
             --chunk-size 8192 \
             --cpu-threads {threads} > {log:q} 2>&1
@@ -134,9 +131,6 @@ rule simulate:
 
 
 rule reference_catalog:
-    input:
-        base="config/catalogs/base.toml",
-        metadata="config/catalogs/{catalog}.toml",
     output:
         f"{CATALOGS_ROOT}/{{catalog}}.h5",
     log:
@@ -147,6 +141,6 @@ rule reference_catalog:
     shell:
         _RUN
         + """ astrogwb model-catalog {output:q} {params.options} \
-            --catalog-metadata {input.base:q} --catalog-metadata {input.metadata:q} \
+            --catalog {wildcards.catalog:q} \
             --cpu-threads {threads} > {log:q} 2>&1
         """

@@ -1,3 +1,0 @@
-# Overrides base.toml for the importance-convergence ladder.
-num_samples = 256
-sampling = "random"

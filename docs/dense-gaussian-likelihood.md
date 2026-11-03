@@ -58,7 +58,7 @@ Sec. 2.6.
 - `shot_noise_coverage` scores 1000 injections at every grid point.
 - Every caller passes `density_sites=()`, so the importance weights are one and
   the catalog Gram matrix is a constant.
-- Fiducial grid: $F \simeq 400$ bins (`config/ensembles/fiducial/waveform.toml`).
+- Fiducial grid: $F \simeq 400$ bins (`[ensembles.fiducial]`, i.e. `[waveforms.default]`).
   Pairs per network: ET-triangle 3, ET-triangle + CE 6, ET-2L-mis 1,
   ET-2L-mis + CE 3. So $D \le 2400$.
 
