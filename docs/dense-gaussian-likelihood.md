@@ -86,7 +86,7 @@ contracted inside the likelihood.
 
 The likelihood computes $C = \Sigma + M \circ R$ and its Cholesky factor at
 every grid point and network. There is no rank-one, low-rank or non-Gaussian
-alternative. A `shot_noise=False` switch on the model drops $M$ and gives the
+alternative. A `shot_noise=False` switch on the likelihood drops $M$ and gives the
 diagonal Sec. 2.6 likelihood with the same code path (the factor is then the
 diagonal).
 
@@ -103,8 +103,11 @@ The cost of one evaluation splits by what it depends on:
 | factorize | $\Lambda$, network | Cholesky of $C$, $\ln\det C$ | $O(D^3)$ |
 | score | $\Lambda$, network, realization | $\chi^2$ | $O(D^2)$ per realization |
 
-The API exposes the stages instead of hiding them behind
-`params -> (log L, extras)`:
+One likelihood is one network: different networks are different models, and
+the notebooks loop over them. The public entry point stays
+`log_likelihood(params) -> (log L, extras)`; the stages are private methods
+whose results are returned, never stored on the instance (a field holding a
+`params`-dependent value goes stale silently under `jit`).
 
 ```python
 class Prediction(NamedTuple):
@@ -119,30 +122,87 @@ class GaussianFactor(NamedTuple):
     log_det: jax.Array               # ()
 
 
+class Evaluation(NamedTuple):        # what the diagnostics read (D7)
+    prediction: Prediction
+    factor: GaussianFactor
+
+
 @dataclass(frozen=True)
-class CatalogModel:                  # was ImportanceGaussianLikelihood
+class CatalogModel:                  # was ImportanceGaussianLikelihood, minus data and network
     @classmethod
     def from_catalog(cls, data, metadata, *, population, frequencies,
                      num_redshift_nodes, observation_time, density_sites=(),
-                     minimum_redshift=None, shot_noise=True) -> Self: ...
+                     minimum_redshift=None) -> Self: ...
     def spectrum(self, params) -> jax.Array: ...          # (F,)
     def power_moment(self, params) -> jax.Array: ...      # (F, F)
-    def predict(self, params) -> Prediction: ...
+    def predict(self, params, *, shot_noise: bool = True) -> Prediction: ...
 
 
-def factorize(prediction: Prediction, network: Network) -> GaussianFactor: ...
-def log_likelihood(factor: GaussianFactor, observed: ArrayLike) -> jax.Array:
-    """observed (..., D) on the network's kept entries; returns (...)."""
+@dataclass(frozen=True)
+class DenseGaussianLikelihood:
+    model: CatalogModel              # data field
+    network: Network                 # data field
+    observed: jax.Array              # data field, (..., D) on the kept entries
+    shot_noise: bool = True          # meta field
+
+    def log_likelihood(self, params) -> tuple[jax.Array, Mapping[str, jax.Array]]:
+        """log L of shape (...), one per realization, and the prediction's extras."""
+    def evaluate(self, params) -> Evaluation: ...
+    def _factorize(self, prediction: Prediction) -> GaussianFactor: ...
+    def _score(self, factor: GaussianFactor) -> jax.Array: ...
 ```
 
-`power_moment` is today's `_fold_node_moments` summed with the variance kernel
-and divided by $T$: $M = T^{-1} \sum_z \kappa_z s_z^4 W_z G W_z^T$. `extras`
-keeps what the notebooks already plot.
+Every class is a registered pytree, so a likelihood is a `jit` argument with
+its arrays traced: one compilation per network shape serves every catalog and
+data set of that shape.
 
-The model no longer holds data or a network. Data enter at the score stage, so
-one factor scores every realization: `log_likelihood` takes `(R, D)` and does
-one triangular solve with $R$ right-hand sides. For `shot_noise_coverage` that
-turns 1000 Cholesky factorizations per grid point and network into one.
+`power_moment` is $M = T^{-1} \sum_z \kappa_z s_z^4 W_z G W_z^T$, today's
+`_fold_node_moments` summed with the variance kernel, computed sparsely (D2a).
+`extras` keeps what the notebooks already plot.
+
+Realizations share the factor without any `vmap`: `_score` is one triangular
+solve against `observed` reshaped to `(R, D)`, with $R$ right-hand sides. For
+`shot_noise_coverage` that turns 1000 Cholesky factorizations per grid point
+into one. (A `vmap` over `observed` would give the same: values that do not
+depend on the batched argument stay unbatched.)
+
+### D2a. The power moment from sparse interpolation
+
+With one likelihood per network the prediction is recomputed per network, so it
+must be cheap. Today it is not: `_fold_node_moments` forms each node's
+interpolation as a dense `(F, F_ref)` matrix (`jnp.interp` over the identity)
+and multiplies through, $Z \times 2(F F_{\rm ref}^2 + F^2 F_{\rm ref})
+\simeq 8$ Gflop per point at $Z = 32$ and $F \simeq F_{\rm ref} \simeq 400$,
+more than the 4.6 Gflop Cholesky of the largest network.
+
+Linear interpolation has at most two nonzeros per row: the reference index
+$i_k$ below query $k$ and weights $(1 - t_k, t_k)$. So
+
+$$
+(W_z G W_z^T)_{kl} = \sum_{a, b \in \{0, 1\}} w_{k,a}\, w_{l,b}\,
+    G_{i_k + a,\, i_l + b},
+$$
+
+four gathered `(F, F)` slices of $G$ per node, about $Z \times 4F^2 \simeq 20$
+Mflop:
+
+```python
+def node_moment(index, weights, gram):    # index (F,), weights (F, 2)
+    rows = jnp.stack([index, index + 1], axis=1)
+    block = gram[rows[:, :, None, None], rows[None, None, :, :]]  # (F, 2, F, 2)
+    return jnp.einsum("ka,kalb,lb->kl", weights, block, weights)
+```
+
+$(i_k, t_k)$ come from one `searchsorted` per node on the redshifted query
+frequencies, shared with the mean (`_node_intensity`). Queries above the
+reference grid get zero weights, matching `jnp.interp(..., right=0.0)`; queries
+below it clamp to the first reference value, matching `jnp.interp`'s default.
+The mean can use the same weights.
+
+What is independent of both $\Lambda$ and the network is built once and shared
+by reference: the catalog arrays and the Gram matrix $G$ on `CatalogModel`
+(every network's likelihood holds the same model, so the device buffers are not
+copied), and the response draws when every network is sampled from one key.
 
 ### D3. Response moment: Monte Carlo, once per network
 
@@ -217,47 +277,55 @@ cov = cov + jnp.diag(network.scale**2)
 
 `vmap` over networks padded to $P_{\max} = 6$ made sense when the per-network
 cost was $O(F)$. With an $O(D^3)$ solve, ET-2L-mis padded to six pairs does
-$6^3 = 216$ times the work it needs. Networks are a Python loop inside the
-traced grid function: unrolled at trace time, each at its own $D$, one
-compilation for the whole set. `pad_pairs`, `MAX_PAIRS` and the stacked-network
-contract go.
+$6^3 = 216$ times the work it needs. Networks are a loop in the notebook, one
+likelihood each, compiled at its own $D$: four compilations for the paper's four
+networks. `pad_pairs`, `MAX_PAIRS` and the stacked-network contract go.
 
 ### D6. A grid driver in place of the NumPyro-shaped contract
 
 ```python
 def grid_log_likelihood(
-    model: CatalogModel,
-    networks: Mapping[str, Network],
-    observed: Mapping[str, ArrayLike],   # (..., D) per network
+    likelihood: DenseGaussianLikelihood,
     grids: Mapping[str, ArrayLike],
     *,
     fixed: Mapping[str, ArrayLike] | None = None,
     chunk_size: int = 8,
-) -> dict[str, jax.Array]:               # (*grid sizes, ...) per network
+) -> jax.Array:                          # (*grid sizes, ...realizations)
 
 
 def grid_log_prior(priors, grids, *, fixed=None) -> jax.Array:  # (*grid sizes)
 ```
 
-The body maps chunks of grid points with `lax.map(batch_size=chunk_size)`:
-predict once, then loop over networks, factorize, score every realization. Peak
-memory per point is one $M$ (1.3 MB at $F = 400$) plus one $C$ per network
-(46 MB at $D = 2400$).
+The body is `lax.map(likelihood.log_likelihood, points, batch_size=chunk_size)`
+under one module-level `jit`, with the likelihood a pytree argument. A notebook
+reads:
 
-Without gradients or NumPyro, the `LogLikelihood` protocol, the pytree
-registration of the likelihood classes, `log_likelihood_from_prediction`,
-`grid_log_posterior` and `LogDensityFn` (unused outside `inference/`) go. The
-model stays a jit argument with its arrays as traced inputs, so one compilation
-serves every catalog of one shape.
+```python
+model = CatalogModel.from_catalog(...)
+log_prior = grid_log_prior(priors, grids)
+posteriors = {
+    name: grid_log_likelihood(DenseGaussianLikelihood(model, network, data[name]), grids)
+    + log_prior
+    for name, network in networks.items()
+}
+```
 
-Rough cost at the largest network: 4.6 Gflop per Cholesky, so a $10^4$-point
-grid over four networks takes on the order of half an hour on CPU and minutes
-on GPU.
+Peak memory per point is one $M$ (1.3 MB at $F = 400$) plus one $C$ (46 MB at
+$D = 2400$).
+
+Without gradients or NumPyro, the `LogLikelihood` protocol,
+`log_likelihood_from_prediction`, `grid_log_posterior` and `LogDensityFn`
+(unused outside `inference/`) go.
+
+Rough cost: with D2a the prediction is negligible, and the four networks'
+Cholesky factors total about 6 Gflop per point, so a $10^4$-point grid takes on
+the order of half an hour on CPU and minutes on GPU.
 
 ### D7. Diagnostics, not likelihoods
 
 The paper reports quantities derived from the dense covariance. They move to
-`inference/diagnostics.py`, each a function of a `Prediction` and a `Network`:
+`inference/diagnostics.py`, each a function of an `Evaluation` and its
+`Network` (`likelihood.evaluate(params)`, typically at the fiducials):
 
 - $\sigma_{\rm shot}^2 = \mathbf c^T \mathcal C^{\rm Pois} \mathbf c / \rho^4$
   with $\mathbf c = \Sigma^{-1}\boldsymbol\mu$ (Sec. 4.3; today
@@ -296,8 +364,8 @@ asks to check against the mean term.
 
 ```
 inference/
-    gaussian.py      # GaussianFactor, factorize, log_likelihood, Network
-    model.py         # CatalogModel, Prediction
+    gaussian.py      # Network, GaussianFactor, Evaluation, DenseGaussianLikelihood
+    model.py         # CatalogModel, Prediction, sparse node moments
     grid.py          # grid_log_likelihood, grid_log_prior
     diagnostics.py   # sigma_shot, delta, whitened spectrum, amplitude cumulants
     fisher.py        # + dense Fisher
@@ -321,17 +389,20 @@ New modules let phase 1 land beside `likelihood.py` without name clashes; phase
   kept until phase 4).
 - **T5 chunking.** `pair_response_moment` is independent of `chunk_size` for a
   fixed key.
-- **T6 grid driver.** `grid_log_likelihood` equals predict-factorize-score at
-  each point; one compilation per model structure and network set.
-- **T7 limit.** `shot_noise=False` gives the diagonal Gaussian, and
-  `power_moment` scaled to zero reproduces it.
+- **T6 grid driver.** `grid_log_likelihood` equals `log_likelihood` at each
+  point; one compilation per likelihood structure, shared by two catalogs or
+  data sets of one shape.
+- **T8 sparse moment.** The gathered `power_moment` equals the dense
+  interpolation path, including queries above and below the reference grid.
+- **T7 limit.** `shot_noise=False` gives the diagonal Gaussian.
 - **Integration.** `shot_noise_coverage` on the dense likelihood: 68% and 95%
   coverage of $H_0$ per network (`@pytest.mark.integration`).
 
 ## Phases (one PR each)
 
 1. **Dense likelihood beside the old one.** `pair_response_moment`,
-   `inference/gaussian.py`, `model.py`, `grid.py`; T1-T7.
+   `inference/gaussian.py`, `model.py` with the sparse power moment, `grid.py`;
+   T1-T8.
 2. **Diagnostics.** `diagnostics.py`, the dense Fisher matrix; port
    `scripts/shot_noise_budget.py` and the covariance-spectrum figure.
 3. **Paper application.** `paper/posteriors.py` builds compressed `Network`s;
