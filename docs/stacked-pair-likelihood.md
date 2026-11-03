@@ -1,7 +1,8 @@
 # Design: the stacked-pair likelihood
 
 Status: proposal. Branch base: `feat/shot-noise-modes` at `c6259a6` (= `main`
-at `3a2a0c4`, #380).
+at `3a2a0c4`, #380). The likelihood design (D3, D4, D6) is superseded by
+[`dense-gaussian-likelihood.md`](dense-gaussian-likelihood.md).
 
 ## Purpose
 
