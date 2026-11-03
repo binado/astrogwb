@@ -671,8 +671,10 @@ def _(
             f"realization for $f_{{\\min}} = {minimum_frequencies[0]:g}$ Hz."
         ),
         label="tab:mean-spectrum-snr-coba",
+        # A measured SNR scatters by sqrt(1 + (rho s)^2), between 1.1 and 1.8
+        # here, so decimals are below the noise.
         formatters=[
-            *(["{:.1f}".format] * len(minimum_frequencies)),
+            *(["{:.0f}".format] * len(minimum_frequencies)),
             "{:.2f}".format,
         ],
     )
