@@ -353,11 +353,7 @@ these draws, each source contribution uses `(2/5) P0 r`; the covariance uses
 or division by a pair overlap. Compound-Poisson points use the same convention.
 These analytic conversions are rejected for higher-mode or precessing models.
 
-Old serialized files without `reference_inclination` read with that field set
-to `None`. They remain readable as plain catalogs, but reference generation
-and reference likelihoods reject them: regenerate old effective-inclination
-reference artifacts. Package-version checks still apply independently. New
-metadata changes catalog cache keys; existing configuration files need no edits.
+The new metadata changes catalog cache keys; existing configuration files need no edits.
 
 Version **0.6.0** replaces the `bns_md_*` populations with `bns_coba`. Older
 catalog and spectrum artifacts are not compatible and must be regenerated.

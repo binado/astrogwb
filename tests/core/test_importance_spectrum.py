@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import h5py
 import jax
 import numpy as np
 import pytest
@@ -480,7 +479,7 @@ def test_face_on_moments_match_independent_inclination_integral(moment: int) -> 
 @pytest.mark.parametrize(
     "approximant", ["AnalyticInspiral", "TaylorF2", "IMRPhenomXAS_NRTidalv3"]
 )
-def test_face_on_and_legacy_waveforms_give_equivalent_moments(
+def test_face_on_and_mean_inclination_waveforms_give_equivalent_moments(
     reference_metadata: CatalogMetadata, moment: int, approximant: str
 ) -> None:
     reference_metadata = reference_metadata.model_copy(
@@ -491,50 +490,30 @@ def test_face_on_and_legacy_waveforms_give_equivalent_moments(
         }
     )
     data = reference_catalog(reference_metadata, realization_key(41, 0))
-    legacy_inclination = float(np.arccos(np.sqrt(np.sqrt(11.2) - 3.0)))
+    effective_inclination = float(np.arccos(np.sqrt(np.sqrt(11.2) - 3.0)))
     columns = {
         **data["source_parameters"],
-        "inclination": np.full(reference_metadata.num_samples, legacy_inclination),
+        "inclination": np.full(reference_metadata.num_samples, effective_inclination),
     }
-    legacy = polarization_power_data(
+    effective = polarization_power_data(
         waveform_generator(reference_metadata.waveform), columns
     )
     old_factor = 1.0 if moment == 1 else INCLINATION_SECOND_MOMENT
     new_factor = INCLINATION_MEAN if moment == 1 else INCLINATION_RAW_SECOND_MOMENT
     np.testing.assert_allclose(
         new_factor * data["polarization_power"] ** moment,
-        old_factor * legacy["polarization_power"] ** moment,
+        old_factor * effective["polarization_power"] ** moment,
         atol=0,
     )
 
 
-@pytest.mark.parametrize("legacy", [False, True])
-def test_serialized_reference_convention_is_unambiguous(
-    reference_metadata: CatalogMetadata, tmp_path: Path, legacy: bool
+def test_reference_inclination_round_trips_in_metadata(
+    reference_metadata: CatalogMetadata, tmp_path: Path
 ) -> None:
-    # Serialization provenance must distinguish old files even when their
-    # package version matches; defaults on new requests must not mask it.
     path = write(tmp_path / "catalog.h5", {}, reference_metadata, seed=41)
-    if legacy:
-        with h5py.File(path, "r+") as file:
-            file.attrs["metadata"] = reference_metadata.model_dump_json(
-                exclude={"reference_inclination"}
-            )
-    data, metadata, _ = read_catalog(path)
-    if legacy:
-        assert metadata.reference_inclination is None
-        with pytest.raises(ValueError, match="regenerate legacy"):
-            ImportanceGaussianLikelihood.from_catalog(
-                {**data, "polarization_power": np.ones((1, 1))},
-                metadata,
-                population=metadata.population.build(),
-                frequencies=np.array([20.0]),
-                num_redshift_nodes=3,
-                density_sites=(),
-            )
-    else:
-        assert metadata == reference_metadata
-        assert metadata.reference_inclination == 0.0
+    _, metadata, _ = read_catalog(path)
+    assert metadata == reference_metadata
+    assert metadata.reference_inclination == 0.0
 
 
 @pytest.mark.parametrize("approximant", ["IMRPhenomHM", "IMRPhenomXP_NRTidalv3"])

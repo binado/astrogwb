@@ -25,7 +25,7 @@ from typing import Annotated, Any, Self, TypedDict, cast
 import jax
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from astrogwb import __version__
 from astrogwb.populations.joint import fix_extrinsic_parameters, joint_model
@@ -68,9 +68,7 @@ class CatalogMetadata(BaseModel):
     window that starts at or above it
     (:func:`~astrogwb.importance.spectrum.reference_redshift`).
     ``reference_inclination`` records the reference-only face-on convention.
-    It does not condition plain :func:`simulate_catalog` draws. ``None`` marks
-    serialized legacy files with unknown/effective reference inclination;
-    reference likelihoods reject them and require regeneration. Power always
+    It does not condition plain :func:`simulate_catalog` draws. Power always
     means the literal sum of squared polarization amplitudes.
     """
 
@@ -83,16 +81,8 @@ class CatalogMetadata(BaseModel):
     sampling: Sampling = "random"
     reference_redshift: Annotated[float, Field(ge=0.0)] | None = None
     # Reference catalogs only; physical catalogs retain sampled inclinations.
-    reference_inclination: Annotated[float, Field(ge=0.0, le=0.0)] | None = 0.0
+    reference_inclination: Annotated[float, Field(ge=0.0, le=0.0)] = 0.0
     version: str = __version__
-
-    @model_validator(mode="before")
-    @classmethod
-    def _legacy_reference_convention(cls, value: Any, info: ValidationInfo) -> Any:
-        """Keep missing serialized provenance distinct from new requests."""
-        if info.mode == "json" and isinstance(value, dict):
-            return {"reference_inclination": None, **value}
-        return value
 
     @model_validator(mode="after")
     def _sobol_needs_a_power_of_two(self) -> Self:

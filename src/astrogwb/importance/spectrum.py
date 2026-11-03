@@ -147,13 +147,8 @@ _REFERENCE_APPROXIMANTS = frozenset(
 )
 
 
-def _require_reference_convention(metadata: CatalogMetadata) -> None:
-    """Reject ambiguous legacy power and unsupported analytic conversions."""
-    if metadata.reference_inclination != REFERENCE_INCLINATION:
-        raise ValueError(
-            "reference catalog lacks face-on reference_inclination provenance; "
-            "regenerate legacy effective-inclination catalogs"
-        )
+def _require_quadrupole_waveform(metadata: CatalogMetadata) -> None:
+    """Restrict analytic inclination conversion to supported quadrupole models."""
     if metadata.waveform.approximant not in _REFERENCE_APPROXIMANTS:
         raise ValueError(
             "reference integration requires a supported dominant-quadrupole, "
@@ -332,7 +327,7 @@ def reference_catalog(
         metadata.num_samples,
         metadata.population,
     )
-    _require_reference_convention(metadata)
+    _require_quadrupole_waveform(metadata)
     reference = reference_redshift(metadata)
     population = metadata.population
     if reference < population.minimum_redshift:
@@ -450,7 +445,7 @@ def _rescaling_arrays(
         frequencies would fall below the reference grid, where
         :func:`_node_power` clamps instead of following the power law.
     """
-    _require_reference_convention(metadata)
+    _require_quadrupole_waveform(metadata)
     inclination = np.asarray(data["source_parameters"].get(INCLINATION_SITE))
     if not np.all(inclination == REFERENCE_INCLINATION):
         raise ValueError(
