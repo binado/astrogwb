@@ -78,10 +78,10 @@ population = BNSCobaPopulation(
 params = {
     "H0": 67.66,
     "Omega_m": 0.3096,
-    "gamma": 1.42,
-    "kappa": 4.62,
-    "z_peak": 1.84,
-    "local_merger_rate": 770.0,
+    "gamma": 2.35,
+    "kappa": 4.4,
+    "z_peak": 2.14,
+    "local_merger_rate": 240.0,
     "minimum_mass": 1.0,
     "mass_width": 1.5,
 }
