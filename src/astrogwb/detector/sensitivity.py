@@ -1,26 +1,20 @@
 """Detector sensitivity curves backed by gwmock-noise.
 
-gwmock-noise owns PSD loading/interpolation; astrogwb only adds the SGWB
-analysis policy on top. The one numerical wrinkle is out-of-band behavior:
-``gwmock_noise`` clips frequencies outside the curve grid to ``0`` (an
-*infinite* sensitivity contribution in an inverse-variance sum), whereas
-the SGWB analysis wants those bins to contribute *nothing*, i.e. PSD
-``inf``. Calling a ``Sensitivity`` therefore re-applies the ``inf`` policy
-on top of the gwmock interpolation.
+``gwmock_noise`` clips frequencies outside the curve grid to PSD ``0``, an
+infinite contribution to an inverse-variance sum. Calling a ``Sensitivity``
+maps them to ``inf`` instead, so out-of-band bins contribute nothing.
 """
 
 from __future__ import annotations
 
 import tomllib
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
 import numpy as np
 from gwmock_noise.spectral import interpolate_real_spectral_series, load_spectral_series
-from gwmock_signal.network import Network
-from gwmock_signal.stochastic.overlap import detector_names
 from numpy.typing import ArrayLike, NDArray
 
 from .psd import NOISE_CURVES_BASE_DIR as NOISE_CURVES_BASE_DIR  # noqa: PLC0414
@@ -45,6 +39,19 @@ class Sensitivity:
     """
 
     psd_reference: str | Path
+    _curve: tuple[NDArray[np.float64], NDArray[np.float64]] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+
+    def _load_curve(self) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        """The PSD grid and values, read on first use and kept afterwards."""
+        curve = self._curve
+        if curve is None:
+            curve = load_spectral_series(
+                resolve_psd_path(self.psd_reference), kind="PSD"
+            )
+            object.__setattr__(self, "_curve", curve)
+        return curve
 
     def __call__(
         self, frequencies: ArrayLike, *, out_of_band: OutOfBand = "inf"
@@ -57,9 +64,8 @@ class Sensitivity:
         ``inf``, the astrogwb analysis convention so out-of-band bins drop
         out of an inverse-variance contraction. Grid endpoints stay finite.
         """
-        resolved = resolve_psd_path(self.psd_reference)
         frequencies = np.asarray(frequencies, dtype=float)
-        grid, grid_values = load_spectral_series(resolved, kind="PSD")
+        grid, grid_values = self._load_curve()
         values = interpolate_real_spectral_series(grid, grid_values, frequencies)
 
         if out_of_band == "zero":
@@ -70,7 +76,15 @@ class Sensitivity:
 
 
 def load_sensitivity(name: str, *, path: str | Path | None = None) -> Sensitivity:
-    """Load a single detector's :class:`Sensitivity` from a TOML table."""
+    """Load a single detector's :class:`Sensitivity` from a TOML table.
+
+    Parameters
+    ----------
+    name
+        Name to look up.
+    path
+        File path.
+    """
     table = _load_sensitivity_table(path)
     return _sensitivity_from_dict(table[name])
 
@@ -78,31 +92,24 @@ def load_sensitivity(name: str, *, path: str | Path | None = None) -> Sensitivit
 def load_sensitivity_map(
     names: Sequence[str], *, path: str | Path | None = None
 ) -> Mapping[str, Sensitivity]:
-    """Load a name -> :class:`Sensitivity` mapping for several detectors."""
+    """Load a name -> :class:`Sensitivity` mapping for several detectors.
+
+    Parameters
+    ----------
+    names
+        Names to select.
+    path
+        File path.
+    """
     table = _load_sensitivity_table(path)
     return {name: _sensitivity_from_dict(table[name]) for name in names}
-
-
-def load_sensitivities_for_network(
-    network: Network | str, *, path: str | Path | None = None
-) -> Mapping[str, Sensitivity]:
-    """Load sensitivity curves keyed by each detector's public name.
-
-    ``network`` may be a gwmock network alias (see ``Network.list_names()``)
-    or a ready :class:`~gwmock_signal.network.Network`. Every detector must
-    have a row in ``sensitivity.toml``; a gwmock preset whose geometry is
-    supplied upstream therefore needs a ``path=`` table of its own.
-    """
-    if isinstance(network, str):
-        network = Network.from_name(network)
-    return load_sensitivity_map(detector_names(network.detector_names), path=path)
 
 
 def _load_sensitivity_table(path: str | Path | None) -> Mapping[str, dict]:
     if path is not None:
         with Path(path).open("rb") as handle:
             data = tomllib.load(handle)
-        # Keep accepting the flat layout used by existing external tables.
+        # A table may omit the [detectors] wrapper.
         return data.get("detectors", data)
     with SENSITIVITY_FILE.open("rb") as handle:
         return tomllib.load(handle)["detectors"]

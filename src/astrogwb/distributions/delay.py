@@ -82,6 +82,13 @@ class PowerLawDelayDistribution(dist.DoublyTruncatedPowerLaw):
 
     @validate_sample
     def log_prob(self, value: ArrayLike) -> jax.Array:
+        """Evaluate the log probability density at ``value``.
+
+        Parameters
+        ----------
+        value
+            Value to evaluate.
+        """
         beta, log_range = self._shape()
         # Z = low^beta * log_range * h(beta * log_range).
         log_normalization = (
@@ -92,6 +99,13 @@ class PowerLawDelayDistribution(dist.DoublyTruncatedPowerLaw):
         return jnp.asarray(self.alpha) * jnp.log(value) - log_normalization
 
     def cdf(self, value: ArrayLike) -> jax.Array:
+        """Evaluate the cumulative distribution function at ``value``.
+
+        Parameters
+        ----------
+        value
+            Value to evaluate.
+        """
         beta, log_range = self._shape()
         log_ratio = jnp.log(jnp.asarray(value) / self.low)
         # Saturate outside the support, as the parent does.
@@ -103,6 +117,13 @@ class PowerLawDelayDistribution(dist.DoublyTruncatedPowerLaw):
         )
 
     def icdf(self, q: ArrayLike) -> jax.Array:
+        """Evaluate the inverse cumulative distribution function at ``q``.
+
+        Parameters
+        ----------
+        q
+            Cumulative probability.
+        """
         beta, log_range = self._shape()
         scaled_range = log_range * _expm1_ratio(beta * log_range)
         q = jnp.asarray(q)

@@ -1,34 +1,67 @@
-from ._types import DetectorSpec
+from .config import (
+    DETECTOR_DEFAULT_PATHS,
+    DetectorConfig,
+    DetectorGeometry,
+    DetectorRegistry,
+    load_detector,
+    load_detector_config,
+)
 from .effective_psd import (
+    PairTerms,
     effective_psd,
     gaussian_bin_scale,
     log_frequency_noise_scale,
+    pair_bin_scale,
+    pair_terms,
 )
-from .geometry import load_detector, resolve_detector
+from .geometry import Detector
 from .overlap import (
+    OrientationReference,
+    align_detector,
+    isotropic_overlap_reduction_function,
     overlap_reduction_function,
     pairwise_overlap_reduction_function,
+    relative_orientation,
+    stokes_cross_power,
 )
 from .psd import resolve_psd_path
+from .response import (
+    pair_response,
+    pair_response_moment,
+    sample_pair_response,
+)
 from .sensitivity import (
     Sensitivity,
-    load_sensitivities_for_network,
     load_sensitivity,
     load_sensitivity_map,
 )
 
 __all__ = [
-    "DetectorSpec",
+    "DETECTOR_DEFAULT_PATHS",
+    "Detector",
+    "DetectorConfig",
+    "DetectorGeometry",
+    "DetectorRegistry",
+    "OrientationReference",
+    "PairTerms",
     "Sensitivity",
+    "align_detector",
     "effective_psd",
     "gaussian_bin_scale",
+    "isotropic_overlap_reduction_function",
     "load_detector",
-    "load_sensitivities_for_network",
+    "load_detector_config",
     "load_sensitivity",
     "load_sensitivity_map",
     "log_frequency_noise_scale",
     "overlap_reduction_function",
+    "pair_bin_scale",
+    "pair_response",
+    "pair_response_moment",
+    "pair_terms",
     "pairwise_overlap_reduction_function",
-    "resolve_detector",
+    "relative_orientation",
     "resolve_psd_path",
+    "sample_pair_response",
+    "stokes_cross_power",
 ]

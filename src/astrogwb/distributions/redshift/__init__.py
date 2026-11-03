@@ -1,13 +1,10 @@
 """Redshift distributions induced by source-frame merger-rate models.
 
-The base, time-delayed and Madau-Dickinson implementations are also exported
-here:
-
-- :mod:`astrogwb.distributions.redshift.base` — the distribution and its
+- :mod:`astrogwb.distributions.redshift.base` -- the distribution and its
   cosmology tables
-- :mod:`astrogwb.distributions.redshift.time_delayed` — mergers delayed from a
+- :mod:`astrogwb.distributions.redshift.time_delayed` -- mergers delayed from a
   formation rate
-- :mod:`astrogwb.distributions.redshift.madau_dickinson` — the
+- :mod:`astrogwb.distributions.redshift.madau_dickinson` -- the
   Madau-Dickinson rate-shape factories
 """
 

@@ -1,0 +1,35 @@
+# Coverage draws on SLURM, CPU only:
+#   uv run --no-sync snakemake \
+#       --profile workflow/profiles/slurm --dry-run
+# Needs the project venv synced with the `cluster` group; see
+# docs/coverage-draws-on-slurm.md.
+# Job logs land under .snakemake/slurm_logs/, each command's own under logs/.
+executor: slurm
+# Concurrent jobs in the queue; 1000 draws at 5 per job is 200 jobs.
+jobs: 100
+# Draw jobs share the `draws` group; pack five into each SLURM job, run one
+# after another, so a job's ~5 min startup and queue wait are amortized.
+group-components:
+  - draws=5
+keep-going: true
+rerun-incomplete: true
+# Re-run a draw only when its file is missing or a config it reads is newer.
+# A changed config then fails on the realization's recorded settings rather
+# than silently redrawing: delete the ensemble to regenerate it.
+rerun-triggers: mtime
+# Outputs land on a shared filesystem the controller polls.
+latency-wait: 120
+retries: 1
+default-resources:
+  slurm_partition: short
+  # Uncomment for clusters that require it:
+  # slurm_account: <account>
+  # Two draws peaked at 2.1 GB RSS on an M4 (/usr/bin/time -l); XLA's
+  # per-thread buffers grow with `threads`, and an out-of-memory kill loses
+  # the whole batch, so ~4x headroom at 8 threads.
+  mem_mb: 8000
+  # The first cluster batch, 10 draws on 4 cores, took 50-90 min: 5-9 min a
+  # draw. 8 cores should bring 5 draws to ~15-30 min; 60 leaves room for
+  # imperfect thread scaling, since a job killed at its limit loses its
+  # whole batch.
+  runtime: 60

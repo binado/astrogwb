@@ -4,14 +4,13 @@ __generated_with = "0.25.0"
 app = marimo.App()
 
 with app.setup(hide_code=True):
-    import os
-    from collections.abc import Callable, Mapping
+    from collections.abc import Mapping
     from pathlib import Path
 
-    from astrogwb.paper.runtime import configure_runtime
+    from astrogwb.runtime import configure_runtime
 
     # Backend configuration precedes waveform construction and array creation.
-    configure_runtime(num_chains=1)
+    configure_runtime()
 
     import jax
     import jax.numpy as jnp
@@ -23,36 +22,36 @@ with app.setup(hide_code=True):
     from matplotlib.projections import register_projection
     from numpy.typing import NDArray
 
+    from astrogwb.config import load_config
     from astrogwb.detector import effective_psd, gaussian_bin_scale
+    from astrogwb.detector.config import DetectorRegistry
     from astrogwb.frequency import frequency_mask
-    from astrogwb.gwb.importance import (
-        reference_catalog,
-        reference_catalog_stem,
-    )
-    from astrogwb.inference import ImportanceGaussianLikelihood
-    from astrogwb.inference.fisher import spectral_density_jacobian
-    from astrogwb.paper.config import (
-        detector_registry,
-        fiducials,
-        population_metadata,
-        waveform_metadata,
-    )
-    from astrogwb.paper.config.detectors import DetectorRegistry
-    from astrogwb.paper.config.runs import CATALOGS_ROOT, FIGURES_DIR
-    from astrogwb.paper.plotting import parameter_label, save_figures, use_paper_style
-    from astrogwb.populations import Population, build_population
-    from astrogwb.simulators.core import batch_keys, load, write
-    from astrogwb.simulators.polarization_power import (
+    from astrogwb.importance.catalog import (
         CatalogMetadata,
-        PolarizationPowerData,
+        IntensityData,
+        read_catalog,
     )
+    from astrogwb.importance.spectrum import (
+        INCLINATION_SECOND_MOMENT,
+        reference_catalog,
+    )
+    from astrogwb.inference import CatalogModel
+    from astrogwb.inference.fisher import spectral_density_jacobian
+    from astrogwb.paper.plotting import parameter_label, save_figures, use_paper_style
+    from astrogwb.populations import Population
+    from astrogwb.simulators import realization_key
+    from astrogwb.waveform import WaveformMetadata, waveform_generator
 
-    # One compiled spectrum for every catalog: the likelihood is a pytree
-    # argument, so its catalog is a traced input, not a constant, and catalogs
-    # of one shape share the compilation.
-    evaluate_spectrum = jax.jit(lambda likelihood, params: likelihood.spectrum(params))
+    # One compiled spectrum for every catalog: the model is a pytree argument,
+    # so its catalog is a traced input, not a constant, and catalogs of one
+    # shape share the compilation.
+    evaluate_spectrum = jax.jit(lambda model, params: model.spectrum(params))
+    # The per-bin shot-noise variance under the sky-averaged response: the
+    # diagonal of the power moment times the inclination scatter.
     evaluate_variance = jax.jit(
-        lambda likelihood, params: likelihood.predict(params)[1]
+        lambda model, params: (
+            INCLINATION_SECOND_MOMENT * jnp.diag(model.power_moment(params))
+        )
     )
 
 
@@ -74,7 +73,7 @@ def _():
 
     with $\bar P_{\mathrm{ref}}$ the mean reference power, interpolated in
     $\ln f$. The rescaling holds for the $(2,2)$-mode, aligned-spin,
-    quasi-circular waveforms used here; `tests/core/test_gwb_importance.py`
+    quasi-circular waveforms used here; `tests/core/test_importance_spectrum.py`
     checks it against waveforms generated at every node. Two checks, each
     measured on its own:
 
@@ -97,7 +96,9 @@ def _():
     coherent shift of the posterior: $b_a$ is that shift. $\xi_n$ has no
     $b$: at $\Xi_0 = 1$ the spectrum does not depend on it.
 
-    Setting `ASTROGWB_NOTEBOOK_SMOKE=1` swaps in tiny catalogs.
+    The ladder's reference catalog is read from a file
+    (`astrogwb model-catalog`, run by `Snakefile`);
+    the Monte Carlo and Sobol catalogs are drawn in memory.
     """)
 
 
@@ -111,12 +112,10 @@ def _():
 @app.cell
 def _():
     ROOT_DIR = Path(__file__).resolve().parents[1]
-    FIGURES = ROOT_DIR / FIGURES_DIR / "importance_convergence"
-    catalog_dir = ROOT_DIR / CATALOGS_ROOT
+    FIGURES = ROOT_DIR / "outputs" / "figures" / "importance_convergence"
 
-    # Redshift ladder: one fixed set of draws; the top rung is the reference.
-    ladder_seed = 100
-    ladder_samples = 256
+    # Redshift ladder: one fixed set of 256 i.i.d. draws at seed 100, read from
+    # the file the workflow writes; the top rung is the reference.
     ladder_exponents = range(2, 11)  # Z = 4 ... 1024
 
     # Monte Carlo: M catalogs at N_max; each N = 2**k <= N_max is a prefix.
@@ -140,7 +139,7 @@ def _():
     yardstick_network = "ET-2L-aligned-CE-Hanford"  # the most sensitive
     peak_parameters = ("H0", "Omega_m", "xi_0")
 
-    FIDUCIALS = fiducials(root=ROOT_DIR)
+    FIDUCIALS = load_config(ROOT_DIR / "config").fiducials
     # The grid posteriors' window edges, one parameter moved at a time.
     edges = {
         "H0": (60.0, 76.0),
@@ -149,19 +148,7 @@ def _():
         "xi_n": (0.3, 3.0),
     }
 
-    SMOKE = os.environ.get("ASTROGWB_NOTEBOOK_SMOKE") == "1"
-    write_figures_default = True
-    if SMOKE:
-        ladder_samples = 16
-        ladder_exponents = range(2, 6)  # Z = 4 ... 32
-        mc_catalogs = 3
-        mc_max_samples = 64
-        mc_min_exponent = 3
-        qmc_catalogs = 3
-        qmc_max_samples = 64
-        catalog_chunk_size = 512
-        edges = {}
-        write_figures_default = False
+    ladder_path = ROOT_DIR / "outputs" / "catalogs" / "reference-ladder.h5"
 
     evaluation_points: dict[str, dict[str, float]] = {"fiducial": dict(FIDUCIALS)}
     for _name, _values in edges.items():
@@ -170,21 +157,23 @@ def _():
 
     # The observed grid, and the reference grid: geometric bins 1% wide from
     # the observed f_min to past the detector-frame BNS merger at z_min.
-    waveform = waveform_metadata(root=ROOT_DIR)
-    reference_waveform = waveform_metadata(
-        root=ROOT_DIR,
-        frequency_spacing="log",
-        minimum_frequency=minimum_frequency,
-        maximum_frequency=4000.0,
-        frequency_resolution=0.02,
-        turnover_frequency=None,
+    waveform = load_config(ROOT_DIR / "config").catalog.waveform
+    reference_waveform = WaveformMetadata.model_validate(
+        {
+            **load_config(ROOT_DIR / "config").catalog.waveform.model_dump(),
+            "frequency_spacing": "log",
+            "minimum_frequency": minimum_frequency,
+            "maximum_frequency": 4000.0,
+            "frequency_resolution": 0.02,
+            "turnover_frequency": None,
+        }
     )
-    frequencies = np.asarray(waveform.build().frequencies)
-    population = population_metadata(root=ROOT_DIR)
-    target = build_population(population.model_name, **population.model_kwargs)
-    registry = detector_registry(root=ROOT_DIR)
+    frequencies = np.asarray(waveform_generator(waveform).frequencies)
+    population = load_config(ROOT_DIR / "config").catalog.population
+    target = population.build()
+    registry = load_config(ROOT_DIR / "config").registry
 
-    write_figures = mo.ui.switch(value=write_figures_default, label="Write figures")
+    write_figures = mo.ui.switch(value=True, label="Write figures")
     write_figures
     use_paper_style(root=ROOT_DIR)
     # gwpy registers replacement default axes; keep matplotlib's.
@@ -193,12 +182,10 @@ def _():
         FIDUCIALS,
         FIGURES,
         catalog_chunk_size,
-        catalog_dir,
         evaluation_points,
         frequencies,
         ladder_exponents,
-        ladder_samples,
-        ladder_seed,
+        ladder_path,
         maximum_frequency,
         mc_base_seed,
         mc_catalogs,
@@ -229,64 +216,17 @@ def _():
 
 
 @app.function(hide_code=True)
-def cached_catalog(
-    path: Path,
-    metadata: CatalogMetadata,
-    seed: int,
-    draw: Callable[[jax.Array], PolarizationPowerData],
-) -> PolarizationPowerData:
-    """The catalog at ``path``, drawn with ``draw(batch_keys(seed, 1)[0])`` on a miss.
-
-    A hit is checked against ``metadata`` and ``seed``, against the
-    request it records.
-
-    Raises
-    ------
-    ValueError
-        If the cached file records another metadata or seed.
-    """
-    if path.is_file():
-        data, recorded, attrs = load(path, type(metadata))
-        if recorded.key() != metadata.key() or attrs.get("seed") != seed:
-            raise ValueError(
-                f"{path} records {recorded.key()} at seed {attrs.get('seed')}, "
-                f"not the requested {metadata.key()} at seed {seed}"
-            )
-        return data  # ty: ignore[invalid-return-type]
-    data = draw(batch_keys(seed, 1)[0])
-    write(path, data, metadata, seed=seed)
-    return data
-
-
-@app.function(hide_code=True)
-def ensure_reference_catalog(
-    metadata: CatalogMetadata,
-    seed: int,
-    directory: Path,
-    *,
-    chunk_size: int | None = None,
-) -> PolarizationPowerData:
-    """The reference catalog of ``metadata`` at ``seed``: power ``(F_ref, N)``."""
-    return cached_catalog(
-        directory / f"{reference_catalog_stem(metadata, seed)}.h5",
-        metadata,
-        seed,
-        lambda key: reference_catalog(metadata, key, chunk_size=chunk_size),
-    )
-
-
-@app.function(hide_code=True)
 def prefix_catalog(
-    data: PolarizationPowerData, metadata: CatalogMetadata, n: int
-) -> tuple[PolarizationPowerData, CatalogMetadata]:
+    data: IntensityData, metadata: CatalogMetadata, n: int
+) -> tuple[IntensityData, CatalogMetadata]:
     """The reference catalog of its first ``n`` draws.
 
     The first ``n`` of ``N`` iid draws are themselves an iid sample, so every
     smaller size is read off one catalog.
     """
-    sliced: PolarizationPowerData = {
+    sliced: IntensityData = {
         "frequencies": data["frequencies"],
-        "polarization_power": np.asarray(data["polarization_power"])[:, :n],
+        "intensity": np.asarray(data["intensity"])[:, :n],
         "source_parameters": {
             name: np.asarray(values)[:n]
             for name, values in data["source_parameters"].items()
@@ -316,8 +256,8 @@ def network_data(
         ``sigma`` and ``mask``, shape ``(F,)``.
     """
     grid = jnp.asarray(frequencies)
-    geometry, sensitivities = registry.build_network(name)
-    psd = jnp.asarray(effective_psd(grid, geometry, sensitivities))
+    geometry = registry.build_network(name)
+    psd = jnp.asarray(effective_psd(grid, geometry))
     mask = (
         frequency_mask(grid, fmin=minimum_frequency, fmax=maximum_frequency)
         & jnp.isfinite(psd)
@@ -329,13 +269,13 @@ def network_data(
 
 @app.function(hide_code=True)
 def spectra_at(
-    likelihood: ImportanceGaussianLikelihood,
+    model: CatalogModel,
     points: Mapping[str, Mapping[str, float]],
 ) -> NDArray[np.float64]:
     """The spectrum at every evaluation point, shape ``(len(points), F)``."""
     return np.stack(
         [
-            np.asarray(evaluate_spectrum(likelihood, dict(params)))
+            np.asarray(evaluate_spectrum(model, dict(params)))
             for params in points.values()
         ]
     )
@@ -343,23 +283,25 @@ def spectra_at(
 
 @app.function(hide_code=True)
 def rescaled_fn(
-    data: PolarizationPowerData,
+    data: IntensityData,
     metadata: CatalogMetadata,
     target: Population,
     frequencies: NDArray[np.float64],
     num_redshift_nodes: int,
-) -> ImportanceGaussianLikelihood:
-    """The rescaled spectrum of one reference catalog, as a likelihood.
+    observation_time: float = 1.0,
+) -> CatalogModel:
+    """The rescaled spectrum of one reference catalog, as a catalog model.
 
     No swept parameter is intrinsic, so no density factor enters a weight.
+    ``observation_time`` in years scales the shot-noise variance alone.
     """
-    return ImportanceGaussianLikelihood.from_catalog(
+    return CatalogModel.from_catalog(
         data,
         metadata,
         population=target,
         frequencies=frequencies,
         num_redshift_nodes=num_redshift_nodes,
-        density_sites=(),
+        observation_time=observation_time,
     )
 
 
@@ -461,29 +403,11 @@ def _(
 
 
 @app.cell
-def _(
-    FIDUCIALS,
-    catalog_chunk_size,
-    catalog_dir,
-    ladder_samples,
-    ladder_seed,
-    population,
-    reference_waveform,
-):
-    ladder_reference_metadata = CatalogMetadata(
-        waveform=reference_waveform,
-        population=population,
-        fiducials=FIDUCIALS,
-        num_samples=ladder_samples,
-    )
-    ladder_reference = ensure_reference_catalog(
-        ladder_reference_metadata,
-        ladder_seed,
-        catalog_dir,
-        chunk_size=catalog_chunk_size,
-    )
+def _(ladder_path):
+    ladder_reference, ladder_reference_metadata, _seed = read_catalog(ladder_path)
     print(
-        f"ladder: N = {ladder_samples}, reference grid "
+        f"ladder: N = {ladder_reference_metadata.num_samples} at seed "
+        f"{_seed}, reference grid "
         f"{np.asarray(ladder_reference['frequencies']).size} bins"
     )
     return ladder_reference, ladder_reference_metadata
@@ -674,15 +598,13 @@ def _(
 ):
     ladder_scatter = {}
     for _nodes in ladder_nodes:
-        _fn = ImportanceGaussianLikelihood.from_catalog(
+        _fn = rescaled_fn(
             ladder_reference,
             ladder_reference_metadata,
-            population=target,
-            frequencies=frequencies,
-            num_redshift_nodes=_nodes,
-            density_sites=(),
-            shot_noise="amplitude",
-            observation_time=observation_time,
+            target,
+            frequencies,
+            _nodes,
+            observation_time,
         )
         _variances = np.stack(
             [
@@ -770,30 +692,21 @@ def catalog_ladder(
     spectra, variances = [], []
     for seed in seeds:
         data = reference_catalog(
-            metadata, batch_keys(seed, 1)[0], chunk_size=chunk_size
+            metadata, realization_key(seed, 0), chunk_size=chunk_size
         )
         row_spectra, row_variances = [], []
         for size in sizes:
             prefix, prefix_metadata = prefix_catalog(data, metadata, size)
-            row_spectra.append(
-                spectra_at(
-                    rescaled_fn(
-                        prefix, prefix_metadata, target, frequencies, num_redshift_nodes
-                    ),
-                    points,
-                )
-            )
-            shot_noise = ImportanceGaussianLikelihood.from_catalog(
+            model = rescaled_fn(
                 prefix,
                 prefix_metadata,
-                population=target,
-                frequencies=frequencies,
-                num_redshift_nodes=num_redshift_nodes,
-                density_sites=(),
-                shot_noise="amplitude",
-                observation_time=observation_time,
+                target,
+                frequencies,
+                num_redshift_nodes,
+                observation_time,
             )
-            row_variances.append(np.asarray(evaluate_variance(shot_noise, fiducial)))
+            row_spectra.append(spectra_at(model, points))
+            row_variances.append(np.asarray(evaluate_variance(model, fiducial)))
         spectra.append(row_spectra)
         variances.append(row_variances)
         # Release this catalog before the next is drawn.
@@ -820,7 +733,6 @@ def _():
 def _(
     FIDUCIALS,
     catalog_chunk_size,
-    catalog_dir,
     chosen_nodes,
     evaluation_points,
     frequencies,
@@ -1163,7 +1075,7 @@ def _(
     _rows = quadrature[quadrature["Z"] == mc_nodes]
     _quadrature = float(_rows[_b_columns].abs().max().max()) if len(_rows) else 0.0
     _mc = float(_mc_worst[mc_sizes.index(chosen_samples)])
-    _bins = reference_waveform.build().frequencies.size
+    _bins = waveform_generator(reference_waveform).frequencies.size
     recommendation = pd.DataFrame(
         [
             {

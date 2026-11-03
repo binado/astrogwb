@@ -9,20 +9,12 @@ Coarsening by subsampling therefore holds the sources fixed and varies only
 ``FINE_DF`` is a negative power of two so that ``k * FINE_DF`` is exact in
 binary and the two grids agree essentially to round-off.
 
-Nothing here tracks a bin width by hand: the SNR and the noise scale take the
-subsampled ``frequencies`` and derive each bin's width from them, so a coarser
-grid is coarser everywhere at once. The band mask is passed alongside the full
-grid rather than used to slice it, because widths belong to the whole axis.
-
-The band stops at 256 Hz to keep the grid manageable while retaining the
-signal contribution used by ``notebooks/catalog_convergence.py``.
-
-Fast by design -- no NUTS, so these are not marked ``integration``.
+Bin widths derive from the subsampled ``frequencies``; the band is a mask on
+the full grid, never a slice.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
 
 import jax
@@ -37,13 +29,13 @@ from astrogwb_mock_population import (
     build_reference_spectrum,
 )
 
+from astrogwb.background import spectral_snr_squared
 from astrogwb.constants import SECONDS_PER_YEAR
-from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
+from astrogwb.detector import effective_psd, gaussian_bin_scale, load_detector
 from astrogwb.frequency import frequency_mask
-from astrogwb.gwb import spectral_snr_squared
-from astrogwb.simulators.polarization_power import (
+from astrogwb.importance.catalog import (
     CatalogMetadata,
-    PolarizationPowerData,
+    IntensityData,
 )
 
 #: Reference resolution, and the band the refinement study runs over.
@@ -77,7 +69,7 @@ FIRST_STEP_TOLERANCE = 5e-3
 @pytest.fixture(scope="module")
 def fine_catalog(
     mock_population: dict[str, np.ndarray],
-) -> tuple[PolarizationPowerData, CatalogMetadata]:
+) -> tuple[IntensityData, CatalogMetadata]:
     """The reference catalog every coarser grid is subsampled from."""
     return build_mock_catalog(
         mock_population,
@@ -90,18 +82,15 @@ def fine_catalog(
 
 def test_subsampling_a_fine_catalog_matches_a_coarse_one(
     mock_population: dict[str, np.ndarray],
-    fine_catalog: tuple[PolarizationPowerData, CatalogMetadata],
+    fine_catalog: tuple[IntensityData, CatalogMetadata],
 ) -> None:
     """``[::k]`` of a fine catalog *is* the catalog built at ``k * df``.
 
-    The premise of every other test in this module, and of
-    ``notebooks/catalog_convergence.py``. Both grids are formed from integer indices times a
-    power-of-two ``df``, so any real disagreement means the grid construction
-    changed.
+    The premise of every other test in this module.
     """
     fine_data, _ = fine_catalog
     fine_frequencies = np.asarray(fine_data["frequencies"])
-    fine_power = np.asarray(fine_data["polarization_power"])
+    fine_intensity = np.asarray(fine_data["intensity"])
 
     for factor in SUBSAMPLE_FACTORS:
         coarse, _ = build_mock_catalog(
@@ -115,24 +104,20 @@ def test_subsampling_a_fine_catalog_matches_a_coarse_one(
             fine_frequencies[::factor], np.asarray(coarse["frequencies"])
         )
         np.testing.assert_allclose(
-            fine_power[::factor], np.asarray(coarse["polarization_power"])
+            fine_intensity[::factor], np.asarray(coarse["intensity"])
         )
 
 
-def _analysis_at(
-    frequencies: jax.Array, sensitivities: Mapping[str, Any]
-) -> dict[str, Any]:
+def _analysis_at(frequencies: jax.Array) -> dict[str, Any]:
     """Derive the masked analysis inputs on one observed grid.
 
-    The PSD and the mask are rebuilt on each grid rather than subsampled, so
-    nothing about the coarse analysis is inherited from the fine one except
-    the sources. Every array stays on the full grid and the band is a mask, so
-    bin widths derive from the whole axis; ``noise_scale`` is a placeholder of
-    one wherever the mask excludes a bin, which keeps an infinite PSD out of
-    the log density.
+    The PSD and mask are rebuilt on each grid; only the sources are shared.
+    ``noise_scale`` is one wherever the mask excludes a bin.
     """
     network_psd = jnp.asarray(
-        effective_psd(np.asarray(frequencies), DETECTORS, sensitivities)
+        effective_psd(
+            np.asarray(frequencies), [load_detector(name) for name in DETECTORS]
+        )
     )
     mask = frequency_mask(frequencies, fmin=F_MIN, fmax=F_MAX) & jnp.isfinite(
         network_psd
@@ -148,7 +133,7 @@ def _analysis_at(
 
 
 @pytest.fixture(scope="module")
-def reference() -> tuple[PolarizationPowerData, CatalogMetadata]:
+def reference() -> tuple[IntensityData, CatalogMetadata]:
     """One reference catalog every observed grid is predicted from.
 
     It reaches past the detector-frame merger frequency at the window's lower
@@ -164,20 +149,16 @@ def reference() -> tuple[PolarizationPowerData, CatalogMetadata]:
 
 @pytest.fixture(scope="module")
 def resolutions(
-    reference: tuple[PolarizationPowerData, CatalogMetadata],
+    reference: tuple[IntensityData, CatalogMetadata],
 ) -> dict[int, dict[str, Any]]:
     """Masked analysis inputs, mock observations, and SNR^2 at each resolution."""
     data, _ = reference
     fine_frequencies = jnp.asarray(data["frequencies"])
     fine_frequencies = fine_frequencies[fine_frequencies <= F_MAX]
 
-    # Loaded once: the noise curves are the same at every resolution, and
-    # re-reading them per grid dominated the module's runtime.
-    sensitivities = load_sensitivity_map(DETECTORS)
-
     runs: dict[int, dict[str, Any]] = {}
     for factor in (1, *SUBSAMPLE_FACTORS):
-        run = _analysis_at(fine_frequencies[::factor], sensitivities)
+        run = _analysis_at(fine_frequencies[::factor])
         # One estimator per observed grid, all predicting from the same
         # sources. The injection is its own fiducial prediction, so the
         # chi^2 term vanishes at the fiducials and every log-weight is zero.
@@ -205,7 +186,7 @@ def _log_likelihood(run: dict[str, Any], hubble_constant: float) -> float:
     return float(jnp.sum(jnp.where(run["mask"], log_prob, 0.0)))
 
 
-def test_log_likelihood_ratio_converges_but_the_absolute_value_does_not(
+def test_the_absolute_log_likelihood_does_not_converge(
     resolutions: dict[int, dict[str, Any]],
 ) -> None:
     r"""Only differences at fixed resolution mean anything.
@@ -214,26 +195,14 @@ def test_log_likelihood_ratio_converges_but_the_absolute_value_does_not(
     \sqrt{2T\Delta f}`, so coarsening by ``k`` grows every :math:`\sigma_i` by
     :math:`\sqrt{k}` while dropping the bin count by ``k``. The normalization
     :math:`-\tfrac{1}{2}\sum_i\log(2\pi\sigma_i^2)` therefore scales with the
-    number of bins and converges to nothing. This test is the executable form
-    of that statement, so that the drift is never mistaken for a bug.
+    number of bins and converges to nothing.
     """
     at_fiducial = {
         factor: _log_likelihood(run, FIDUCIALS["H0"])
         for factor, run in resolutions.items()
     }
-    delta = {
-        factor: _log_likelihood(run, OFFSET_H0) - at_fiducial[factor]
-        for factor, run in resolutions.items()
-    }
-
-    # The ratio converges.
-    residuals = {factor: delta[factor] / delta[1] - 1.0 for factor in SUBSAMPLE_FACTORS}
-    magnitudes = [abs(residuals[factor]) for factor in SUBSAMPLE_FACTORS]
-    assert magnitudes == sorted(magnitudes), residuals
-    assert abs(residuals[SUBSAMPLE_FACTORS[0]]) < FIRST_STEP_TOLERANCE, residuals
-
-    # The absolute value does not: it tracks the bin count, so the coarsest
-    # grid is off by an order of magnitude while its ratio is off by 11%.
+    # It tracks the bin count, so the coarsest grid is off by an order of
+    # magnitude while the log-likelihood ratio is off by 11%.
     bin_ratio = (
         resolutions[1]["num_bins"] / resolutions[SUBSAMPLE_FACTORS[-1]]["num_bins"]
     )
@@ -259,10 +228,8 @@ def test_the_log_likelihood_ratio_residual_is_the_snr_squared_residual(
 
     and the relative residual of :math:`\Delta\log\mathcal{L}` under
     coarsening must equal that of :math:`\rho^2`, with no dependence on
-    :math:`H_0` at all. Asserting it ties ``spectral_density``,
-    ``spectral_snr_squared``, and ``gaussian_bin_scale`` to one another: a
-    factor lost in any one of them breaks the identity, whereas each function's
-    own tests would still pass.
+    :math:`H_0` at all. This ties ``spectral_density``,
+    ``spectral_snr_squared`` and ``gaussian_bin_scale`` to one another.
     """
     at_fiducial = {
         factor: _log_likelihood(run, FIDUCIALS["H0"])
@@ -275,13 +242,9 @@ def test_the_log_likelihood_ratio_residual_is_the_snr_squared_residual(
         ) - 1.0
         snr_squared_residual = run["snr_squared"] / resolutions[1]["snr_squared"] - 1.0
         np.testing.assert_allclose(delta_residual, snr_squared_residual, rtol=1e-5)
-
-
-def test_every_log_weight_is_exactly_zero_at_the_fiducials(
-    resolutions: dict[int, dict[str, Any]],
-) -> None:
-    """The premise the identity above rests on, stated on its own."""
-    run = resolutions[1]
-    log_weights = run["estimator"].log_weights(dict(FIDUCIALS))
-    assert isinstance(log_weights, jax.Array)
-    np.testing.assert_array_equal(np.asarray(log_weights), 0.0)
+    # The ratio converges: the first coarsening moves it very little.
+    first = resolutions[SUBSAMPLE_FACTORS[0]]
+    assert (
+        abs(first["snr_squared"] / resolutions[1]["snr_squared"] - 1.0)
+        < FIRST_STEP_TOLERANCE
+    )

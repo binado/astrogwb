@@ -32,11 +32,11 @@ class MaxOfTwoNormalsDistribution(dist.Distribution):
 
     Parameters
     ----------
-    loc:
+    loc
         Mean :math:`\mu` of each component.
-    scale:
+    scale
         Standard deviation :math:`\sigma` of each component.
-    validate_args:
+    validate_args
         Forwarded to :class:`~numpyro.distributions.Distribution`.
     """
 
@@ -46,10 +46,7 @@ class MaxOfTwoNormalsDistribution(dist.Distribution):
     }
     support = dist.constraints.real
     reparametrized_params = ["loc", "scale"]  # noqa: RUF012
-    # Same layout as numpyro.distributions.HalfNormal: the component lives on
-    # the instance, and is named here so a JIT round-trip restores it.
-    # `tree_flatten` reads ``__dict__`` and `tree_unflatten` does not re-run
-    # ``__init__``.
+    # `_normal` is listed because `tree_unflatten` does not re-run `__init__`.
     pytree_data_fields = ("_normal", "loc", "scale")
 
     def __init__(
@@ -67,23 +64,50 @@ class MaxOfTwoNormalsDistribution(dist.Distribution):
     def sample(
         self, key: jax.Array | None, sample_shape: tuple[int, ...] = ()
     ) -> jax.Array:
-        """Two i.i.d. component normals, then the larger of the pair."""
-        # `None` only exists to match the base-class signature; handlers
-        # always pass a real key.
+        """Two i.i.d. component normals, then the larger of the pair.
+
+        Parameters
+        ----------
+        key
+            JAX random key.
+        sample_shape
+            Leading shape of the samples.
+        """
         assert key is not None
         eps = jax.random.normal(key, shape=(2,) + sample_shape + self.batch_shape)
         return jnp.asarray(self.loc + self.scale * jnp.max(eps, axis=0))
 
     @validate_sample
     def log_prob(self, value: ArrayLike) -> jax.Array:
+        """Evaluate the log probability density at ``value``.
+
+        Parameters
+        ----------
+        value
+            Value to evaluate.
+        """
         return jnp.asarray(
             jnp.log(2.0) + self._normal.log_prob(value) + self._normal.log_cdf(value)
         )
 
     def cdf(self, value: ArrayLike) -> jax.Array:
+        """Evaluate the cumulative distribution function at ``value``.
+
+        Parameters
+        ----------
+        value
+            Value to evaluate.
+        """
         return jnp.asarray(self._normal.cdf(value) ** 2)
 
     def icdf(self, q: ArrayLike) -> jax.Array:
+        """Evaluate the inverse cumulative distribution function at ``q``.
+
+        Parameters
+        ----------
+        q
+            Cumulative probability.
+        """
         return jnp.asarray(self.loc + self.scale * ndtri(jnp.sqrt(q)))
 
 
@@ -98,11 +122,11 @@ class MaxOfTwoUniformsDistribution(dist.Distribution):
 
     Parameters
     ----------
-    low:
+    low
         Lower edge :math:`a` of each component.
-    width:
+    width
         Width :math:`w` of each component's interval.
-    validate_args:
+    validate_args
         Forwarded to :class:`~numpyro.distributions.Distribution`.
     """
 
@@ -126,25 +150,53 @@ class MaxOfTwoUniformsDistribution(dist.Distribution):
 
     @dist.constraints.dependent_property(is_discrete=False, event_dim=0)
     def support(self) -> dist.constraints.Constraint:
+        """Return the interval supported by the distribution."""
         return dist.constraints.interval(self.low, self.low + self.width)
 
     def sample(
         self, key: jax.Array | None, sample_shape: tuple[int, ...] = ()
     ) -> jax.Array:
-        """Inverse-CDF draw from one uniform per element."""
-        # `None` only exists to match the base-class signature; handlers
-        # always pass a real key.
+        """Inverse-CDF draw from one uniform per element.
+
+        Parameters
+        ----------
+        key
+            JAX random key.
+        sample_shape
+            Leading shape of the samples.
+        """
         assert key is not None
         return self.icdf(jax.random.uniform(key, shape=sample_shape + self.batch_shape))
 
     @validate_sample
     def log_prob(self, value: ArrayLike) -> jax.Array:
+        """Evaluate the log probability density at ``value``.
+
+        Parameters
+        ----------
+        value
+            Value to evaluate.
+        """
         return jnp.asarray(
             jnp.log(2.0) + jnp.log(value - self.low) - 2.0 * jnp.log(self.width)
         )
 
     def cdf(self, value: ArrayLike) -> jax.Array:
+        """Evaluate the cumulative distribution function at ``value``.
+
+        Parameters
+        ----------
+        value
+            Value to evaluate.
+        """
         return jnp.asarray(((jnp.asarray(value) - self.low) / self.width) ** 2)
 
     def icdf(self, q: ArrayLike) -> jax.Array:
+        """Evaluate the inverse cumulative distribution function at ``q``.
+
+        Parameters
+        ----------
+        q
+            Cumulative probability.
+        """
         return jnp.asarray(self.low + self.width * jnp.sqrt(q))

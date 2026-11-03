@@ -33,13 +33,19 @@ dependencies = [
     # scope: core owns the metadata models every persisted artifact carries, so
     # the dependency is declared rather than borrowed from a transitive edge
     # that gwmock-noise is free to drop.
-    "pydantic>=2.11",
+    "pydantic>=2.14",
+    "pyknf>=0.6,<0.8",
 ]
+
+[project.scripts]
+astrogwb = "astrogwb.cli:app"
 
 [project.optional-dependencies]
 cuda = ["jax[cuda12]>=0.11.0"]
 # HDF5 catalog serialization is opt-in and the published wheel stays lean.
 io = ["h5py>=3.15"]
+# The `astrogwb` command line: simulator stages written to disk.
+cli = ["astrogwb[io]", "typer>=0.16"]
 # Only the integration cosmology cross-check needs it now: populations are
 # declared as NumPyro models here, so nothing in the library draws through a
 # gwmock graph any more.
@@ -52,8 +58,6 @@ tpu = ["jax[tpu]>=0.11.0"]
 paper = [
     "astrogwb[io,simulation]",
     "arviz[h5netcdf]>=1.2.0",
-    # Merges the config layers (astrogwb.paper.config.runs).
-    "pyknf>=0.6,<0.7",
     # User cache paths, including XDG overrides on macOS.
     "platformdirs>=4.11.12",
 ]
@@ -65,11 +69,8 @@ notebook = [
     "arviz-stats[xarray]>=1.2.0",
     "corner @ git+https://github.com/dfm/corner.py@d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4",
     "matplotlib>=3.11.1",
-    "pandas>=2.0",
+    "pandas[output-formatting]>=2.0",
     "scipy>=1.10",
-]
-blackjax = [
-    "blackjax>=1.2",
 ]
 
 [project.urls]
@@ -83,7 +84,7 @@ build-backend = "uv_build"
 
 # Groups are tooling: never imported by shipped code, never part of a wheel.
 [dependency-groups]
-# tomli-w: fixtures write scratch config layers, which are TOML.
+# tomli-w writes the TOML inputs of the CLI tests.
 test = ["pytest>=9.0.2", "pytest-xdist>=3.8.0", "tomli-w>=1.2"]
 # Notebook editor/runner (marimo). The `notebook` extra, by contrast, is the
 # library stack notebooks import.
@@ -95,6 +96,12 @@ dev = [
     { include-group = "test" },
     "ruff>=0.16.1",
     "ty>=0.0.69",
+]
+# Snakemake on SLURM, for Snakefile. It runs from the
+# project venv, so its jobs see the same interpreter as the scripts they run.
+cluster = [
+    "snakemake>=9.24",
+    "snakemake-executor-plugin-slurm>=1.5",
 ]
 
 [tool.uv]
@@ -124,10 +131,7 @@ include = [
 extend-select = ["TID"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
-# The one-way dependency the two-package split used to enforce structurally.
-# The `paper` extra keeps core installable without the application's
-# dependencies; this catches the other case -- a pure-stdlib helper drifting
-# from astrogwb.paper into core, which no packaging check would ever see.
+# Core must not import the paper application; no packaging check would catch it.
 "astrogwb.paper".msg = "core must not import the paper application; the dependency runs one way (astrogwb.paper -> astrogwb)"
 
 [tool.ruff.lint.per-file-ignores]
@@ -148,17 +152,16 @@ extend-select = ["TID"]
 "notebooks/spectrum_snrs.py" = ["F811", "F401", "I001", "PLR1711"]
 "notebooks/ensemble_spectrum.py" = ["PLR1711"]
 "notebooks/cosmology_grid_posteriors.py" = ["PLR1711"]
+"notebooks/madau_dickinson_grid.py" = ["PLR1711"]
 
 [tool.ty.src]
 # Most of `scripts/` stays absent because fixture generators can import
-# heavyweight optional dependencies. The core spectrum simulator is
-# checked explicitly; Ruff continues to cover every
-# script.
+# heavyweight optional dependencies; Ruff continues to cover every script.
 include = [
     "src",
     "tests",
-    "scripts/simulate_spectra.py",
     "notebooks/cosmology_grid_posteriors.py",
+    "notebooks/madau_dickinson_grid.py",
 ]
 
 [tool.pytest.ini_options]

@@ -1,26 +1,25 @@
-"""The simulator protocol's plumbing: batched keys and the HDF5 write/load pair."""
+"""Realization keys and the HDF5 write/load pair."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
 
+import h5py
 import jax
 import numpy as np
 import pytest
 from pydantic import BaseModel
 
-from astrogwb.simulators.core import batch_keys, content_key, load, write
+from astrogwb.simulators import realization_key
+from astrogwb.utils.io import atomic_h5, load, write
 
 
 class Record(BaseModel):
-    """A stand-in metadata record: anything with ``key()`` and JSON."""
+    """A stand-in metadata record: anything with JSON."""
 
     name: str
     size: int
-
-    def key(self) -> str:
-        return content_key(self.model_dump(mode="json"))
 
 
 TREE: dict[str, Any] = {
@@ -30,17 +29,17 @@ TREE: dict[str, Any] = {
 }
 
 
-def test_batch_keys_are_distinct_and_prefix_stable() -> None:
-    keys = np.asarray(jax.random.key_data(batch_keys(41, 4)))
-    assert len({tuple(row) for row in keys.tolist()}) == 4
-    np.testing.assert_array_equal(
-        np.asarray(jax.random.key_data(batch_keys(41, 2))), keys[:2]
-    )
+def test_realization_keys_are_deterministic_and_distinct() -> None:
+    keys = [
+        tuple(np.asarray(jax.random.key_data(realization_key(41, i)))) for i in range(4)
+    ]
+    assert len(set(keys)) == 4
+    np.testing.assert_array_equal(jax.random.key_data(realization_key(41, 3)), keys[3])
 
 
-def test_batch_keys_reject_a_negative_count() -> None:
+def test_realization_key_rejects_a_negative_index() -> None:
     with pytest.raises(ValueError, match="non-negative"):
-        batch_keys(41, -1)
+        realization_key(41, -1)
 
 
 def test_write_then_load_round_trips_data_metadata_and_attrs(tmp_path: Path) -> None:
@@ -69,3 +68,17 @@ def test_a_failed_write_leaves_no_file_behind(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="without '/'"):
         write(tmp_path / "file.h5", {"a/b": np.zeros(1)}, Record(name="a", size=2))
     assert list(tmp_path.iterdir()) == []
+
+
+def test_a_failed_atomic_h5_leaves_the_previous_file(tmp_path: Path) -> None:
+    target = tmp_path / "product.h5"
+    with atomic_h5(target) as file:
+        file.create_dataset("values", data=np.arange(3))
+
+    with pytest.raises(RuntimeError, match="interrupted"), atomic_h5(target) as file:
+        file.create_dataset("values", data=np.zeros(5))
+        raise RuntimeError("interrupted")
+
+    assert [path.name for path in tmp_path.iterdir()] == ["product.h5"]
+    with h5py.File(target, "r") as file:
+        np.testing.assert_array_equal(file["values"][()], np.arange(3))

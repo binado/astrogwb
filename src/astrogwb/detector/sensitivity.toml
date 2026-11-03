@@ -1,5 +1,5 @@
-# Detector sensitivities, keyed by the public detector name reported by
-# gwmock's detector_names(). Plain str codes (H1, L1, ...) match directly;
+# Detector sensitivities, keyed by the owned detector name.
+# Packaged names (H1, L1, ...) match directly;
 # a CustomDetector spec matches on its .name.
 #
 # psd_reference may be a gwmock-noise bundled preset (e.g. "ET_D_psd"), a

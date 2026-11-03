@@ -8,75 +8,65 @@ import jax
 import jax.numpy as jnp
 import pytest
 from numpyro import handlers
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from astrogwb.distributions.config import DistributionConfig
-from astrogwb.populations import PopulationMetadata
-from astrogwb.simulators.population import PopulationDrawMetadata
+from astrogwb.populations import AnyPopulation, BNSCobaPopulation
+from astrogwb.simulators import RealizationMetadata
 
-MODEL_KWARGS = {
+SETTINGS: dict[str, Any] = {
+    "model_name": "bns_coba",
     "mass_model": "uniform",
     "minimum_redshift": 0.1,
     "maximum_redshift": 10.0,
     "n_grid": 32,
 }
+ANY_POPULATION = TypeAdapter(AnyPopulation)
 
 
-def _record(**overrides: Any) -> PopulationMetadata:
-    fields: dict[str, Any] = {
-        "model_name": "bns_coba",
-        "model_kwargs": MODEL_KWARGS,
-    }
-    return PopulationMetadata(**{**fields, **overrides})
+def _record(**overrides: Any) -> BNSCobaPopulation:
+    return BNSCobaPopulation.model_validate({**SETTINGS, **overrides})
 
 
-def test_json_round_trip_preserves_every_field() -> None:
+def test_json_round_trip_restores_the_subclass_and_its_types() -> None:
     record = _record()
-    restored = PopulationMetadata.model_validate_json(record.model_dump_json())
+    restored = ANY_POPULATION.validate_json(ANY_POPULATION.dump_json(record))
     assert restored == record
-    assert type(restored.model_kwargs["n_grid"]) is int
-    assert type(restored.model_kwargs["minimum_redshift"]) is float
-    assert restored.model_kwargs["mass_model"] == "uniform"
+    assert type(restored) is BNSCobaPopulation
+    assert type(restored.n_grid) is int
+    assert type(restored.minimum_redshift) is float
 
 
-def test_check_registered_names_the_unknown_population() -> None:
-    with pytest.raises(KeyError, match="no_such_population"):
-        _record(model_name="no_such_population").check_registered()
+@pytest.mark.parametrize(
+    ("settings", "match"),
+    [
+        ({**SETTINGS, "model_name": "no_such_population"}, "no_such_population"),
+        ({**SETTINGS, "no_such_setting": 0.1}, "no_such_setting"),
+        ({**SETTINGS, "mass_model": "flat"}, "mass_model"),
+        ({**SETTINGS, "maximum_redshift": 0.05}, "must exceed"),
+        ({**SETTINGS, "time_delay": True}, "requires minimum_delay"),
+    ],
+)
+def test_an_invalid_record_is_refused_when_validated(
+    settings: dict[str, Any], match: str
+) -> None:
+    with pytest.raises(ValidationError, match=match):
+        ANY_POPULATION.validate_python(settings)
 
 
-def test_check_registered_rejects_a_kwarg_the_population_does_not_take() -> None:
-    """A record is only valid if its kwargs actually build its population.
-
-    The flat kwargs mapping used to be filtered down to the shared window keys
-    before reaching the rate function, so a stale key travelled unnoticed.
-    """
-    record = _record(model_kwargs={**MODEL_KWARGS, "no_such_kwarg": 0.1})
-    with pytest.raises(TypeError, match="no_such_kwarg"):
-        record.check_registered()
+def test_equal_records_build_the_same_population() -> None:
+    assert _record().build() is _record().build()
+    assert _record().build() is not _record(n_grid=64).build()
 
 
-def test_flags_travel_in_the_record_as_booleans_and_strings() -> None:
-    record = _record(
-        model_kwargs={
-            **MODEL_KWARGS,
-            "time_delay": True,
-            "minimum_delay": 0.02,
-            "maximum_formation_redshift": 15.0,
-        }
-    )
-    restored = PopulationMetadata.model_validate_json(record.model_dump_json())
-    assert restored.model_kwargs["time_delay"] is True
-    assert type(restored.model_kwargs["mass_model"]) is str
+def test_replace_revalidates() -> None:
+    assert _record().replace(minimum_redshift=0.2).minimum_redshift == 0.2
+    with pytest.raises(ValidationError, match="must exceed"):
+        _record().replace(minimum_redshift=20.0)
 
 
-def test_a_seed_is_not_part_of_the_record() -> None:
-    """A seed picks a realization; it is a simulator input, not metadata."""
-    with pytest.raises(ValidationError, match="seed"):
-        _record(seed=7)
-
-
-def _draw_metadata() -> PopulationDrawMetadata:
-    return PopulationDrawMetadata(
+def _draw_metadata() -> RealizationMetadata:
+    return RealizationMetadata(
         population=_record(),
         hyperparameters={
             "H0": 67.66,
@@ -88,8 +78,7 @@ def _draw_metadata() -> PopulationDrawMetadata:
     )
 
 
-def test_prior_model_has_a_site_per_hyperparameter() -> None:
-    jax.config.update("jax_enable_x64", True)
+def test_prior_model_has_a_scalar_site_per_hyperparameter() -> None:
     metadata = _draw_metadata()
     model = metadata.prior_model()
     trace = handlers.trace(handlers.seed(model, jax.random.key(0))).get_trace()
@@ -100,9 +89,7 @@ def test_prior_model_has_a_site_per_hyperparameter() -> None:
     assert trace["H0"]["value"].dtype == jnp.float64
     assert float(trace["H0"]["value"]) == 67.66
 
-
-def test_prior_model_returns_every_hyperparameter_as_a_scalar() -> None:
-    theta = handlers.seed(_draw_metadata().prior_model(), jax.random.key(3))()
+    theta = handlers.seed(model, jax.random.key(3))()
     assert set(theta) == {"H0", "gamma"}
     assert all(v.shape == () for v in theta.values())
     assert 1.0 <= float(theta["gamma"]) <= 2.0

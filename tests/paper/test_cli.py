@@ -13,15 +13,16 @@ def test_paper_imports_leave_the_xla_backend_uninitialized() -> None:
     (``jax.devices()``, array creation) is what freezes ``JAX_PLATFORMS`` /
     ``set_host_device_count``. A late ``set_host_device_count(2)`` still yielding
     two devices proves the imports and the config accessors did not consume that
-    configuration. ``priors()`` imports numpyro but must leave the backend free.
+    configuration. Loading the shared configuration must leave the backend free.
     """
     code = """
 from pathlib import Path
-import astrogwb.paper.catalogs
-from astrogwb.paper.config import priors
-from astrogwb.paper.config.detectors import load_detector_config
+import astrogwb.importance.catalog
+import astrogwb.paper.posteriors
+from astrogwb.config import load_config
+from astrogwb.detector.config import load_detector_config
 load_detector_config([Path('config/detectors.toml')])
-assert len(priors()) == 10
+assert len(load_config().priors) == 10
 
 import numpyro
 
@@ -41,22 +42,17 @@ assert jax.device_count() == 2, f"backend initialized early: {jax.devices()}"
     assert result.returncode == 0, result.stderr
 
 
-def test_the_accessors_hand_back_copies() -> None:
-    """`@cache` returns the same object every call; the accessors must not.
-
-    A notebook that does `p = priors(); p['H0'] = ...` would otherwise poison
-    every later reader in the process. Keyword overrides are merged after the
-    cached parse, so they must not reach the cache either.
-    """
-    from astrogwb.paper.config import fiducials, networks, priors
-
-    fiducials(REPO_ROOT)["H0"] = 999.0
-    networks(REPO_ROOT)["ET-2L-aligned"] = ("nope",)
-    del priors(REPO_ROOT)["H0"]
-
-    fiducials(REPO_ROOT, H0=1.0)
-    networks(REPO_ROOT, **{"ET-2L-aligned": ("overridden",)})
-
-    assert fiducials(REPO_ROOT)["H0"] == 67.66
-    assert networks(REPO_ROOT)["ET-2L-aligned"] == ("S1", "R1")
-    assert "H0" in priors(REPO_ROOT)
+def test_detector_and_shared_config_import_in_either_order() -> None:
+    """The shared config and detector registry must not form an import cycle."""
+    for imports in (
+        "import astrogwb.config; import astrogwb.detector.config",
+        "import astrogwb.detector.config; import astrogwb.config",
+    ):
+        result = subprocess.run(
+            [sys.executable, "-c", imports],
+            cwd=REPO_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr

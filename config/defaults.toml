@@ -11,7 +11,7 @@
 # a.b. A reference to a table merges as that table: a later layer that sets a
 # key *under* one overrides just that field and keeps the rest.
 # A table that is a base plus a few additions is written `extends = "${a.b}"`
-# (config.runs.MERGE_KEY): the base's fields, then the local ones on top.
+# (astrogwb.config.MERGE_KEY): the base's fields, then the local ones on top.
 
 # Observing time and frequency band.
 [analysis]
@@ -19,7 +19,7 @@ observation_time = 1.0
 minimum_frequency = 2.0
 maximum_frequency = 2048.0
 
-# The default draw, shaped like astrogwb.simulators.polarization_power.CatalogMetadata: a 32768-source
+# The default draw, shaped like astrogwb.importance.catalog.CatalogMetadata: a 32768-source
 # draw from the cosmological population with the default waveform. It is
 # drawn at the shared [fiducials], so editing [fiducials] re-keys every
 # catalog. The record's version is the installed astrogwb's, never the config's.

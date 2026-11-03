@@ -1,0 +1,337 @@
+r"""Closed-form quadrupolar, inspiral-only intensity.
+
+The leading-order stationary-phase amplitude of a circular, non-spinning
+compact binary gives the intensity in closed form:
+
+.. math::
+
+    |\tilde h_+(f)|^2 + |\tilde h_\times(f)|^2
+    = \frac{5}{24\,\pi^{4/3}\,r^2 c^3}\,
+      \frac{(G M_c)^{5/3}}{f^{7/3}}\, g(\iota),
+    \qquad
+    g(\iota) = \left(\frac{1 + \cos^2\iota}{2}\right)^2 + \cos^2\iota,
+
+with :math:`M_c` the *detector-frame* chirp mass and :math:`r` the luminosity
+distance. The inspiral is terminated at
+
+.. math:: f_{\rm end} = \frac{\alpha}{(1 + z)\, M}
+
+in geometrized units -- equivalently :math:`f_{\rm end} = \alpha c^3 / (G
+M_{\rm det})` in Hz -- for a dimensionless :math:`\alpha` that the caller
+chooses. :data:`~astrogwb.constants.ISCO_ALPHA` is the value putting :math:`f_{\rm end}` at the
+Schwarzschild test-particle ISCO; nothing here defaults to it.
+
+.. warning::
+
+    The power, about :math:`10^{-47}\,\mathrm{Hz}^{-2}` for a BNS at a few
+    hundred Mpc, silently underflows in float32, so
+    :func:`inspiral_intensity` requires ``jax_enable_x64``.
+"""
+
+from __future__ import annotations
+
+import math
+from collections.abc import Mapping
+from dataclasses import dataclass
+
+import jax
+import jax.numpy as jnp
+import numpy as np
+from jax.typing import ArrayLike as JaxArrayLike
+from numpy.typing import ArrayLike
+
+from astrogwb.constants import MPC_IN_SECONDS, SOLAR_MASS_IN_SECONDS
+from astrogwb.frequency import frequency_grid
+from astrogwb.utils import require_x64
+from astrogwb.waveform.base import WaveformGenerator
+from astrogwb.waveform.intensity import quadrupolar_polarizations
+
+__all__ = [
+    "AnalyticInspiralGenerator",
+    "chirp_mass",
+    "inclination_factor",
+    "inspiral_intensity",
+    "termination_frequency",
+]
+
+#: $\tfrac{5}{24}\pi^{-4/3}$, the amplitude-squared prefactor in geometrized units.
+_AMPLITUDE_PREFACTOR: float = (5.0 / 24.0) * math.pi ** (-4.0 / 3.0)
+
+
+def inclination_factor(inclination: JaxArrayLike) -> jax.Array:
+    r"""Quadrupolar inclination factor $g(\iota)$.
+
+    .. math::
+
+        g(\iota) = \left(\frac{1 + \cos^2\iota}{2}\right)^2 + \cos^2\iota
+
+    The two terms are the plus and cross contributions to
+    $|\tilde h_+|^2 + |\tilde h_\times|^2$. It runs from $g(\pi/2) = 1/4$
+    edge-on to $g(0) = g(\pi) = 2$ face-on/face-off.
+
+    Parameters
+    ----------
+    inclination
+        Inclination angle in radians.
+    """
+    cos_squared = jnp.cos(inclination) ** 2
+    return ((1.0 + cos_squared) / 2.0) ** 2 + cos_squared
+
+
+def chirp_mass(mass_1: JaxArrayLike, mass_2: JaxArrayLike) -> jax.Array:
+    r"""Chirp mass $M_c = (m_1 m_2)^{3/5} / (m_1 + m_2)^{1/5}$.
+
+    In the frame and unit of the components.
+
+    Parameters
+    ----------
+    mass_1
+        First component mass.
+    mass_2
+        Second component mass.
+    """
+    mass_1, mass_2 = jnp.asarray(mass_1), jnp.asarray(mass_2)
+    return (mass_1 * mass_2) ** 0.6 / (mass_1 + mass_2) ** 0.2
+
+
+def _require_scalar_alpha(alpha: JaxArrayLike) -> jax.Array:
+    alpha_value = jnp.asarray(alpha)
+    if alpha_value.ndim != 0:
+        msg = (
+            f"alpha must be a scalar; received an array with shape {alpha_value.shape}"
+        )
+        raise ValueError(msg)
+    return alpha_value
+
+
+def termination_frequency(
+    mass_1: JaxArrayLike,
+    mass_2: JaxArrayLike,
+    redshift: JaxArrayLike,
+    *,
+    alpha: JaxArrayLike,
+) -> jax.Array:
+    r"""Frequency in Hz at which the inspiral is truncated.
+
+    .. math:: f_{\rm end} = \frac{\alpha}{(1 + z)\, M}
+
+    in geometrized units, i.e. $\alpha c^3 / (G M_{\rm det})$ in Hz with
+    $M_{\rm det} = (1 + z)(m_1 + m_2)$ the detector-frame total mass.
+
+    Parameters
+    ----------
+    mass_1, mass_2
+        Source-frame component masses in solar masses.
+    redshift
+        Source redshift.
+    alpha
+        Scalar dimensionless truncation parameter. See
+        :data:`~astrogwb.constants.ISCO_ALPHA` for
+        the value corresponding to the Schwarzschild test-particle ISCO.
+
+    Returns
+    -------
+    jax.Array
+        The truncation frequency in Hz.
+    """
+    total_mass = jnp.asarray(mass_1) + mass_2
+    alpha_value = _require_scalar_alpha(alpha)
+    return alpha_value / ((1.0 + redshift) * total_mass * SOLAR_MASS_IN_SECONDS)
+
+
+def _require_frequency_grid(frequencies: JaxArrayLike) -> jax.Array:
+    frequency_grid = jnp.asarray(frequencies)
+    if frequency_grid.ndim != 1:
+        msg = (
+            "frequencies must have shape (F,); "
+            f"received an array with shape {frequency_grid.shape}"
+        )
+        raise ValueError(msg)
+    return frequency_grid
+
+
+def _normalize_source_parameter(name: str, value: JaxArrayLike) -> jax.Array:
+    parameter = jnp.asarray(value)
+    if parameter.ndim > 1:
+        msg = (
+            f"{name} must be a scalar or have shape (N,); "
+            f"received an array with shape {parameter.shape}"
+        )
+        raise ValueError(msg)
+    if parameter.ndim == 0:
+        return jnp.reshape(parameter, (1,))
+    return parameter
+
+
+def _normalize_source_parameters(
+    *,
+    source_frame_mass_1: JaxArrayLike,
+    source_frame_mass_2: JaxArrayLike,
+    redshift: JaxArrayLike,
+    luminosity_distance: JaxArrayLike,
+    inclination: JaxArrayLike | None,
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
+    parameters = (
+        _normalize_source_parameter("source_frame_mass_1", source_frame_mass_1),
+        _normalize_source_parameter("source_frame_mass_2", source_frame_mass_2),
+        _normalize_source_parameter("redshift", redshift),
+        _normalize_source_parameter("luminosity_distance", luminosity_distance),
+        _normalize_source_parameter(
+            "inclination", 0.0 if inclination is None else inclination
+        ),
+    )
+    (
+        source_frame_mass_1_array,
+        source_frame_mass_2_array,
+        redshift_array,
+        distance_array,
+        iota_array,
+    ) = jnp.broadcast_arrays(*parameters)
+    return (
+        source_frame_mass_1_array,
+        source_frame_mass_2_array,
+        redshift_array,
+        distance_array,
+        iota_array,
+    )
+
+
+def _single_source_inspiral_intensity(
+    frequencies: jax.Array,
+    source_frame_mass_1: jax.Array,
+    source_frame_mass_2: jax.Array,
+    redshift: jax.Array,
+    luminosity_distance: jax.Array,
+    inclination: jax.Array,
+    alpha: jax.Array,
+) -> jax.Array:
+    detector_frame_chirp_mass_seconds = (
+        chirp_mass(source_frame_mass_1, source_frame_mass_2)
+        * (1.0 + redshift)
+        * SOLAR_MASS_IN_SECONDS
+    )
+    distance_seconds = luminosity_distance * MPC_IN_SECONDS
+    amplitude_squared = (
+        _AMPLITUDE_PREFACTOR
+        * detector_frame_chirp_mass_seconds ** (5.0 / 3.0)
+        / distance_seconds**2
+        * inclination_factor(inclination)
+    )
+    cutoff = termination_frequency(
+        source_frame_mass_1, source_frame_mass_2, redshift, alpha=alpha
+    )
+
+    # Substitute before the power: an infinite masked branch still leaks NaN
+    # into reverse-mode gradients.
+    inside_band = (frequencies > 0.0) & (frequencies <= cutoff)
+    safe_frequency = jnp.where(frequencies > 0.0, frequencies, 1.0)
+    power = amplitude_squared * safe_frequency ** (-7.0 / 3.0)
+    return jnp.where(inside_band, power, 0.0)
+
+
+_batched_inspiral_intensity = jax.vmap(
+    _single_source_inspiral_intensity,
+    in_axes=(None, 0, 0, 0, 0, 0, None),
+)
+
+
+@require_x64
+def inspiral_intensity(
+    frequencies: JaxArrayLike,
+    parameters: Mapping[str, JaxArrayLike],
+    *,
+    alpha: JaxArrayLike,
+) -> jax.Array:
+    r"""Intensity $|\tilde h_+|^2 + |\tilde h_\times|^2$ on an ``(N, F)`` grid.
+
+    Evaluates the module's closed form and zeroes the bins above each source's
+    :func:`termination_frequency`. Source parameters may be scalars or ``(N,)``
+    and are broadcast jointly; other mapping entries are ignored. The gradient
+    with respect to ``alpha`` is zero: the truncation is a hard mask.
+
+    Parameters
+    ----------
+    frequencies
+        Frequency grid in Hz, shape ``(F,)``. A zero bin returns zero power
+        rather than the divergence of $f^{-7/3}$.
+    parameters
+        ``source_frame_mass_1``, ``source_frame_mass_2`` (solar masses),
+        ``redshift``, ``luminosity_distance`` (Mpc) and optional
+        ``inclination`` (radians, default face-on).
+    alpha
+        Scalar dimensionless truncation parameter shared by every source; see
+        :func:`termination_frequency`.
+
+    Returns
+    -------
+    jax.Array
+        Intensity of shape ``(N, F)`` in $\mathrm{Hz}^{-2}$.
+    """
+    frequency_grid = _require_frequency_grid(frequencies)
+    alpha_value = _require_scalar_alpha(alpha)
+    source_parameters = _normalize_source_parameters(
+        source_frame_mass_1=parameters["source_frame_mass_1"],
+        source_frame_mass_2=parameters["source_frame_mass_2"],
+        redshift=parameters["redshift"],
+        luminosity_distance=parameters["luminosity_distance"],
+        inclination=parameters.get("inclination"),
+    )
+    return _batched_inspiral_intensity(frequency_grid, *source_parameters, alpha_value)
+
+
+@dataclass(frozen=True, slots=True)
+class AnalyticInspiralGenerator(WaveformGenerator):
+    """Generate inspiral-only intensity on the descriptor grid."""
+
+    @property
+    def frequencies(self) -> np.ndarray:
+        """Return the waveform frequency grid in Hz."""
+        return frequency_grid(
+            self.metadata.frequency_spacing,
+            self.metadata.minimum_frequency,
+            self.metadata.maximum_frequency,
+            self.metadata.frequency_resolution,
+            self.metadata.turnover_frequency,
+            dlogf=self.metadata.dlogf,
+        )
+
+    def _generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
+        prepared_parameters = {
+            name: jnp.asarray(values) for name, values in source_parameters.items()
+        }
+        frequencies = self.frequencies
+        assert self.metadata.alpha is not None
+        return inspiral_intensity(
+            frequencies, prepared_parameters, alpha=self.metadata.alpha
+        ).T
+
+    def _generate_polarizations_batch(
+        self, source_parameters: Mapping[str, ArrayLike]
+    ) -> tuple[jax.Array, jax.Array]:
+        """Quadrupolar polarizations ``(N, F)`` of the closed form, at zero phase.
+
+        The phase is not modelled; it cancels from a source's own cross-powers.
+        """
+        return quadrupolar_polarizations(*self._face_on_amplitude(source_parameters))
+
+    def _face_on_amplitude(
+        self, source_parameters: Mapping[str, ArrayLike]
+    ) -> tuple[jax.Array, jax.Array]:
+        """The amplitude ``(N, F)``, :math:`2 A^2` being the face-on power, and the inclination."""
+        prepared_parameters = {
+            name: jnp.asarray(values) for name, values in source_parameters.items()
+        }
+        assert self.metadata.alpha is not None
+        count = next(iter(prepared_parameters.values())).shape[0]
+        inclination = prepared_parameters.get("inclination", jnp.zeros(count))
+        face_on = inspiral_intensity(
+            self.frequencies,
+            {**prepared_parameters, "inclination": jnp.zeros_like(inclination)},
+            alpha=self.metadata.alpha,
+        )
+        return jnp.sqrt(face_on / 2.0), inclination
+
+    def __call__(
+        self, source_parameters: Mapping[str, ArrayLike]
+    ) -> tuple[jax.Array, jax.Array]:
+        return jnp.asarray(self.frequencies), self.generate_batch(source_parameters)

@@ -7,11 +7,38 @@ import numpy as np
 from jax.typing import ArrayLike
 from numpy.polynomial.legendre import leggauss
 
+from astrogwb import __version__
 from astrogwb.constants import SECONDS_PER_YEAR
 
 
+def require_current_version(version: str) -> None:
+    """Raise unless a record's ``version`` is the installed astrogwb version.
+
+    Parameters
+    ----------
+    version
+        The version a metadata record was made with.
+
+    Raises
+    ------
+    ValueError
+        If ``version`` is not :data:`astrogwb.__version__`.
+    """
+    if version != __version__:
+        raise ValueError(
+            f"metadata is for astrogwb {version}, but {__version__} is installed; "
+            "regenerate it"
+        )
+
+
 def years_to_seconds(observation_time_yr: float) -> float:
-    """Convert an observation time from years to seconds."""
+    """Convert an observation time from years to seconds.
+
+    Parameters
+    ----------
+    observation_time_yr
+        Observation time in years.
+    """
     return observation_time_yr * SECONDS_PER_YEAR
 
 
@@ -21,6 +48,11 @@ def array_dict_shape(parameters: Mapping[str, ArrayLike]) -> tuple[int, ...]:
     Every value must have exactly the same shape. Scalar values are therefore
     valid and return ``()``; callers that require a particular rank should
     validate it separately.
+
+    Parameters
+    ----------
+    parameters
+        Parameter values by name.
     """
     shapes = [(name, np.shape(values)) for name, values in parameters.items()]
     if not shapes:
@@ -38,14 +70,20 @@ def array_dict_shape(parameters: Mapping[str, ArrayLike]) -> tuple[int, ...]:
 
 
 def require_x64[**P, R](function: Callable[P, R]) -> Callable[P, R]:
-    """Raise unless JAX x64 mode is enabled at call time."""
+    """Raise unless JAX x64 mode is enabled at call time.
+
+    Parameters
+    ----------
+    function
+        Function to wrap.
+    """
 
     @wraps(function)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         if not jax.config.x64_enabled:
             raise RuntimeError(
                 f"{wrapper.__name__} requires JAX x64 mode because realistic "
-                "strain spectra and polarization powers underflow in float32; "
+                "strain spectra and intensities underflow in float32; "
                 "call jax.config.update('jax_enable_x64', True) before "
                 "creating arrays"
             )
@@ -60,6 +98,13 @@ def cumulative_trapezoid(y: jax.Array, x: jax.Array) -> jax.Array:
     Integrates along the trailing axis of ``y`` with the trapezoid rule and
     broadcasts over any leading batch dimensions. The result has the shape
     of ``y`` and starts at zero along the integrated axis.
+
+    Parameters
+    ----------
+    y
+        Values to integrate.
+    x
+        Integration abscissa.
     """
     dx = jnp.diff(x)
     segments = 0.5 * (y[..., :-1] + y[..., 1:]) * dx
@@ -85,25 +130,21 @@ def gauss_legendre_nodes_weights(
         points, weights = gauss_legendre_nodes_weights(a, b, n)
         integral = jnp.sum(weights * f(points), axis=-1)
 
-    ``n`` is a static Python integer and is never extracted from a traced
-    value, so this helper is safe to call inside jitted code, and it is
-    differentiable in ``a`` and ``b``.
+    ``n`` is static; the result is jit-safe and differentiable in ``a`` and ``b``.
 
     Parameters
     ----------
-    a, b:
+    a, b
         Integration bounds, broadcast against each other.
-    n:
+    n
         Number of quadrature nodes per interval.
 
     Returns
     -------
     tuple[jax.Array, jax.Array]
         ``(points, weights)``, each of shape
-        ``jnp.broadcast_shapes(a.shape, b.shape) + (n,)``. The dtype is
-        ``jnp.result_type(a, b, float)``: float32 bounds stay float32, integer
-        bounds promote to floating point instead of truncating the nodes and
-        weights to zeros, and Python floats need JAX x64 mode for float64.
+        ``jnp.broadcast_shapes(a.shape, b.shape) + (n,)``, with dtype
+        ``jnp.result_type(a, b, float)``.
     """
     dtype = jnp.result_type(a, b, float)
     host_nodes, host_weights = leggauss(n)

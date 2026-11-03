@@ -14,6 +14,8 @@ notebooks/convergence_catalogs*/
 /out/
 /outputs/
 logs/
+# Snakemake state of workflow/coverage_draws.smk.
+.snakemake/
 figures/
 grids/
 

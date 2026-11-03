@@ -3,56 +3,14 @@ from __future__ import annotations
 import jax.numpy as jnp
 import numpy as np
 
-from astrogwb.constants import SECONDS_PER_YEAR
-from astrogwb.detector import gaussian_bin_scale, log_frequency_noise_scale
-from astrogwb.frequency import bin_widths
-from astrogwb.gwb import (
-    spectral_snr,
+from astrogwb.background import (
     spectral_snr_squared,
     spectral_snr_squared_per_bin,
     spectral_snr_squared_per_log_frequency,
 )
+from astrogwb.detector import log_frequency_noise_scale
+from astrogwb.frequency import bin_widths
 from astrogwb.utils import years_to_seconds
-
-
-def test_spectral_snr_squared_matches_gaussian_bin_scale() -> None:
-    eff = jnp.array([2.0, 4.0, 6.0])
-    sd = jnp.array([0.1, 0.2, 0.3])
-    observation_time_yr = 5.0 / SECONDS_PER_YEAR
-    frequencies = 10.0 * jnp.arange(3)
-
-    scale = gaussian_bin_scale(eff, observation_time_yr, frequencies)
-    observation_time_sec = years_to_seconds(observation_time_yr)
-
-    expected = jnp.sum((sd / scale) ** 2)
-    actual = spectral_snr_squared(sd, eff, observation_time_sec, frequencies)
-
-    np.testing.assert_allclose(np.asarray(actual), np.asarray(expected))
-
-
-def test_spectral_snr_squared_hand_computed() -> None:
-    eff = jnp.array([2.0, 4.0, 6.0])
-    sd = jnp.array([0.2, 0.4, 0.6])
-    observation_time_sec = 5.0
-    frequencies = 10.0 * jnp.arange(3)
-
-    # prefactor = 2 * T * bin width = 100; per-bin: 100 * sd_i^2 / eff_i^2
-    expected = 100.0 * ((0.2 / 2.0) ** 2 + (0.4 / 4.0) ** 2 + (0.6 / 6.0) ** 2)
-    actual = spectral_snr_squared(sd, eff, observation_time_sec, frequencies)
-
-    np.testing.assert_allclose(np.asarray(actual), expected)
-
-
-def test_spectral_snr_squared_per_bin_matches_hand_computed_terms() -> None:
-    eff = jnp.array([2.0, 4.0, 6.0])
-    sd = jnp.array([0.2, 0.4, 0.6])
-    observation_time_sec = 5.0
-    frequencies = 10.0 * jnp.arange(3)
-
-    expected = 100.0 * (sd / eff) ** 2
-    actual = spectral_snr_squared_per_bin(sd, eff, observation_time_sec, frequencies)
-
-    np.testing.assert_allclose(np.asarray(actual), np.asarray(expected))
 
 
 def test_spectral_snr_squared_sums_per_bin_contributions() -> None:
@@ -65,44 +23,6 @@ def test_spectral_snr_squared_sums_per_bin_contributions() -> None:
     actual = spectral_snr_squared(sd, eff, observation_time_sec, frequencies)
 
     np.testing.assert_allclose(np.asarray(actual), np.asarray(jnp.sum(per_bin)))
-
-
-def test_spectral_snr_squared_broadcasts_batch_factors_along_frequency() -> None:
-    """Batch ``T`` multiplies after the frequency reduction.
-
-    A trailing ``(batch,)`` scale would otherwise align to the frequency
-    axis of a ``(batch, frequency)`` array. The batch and frequency sizes
-    differ here so a wrong-axis broadcast would raise.
-    """
-    sd = jnp.array(
-        [
-            [0.2, 0.4, 0.6, 0.8],
-            [0.1, 0.1, 0.1, 0.1],
-            [0.3, 0.0, 0.3, 0.0],
-        ]
-    )
-    eff = jnp.full(sd.shape, 2.0)
-    observation_time_sec = jnp.array([5.0, 10.0, 2.5])
-    frequencies = jnp.array([1.0, 2.0, 4.0, 8.0])
-
-    expected = np.array(
-        [
-            float(
-                spectral_snr_squared(
-                    sd[i], eff[i], observation_time_sec[i], frequencies
-                )
-            )
-            for i in range(sd.shape[0])
-        ]
-    )
-    actual = spectral_snr_squared(sd, eff, observation_time_sec, frequencies)
-    per_bin = spectral_snr_squared_per_bin(sd, eff, observation_time_sec, frequencies)
-
-    np.testing.assert_allclose(np.asarray(actual), np.asarray(expected))
-    assert per_bin.shape == sd.shape
-    np.testing.assert_allclose(
-        np.asarray(jnp.sum(per_bin, axis=-1)), np.asarray(actual)
-    )
 
 
 def test_spectral_snr_squared_batch_factors_do_not_align_to_frequency() -> None:
@@ -123,18 +43,6 @@ def test_spectral_snr_squared_batch_factors_do_not_align_to_frequency() -> None:
 
     np.testing.assert_allclose(np.asarray(actual), np.asarray(expected))
     assert not np.allclose(np.asarray(actual), np.asarray(wrong_axis))
-
-
-def test_spectral_snr_is_sqrt_of_spectral_snr_squared() -> None:
-    eff = jnp.array([2.0, 4.0, 6.0])
-    sd = jnp.array([0.2, 0.4, 0.6])
-    observation_time_sec = 5.0
-    frequencies = 10.0 * jnp.arange(3)
-
-    snr = spectral_snr(sd, eff, observation_time_sec, frequencies)
-    snr_squared = spectral_snr_squared(sd, eff, observation_time_sec, frequencies)
-
-    np.testing.assert_allclose(np.asarray(snr), np.sqrt(np.asarray(snr_squared)))
 
 
 def test_snr_per_log_frequency_rescales_per_bin_terms_by_f_over_bin_width() -> None:

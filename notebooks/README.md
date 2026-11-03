@@ -4,43 +4,68 @@ Workflows in this directory are plain `.py` files edited in [marimo](https://doc
 
 Every notebook here drives the `astrogwb.paper` configuration layer, so they all need the `notebook` extra for their imports and the `notebook` dependency group for the marimo editor. Run them from the repository root.
 
+## Inputs
+
+The notebooks read simulation data and never generate it, except for
+reference catalogs small enough to draw in memory: `fiducial_spectrum` and
+`importance_convergence` build their own. Each configuration cell names its
+inputs, all under `outputs/`:
+
+| Input | Read by |
+| --- | --- |
+| `ensembles/fiducial/` | `cosmology_grid_posteriors`, `madau_dickinson_grid`, `shot_noise_coverage`, `ensemble_spectrum` |
+| `catalogs/reference-fiducial.h5` | `cosmology_grid_posteriors`, `madau_dickinson_grid`, `shot_noise_coverage`, `ensemble_spectrum` |
+| `catalogs/reference-ladder.h5` | `importance_convergence` |
+
+`Snakefile` writes them (`docs/coverage-draws-on-slurm.md`).
+A missing input is a `FileNotFoundError`, never a simulation.
+
 ## Notebooks
 
-- **`fiducial_spectrum.py`** — marimo notebook. Interactive explorer of one
-  seeded forward-model draw: characteristic amplitudes $h_c$ / $h_n$ (or
-  $S_h$ / $\Omega_{\mathrm{GW}}$), network $S_{\mathrm{eff}}$, $\sigma$, and
-  cumulative per-network SNR, with sliders for approximant, resolution and
-  observation time. No catalog file, and no paper SNR table: a single draw is
-  not the quoted number (see `ensemble_spectrum.py`).
-- **`spectrum_snrs.py`** — **deprecated**: it depends on the removed
-  amplitude-marginalized model and fails at import; to be resolved in a
-  follow-up. Marimo notebook for the appendix's shot-noise
-  argument. A physics-first walkthrough of how catalog shot noise scales with
-  the number of injections $N$ and the minimum redshift $z_{\min}$, judged
-  against the expected $\sigma(H_0)$. It fits every template to a common
-  reference spectrum, measures the MAP offset in units of a fixed
-  $\sigma_{\mathrm{ref}}$ with bootstrap errors, and ends with a pass/fail
-  verdict against a tolerance on $\mathrm{sd}(r)$. Uses the checked spectrum
-  cache and writes three paper figures (A1-A3) and eleven supporting
-  figures.
+- **`fiducial_spectrum.py`** — marimo notebook. The paper's spectrum figures
+  and SNR table, from the model mean spectrum at the fiducials: the
+  `CatalogModel` (32 redshift nodes) of its own reference catalog, drawn in
+  memory ($2^{14}$ Sobol draws, seed 42, generated at $z_{\min}$ on a
+  geometric grid with $d\ln f = 0.0035$ to 4000 Hz), evaluated on a geometric
+  observed grid of about 2000 points from 2 to 2048 Hz. Writes $S_h$ and $\Omega_{\mathrm{GW}}$
+  (`fiducial_spectrum.pdf`, with the expected number of mergers in one year
+  printed for the caption), $h_c$ against each network's $h_n$ over
+  $d\mathrm{SNR}^2/d\ln f$ for $T = 1$ yr (`characteristic_amplitudes.pdf`),
+  and each network's SNR for $f_{\min} = 2, 5, 10, 20$ Hz with the shot
+  noise $\rho s$ of one realization (`mean_spectrum_snr.tex`).
 - **`cosmology_grid_posteriors.py`** — marimo notebook. Grid posteriors for
   $H_0$, $(H_0, \Omega_m)$ and $(\Xi_0, n)$ across the six detector networks,
-  from a zero-noise Poisson injection, modeled with the rescaled
-  reference-redshift spectrum (`astrogwb.gwb.importance`: $2^{14}$ intrinsic
-  draws on a scrambled Sobol net, one waveform each at the window's lower edge, rescaled to 32 redshift
-  nodes; a different seed). The log densities are cached under
-  `default_cache_dir() / "posteriors"`, keyed by a hash of their settings, so
-  the figures iterate without recomputing. Each grid point is predicted once
-  and shared by all six networks (`grid_log_posterior`); the numbers
-  equal the per-network evaluation, so existing cache files stay valid. The
+  from a zero-noise Poisson injection as each network records it
+  (`network_spectra_ensemble` over the fiducial ensemble: one catalog, six
+  spectra through the per-source antenna patterns), modeled with the rescaled
+  reference-redshift spectrum (`astrogwb.importance.spectrum`: $2^{14}$ intrinsic
+  draws on a scrambled Sobol net, one waveform each at reference redshift $10^{-4}$, rescaled to 32 redshift
+  nodes; catalog seed 42, the injection being seed 41). The log densities are computed on every run, one
+  `DenseGaussianLikelihood` per network (`grid_log_likelihood`). The
   injection is one catalog realization, so its physical shot noise is modeled
-  as a rank-one covariance term from the same reference catalog
-  (`ImportanceGaussianLikelihood`'s `shot_noise` mode); each problem is evaluated with every
-  likelihood variant (`detector`, `amplitude`, `fixed`, `per_frequency`), the
-  figures show `likelihood_variant`, and a comparison section reports the
-  widening, the fixed vs per-point $s^2$ verdict, and the per-frequency
-  leakage check. Writes per-problem marginals and corner plots, and an $H_0$
-  overlay of the variants.
+  by the dense catalog covariance of the stacked per-pair data, the power
+  moment of the same reference catalog times each network's response moment
+  (`pair_response_moment`); each problem is evaluated with both likelihood
+  variants (`detector`, `dense`), the figures show `likelihood_variant`, and a
+  comparison section reports the widening. Writes per-problem marginals and
+  corner plots, and an $H_0$ overlay of the variants.
+- **`madau_dickinson_grid.py`** — marimo notebook. Posteriors on the
+  Madau-Dickinson shape $(z_{\mathrm{peak}}, \gamma, \kappa)$ for the six
+  detector networks (the paper's astrophysical-parameter section), from the
+  same network-recorded Poisson injection and rescaled reference catalog as
+  `cosmology_grid_posteriors.py`, with the response-aware `modes` likelihood,
+  on a **ridge-aligned grid**. NUTS is not
+  used: the posterior is too thin and curved for it to sample reliably. The data pin the
+  spectrum amplitude to about $10^{-4}$ to $10^{-3}$ of the prior range, so the
+  posterior is a thin curved sheet that a uniform grid steps over. The grid runs
+  over $(\gamma, \kappa)$ and solves $z_{\mathrm{peak}}$ at every point: a
+  coarse scan and Newton iterations locate the spike, and the trapezoid rule
+  integrates a window around it. One knob, `likelihood_variant` (`detector`,
+  `amplitude`, `fixed`). A 200x120 grid takes a few seconds per network. Reports, per
+  network, the posterior mass in columns where Newton did not converge or the
+  ridge sits on the support edge, and the quantile shift under a 2x refinement;
+  writes marginals, a corner plot, `summary.csv` / `summary.tex` and
+  `checks.csv`.
 - **`importance_convergence.py`** — marimo notebook. Chooses the grid
   posteriors' $(N, Z)$: redshift-quadrature convergence on a $Z = 2^i$
   ladder over one fixed set of draws (for the spectrum and, separately, for
@@ -50,23 +75,29 @@ Every notebook here drives the `astrogwb.paper` configuration layer, so they all
   Sobol catalogs (`CatalogMetadata(sampling="sobol")`), compared at equal $N$
   (`sampling_comparison.pdf`). Errors are in units of the most
   sensitive network's per-bin noise and of each parameter's Fisher width.
-- **`ensemble_spectrum.py`** — marimo notebook. The paper's spectrum
-  figure and SNR tables, from a 200-draw Poisson ensemble (`IMRPhenomXAS`,
+- **`ensemble_spectrum.py`** — marimo notebook. Validation, not a paper
+  notebook: checks the model mean spectrum of `fiducial_spectrum.py` against
+  a 1000-draw Poisson ensemble (`IMRPhenomXAS_NRTidalv3`,
   seed 41): per-network SNR and low-frequency cut as the mean over draws of
-  each draw's SNR with its 16-84% range (LaTeX tables, ET-COBA and ET-D PSDs),
+  each draw's SNR with its 16-84% range (LaTeX table),
   the characteristic amplitudes $h_c$ (median) against $h_n$ and
   the $d\mathrm{SNR}^2/d\ln f$ curves, as two figures (`characteristic_amplitudes.pdf`,
   `snr_density.pdf`),
   and the shot noise of one draw about the mean ($\rho\,\mathrm{sd}(\epsilon)$
-  and the correlation across bins). The ensemble is cached one draw per file
-  under `default_cache_dir() / "ensembles"` (`spectra_ensemble`) and shared
-  with `shot_noise_coverage.py`.
+  and the correlation across bins). It also scans the window's lower edge
+  $z_{\min}$: the amplitude uncertainty
+  $\sigma_{\mathrm{tot}}/A = (\rho^{-2} + s^2)^{1/2}$ per network
+  (`minimum_redshift_scan.pdf`), from one reference catalog generated at the
+  reference redshift $10^{-4}$ and rescaled to each window, checked against the
+  draws' $\rho\,\mathrm{sd}(\epsilon)$. The ensemble is the fiducial ensemble,
+  shared with `shot_noise_coverage.py`.
 - **`shot_noise_coverage.py`** — marimo notebook. Calibration of the
-  shot-noise likelihood for $H_0$: the Poisson ensemble of
-  `ensemble_spectrum.py` as injections (read from the shared cache),
-  plus Gaussian detector noise per network, scored on an $H_0$ grid against an
-  independent `IMRPhenomXAS` reference catalog with the `detector`,
-  `amplitude` and `fixed` likelihoods. Compares the model's $\rho s$ with the
+  shot-noise likelihood for $H_0$: the catalogs of the Poisson ensemble of
+  `ensemble_spectrum.py`, each recorded by every network
+  (`network_spectra_ensemble`), plus
+  Gaussian detector noise per network, scored on an $H_0$ grid against an
+  independent `IMRPhenomXAS_NRTidalv3` reference catalog with the `detector`,
+  `amplitude`, `fixed` and `amplitude_sky` (no response) likelihoods. Compares the model's $\rho s$ with the
   injections' realized scatter, and reports 68%/95% coverage and the mean and
   variance of $z = (\bar H_0 - H_0^{\mathrm{true}})/\mathrm{sd}$ with
   bootstrap errors, and a PIT/$z$ figure at the fiducial network; writes
@@ -79,11 +110,11 @@ Open a notebook from the repository root:
 uv sync --extra notebook --group notebook
 uv run --extra notebook --group notebook marimo edit notebooks/fiducial_spectrum.py
 # Or through the just recipe, which runs the same editor:
-just run-notebook notebooks/spectrum_snrs.py
+just run-notebook notebooks/ensemble_spectrum.py
 ```
 
 The shared fiducials, detector registry, and default draw's waveform and
-population come from `astrogwb.paper.config`. Each notebook's analysis window,
+population come from `astrogwb.config`. Each notebook's analysis window,
 draw seed, and plotting choices live in its own editable configuration cell.
 Editing the shared analysis table does not update those local controls; mirror
 the change there by hand.
@@ -92,34 +123,21 @@ For the shared scientific values on their own, without standing in for a
 particular run, read them from the package rather than retyping them:
 
 ```python
-from astrogwb.paper.config import detector_registry, fiducials, networks, priors
+from astrogwb.config import load_config
 
-fid = fiducials()
-detectors = networks()["ET-2L-aligned-CE-Hanford"]
-registry = detector_registry()
-geometry, sensitivities = registry.build_network("ET-2L-aligned-CE-Hanford")
-higher_h0 = fiducials(H0=70.0)  # keyword overrides, merged over the file
+config = load_config()
+fid = config.fiducials
+registry = config.registry
+detectors = registry.build_network("ET-2L-aligned-CE-Hanford")
+priors = {name: spec.build() for name, spec in config.priors.items()}
+higher_h0 = {**fid, "H0": 70.0}
 ```
 
-These are the `[fiducials]` and `[priors]` tables of `config/defaults.toml`, and
-the `[networks]` and `[detectors]` tables of `config/detectors.toml` — the shared
-layers the workflow merges into every run, so a notebook cannot drift from what
-the runs sample. `priors()` returns live NumPyro distributions. Each accessor
-also takes keyword overrides merged over the file, so varying one value does
-not mean retyping the table; a network name is hyphenated, so override one by
-unpacking a mapping (`networks(**{"ET-2L-aligned": ("S1", "R1", "C1")})`). Each
-accessor returns fresh settings from one cached merge of the shared layers. To
-see file edits in a long-lived kernel, call
-`astrogwb.paper.config._shared.cache_clear()`.
+`load_config()` merges the top-level TOML files in `config/` with packaged
+detector defaults. Pass a different config directory or ordered override files
+when needed. Each call returns independent settings and reads the current files.
+Prior specifications are built into NumPyro distributions where needed.
 
-## Smoke runs
-
-`ASTROGWB_NOTEBOOK_SMOKE=1` shrinks the catalogs and the convergence sweeps. It
-changes only how long a notebook runs, never which cells execute — there is one
-code path in both modes. Run any notebook as a script to check it end to end:
-
-```bash
-ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/fiducial_spectrum.py
-```
+## Checking notebooks
 
 `marimo check --strict notebooks/<name>.py` lints a notebook's cell graph without running it.

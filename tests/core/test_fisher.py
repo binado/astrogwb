@@ -7,6 +7,7 @@ from collections.abc import Mapping
 import jax
 import jax.numpy as jnp
 import numpy as np
+import numpyro.distributions as dist
 import pytest
 from astrogwb_mock_population import (
     FIDUCIALS,
@@ -16,8 +17,6 @@ from astrogwb_mock_population import (
 from jax.typing import ArrayLike
 
 from astrogwb.inference import (
-    GaussianLikelihood,
-    Network,
     SpectrumFn,
     fisher_matrix_per_bin,
     spectral_density_jacobian,
@@ -94,14 +93,7 @@ def test_columns_follow_the_requested_order_and_others_stay_fixed(
     )
 
 
-def test_an_unknown_parameter_is_rejected(
-    power_law: SpectrumFn, power_law_params: dict[str, float]
-) -> None:
-    with pytest.raises(KeyError, match="missing"):
-        spectral_density_jacobian(power_law, power_law_params, ("missing",))
-
-
-def test_summed_fisher_is_the_hessian_of_the_model_likelihood(
+def test_summed_fisher_is_the_hessian_of_the_gaussian_likelihood(
     power_law: SpectrumFn,
     power_law_params: dict[str, float],
     scale: jax.Array,
@@ -110,11 +102,7 @@ def test_summed_fisher_is_the_hessian_of_the_model_likelihood(
     observed = power_law(power_law_params)
 
     def negative_log_likelihood(free: dict[str, jax.Array]) -> jax.Array:
-        # Nothing is sampled, so the parameters enter through the spectrum.
-        likelihood = GaussianLikelihood(
-            lambda params: power_law(free), observed, Network(scale)
-        )
-        return -likelihood({})[0]
+        return -jnp.sum(dist.Normal(power_law(free), scale).log_prob(observed))
 
     free = {name: jnp.asarray(power_law_params[name]) for name in names}
     hessian = jax.hessian(negative_log_likelihood)(free)

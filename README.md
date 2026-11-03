@@ -24,21 +24,24 @@ pip install astrogwb[io]
   so results are bit-comparable with LALSimulation and ripple.
 - `astrogwb.detector` loads bundled detector geometry and sensitivity data and
   evaluates overlap-reduction functions and effective PSDs.
-- `astrogwb.gwb` provides spectral-density, Omega-GW conversion, and SNR
-  calculations. `astrogwb.gwb.analytic` evaluates the inspiral-only
+- `astrogwb.background` provides spectral-density, Omega-GW conversion, and SNR
+  calculations. `astrogwb.background.analytic` evaluates the inspiral-only
   background in closed form, truncated on the same dimensionless `alpha` as
   `astrogwb.waveform`.
 - `astrogwb.populations` declares source populations as NumPyro models,
   addressed by registered name. One declaration serves both generation and
   density evaluation, so a catalog and the weights that reweight it can never
   disagree about the law behind it.
-- `astrogwb.gwb.importance` reweights the intrinsic draws of a reference catalog
-  to a target population and integrates redshift by closed-form quadrature.
+- `astrogwb.importance` owns importance weighting: `astrogwb.importance.catalog`
+  draws fixed-size reference catalogs and their intensity,
+  `astrogwb.importance.spectrum` reweights their intrinsic draws to a target
+  population and integrates redshift by closed-form quadrature, and
+  `astrogwb.importance.diagnostics` reports effective sample sizes.
 - `astrogwb.inference` exposes the caller-prepared NumPyro model.
 - `astrogwb.catalog` provides an array-native catalog that records the
   population that drew it, and reads and writes it as HDF5 behind the `io`
   extra.
-- `astrogwb.waveform` owns polarization-power generators, reduces raw
+- `astrogwb.waveform` owns intensity generators, reduces raw
   plus/cross polarizations to power, applies GW-distance corrections to plain
   arrays, and provides a closed-form quadrupolar inspiral model. Persistence
   and labelled-array policy stay with applications.
@@ -55,24 +58,23 @@ hanford = load_detector("H1")
 sensitivity = load_sensitivity("H1")
 ```
 
-A population is drawn, reduced to polarization power, and stored together with
+A population is drawn, reduced to intensity, and stored together with
 the declaration that produced it:
 
 ```python
 import jax
 
-from astrogwb.catalog import PolarizationPowerCatalog
-from astrogwb.metadata import PopulationMetadata, WaveformMetadata
-from astrogwb.populations import build_population, joint_model
-from astrogwb.inference.utils import sample_sources
-from astrogwb.waveform import AnalyticInspiralGenerator
+from astrogwb.importance.catalog import CatalogMetadata, simulate_catalog
+from astrogwb.populations import BNSCobaPopulation
+from astrogwb.utils.io import write
+from astrogwb.waveform import WaveformMetadata
 
-model_kwargs = {
-    "mass_model": "uniform",
-    "minimum_redshift": 0.0,
-    "maximum_redshift": 20.0,
-    "n_grid": 4096,
-}
+# A population record's fields are its construction settings; build() returns
+# hyperparameters -> (redshift distribution, source model). Isotropic
+# inclination is always sampled.
+population = BNSCobaPopulation(
+    mass_model="uniform", minimum_redshift=0.0, maximum_redshift=20.0, n_grid=4096
+)
 params = {
     "H0": 67.66,
     "Omega_m": 0.3096,
@@ -83,34 +85,19 @@ params = {
     "minimum_mass": 1.0,
     "mass_width": 1.5,
 }
-# A population maps hyperparameters to (redshift distribution, source model);
-# joint_model composes them into a no-argument NumPyro model. Isotropic
-# inclination is always sampled.
-population = build_population("bns_coba", **model_kwargs)
-model = joint_model(*population(params))
-source_parameters = sample_sources(model, jax.random.PRNGKey(42), num_samples=1024)
-
-generator = AnalyticInspiralGenerator(
-    WaveformMetadata(
-        approximant="AnalyticInspiral",
-        minimum_frequency=2.0,
-        maximum_frequency=2048.0,
-        reference_frequency=2.0,
-        sampling_frequency=4096.0,
-        frequency_resolution=1.0,
-    )
+waveform = WaveformMetadata(
+    approximant="AnalyticInspiral",
+    minimum_frequency=2.0,
+    maximum_frequency=2048.0,
+    reference_frequency=2.0,
+    sampling_frequency=4096.0,
+    frequency_resolution=1.0,
 )
-catalog = PolarizationPowerCatalog.from_generator(
-    source_parameters,
-    generator=generator,
-    population=PopulationMetadata(
-        model_name="bns_coba",
-        model_kwargs=model_kwargs,
-        seed=42,
-    ),
-    fiducials=params,
+metadata = CatalogMetadata(
+    waveform=waveform, population=population, fiducials=params, num_samples=1024
 )
-catalog.save("catalog.h5")
+catalog = simulate_catalog(metadata, jax.random.key(42))
+write("catalog.h5", catalog, metadata, seed=42)
 ```
 
 A spectrum prediction starts from a *reference catalog* instead: the same
@@ -123,30 +110,45 @@ closed-form quadrature, so it needs no weights at all.
 import jax
 import numpy as np
 
-from astrogwb.gwb.importance import reference_catalog
-from astrogwb.inference import ImportanceGaussianLikelihood
-from astrogwb.metadata import CatalogMetadata
+from astrogwb.importance.spectrum import reference_catalog
+from astrogwb.inference import CatalogModel
 
-metadata = CatalogMetadata(
-    waveform=generator.metadata,
-    population=PopulationMetadata(model_name="bns_coba", model_kwargs=model_kwargs),
-    fiducials=params,
-    num_samples=1024,
-)
-reference = reference_catalog(metadata, jax.random.PRNGKey(42))
+reference = reference_catalog(metadata, jax.random.key(42))
 
-target = build_population("bns_coba", **model_kwargs)
-likelihood = ImportanceGaussianLikelihood.from_catalog(
+model = CatalogModel.from_catalog(
     reference,
     metadata,
-    population=target,
+    population=population.build(),
     frequencies=np.arange(10.0, 1000.0, 1.0),
     num_redshift_nodes=32,
+    observation_time=1.0,
     density_sites=("source_frame_mass_1", "source_frame_mass_2"),
 )
-spectrum, _, extras = likelihood.predict(
+spectrum, power_moment, extras = model.predict(
     {**params, "H0": 70.0, "xi_0": 1.2, "xi_n": 1.91}
 )
+```
+
+`spectrum` is the background's mean and `power_moment` the shot-noise moment of
+a Poisson catalog over the observation time. A detector network's likelihood of
+its per-pair cross powers is the dense Gaussian with covariance
+`Sigma + power_moment * R` (elementwise), with `Sigma` the detector noise and
+`R` the network's response moment:
+
+```python
+from astrogwb.detector import pair_response_moment
+from astrogwb.inference import DenseGaussianLikelihood, Network
+
+network = Network.from_pairs(
+    scale,  # (P, F) per-pair detector noise, pair_bin_scale
+    pair_overlap,  # (P, F) isotropic ORFs
+    mask,  # (P, F) usable entries
+    response_moment=pair_response_moment(
+        jax.random.key(0), 32_768, frequencies, detectors
+    ),
+)
+likelihood = DenseGaussianLikelihood(model, network, network.compress(observed))
+log_likelihood, extras = likelihood.log_likelihood(params)
 ```
 
 ## The manuscript application

@@ -1,16 +1,13 @@
-"""Diagnostics for importance sampling a fixed catalog against a target population.
+"""Importance weighting of a fixed reference catalog against a target population.
 
-The catalog-based spectrum itself is :mod:`astrogwb.gwb.importance`, which
-reweights the intrinsic draws of a reference catalog and integrates redshift by
-quadrature. This subpackage holds the effective-sample-size diagnostic that says
-how much of that catalog is still doing work.
+The package is split into three submodules, imported directly:
 
-Import from explicit submodules rather than this package root:
-
-- :mod:`astrogwb.gwb.importance` -- the rescaled quadrature spectrum and its weights
-- :mod:`astrogwb.populations` -- populations as NumPyro model declarations
-- :mod:`astrogwb.importance.diagnostics` -- effective sample size helper
-- :mod:`astrogwb.cosmology` -- shared cosmology helpers
+- :mod:`astrogwb.importance.catalog` holds the importance proposal: fixed-size
+  reference draws of a population and their per-source intensity.
+- :mod:`astrogwb.importance.spectrum` holds the estimator: the background
+  spectrum as a redshift quadrature over the reweighted intrinsic draws.
+- :mod:`astrogwb.importance.diagnostics` holds the effective-sample-size
+  diagnostics of the weights.
 """
 
 __all__: list[str] = []

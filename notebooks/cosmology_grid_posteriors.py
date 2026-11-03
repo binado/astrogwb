@@ -4,19 +4,15 @@ __generated_with = "0.25.0"
 app = marimo.App()
 
 with app.setup(hide_code=True):
-    import dataclasses
-    import hashlib
-    import json
-    import os
-    from collections.abc import Callable, Mapping, Sequence
-    from functools import partial
+    from collections.abc import Mapping, Sequence
     from pathlib import Path
 
-    from astrogwb.paper.runtime import configure_runtime
+    from astrogwb.runtime import configure_runtime
 
     # Backend configuration precedes waveform construction and array creation.
-    configure_runtime(num_chains=1)
+    configure_runtime()
 
+    import jax
     import jax.numpy as jnp
     import marimo as mo
     import matplotlib.pyplot as plt
@@ -24,57 +20,38 @@ with app.setup(hide_code=True):
     import numpyro.distributions as dist
     import pandas as pd
     from matplotlib.axes import Axes
-    from matplotlib.figure import Figure
-    from matplotlib.lines import Line2D
     from matplotlib.projections import register_projection
     from numpy.typing import NDArray
 
-    from astrogwb import __version__
-    from astrogwb.detector import effective_psd, gaussian_bin_scale
-    from astrogwb.frequency import frequency_mask
-    from astrogwb.gwb.importance import (
-        reference_catalog,
-        reference_catalog_stem,
+    from astrogwb.config import load_config
+    from astrogwb.detector import pair_response_moment
+    from astrogwb.importance.catalog import (
+        read_catalog,
+        validate_matching_frequency_grids,
     )
     from astrogwb.inference import (
-        ImportanceGaussianLikelihood,
-        amplitude_shot_noise_variance,
-        grid_log_posterior,
+        CatalogModel,
+        DenseGaussianLikelihood,
+        amplitude_template,
+        grid_log_likelihood,
+        grid_log_prior,
+        shot_noise_variance,
     )
-    from astrogwb.inference import Network as LikelihoodNetwork
-    from astrogwb.paper.cache import default_cache_dir
-    from astrogwb.paper.catalogs import validate_matching_frequency_grids
-    from astrogwb.paper.config import (
-        detector_registry,
-        fiducials,
-        population_metadata,
-        priors,
-        waveform_metadata,
-    )
-    from astrogwb.paper.config.detectors import DetectorRegistry
-    from astrogwb.paper.config.runs import CATALOGS_ROOT, FIGURES_DIR
+    from astrogwb.inference.gaussian import Network
     from astrogwb.paper.plotting import (
-        CORNER_LEVELS,
-        DETECTOR_COMPARISON_LEGEND,
         DETECTOR_NETWORKS,
         TRUTH,
-        Network,
-        detector_network_styles,
-        get_corner_kwargs,
+        convert_grids_to_samples,
         parameter_label,
-        plot_corner_for_posterior_grid,
+        plot_corner,
+        plot_network_marginals,
         save_figures,
         use_paper_style,
     )
-    from astrogwb.populations import build_population
-    from astrogwb.simulators.core import batch_keys, load, write
-    from astrogwb.simulators.polarization_power import (
-        CatalogMetadata,
-        PolarizationPowerData,
-    )
-    from astrogwb.simulators.spectra import (
-        BackgroundSpectralDensityMetadata,
-        BackgroundSpectralDensitySimulator,
+    from astrogwb.paper.posteriors import pair_network
+    from astrogwb.simulators import (
+        BackgroundArtifact,
+        network_spectra_ensemble,
     )
 
 
@@ -84,13 +61,22 @@ def _():
     # Grid posteriors for cosmology and modified propagation
 
     Posteriors on a **grid**, with no sampler: the log density of the
-    Gaussian spectrum likelihood is evaluated at every grid point and cached,
-    so the figures can be iterated on without recomputing anything.
+    Gaussian spectrum likelihood is evaluated at every grid point.
 
-    The data are a **zero-noise Poisson injection**: one Poisson-count
-    spectrum drawn at the fiducials, with no Gaussian noise added on top. It is
-    a catalog realization $S_h^{\mathrm{cat}}$, so it carries physical shot
-    noise about the expected spectrum, which the likelihood models. The
+    The notebook reads its inputs and never simulates them:
+    `Snakefile` writes the injection ensemble, its detector
+    noise and the reference catalog (see the configuration cell for the
+    paths). A missing input is a `FileNotFoundError`.
+
+    The data are a **zero-noise Poisson injection**: one Poisson catalog drawn
+    at the fiducials, with no Gaussian noise added on top, as each network
+    records it. Every source reaches a network through its own antenna
+    patterns at an isotropic sky position, and the detector pairs are combined
+    with the optimal cross-correlation weights
+    (`astrogwb.simulators.simulate_background`), so the six networks see one catalog
+    but record six spectra. Each is a catalog realization
+    $S_h^{\mathrm{cat}}$ that carries physical shot noise about the expected
+    spectrum, which each network's likelihood models with its own response. The
     model spectrum is a **rescaled reference-redshift catalog**: intrinsic
     draws at the same fiducials, each generated once at the window's lower
     edge and rescaled to the Gauss-Legendre redshift nodes. The two are drawn
@@ -103,9 +89,6 @@ def _():
     2. $H_0$ and $\Omega_m$ (*Inferring cosmological parameters*, H0 and Omega_m).
     3. $\Xi_0$ and $n$ (*Inferring modified propagation parameters*), with
        $H_0$ fixed.
-
-    Setting `ASTROGWB_NOTEBOOK_SMOKE=1` swaps in a tiny catalog and coarse
-    grids so the whole notebook runs in a minute or two.
     """)
     return
 
@@ -115,25 +98,24 @@ def _():
     mo.md(r"""
     ## Method
 
-    **Likelihood.** In each bin the observed spectrum is Gaussian about the
-    predicted one with scale $\sigma_i = S_{\mathrm{eff},i}/\sqrt{2T\Delta f_i}$.
-    The network only changes $\sigma$ (and which bins are usable), so each grid
-    point is predicted once and all six networks' likelihoods are evaluated on
-    that one prediction.
+    **Likelihood.** Every detector pair's cross power in every bin is Gaussian
+    about $\gamma_{ab} S$, with detector-noise scale
+    $\sigma_{ab,k} \propto \sqrt{S_a S_b}/\sqrt{2T\Delta f_k}$. The network
+    changes $\sigma$, which entries are usable, the data it recorded and the
+    response its shot noise carries, but not the expected spectrum; each
+    network is its own likelihood, evaluated over the grid.
 
-    **Shot noise.** The data are one finite catalog, so they also scatter
-    about the expected spectrum $S$ with the per-bin variance $V_f$ of a
+    **Shot noise.** The data are one finite catalog, so the per-pair cross
+    powers also scatter about their mean with the catalog covariance of
+    Sec. 2.7, $M_{kl}(\Lambda) R_{ab,k;\,cd,l}$: the power moment $M$ of a
     Poisson sum (Campbell's theorem), computed from the same reference catalog
-    with every factor of the quadrature squared. Within the band almost all of
-    it is one flat amplitude mode, $S^{\mathrm{cat}} \approx S(1 + \epsilon)$,
-    so it enters as $\epsilon \sim \mathcal{N}(0, s^2)$ marginalized: a
-    rank-one covariance $D + s^2 S S^T$, inverted in closed form, with $s$ the
-    SNR-weighted mean of $\sqrt{V_f}/S_f$. Along the template this is a
-    Gaussian in the amplitude with variance $\rho^{-2} + A^2 s^2$. The
-    variance comes from the model at each grid point, never from the data.
-    Variants: `detector` (no shot noise), `amplitude` ($s^2$ at each point),
-    `fixed` ($s^2$ at the fiducial), and `per_frequency` ($u_f =
-    \sqrt{V_f}$, a cross-check where $\Xi_0$ and $n$ tilt the template).
+    at every grid point, times the network's response moment $R$, the second
+    moment of the per-source ORF of every pair over `response_draws` isotropic
+    draws, computed once. The likelihood is the dense Gaussian with covariance
+    $\Sigma + M \circ R$, factorized once per grid point and network. The
+    covariance comes from the model at each grid point, never from the data.
+    Variants: `detector` (no shot noise) and `dense`, which the figures and
+    tables show.
 
     **Prediction.** Every draw $\theta_k$ is generated once, at the window's
     lower edge $z_{\min}$. A $(2,2)$-mode aligned-spin waveform scales
@@ -167,18 +149,14 @@ def _():
 @app.cell
 def _():
     ROOT_DIR = Path(__file__).resolve().parents[1]
-    FIGURES = ROOT_DIR / FIGURES_DIR / "cosmology_grid_posteriors"
+    FIGURES = ROOT_DIR / "outputs" / "figures" / "cosmology_grid_posteriors"
 
-    # Different seeds: the injection must not be a subset of the catalog.
+    # The injection's seed; the reference catalog is drawn at another, 42, so
+    # the injection is not a subset of the catalog.
     data_seed = 41
-    catalog_seed = 42
-    # Intrinsic draws on a scrambled Sobol net, one waveform each: at 2^14 the
-    # template error is ~5e-5 sigma (importance_convergence.py), where i.i.d.
-    # draws would need ~3e5 for 0.1 sigma.
-    num_samples = 2**14
+    marginal_seed = 43  # cell and jitter draws behind the plots
+    num_marginal_samples = 2**18  # grid draws per plot, for the marginals and corners
     redshift_nodes = 32  # Gauss-Legendre nodes in 1/(1 + z); costs no waveforms
-    catalog_chunk_size = 4096  # reference waveforms per lax.map batch
-    chunk_size = 16_384  # injection waveforms per reduced chunk
     grid_chunk_size = 8  # grid points per lax.map batch; bounds peak memory
 
     observation_time = 1.0  # years
@@ -190,42 +168,27 @@ def _():
     # Grid knobs: each window is (low, high), each size a point count. Uniform
     # grids: the corner plot reads each density value as proportional to the
     # mass of its cell. Windows should hold the posterior comfortably; the
-    # best network's sigma is ~0.3 for H0 and ~0.004 for xi_0, the worst's ~1
-    # and ~0.013. xi_n is flat at xi_0 = 1, so it takes its prior range.
-    h0_window, h0_size = (60.0, 76.0), 321  # H0 alone: 0.05 step
-    h0_omega_window, h0_omega_size = (65.0, 70.5), 111  # H0 in the 2D problem
+    # best network's sigma is ~0.2 for H0 and ~0.003 for xi_0, the worst's
+    # (ET-2L-mis, at 45 deg from local North) ~1.5 and ~0.02. xi_n is flat at
+    # xi_0 = 1, so it takes its prior range.
+    h0_window, h0_size = (58.5, 77.0), 926  # H0 alone: 0.02 step
+    h0_omega_window, h0_omega_size = (59.0, 76.5), 351  # H0 in the 2D problem
     omega_m_window, omega_m_size = (0.2856, 0.3336), 41  # +/- 4 prior sigma
-    xi_0_window, xi_0_size = (0.94, 1.06), 121
+    xi_0_window, xi_0_size = (0.86, 1.14), 281
     xi_n_window, xi_n_size = (0.3, 3.0), 55  # prior range
 
     # Likelihood variants evaluated per problem, and the one every figure
-    # shows. "fixed" pins s^2 at the fiducial; the A/B section adopts it if it
-    # moves no posterior mean or sd by more than ab_tolerance detector sigma,
-    # which it does not (worst 0.003 sigma).
-    likelihood_variant = "fixed"
+    # shows: "dense" is the paper's likelihood, the dense catalog covariance of
+    # the stacked per-pair data, with the per-source network response from
+    # `response_draws` isotropic draws, as the injections carry it; "detector"
+    # drops the shot noise.
+    likelihood_variant = "dense"
     problem_variants = {
-        "H0": ("detector", "amplitude", "fixed"),
-        "H0_Omega_m": ("detector", "amplitude", "fixed"),
-        "xi_0_xi_n": ("detector", "amplitude", "fixed", "per_frequency"),
+        "H0": ("detector", "dense"),
+        "H0_Omega_m": ("detector", "dense"),
+        "xi_0_xi_n": ("detector", "dense"),
     }
-    ab_tolerance = 0.05
-
-    SMOKE = os.environ.get("ASTROGWB_NOTEBOOK_SMOKE") == "1"
-    write_figures_default = True
-    cache_name_prefix = ""
-    if SMOKE:
-        num_samples = 64
-        redshift_nodes = 8
-        catalog_chunk_size = 512
-        chunk_size = 512
-        grid_chunk_size = 4
-        write_figures_default = False
-        cache_name_prefix = "smoke_"
-        h0_window, h0_size = (40.0, 100.0), 7
-        h0_omega_window, h0_omega_size = (55.0, 80.0), 4
-        omega_m_window, omega_m_size = (0.30, 0.32), 3
-        xi_0_window, xi_0_size = (0.8, 1.4), 3
-        xi_n_window, xi_n_size = (1.5, 2.5), 3
+    response_draws, response_seed = 32_768, 0
 
     # (low, high, size) per swept parameter, per problem.
     grid_specs = {
@@ -240,42 +203,27 @@ def _():
         },
     }
 
-    cache_dir = default_cache_dir() / "posteriors"
-    FIDUCIALS = fiducials(root=ROOT_DIR)
-    PRIORS = priors(root=ROOT_DIR)
-    registry = detector_registry(root=ROOT_DIR)
+    FIDUCIALS = load_config(ROOT_DIR / "config").fiducials
+    PRIORS = {
+        name: spec.build()
+        for name, spec in (load_config(ROOT_DIR / "config").priors).items()
+    }
+    registry = load_config(ROOT_DIR / "config").registry
 
-    # The injection and the reference catalog share the approximant and the
-    # cosmological population. The injection is on the observed grid; the
-    # reference catalog on geometric bins 1% wide, from the observed f_min to
-    # past the detector-frame BNS merger at the window's lower edge.
-    waveform = waveform_metadata(root=ROOT_DIR)
-    frequencies = np.asarray(waveform.build().frequencies)
-    population = population_metadata(root=ROOT_DIR)
-    catalog_metadata = CatalogMetadata(
-        waveform=waveform_metadata(
-            root=ROOT_DIR,
-            frequency_spacing="log",
-            minimum_frequency=minimum_frequency,
-            maximum_frequency=4000.0,
-            frequency_resolution=0.02,
-            turnover_frequency=None,
-        ),
-        population=population,
-        fiducials=FIDUCIALS,
-        num_samples=num_samples,
-        sampling="sobol",
-    )
-    injection_metadata = BackgroundSpectralDensityMetadata(
-        count="fixed" if SMOKE else "poisson",
-        num_events=64 if SMOKE else None,
-        observation_time=observation_time,
-        hyperparameters={**FIDUCIALS},
-        waveform=waveform,
-        population=population,
-    )
+    # The inputs, written by Snakefile and only read here:
+    # the injection ensemble (draw 0 of `data_seed` is the injection, the
+    # one Poisson catalog as each network records it), its detector noise,
+    # and the reference catalog, 2^14 intrinsic draws on a scrambled Sobol
+    # net at seed 42 on geometric bins 1% wide past the BNS merger
+    # (importance_convergence.py sizes it). Both are drawn from the shared
+    # population and approximant.
+    ensemble_root = ROOT_DIR / "outputs" / "ensembles" / "fiducial"
+    reference_catalog_path = ROOT_DIR / "outputs" / "catalogs" / "reference-fiducial.h5"
+    background = BackgroundArtifact.open(ensemble_root / f"{data_seed}-0.h5")
+    noise = background.noise()
+    frequencies = background.frequencies
 
-    write_figures = mo.ui.switch(value=write_figures_default, label="Write figures")
+    write_figures = mo.ui.switch(value=True, label="Write figures")
     write_figures
     use_paper_style(root=ROOT_DIR)
     # gwpy registers replacement default axes; keep matplotlib's.
@@ -284,28 +232,27 @@ def _():
         FIDUCIALS,
         FIGURES,
         PRIORS,
-        ab_tolerance,
-        cache_dir,
-        cache_name_prefix,
-        catalog_chunk_size,
-        catalog_metadata,
-        catalog_seed,
-        chunk_size,
         data_seed,
         fiducial_network,
         frequencies,
         grid_chunk_size,
         grid_specs,
-        injection_metadata,
         likelihood_variant,
+        marginal_seed,
         maximum_frequency,
         minimum_frequency,
+        background,
+        ensemble_root,
         network_names,
+        noise,
+        num_marginal_samples,
         observation_time,
-        population,
         problem_variants,
+        reference_catalog_path,
         redshift_nodes,
         registry,
+        response_draws,
+        response_seed,
         write_figures,
     )
 
@@ -319,169 +266,21 @@ def _():
 
 
 @app.function(hide_code=True)
-def settings_digest(**settings: object) -> str:
-    """Short hash of everything a cached log density depends on.
-
-    Parameters
-    ----------
-    **settings
-        JSON-serializable (or ``str``-able) values; key order is irrelevant.
-
-    Returns
-    -------
-    str
-        Twelve hex characters, for use in a cache file name.
-    """
-    text = json.dumps(settings, sort_keys=True, default=str)
-    return hashlib.sha256(text.encode()).hexdigest()[:12]
-
-
-@app.function(hide_code=True)
-def cached_log_densities(
-    compute: Callable[[], tuple[dict[str, NDArray], dict[str, NDArray]]],
-    outfile: Path,
-) -> tuple[dict[str, NDArray], dict[str, NDArray]]:
-    """Return ``(grids, log_densities)``, computed once and cached in ``outfile``.
-
-    The file stores ``grid__<parameter>`` and ``log_density__<network>``. It
-    records none of the settings behind it, so the caller puts a
-    :func:`settings_digest` in the file name.
-
-    Parameters
-    ----------
-    compute
-        Called on a miss; returns the grids by parameter and the log density
-        by network.
-    outfile
-        ``.npz`` path.
-
-    Returns
-    -------
-    tuple
-        Grids by parameter name, and log densities by network name.
-    """
-    if not outfile.is_file():
-        grids, log_densities = compute()
-        outfile.parent.mkdir(parents=True, exist_ok=True)
-        arrays = {f"grid__{name}": grid for name, grid in grids.items()}
-        arrays |= {f"log_density__{name}": ld for name, ld in log_densities.items()}
-        np.savez(outfile, **arrays)  # ty: ignore[invalid-argument-type]
-        return grids, log_densities
-    with np.load(outfile) as cached:
-        grids = {
-            k.removeprefix("grid__"): cached[k]
-            for k in cached.files
-            if k.startswith("grid__")
-        }
-        log_densities = {
-            k.removeprefix("log_density__"): cached[k]
-            for k in cached.files
-            if k.startswith("log_density__")
-        }
-    return grids, log_densities
-
-
-@app.function(hide_code=True)
-def ensure_reference_catalog(
-    metadata: CatalogMetadata,
-    seed: int,
-    directory: Path,
-    *,
-    chunk_size: int | None = None,
-) -> PolarizationPowerData:
-    """The reference catalog of ``metadata`` at ``seed``, drawn on a miss.
-
-    The file is ``<directory>/reference_catalog-<key>-<seed>.h5``. A hit is
-    checked against the request it records; a miss is drawn at ``batch_keys(seed, 1)[0]`` and written.
-
-    Parameters
-    ----------
-    metadata
-        The catalog's record.
-    seed
-        The draw's seed.
-    directory
-        Cache directory.
-    chunk_size
-        Waveforms per ``lax.map`` batch on a miss; cost only.
-
-    Returns
-    -------
-    PolarizationPowerData
-        Power ``(F_ref, N)``, every draw at the window's lower edge.
-
-    Raises
-    ------
-    ValueError
-        If the cached file records another metadata or seed.
-    """
-    path = directory / f"{reference_catalog_stem(metadata, seed)}.h5"
-    if path.is_file():
-        data, recorded, attrs = load(path, CatalogMetadata)
-        if recorded.key() != metadata.key() or attrs.get("seed") != seed:
-            raise ValueError(
-                f"{path} records {recorded.key()} at seed {attrs.get('seed')}, "
-                f"not the requested {metadata.key()} at seed {seed}"
-            )
-        return data  # ty: ignore[invalid-return-type]
-    data = reference_catalog(metadata, batch_keys(seed, 1)[0], chunk_size=chunk_size)
-    write(path, data, metadata, seed=seed)
-    return data
-
-
-@app.function(hide_code=True)
-def network_data(
-    registry: DetectorRegistry,
-    name: str,
-    frequencies: NDArray[np.float64],
-    *,
-    observation_time: float,
-    minimum_frequency: float,
-    maximum_frequency: float,
-) -> dict[str, object]:
-    """The per-bin Gaussian scale and usable-bin mask of one network.
-
-    Bins no detector pair measures have infinite effective PSD; they are
-    dropped from the mask and given a finite scale of one, as
-    ``InferenceInputs.model_kwargs`` does.
-
-    Returns
-    -------
-    dict
-        ``scale`` and ``frequency_mask``, shape ``(F,)``, as model keyword
-        arguments.
-    """
-    grid = jnp.asarray(frequencies)
-    geometry, sensitivities = registry.build_network(name)
-    psd = jnp.asarray(effective_psd(grid, geometry, sensitivities))
-    mask = (
-        frequency_mask(grid, fmin=minimum_frequency, fmax=maximum_frequency)
-        & jnp.isfinite(psd)
-        & (psd > 0.0)
-    )
-    scale = gaussian_bin_scale(psd, observation_time, grid)
-    return {"scale": jnp.where(mask, scale, 1.0), "frequency_mask": mask}
-
-
-@app.function(hide_code=True)
 def evaluate_grid(
-    likelihood: ImportanceGaussianLikelihood,
+    model: CatalogModel,
     priors: Mapping[str, dist.Distribution],
-    chunk_size: int | None,
+    chunk_size: int,
     axes: Mapping[str, tuple[float, float, int]],
     fixed: Mapping[str, float],
-    observed: NDArray[np.float64],
-    per_network: Mapping[str, dict[str, object]],
-    relative_variance: NDArray[np.float64] | None,
+    per_network: Mapping[str, tuple[Network, jax.Array]],
+    shot_noise: bool,
 ) -> tuple[dict[str, NDArray], dict[str, NDArray]]:
     """Evaluate one problem's log posterior on its grid, for every network.
 
     Parameters
     ----------
-    likelihood
-        The problem's likelihood, with its shot-noise mode set. One prediction
-        per grid point, shared by all networks, which differ only in
-        :class:`~astrogwb.inference.Network`.
+    model
+        The catalog model, shared by every network.
     priors
         Prior of every parameter.
     chunk_size
@@ -490,13 +289,11 @@ def evaluate_grid(
         ``(low, high, size)`` of each swept parameter.
     fixed
         Every other parameter, pinned at its fiducial.
-    observed
-        Observed spectrum ``(F,)``.
     per_network
-        :func:`network_data` by network name.
-    relative_variance
-        :math:`s^2` per network, in ``per_network`` order, for the ``"fixed"``
-        mode; ``None`` otherwise.
+        Each network's :class:`~astrogwb.inference.gaussian.Network` and its
+        observed per-pair data on the counted entries, by network name.
+    shot_noise
+        Whether the covariance includes the catalog's shot noise.
 
     Returns
     -------
@@ -506,169 +303,72 @@ def evaluate_grid(
     """
     grids = {name: np.linspace(lo, hi, n) for name, (lo, hi, n) in axes.items()}
     jax_grids = {name: jnp.asarray(grid) for name, grid in grids.items()}
-    names = list(per_network)
-    networks = LikelihoodNetwork(
-        scale=jnp.stack([jnp.asarray(per_network[n]["scale"]) for n in names]),
-        mask=jnp.stack([jnp.asarray(per_network[n]["frequency_mask"]) for n in names]),
-        relative_variance=(
-            None if relative_variance is None else jnp.asarray(relative_variance)
-        ),
-    )
-    batched = np.asarray(
-        grid_log_posterior(
-            dataclasses.replace(likelihood, observed=jnp.asarray(observed)),
-            priors,
-            jax_grids,
-            fixed=fixed,
-            networks=networks,
-            chunk_size=chunk_size,
+    log_prior = np.asarray(grid_log_prior(priors, jax_grids, fixed=fixed))
+    # One likelihood per network: each compiles at its own number of entries.
+    log_densities = {
+        name: log_prior
+        + np.asarray(
+            grid_log_likelihood(
+                DenseGaussianLikelihood(model, network, observed, shot_noise),
+                jax_grids,
+                fixed=fixed,
+                chunk_size=chunk_size,
+            )
         )
-    )
-    log_densities = {network: batched[i] for i, network in enumerate(names)}
+        for name, (network, observed) in per_network.items()
+    }
     return grids, log_densities
 
 
 @app.function(hide_code=True)
-def grid_posterior(
-    run: str,
+def problem_posteriors(
     axes: Mapping[str, tuple[float, float, int]],
-    likelihood: ImportanceGaussianLikelihood,
-    relative_variance: NDArray[np.float64] | None,
+    variants: Sequence[str],
+    model: CatalogModel,
     *,
     priors: Mapping[str, dist.Distribution],
-    chunk_size: int | None,
+    chunk_size: int,
     fiducials: Mapping[str, float],
-    observed: NDArray[np.float64],
-    per_network: Mapping[str, dict[str, object]],
-    settings: Mapping[str, object],
-    cache_dir: Path,
-    prefix: str,
-) -> tuple[dict[str, NDArray], dict[str, NDArray]]:
-    """One problem's grid log densities, cached under a settings digest.
+    per_network: Mapping[str, tuple[Network, jax.Array]],
+) -> dict[str, tuple[dict[str, NDArray], dict[str, NDArray]]]:
+    """:func:`evaluate_grid` of one problem for every likelihood variant.
 
     Parameters
     ----------
-    run
-        Problem name, also in the cache file name.
     axes
         ``(low, high, size)`` of each swept parameter.
-    likelihood
-        The problem's :class:`ImportanceGaussianLikelihood`. Its catalog stays
-        a traced input of the compiled evaluator, not a constant baked into it.
-    relative_variance
-        :math:`s^2` per network for the ``"fixed"`` mode, else ``None``.
+    variants
+        ``"detector"`` (no shot noise) or ``"dense"``.
+    model
+        The catalog model. Its catalog stays a traced input of the compiled
+        evaluator, not a constant baked into it.
     priors
         Prior of every parameter.
     chunk_size
         Grid points per batch.
     fiducials
         Every parameter; those not in ``axes`` are pinned at their value.
-    observed
-        Observed spectrum ``(F,)``.
     per_network
-        :func:`network_data` by network name.
-    settings
-        Everything else the cached values depend on, for the digest.
-    cache_dir
-        Directory of the ``.npz`` file.
-    prefix
-        File name prefix, to keep smoke-run caches apart.
+        See :func:`evaluate_grid`.
 
     Returns
     -------
-    tuple
-        See :func:`cached_log_densities`.
+    dict
+        Per variant, grids by parameter and log densities by network.
     """
-    digest = settings_digest(run=run, axes=axes, **settings)
     fixed = {k: v for k, v in fiducials.items() if k not in axes}
-    return cached_log_densities(
-        partial(
-            evaluate_grid,
-            likelihood,
+    return {
+        variant: evaluate_grid(
+            model,
             priors,
             chunk_size,
             axes,
             fixed,
-            observed,
             per_network,
-            relative_variance,
-        ),
-        cache_dir / f"{prefix}{run}_{digest}.npz",
-    )
-
-
-@app.function(hide_code=True)
-def shot_noise_variant(
-    variant: str,
-    likelihood: ImportanceGaussianLikelihood,
-    fiducial_relative_variance: NDArray[np.float64],
-) -> tuple[ImportanceGaussianLikelihood, NDArray[np.float64] | None, dict[str, object]]:
-    """The likelihood, per-network :math:`s^2` and cache settings of one variant.
-
-    Parameters
-    ----------
-    variant
-        ``"detector"``, ``"amplitude"``, ``"fixed"`` or ``"per_frequency"``.
-    likelihood
-        Built with ``shot_noise="amplitude"``, so the squared power is held
-        for every variant.
-    fiducial_relative_variance
-        :math:`s^2` at the fiducials per network, in ``per_network`` order;
-        used by ``"fixed"`` only.
-
-    Returns
-    -------
-    tuple
-        The likelihood with the variant's mode, the ``"fixed"`` variant's
-        per-network :math:`s^2` (else ``None``), and the settings that set the
-        variant apart in a cache digest. The detector variant adds none, so
-        its caches predate shot noise and stay valid.
-    """
-    if variant == "detector":
-        return dataclasses.replace(likelihood, shot_noise=None), None, {}
-    if variant == "fixed":
-        values = [float(value) for value in fiducial_relative_variance]
-        return (
-            dataclasses.replace(likelihood, shot_noise="fixed"),
-            np.asarray(values),
-            {"shot_noise": variant, "relative_variance": values},
+            shot_noise=variant == "dense",
         )
-    return (
-        dataclasses.replace(likelihood, shot_noise=variant),
-        None,
-        {"shot_noise": variant},
-    )
-
-
-@app.function(hide_code=True)
-def problem_posteriors(
-    run: str,
-    axes: Mapping[str, tuple[float, float, int]],
-    variants: Sequence[str],
-    likelihood: ImportanceGaussianLikelihood,
-    fiducial_relative_variance: NDArray[np.float64],
-    settings: Mapping[str, object],
-    **kwargs: object,
-) -> dict[str, tuple[dict[str, NDArray], dict[str, NDArray]]]:
-    """:func:`grid_posterior` of one problem for every likelihood variant.
-
-    ``kwargs`` are :func:`grid_posterior`'s remaining arguments. One catalog
-    serves every variant; each variant compiles once.
-    """
-    posteriors = {}
-    for variant in variants:
-        variant_likelihood, relative_variance, variant_settings = shot_noise_variant(
-            variant, likelihood, fiducial_relative_variance
-        )
-        posteriors[variant] = grid_posterior(
-            run,
-            axes,
-            variant_likelihood,
-            relative_variance,
-            settings={**settings, **variant_settings},
-            **kwargs,  # ty: ignore[invalid-argument-type]
-        )
-    return posteriors
+        for variant in variants
+    }
 
 
 @app.function(hide_code=True)
@@ -711,14 +411,39 @@ def median_and_hdi(
     Returns
     -------
     tuple
-        ``(median, lower, upper)``; the interval is the span of the cells
-        above the density threshold that encloses ``mass``.
+        ``(median, lower, upper)``; the interval is where the density exceeds
+        the level that encloses ``mass``, with its edges interpolated linearly
+        between grid points, so it is not quantized to the grid cell.
     """
-    cell = density / density.sum()
-    median = float(np.interp(0.5, np.cumsum(cell) - cell / 2, grid))
-    order = np.argsort(cell)[::-1]
-    kept = order[: int(np.searchsorted(np.cumsum(cell[order]), mass)) + 1]
-    return median, float(grid[kept].min()), float(grid[kept].max())
+    cdf = np.concatenate(
+        [[0.0], np.cumsum(0.5 * (density[1:] + density[:-1]) * np.diff(grid))]
+    )
+    cdf /= cdf[-1]
+    median = float(np.interp(0.5, cdf, grid))
+    density = density / np.trapezoid(density, grid)
+
+    def crossing(level: float, inside: int, outside: int) -> float:
+        slope = (grid[outside] - grid[inside]) / (density[outside] - density[inside])
+        return float(grid[inside] + (level - density[inside]) * slope)
+
+    def interval(level: float) -> tuple[float, float]:
+        above = np.flatnonzero(density >= level)
+        first, last = int(above[0]), int(above[-1])
+        lower = crossing(level, first, first - 1) if first > 0 else float(grid[0])
+        upper = (
+            crossing(level, last, last + 1) if last < len(grid) - 1 else float(grid[-1])
+        )
+        return lower, upper
+
+    # Bisect the density level whose superlevel interval encloses `mass`.
+    low, high = 0.0, float(density.max())
+    for _ in range(60):
+        level = 0.5 * (low + high)
+        lower, upper = interval(level)
+        enclosed = np.interp(upper, grid, cdf) - np.interp(lower, grid, cdf)
+        low, high = (level, high) if enclosed > mass else (low, level)
+    lower, upper = interval(0.5 * (low + high))
+    return median, lower, upper
 
 
 @app.function(hide_code=True)
@@ -768,55 +493,42 @@ def summary_rows(
 
 
 @app.function(hide_code=True)
-def plot_marginals(
-    parameter: str,
+def marginal_window(
     grid: NDArray[np.float64],
-    densities: Mapping[str, NDArray[np.float64]],
-    networks: Sequence[tuple[str, str]],
-    fiducial: float,
-) -> Figure:
-    """Overlay one parameter's marginal posterior for every network.
+    log_densities: Mapping[str, NDArray[np.float64]],
+    axis: int,
+    num_sd: float = 5.0,
+) -> tuple[float, float]:
+    """Plot window of ``num_sd`` standard deviations around the broadest marginal.
 
-    Colors and line styles follow the detector-comparison convention of
-    ``scripts/mcmc_cosmological_parameters.py``.
+    The grid window is far wider than any posterior, so the marginal plots zoom
+    to the network with the largest sd, clipped to the grid.
 
     Parameters
     ----------
-    parameter
-        Parameter name, for the axis label.
     grid
-        Parameter grid.
-    densities
-        Marginal density by network name.
-    networks
-        ``(name, LaTeX label)`` in legend order.
-    fiducial
-        Truth marker position.
+        Coordinate of ``axis``.
+    log_densities
+        Unnormalized log density by network name.
+    axis
+        Axis of ``grid`` in each log density.
+    num_sd
+        Half-width of the window in standard deviations.
 
     Returns
     -------
-    matplotlib.figure.Figure
+    tuple of float
+        ``(low, high)`` limits of the window.
     """
-    styled = [Network(name, label, ()) for name, label in networks]
-    colors, linestyles = detector_network_styles(styled)
-    fig, ax = plt.subplots()
-    handles = []
-    for network, color, linestyle in zip(styled, colors, linestyles, strict=True):
-        ax.plot(grid, densities[network.name], color=color, linestyle=linestyle)
-        handles.append(
-            Line2D(
-                [],
-                [],
-                color=color,
-                linestyle=linestyle,  # ty: ignore[invalid-argument-type]
-                label=network.label,
-            )
+    moments = []
+    for log_density in log_densities.values():
+        density = marginal_density(grid, log_density, axis=axis)
+        mean = np.trapezoid(grid * density, grid)
+        moments.append(
+            (mean, np.sqrt(np.trapezoid((grid - mean) ** 2 * density, grid)))
         )
-    ax.axvline(fiducial, **TRUTH)  # ty: ignore[invalid-argument-type]
-    ax.set(xlabel=parameter_label(parameter), ylabel="Posterior density")
-    ax.legend(handles=handles, **DETECTOR_COMPARISON_LEGEND)  # ty: ignore[no-matching-overload]
-    fig.tight_layout()
-    return fig
+    mean, sd = max(moments, key=lambda moment: moment[1])
+    return max(grid[0], mean - num_sd * sd), min(grid[-1], mean + num_sd * sd)
 
 
 @app.cell(hide_code=True)
@@ -825,137 +537,98 @@ def _():
     ## Reference catalog and injection
 
     The reference catalog generates every intrinsic draw once, at the
-    window's lower edge, so its power is `(F_ref, N)`. It is generated in
-    `lax.map` batches on a miss and read from `outputs/catalogs/` afterwards.
-    The injection is one Poisson spectrum, cached beside the posteriors.
+    reference redshift $10^{-4}$, so its power is `(F_ref, N)`; it is read from
+    `reference_catalog_path` (`astrogwb model-catalog`). The
+    injection is one Poisson catalog recorded by every network, read from the
+    ensemble's draw 0 (`network_spectra_ensemble`): each network's pair
+    spectra were projected in one waveform pass shared by the networks.
 
-    The rescaled spectrum is built in the same cell as the catalog, once.
-    The population is built a single time because it hashes by identity. Each
-    problem evaluates its grid with `grid_log_posterior`, which predicts every
-    grid point once for all six networks. The likelihood is a pytree passed to
-    it per call, so the catalog is one traced input shared by all three
-    problems rather than a constant compiled into each. The NumPy catalog is dropped there, so only the device copy stays
+    The catalog model is built in the same cell as the catalog, once, with
+    its per-node power moments. The population is built a single time because
+    it hashes by identity. Each problem evaluates its grid with
+    `grid_log_likelihood`, one network at a time. The likelihood is a pytree
+    passed to it per call, so the catalog is one traced input shared by all
+    three problems rather than a constant compiled into each. The NumPy catalog is dropped there, so only the device copy stays
     resident.
     """)
     return
 
 
 @app.cell
-def _(
-    catalog_chunk_size,
-    catalog_metadata,
-    catalog_seed,
-    frequencies,
-    observation_time,
-    population,
-    redshift_nodes,
-):
+def _(frequencies, observation_time, redshift_nodes, reference_catalog_path):
     # The NumPy catalog is local to this cell, so it is freed once the device
     # copy made by the likelihood exists: the power and its square.
-    catalog_data = ensure_reference_catalog(
-        catalog_metadata, catalog_seed, CATALOGS_ROOT, chunk_size=catalog_chunk_size
-    )
-    power = catalog_data["polarization_power"]
+    catalog_data, catalog_metadata, _seed = read_catalog(reference_catalog_path)
+    population = catalog_metadata.population
+    power = catalog_data["intensity"]
     print(
-        f"reference catalog: {catalog_metadata.num_samples:,} draws, "
+        f"reference catalog: {catalog_metadata.num_samples:,} draws at seed "
+        f"{_seed}, "
         f"{power.shape[0]} reference bins, {power.nbytes / 1e9:.2f} GB of power; "
         f"{redshift_nodes} redshift nodes"
     )
-    target = build_population(population.model_name, **population.model_kwargs)
-    # No swept parameter is intrinsic, so no density factor enters a weight.
-    # Built with the amplitude mode, so the squared power is held for every
-    # variant `shot_noise_variant` switches to.
-    likelihood = ImportanceGaussianLikelihood.from_catalog(
+    target = population.build()
+    # No swept parameter is intrinsic, so no density factor enters a weight
+    # and the per-node power moments are formed here, once.
+    model = CatalogModel.from_catalog(
         catalog_data,
         catalog_metadata,
         population=target,
         frequencies=frequencies,
         num_redshift_nodes=redshift_nodes,
-        density_sites=(),
-        shot_noise="amplitude",
         observation_time=observation_time,
     )
-    return (likelihood,)
+    return (model,)
 
 
 @app.cell
-def _(
-    cache_dir,
-    cache_name_prefix,
-    chunk_size,
-    data_seed,
-    frequencies,
-    injection_metadata,
-):
-    injection_file = (
-        cache_dir
-        / f"{cache_name_prefix}injection_{injection_metadata.key()}_{data_seed}.npz"
+def _(background, data_seed, ensemble_root, frequencies, network_names):
+    # Draw 0 of `data_seed`: the key of the sky-averaged injection, so the
+    # networks record the same sources it summed.
+    _drawn = network_spectra_ensemble(ensemble_root, data_seed, 1, network_names)
+    observed = {}
+    for _name, _data in zip(network_names, _drawn, strict=True):
+        validate_matching_frequency_grids(_data["frequencies"], frequencies)
+        observed[_name] = _data["pair_spectral_density"][0]
+    print(
+        f"injection: {int(_drawn[0]['n_events'][0]):,} Poisson events, "
+        f"recorded by {len(observed)} networks over "
+        f"{background.config.population.observation_time:g} yr"
     )
-    if injection_file.is_file():
-        with np.load(injection_file) as cached:
-            observed = cached["spectral_density"]
-            injection_frequencies = cached["frequencies"]
-            num_injected = int(cached["n_events"])
-    else:
-        drawn = BackgroundSpectralDensitySimulator(
-            injection_metadata, chunk_size=chunk_size
-        )(batch_keys(data_seed, 1)[0])
-        # Zero noise: the Poisson spectrum itself is the data. The draw axis
-        # is leading even for one draw.
-        observed = np.asarray(drawn["spectral_density"][0], dtype=np.float64)
-        injection_frequencies = np.asarray(drawn["frequencies"], dtype=np.float64)
-        num_injected = int(drawn["n_events"][0])
-        injection_file.parent.mkdir(parents=True, exist_ok=True)
-        np.savez(
-            injection_file,
-            spectral_density=observed,
-            frequencies=injection_frequencies,
-            n_events=num_injected,
-        )
-    validate_matching_frequency_grids(injection_frequencies, frequencies)
-    print(f"injection: {num_injected:,} Poisson events")
     return (observed,)
 
 
 @app.cell
 def _(
-    catalog_metadata,
-    catalog_seed,
-    data_seed,
     frequencies,
-    injection_metadata,
     maximum_frequency,
     minimum_frequency,
     network_names,
-    observation_time,
-    redshift_nodes,
+    noise,
+    observed,
     registry,
+    response_draws,
+    response_seed,
 ):
-    per_network = {
-        name: network_data(
-            registry,
-            name,
+    # Every network on its counted entries, with the response moment of its
+    # per-pair response over the isotropic draws, and its per-pair data.
+    per_network = {}
+    for _name in network_names:
+        _network = pair_network(
             frequencies,
-            observation_time=observation_time,
+            noise[_name],
             minimum_frequency=minimum_frequency,
             maximum_frequency=maximum_frequency,
+            response_moment=pair_response_moment(
+                jax.random.key(response_seed),
+                response_draws,
+                frequencies,
+                registry.build_network(_name),
+            ),
         )
-        for name in network_names
-    }
-    # Everything a cached log density depends on besides its own axes.
-    cache_settings = {
-        "version": __version__,
-        "networks": network_names,
-        "seeds": (data_seed, catalog_seed),
-        "band": (minimum_frequency, maximum_frequency),
-        "observation_time": observation_time,
-        "density_sites": (),
-        "injection": injection_metadata.key(),
-        "reference_catalog": catalog_metadata.key(),
-        "redshift_nodes": redshift_nodes,
-    }
+        per_network[_name] = (_network, _network.compress(observed[_name]))
     labelled_networks = [(n, l) for n, l in DETECTOR_NETWORKS if n in network_names]
-    return cache_settings, labelled_networks, per_network
+    return labelled_networks, per_network
 
 
 @app.cell(hide_code=True)
@@ -963,44 +636,30 @@ def _():
     mo.md(r"""
     ### Shot noise at the fiducials
 
-    The relative amplitude scatter $s$ of one catalog realization and the
-    optimal SNR $\rho$ of the expected spectrum, per network. $\rho s$ is the
-    shot noise in units of the detector's amplitude error; it does not depend
-    on the observation time. `notebooks/spectrum_snrs.py` measures it
-    empirically from Poisson ensembles, about 0.48 for the fiducial network.
+    The relative amplitude scatter $s$ of one catalog realization, with the
+    network's response, and the optimal SNR $\rho$ of the expected spectrum,
+    per network. $\rho s$ is the shot noise in units of the detector's
+    amplitude error; it does not depend on the observation time. Measured
+    empirically from Poisson ensembles it is about 0.48 for the fiducial network.
     """)
     return
 
 
 @app.cell
-def _(FIDUCIALS, likelihood, per_network):
-    _spectrum, _variance, _ = likelihood.predict(FIDUCIALS)
+def _(FIDUCIALS, model, per_network):
+    _prediction = model.predict(FIDUCIALS)
     _label = dict(DETECTOR_NETWORKS)
     _rows = []
-    for _name, _data in per_network.items():
-        _keep = np.asarray(_data["frequency_mask"])
-        _sigma = np.asarray(_data["scale"])
-        _s2 = float(
-            amplitude_shot_noise_variance(
-                _spectrum, _variance, _data["scale"], _data["frequency_mask"]
-            )
-        )
-        _snr = float(
-            np.sqrt(np.sum(np.where(_keep, (np.asarray(_spectrum) / _sigma) ** 2, 0)))
-        )
+    for _name, (_network, _) in per_network.items():
+        _, _squared_snr = amplitude_template(_prediction, _network)
+        _snr = float(np.sqrt(_squared_snr))
+        _s = float(np.sqrt(shot_noise_variance(_prediction, _network)))
         _rows.append(
-            {
-                "network": _label[_name],
-                "rho": _snr,
-                "s": np.sqrt(_s2),
-                "rho s": _snr * np.sqrt(_s2),
-                "s2": _s2,
-            }
+            {"network": _label[_name], "rho": _snr, "s": _s, "rho s": _snr * _s}
         )
     shot_noise_table = pd.DataFrame(_rows)
-    fiducial_relative_variance = shot_noise_table["s2"].to_numpy()
-    shot_noise_table.drop(columns="s2")
-    return (fiducial_relative_variance,)
+    shot_noise_table
+    return (shot_noise_table,)
 
 
 @app.cell(hide_code=True)
@@ -1030,49 +689,39 @@ def _():
 def _(
     FIDUCIALS,
     PRIORS,
-    cache_dir,
-    cache_name_prefix,
-    cache_settings,
-    fiducial_relative_variance,
     grid_chunk_size,
     grid_specs,
     likelihood_variant,
-    observed,
     per_network,
     problem_variants,
-    likelihood,
+    model,
 ):
     h0_posteriors = problem_posteriors(
-        "H0",
         grid_specs["H0"],
         problem_variants["H0"],
-        likelihood,
-        fiducial_relative_variance,
-        cache_settings,
+        model,
         priors=PRIORS,
         chunk_size=grid_chunk_size,
         fiducials=FIDUCIALS,
-        observed=observed,
         per_network=per_network,
-        cache_dir=cache_dir,
-        prefix=cache_name_prefix,
     )
     h0_posterior = h0_posteriors[likelihood_variant]
     return h0_posterior, h0_posteriors
 
 
 @app.cell
-def _(FIDUCIALS, h0_posterior, labelled_networks):
+def _(FIDUCIALS, h0_posterior, labelled_networks, marginal_seed, num_marginal_samples):
     _grids, _log_densities = h0_posterior
-    h0_marginal = plot_marginals(
+    _rng = np.random.default_rng(marginal_seed)
+    h0_marginal = plot_network_marginals(
         "H0",
-        _grids["H0"],
         {
-            name: marginal_density(_grids["H0"], ld, axis=0)
+            name: convert_grids_to_samples(_grids, ld, num_marginal_samples, rng=_rng)
             for name, ld in _log_densities.items()
         },
         labelled_networks,
         FIDUCIALS["H0"],
+        xlim=marginal_window(_grids["H0"], _log_densities, axis=0),
     )
     mo.as_html(h0_marginal)
     return (h0_marginal,)
@@ -1100,49 +749,45 @@ def _():
 def _(
     FIDUCIALS,
     PRIORS,
-    cache_dir,
-    cache_name_prefix,
-    cache_settings,
-    fiducial_relative_variance,
     grid_chunk_size,
     grid_specs,
     likelihood_variant,
-    observed,
     per_network,
     problem_variants,
-    likelihood,
+    model,
 ):
     h0_omega_m_posteriors = problem_posteriors(
-        "H0_Omega_m",
         grid_specs["H0_Omega_m"],
         problem_variants["H0_Omega_m"],
-        likelihood,
-        fiducial_relative_variance,
-        cache_settings,
+        model,
         priors=PRIORS,
         chunk_size=grid_chunk_size,
         fiducials=FIDUCIALS,
-        observed=observed,
         per_network=per_network,
-        cache_dir=cache_dir,
-        prefix=cache_name_prefix,
     )
     h0_omega_m_posterior = h0_omega_m_posteriors[likelihood_variant]
     return h0_omega_m_posterior, h0_omega_m_posteriors
 
 
 @app.cell
-def _(FIDUCIALS, h0_omega_m_posterior, labelled_networks):
+def _(
+    FIDUCIALS,
+    h0_omega_m_posterior,
+    labelled_networks,
+    marginal_seed,
+    num_marginal_samples,
+):
     _grids, _log_densities = h0_omega_m_posterior
-    h0_omega_m_marginal = plot_marginals(
+    _rng = np.random.default_rng(marginal_seed)
+    h0_omega_m_marginal = plot_network_marginals(
         "H0",
-        _grids["H0"],
         {
-            name: marginal_density(_grids["H0"], ld, axis=0)
+            name: convert_grids_to_samples(_grids, ld, num_marginal_samples, rng=_rng)
             for name, ld in _log_densities.items()
         },
         labelled_networks,
         FIDUCIALS["H0"],
+        xlim=marginal_window(_grids["H0"], _log_densities, axis=0),
     )
     mo.as_html(h0_omega_m_marginal)
     return (h0_omega_m_marginal,)
@@ -1157,15 +802,23 @@ def _():
 
 
 @app.cell
-def _(FIDUCIALS, fiducial_network, grid_specs, h0_omega_m_posterior):
+def _(
+    FIDUCIALS,
+    fiducial_network,
+    grid_specs,
+    h0_omega_m_posterior,
+    marginal_seed,
+    num_marginal_samples,
+):
     _grids, _log_densities = h0_omega_m_posterior
-    _names = list(grid_specs["H0_Omega_m"])
-    h0_omega_m_corner = plot_corner_for_posterior_grid(
-        [_grids[name] for name in _names],
-        _log_densities[fiducial_network],
-        labels=[parameter_label(name) for name in _names],
-        truths=[FIDUCIALS[name] for name in _names],
-        **get_corner_kwargs(levels=CORNER_LEVELS),  # ty: ignore[invalid-argument-type]
+    h0_omega_m_corner = plot_corner(
+        convert_grids_to_samples(
+            _grids,
+            _log_densities[fiducial_network],
+            num_marginal_samples,
+            rng=np.random.default_rng(marginal_seed),
+        ),
+        {name: FIDUCIALS[name] for name in grid_specs["H0_Omega_m"]},
     )
     mo.as_html(h0_omega_m_corner)
     return (h0_omega_m_corner,)
@@ -1195,49 +848,39 @@ def _():
 def _(
     FIDUCIALS,
     PRIORS,
-    cache_dir,
-    cache_name_prefix,
-    cache_settings,
-    fiducial_relative_variance,
     grid_chunk_size,
     grid_specs,
     likelihood_variant,
-    observed,
     per_network,
     problem_variants,
-    likelihood,
+    model,
 ):
     xi_posteriors = problem_posteriors(
-        "xi_0_xi_n",
         grid_specs["xi_0_xi_n"],
         problem_variants["xi_0_xi_n"],
-        likelihood,
-        fiducial_relative_variance,
-        cache_settings,
+        model,
         priors=PRIORS,
         chunk_size=grid_chunk_size,
         fiducials=FIDUCIALS,
-        observed=observed,
         per_network=per_network,
-        cache_dir=cache_dir,
-        prefix=cache_name_prefix,
     )
     xi_posterior = xi_posteriors[likelihood_variant]
     return xi_posterior, xi_posteriors
 
 
 @app.cell
-def _(FIDUCIALS, labelled_networks, xi_posterior):
+def _(FIDUCIALS, labelled_networks, marginal_seed, num_marginal_samples, xi_posterior):
     _grids, _log_densities = xi_posterior
-    xi_marginal = plot_marginals(
+    _rng = np.random.default_rng(marginal_seed)
+    xi_marginal = plot_network_marginals(
         "xi_0",
-        _grids["xi_0"],
         {
-            name: marginal_density(_grids["xi_0"], ld, axis=0)
+            name: convert_grids_to_samples(_grids, ld, num_marginal_samples, rng=_rng)
             for name, ld in _log_densities.items()
         },
         labelled_networks,
         FIDUCIALS["xi_0"],
+        xlim=marginal_window(_grids["xi_0"], _log_densities, axis=0),
     )
     mo.as_html(xi_marginal)
     return (xi_marginal,)
@@ -1253,15 +896,23 @@ def _():
 
 
 @app.cell
-def _(FIDUCIALS, fiducial_network, grid_specs, xi_posterior):
+def _(
+    FIDUCIALS,
+    fiducial_network,
+    grid_specs,
+    marginal_seed,
+    num_marginal_samples,
+    xi_posterior,
+):
     _grids, _log_densities = xi_posterior
-    _names = list(grid_specs["xi_0_xi_n"])
-    xi_corner = plot_corner_for_posterior_grid(
-        [_grids[name] for name in _names],
-        _log_densities[fiducial_network],
-        labels=[parameter_label(name) for name in _names],
-        truths=[FIDUCIALS[name] for name in _names],
-        **get_corner_kwargs(levels=CORNER_LEVELS),  # ty: ignore[invalid-argument-type]
+    xi_corner = plot_corner(
+        convert_grids_to_samples(
+            _grids,
+            _log_densities[fiducial_network],
+            num_marginal_samples,
+            rng=np.random.default_rng(marginal_seed),
+        ),
+        {name: FIDUCIALS[name] for name in grid_specs["xi_0_xi_n"]},
     )
     mo.as_html(xi_corner)
     return (xi_corner,)
@@ -1287,14 +938,7 @@ def _():
     cell is already about $0.17\sigma$.
 
     - **Effect of shot noise**: the shift of the mean and the ratio of the
-      standard deviations of each variant against `detector`.
-    - **A/B, fixed vs per-point $s^2$**: a covariance that depends on the
-      parameters adds its $\ln\det$ to the likelihood, which can carry
-      spurious information. If pinning $s^2$ at the fiducial moves no mean or
-      standard deviation by more than `ab_tolerance` detector $\sigma$, the
-      fixed value is the safer choice.
-    - **Leakage**: for $(\Xi_0, n)$, which tilt the template, the
-      per-frequency direction against the amplitude one.
+      standard deviations of the `dense` likelihood against `detector`.
     """)
     return
 
@@ -1395,7 +1039,7 @@ def _(shot_noise_moments):
             compare_moments(shot_noise_moments, _variant, "detector").assign(
                 likelihood=_variant
             )
-            for _variant in ("amplitude", "fixed", "per_frequency")
+            for _variant in ("dense",)
             if (shot_noise_moments["likelihood"] == _variant).any()
         ]
     )
@@ -1404,40 +1048,9 @@ def _(shot_noise_moments):
 
 
 @app.cell
-def _(ab_tolerance, shot_noise_moments):
-    ab_comparison = compare_moments(shot_noise_moments, "fixed", "amplitude")
-    _worst = float(
-        ab_comparison[["mean shift / sigma", "sd change / sigma"]].abs().max().max()
-    )
-    if np.isnan(_worst):
-        _verdict = "no posterior is resolved by its grid: no A/B verdict"
-    elif _worst < ab_tolerance:
-        _verdict = (
-            f"fixed s^2 is within {ab_tolerance} sigma of per-point s^2 "
-            f"everywhere (worst {_worst:.3f}): adopt likelihood_variant = 'fixed'"
-        )
-    else:
-        _verdict = (
-            f"fixed s^2 moves a moment by {_worst:.3f} sigma > {ab_tolerance}: "
-            "keep the per-point 'amplitude' variant"
-        )
-    print(_verdict)
-    ab_comparison
-    return
-
-
-@app.cell
-def _(shot_noise_moments):
-    leakage = compare_moments(shot_noise_moments, "per_frequency", "amplitude")
-    leakage
-    return
-
-
-@app.cell
 def _(FIDUCIALS, fiducial_network, h0_posteriors):
     shot_noise_variants_figure, _ax = plt.subplots()
-    # Dashed on top: "fixed" lies on "amplitude" to well below a line width.
-    _styles = {"detector": "-", "amplitude": "-", "fixed": "--"}
+    _styles = {"detector": "--", "dense": "-"}
     for _variant, (_grids, _log_densities) in h0_posteriors.items():
         _ax.plot(
             _grids["H0"],
@@ -1478,7 +1091,7 @@ def _(h0_omega_m_summary_rows, h0_summary_rows, xi_summary_rows):
         [*h0_summary_rows, *h0_omega_m_summary_rows, *xi_summary_rows]
     )
     summary
-    return
+    return (summary,)
 
 
 @app.cell
@@ -1487,12 +1100,18 @@ def _(
     h0_marginal,
     h0_omega_m_corner,
     h0_omega_m_marginal,
+    shot_noise_table,
     shot_noise_variants_figure,
+    summary,
     write_figures,
     xi_corner,
     xi_marginal,
 ):
     if write_figures.value:
+        FIGURES.mkdir(parents=True, exist_ok=True)
+        # The tables' inputs: intervals, and rho and s per network.
+        summary.to_csv(FIGURES / "summary.csv", index=False)
+        shot_noise_table.to_csv(FIGURES / "shot_noise.csv", index=False)
         save_figures(
             {
                 FIGURES / "marginals_H0.pdf": h0_marginal,

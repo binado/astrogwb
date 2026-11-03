@@ -1,11 +1,8 @@
 """Shared styling for the astrogwb paper application.
 
-Presentation-only helpers: colorblind-safe palettes, the neutral truth-line
-style (solid), a loader for ``paper.mplstyle``, the LaTeX parameter labels
-and savefig settings that ``config/plotting.toml`` carries, and
-:func:`save_figures`, the single writer that applies them. This module is
-independent of the ``astrogwb`` package and of the config layer: it reads that
-one TOML file with stdlib ``tomllib``, lazily.
+Palettes, the neutral truth-line style, ``paper.mplstyle``, the LaTeX labels
+and savefig settings of ``config/plotting.toml`` (read lazily with
+``tomllib``), and :func:`save_figures`.
 
 Convention:
 - category accents are the default color for single-posterior figures;
@@ -17,17 +14,9 @@ Convention:
 - ``detector_network_styles`` pairs each ET network with its ET+CE companion;
 - truth / fiducial markers are always neutral solid (``TRUTH``), everywhere.
 
-``DETECTOR_NETWORKS`` lives here for the same reason: it is the ordered legend
-of the three network-comparison figures, and order is presentation.
-
-The split with ``config/``: *order and structure* are Python, *values* are
-data. So the ordered network legend is ``DETECTOR_NETWORKS`` here, while the
-detector list behind each name is the ``[networks]`` table in
-``config/detectors.toml``; and the LaTeX label for a *parameter* is
-``config/plotting.toml``, reached through
-:func:`parameter_label`, while the label for a *network* stays in
-``DETECTOR_NETWORKS`` because nothing can read it without also needing the
-order it sits in.
+Order and structure live in Python, values in ``config/``: the ordered network
+legend is ``DETECTOR_NETWORKS`` here, the detectors behind each name the
+``[networks]`` table, and parameter labels ``config/plotting.toml``.
 """
 
 from __future__ import annotations
@@ -40,50 +29,56 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
+import arviz_plots as azp
+import corner
 import matplotlib.pyplot as plt
 import numpy as np
+from arviz_base import from_dict
+from matplotlib.axes import Axes
 from matplotlib.colors import to_hex
 from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
+from matplotlib.projections import register_projection
 from numpy.typing import ArrayLike
 from scipy.interpolate import CubicSpline
 
 if TYPE_CHECKING:
-    from astrogwb.paper.config.detectors import DetectorRegistry
+    from xarray import DataTree
+
+    from astrogwb.detector.config import DetectorRegistry
 
 _STYLE_PATH = Path(__file__).parent / "paper.mplstyle"
 
-#: Relative to the working directory -- the repository root for every script
-#: and notebook -- matching `astrogwb.paper.config.runs`. Read lazily, never at
-#: import, so importing this module does no file I/O.
+#: Relative to the working directory (the repository root); read lazily.
 _SETTINGS_PATH = Path("config/plotting.toml")
 
 
 @cache
 def _figure_settings(root: Path | None = None) -> Mapping[str, Any]:
-    """Parse ``config/plotting.toml`` once.
-
-    Read with stdlib ``tomllib`` rather than ``astrogwb.paper.utils.load_mapping``
-    so this module keeps importing nothing from the config layer, at module
-    scope or inside a function body.
-
-    Proxied because ``@cache`` hands every caller the same object.
-    """
+    """Parse ``config/plotting.toml`` once, read-only since the cache shares it."""
     return MappingProxyType(
         tomllib.loads(((root or Path()) / _SETTINGS_PATH).read_text(encoding="utf-8"))
     )
 
 
 def figure_dpi(root: Path | None = None) -> int:
-    """Raster resolution for saved figures. Applied by :func:`use_paper_style`."""
+    """Raster resolution for saved figures. Applied by :func:`use_paper_style`.
+
+    Parameters
+    ----------
+    root
+        Root directory for configuration files.
+    """
     return int(_figure_settings(root)["figure_dpi"])
 
 
 def figure_format(root: Path | None = None) -> str:
-    """Default savefig container format. Applied by :func:`use_paper_style`.
+    """Default savefig format for extensionless paths. Applied by :func:`use_paper_style`.
 
-    Near-inert in practice: ``savefig.format`` only decides anything when
-    ``savefig`` is handed a path with no extension, and every figure is saved
-    to an explicit ``.pdf`` path. It records intent.
+    Parameters
+    ----------
+    root
+        Root directory for configuration files.
     """
     return str(_figure_settings(root)["figure_format"])
 
@@ -91,18 +86,27 @@ def figure_format(root: Path | None = None) -> str:
 def parameter_labels(root: Path | None = None) -> dict[str, str]:
     """LaTeX display labels by parameter name, from ``config/plotting.toml``.
 
-    Covers every fiducial plus ``importance_relative_ess``, which is a derived
-    diagnostic rather than a parameter -- so this is a superset of
-    :func:`astrogwb.paper.config.fiducials`, not a match.
+    Covers every fiducial plus derived diagnostics such as
+    ``importance_relative_ess``.
 
-    Parameter labels are data; *network* labels are not. ``DETECTOR_NETWORKS``
-    stays in Python because its order is load-bearing presentation.
+    Parameters
+    ----------
+    root
+        Root directory for configuration files.
     """
     return dict(_figure_settings(root)["labels"])
 
 
 def parameter_label(name: str, root: Path | None = None) -> str:
-    """The LaTeX label for ``name``, or ``name`` itself if none is declared."""
+    """The LaTeX label for ``name``, or ``name`` itself if none is declared.
+
+    Parameters
+    ----------
+    name
+        Name to look up.
+    root
+        Root directory for configuration files.
+    """
     return parameter_labels(root).get(name, name)
 
 
@@ -110,9 +114,7 @@ def parameter_label(name: str, root: Path | None = None) -> str:
 class Network:
     """One detector network: its run name, LaTeX label, and detector list.
 
-    The name and label are presentation, owned here alongside
-    ``DETECTOR_NETWORKS``. The detector list is scientific and comes from the
-    shared ``[networks]`` table.
+    The detector list comes from the shared ``[networks]`` table.
     """
 
     name: str
@@ -160,25 +162,26 @@ MERGER_RATE_LEGEND: dict[str, object] = {
     "frameon": False,
 }
 
-# The detector networks compared in every network figure, as (network name,
-# LaTeX label) in legend order. Declaration order is load-bearing: it drives
-# legend order and the color/linestyle assignment made by
-# `detector_network_styles`.
-#
-# Only the label is owned here; the detector list behind each name is the
-# shared `[networks]` table.
+# The networks compared in every network figure, as (name, LaTeX label). The
+# order drives the legend and `detector_network_styles`.
 DETECTOR_NETWORKS: tuple[tuple[str, str], ...] = (
     ("ET-triangular", r"ET-$\Delta$"),
     ("ET-triangular-CE-Hanford", r"ET-$\Delta$ $+$ CE"),
     ("ET-2L-aligned", "ET-2L-par"),
     ("ET-2L-aligned-CE-Hanford", r"ET-2L-par $+$ CE"),
-    ("ET-2L-misaligned", "ET-2L"),
-    ("ET-2L-misaligned-CE-Hanford", r"ET-2L $+$ CE"),
+    ("ET-2L-misaligned", "ET-2L-mis"),
+    ("ET-2L-misaligned-CE-Hanford", r"ET-2L-mis $+$ CE"),
 )
 
 
 def use_paper_style(root: Path | None = None) -> None:
-    """Apply ``paper.mplstyle`` and configured savefig settings."""
+    """Apply ``paper.mplstyle`` and configured savefig settings.
+
+    Parameters
+    ----------
+    root
+        Root directory for configuration files.
+    """
     plt.style.use(str(_STYLE_PATH))
     plt.rcParams["savefig.dpi"] = figure_dpi(root)
     plt.rcParams["savefig.format"] = figure_format(root)
@@ -193,15 +196,19 @@ def save_figures(
 ) -> list[Path]:
     """Write each figure to its path, creating the parent directory.
 
-    ``figures`` maps the output path to the figure to write, so the caller keeps
-    owning *where* -- its ``--output-*`` flags -- while this owns *how*: the dpi
-    and format come from ``config/plotting.toml``, and the written paths are
-    returned in iteration order so a caller can report them without restating
-    them.
+    The dpi and format default to ``config/plotting.toml``; ``figure_format``
+    is the extension given to a path without one. Returns the written paths.
 
-    ``figure_format`` names the extension a path that has none is given. A path
-    that already names one keeps it, which is why the setting is near-inert
-    here: every caller's ``--output-*`` flag ends in ``.pdf``.
+    Parameters
+    ----------
+    figures
+        Figures and their output paths.
+    figure_dpi
+        Output resolution in dots per inch.
+    figure_format
+        Output figure format.
+    root
+        Root directory for configuration files.
     """
     settings = _figure_settings(root)
     dpi = int(settings["figure_dpi"]) if figure_dpi is None else figure_dpi
@@ -227,6 +234,11 @@ def get_corner_kwargs(**overrides: object) -> dict[str, object]:
     Corner does not read most rcParams, so the axis-label and title font sizes
     are pulled from the active rcParams here. Pass keyword overrides to replace
     any default for a single call.
+
+    Parameters
+    ----------
+    **overrides
+        Values overriding the defaults.
     """
     kwargs: dict[str, object] = {
         "plot_datapoints": True,
@@ -267,23 +279,11 @@ def plot_corner_for_posterior_grid(
 ) -> plt.Figure:
     """Corner plot of a posterior evaluated on a grid, via ``corner.corner()``.
 
-    The posterior density is recovered by exponentiating ``log_density``
-    (unnormalized; stabilized by subtracting its maximum), and every grid
-    point is passed to ``corner.corner()`` as a pseudo-sample weighted by its
-    density value. ``bins`` are set to coincide with the grid cells and
-    ``range`` with the cell-edge extents, so corner's histograms *are* the
-    grid and its credible-region levels and quantiles carry the same meaning
-    as for chains -- the density is not discretized a second time.
-
-    Each grid must be strictly increasing and *uniform*: uniform cell areas
-    are what make the density value proportional to the enclosed mass. For
-    non-uniform grids, use the density-native renderer in
-    ``notebooks/logposterior_grid.py`` instead.
-
-    ``plot_datapoints`` and ``plot_density`` default to ``False`` here: the
-    pseudo-samples cover the full parameter rectangle uniformly, so corner's
-    datapoint scatter would be a featureless gray fog. These and every other
-    default can be overridden through ``corner_kwargs``.
+    Every grid point is a pseudo-sample weighted by its density, with
+    ``bins`` and ``range`` aligned to the grid cells, so corner's histograms
+    are the grid itself. Each grid must be strictly increasing and uniform, so
+    density is proportional to enclosed mass. ``plot_datapoints`` and
+    ``plot_density`` default to ``False``.
 
     Parameters
     ----------
@@ -316,7 +316,6 @@ def plot_corner_for_posterior_grid(
     matplotlib.figure.Figure
         The figure produced by ``corner.corner()``.
     """
-    import corner
 
     grids = tuple(np.asarray(grid, dtype=np.float64) for grid in grids)
     ndim = len(grids)
@@ -331,8 +330,7 @@ def plot_corner_for_posterior_grid(
         if not np.allclose(spacings, spacings[0]):
             raise ValueError(
                 "each grid must be uniform so that cell areas are equal and "
-                "density values are proportional to enclosed mass; for "
-                "non-uniform grids use notebooks/logposterior_grid.py"
+                "density values are proportional to enclosed mass"
             )
 
     log_density = np.asarray(log_density, dtype=np.float64)
@@ -366,9 +364,7 @@ def plot_corner_for_posterior_grid(
 
     density = np.exp(log_density - log_density.max())
     weights = density.ravel()
-    # corner requires 2D (nsamples, ndim) input; the pinned revision's 1D
-    # ndarray path reshapes as data[None, :, :] and crashes, so present the
-    # 1D grid as (npoints, 1).
+    # corner's 1D ndarray path crashes; present a 1D grid as (npoints, 1).
     data = (
         grids[0][:, None]
         if ndim == 1
@@ -385,16 +381,12 @@ def plot_corner_for_posterior_grid(
         "plot_datapoints": False,
         "plot_density": False,
         "smooth": smooth,
-        # corner's overplot_lines crashes for 1D figures in the pinned
-        # revision (axes[k1, k1] on a non-subscriptable Axes), so in 1D the
-        # truth line is drawn manually after rendering, below.
+        # corner's overplot_lines crashes for 1D figures; drawn manually below.
         "truths": list(truths) if truths is not None and ndim == 2 else None,
         "labels": list(labels) if labels is not None else None,
     }
     kwargs |= corner_kwargs
-    # The diagonal panels are drawn from the spline below, not from corner's
-    # histogram, so corner's own 1D smoothing (which would only blur bin counts)
-    # is switched off here whatever the caller passed.
+    # The diagonal panels are drawn from the spline below.
     kwargs["smooth1d"] = None
     fig = corner.corner(data, **kwargs)  # type: ignore[arg-type]
     if fig is None:  # pragma: no cover - corner always creates a figure here
@@ -418,10 +410,8 @@ def plot_corner_for_posterior_grid(
         ax.plot(x_fine, y_fine, color="k")
         ax.set_ylim(0.0, 1.05)
 
-    # Expand the visible axes to include out-of-grid truths after rendering:
-    # corner's truth artists (truly spanning axvline/axhline plus square
-    # markers) are drawn regardless of the limits and simply reappear once
-    # the limits cover them.
+    # Expand the axes to out-of-grid truths only after rendering, so the
+    # histogram range stays cell-aligned.
     if truths is not None:
         axes = np.asarray(fig.axes).reshape(ndim, ndim)
         for index, truth in enumerate(truths):
@@ -439,7 +429,13 @@ def plot_corner_for_posterior_grid(
 
 
 def combo_colors(n: int) -> list[str]:
-    """Ordered qualitative colors for the per-parameter-combination overlay."""
+    """Ordered qualitative colors for the per-parameter-combination overlay.
+
+    Parameters
+    ----------
+    n
+        Number of colors.
+    """
     return [to_hex(c) for c in plt.cm.viridis(np.linspace(0.1, 0.9, n))]
 
 
@@ -456,6 +452,11 @@ def detector_network_styles(
 
     Both lists are positional: they index the ``networks`` sequence, whose
     order comes from the figure config's run array.
+
+    Parameters
+    ----------
+    networks
+        Detector networks.
     """
     bases: list[str] = []
     for network in networks:
@@ -467,3 +468,184 @@ def detector_network_styles(
     colors = [color_by_base[_base_network_name(n.name)] for n in networks]
     linestyles = ["--" if n.name.endswith("-CE-Hanford") else "-" for n in networks]
     return colors, linestyles
+
+
+def convert_grids_to_samples(
+    grids: Mapping[str, ArrayLike],
+    log_density: ArrayLike,
+    num_samples: int,
+    *,
+    rng: np.random.Generator,
+) -> DataTree:
+    """Draw samples from a posterior evaluated on a uniform grid.
+
+    A cell is chosen with probability proportional to its density, then the
+    draw is jittered uniformly within the cell, so the samples are distributed
+    as the piecewise-constant density on the grid. The result has the layout
+    of an MCMC run with one chain, so grid and MCMC posteriors can share the
+    plotting code.
+
+    Parameters
+    ----------
+    grids
+        Bin-center coordinates by parameter name, one strictly increasing
+        uniform 1D array per axis of ``log_density``, in axis order.
+    log_density
+        Unnormalized log density with shape ``tuple(len(g) for g in grids)``.
+        ``-inf`` entries become empty cells.
+    num_samples
+        Number of draws.
+    rng
+        Source of randomness.
+
+    Returns
+    -------
+    xarray.DataTree
+        ``posterior`` group with one variable per grid, dims ``(chain, draw)``
+        of sizes ``(1, num_samples)``.
+    """
+    log_density = np.asarray(log_density, dtype=np.float64)
+    weights = np.exp(log_density - np.max(log_density)).ravel()
+    cells = np.unravel_index(
+        rng.choice(weights.size, size=num_samples, p=weights / weights.sum()),
+        log_density.shape,
+    )
+    draws = {}
+    for axis, (name, grid) in enumerate(grids.items()):
+        grid = np.asarray(grid, dtype=np.float64)
+        half_cell = (grid[1] - grid[0]) / 2
+        draws[name] = (
+            grid[cells[axis]] + rng.uniform(-half_cell, half_cell, num_samples)
+        )[None]
+    return from_dict({"posterior": draws})
+
+
+def plot_network_marginals(
+    parameter: str,
+    posteriors: Mapping[str, DataTree],
+    networks: Sequence[tuple[str, str]],
+    fiducial: float,
+    *,
+    bounds: tuple[float, float] | None = None,
+    xlim: tuple[float, float] | None = None,
+) -> Figure:
+    """Overlay one parameter's marginal posterior for every network.
+
+    A wrapper over :func:`arviz_plots.plot_dist` with the paper styling. Grid
+    posteriors enter through :func:`convert_grids_to_samples`.
+
+    Parameters
+    ----------
+    parameter
+        Variable name in each ``posterior`` group, also the axis label key.
+    posteriors
+        Posterior draws by network name.
+    networks
+        ``(name, LaTeX label)`` in legend order.
+    fiducial
+        Truth marker position.
+    bounds
+        Hard limits of the parameter's support, such as a prior window. The
+        density estimate is cut and corrected at these limits instead of
+        leaking past them. Every draw must lie inside; for samples from
+        :func:`convert_grids_to_samples` these are the outer cell edges, half
+        a grid step beyond the first and last grid point.
+    xlim
+        Display window of the horizontal axis. The density is still estimated
+        over the full support, so this only zooms; ``None`` keeps the
+        automatic limits.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+    """
+    # arviz_plots reads its backend off the Axes class; gwpy replaces it.
+    register_projection(Axes)
+    styled = [Network(name, label, ()) for name, label in networks]
+    colors, linestyles = detector_network_styles(styled)
+    dist_stats = {} if bounds is None else {"custom_lims": bounds}
+    collection = azp.plot_dist(
+        {network.name: posteriors[network.name] for network in styled},
+        var_names=[parameter],
+        kind="kde",
+        backend="matplotlib",
+        # The stub omits "face", which the runtime accepts.
+        visuals={  # ty: ignore[invalid-argument-type]
+            "credible_interval": False,
+            "point_estimate": False,
+            "point_estimate_text": False,
+            "face": False,
+            "title": False,
+            "remove_axis": False,
+        },
+        stats={"dist": dist_stats},
+        aes={"color": ["model"], "linestyle": ["model"]},
+        color=colors,
+        linestyle=linestyles,
+        figure_kwargs={"figsize": plt.rcParams["figure.figsize"]},
+    )
+    ax = collection.viz["plot"][parameter].item()
+    ax.axvline(fiducial, **TRUTH)
+    ax.set(xlabel=parameter_label(parameter), ylabel="Posterior density")
+    if xlim is not None:
+        ax.set_xlim(*xlim)
+    handles = [
+        Line2D(
+            [],
+            [],
+            color=color,
+            linestyle=linestyle,  # ty: ignore[invalid-argument-type]
+            label=network.label,
+        )
+        for network, color, linestyle in zip(styled, colors, linestyles, strict=True)
+    ]
+    ax.legend(handles=handles, **DETECTOR_COMPARISON_LEGEND)
+    fig = collection.viz["figure"].item()
+    fig.tight_layout()
+    return fig
+
+
+def plot_corner(
+    posterior: DataTree,
+    truths: Mapping[str, float],
+    *,
+    var_names: Sequence[str] | None = None,
+    **corner_kwargs: object,
+) -> Figure:
+    """Corner plot of posterior draws, via ``corner.corner()``.
+
+    Takes the same DataTree as :func:`plot_network_marginals`. The defaults are
+    :func:`get_corner_kwargs` without datapoints or density shading.
+
+    Parameters
+    ----------
+    posterior
+        Draws in the ``posterior`` group.
+    truths
+        Marker position by parameter name; one entry for each of ``var_names``.
+    var_names
+        Parameters to plot, in panel order. Defaults to the keys of ``truths``.
+    **corner_kwargs
+        Forwarded to ``corner.corner()``; they take precedence over the
+        defaults.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+    """
+
+    names = list(truths if var_names is None else var_names)
+    defaults = get_corner_kwargs(
+        levels=CORNER_LEVELS,
+        plot_datapoints=False,
+        plot_density=False,
+        smooth=1.0,
+        bins=40,
+    )
+    return corner.corner(
+        posterior,
+        var_names=names,
+        labels=[parameter_label(name) for name in names],
+        truths=[truths[name] for name in names],
+        **(defaults | corner_kwargs),
+    )

@@ -1,40 +1,49 @@
-from .density import LogDensityFn, grid_log_posterior
-from .fisher import fisher_matrix_per_bin, spectral_density_jacobian
-from .likelihood import (
-    GaussianLikelihood,
-    ImportanceGaussianLikelihood,
+from .diagnostics import (
+    AmplitudeCumulants,
+    amplitude_cumulants,
+    amplitude_template,
+    shape_correction,
+    shot_noise_variance,
+    whitened_catalog_covariance,
+)
+from .fisher import (
+    DenseFisher,
+    SpectrumFn,
+    dense_fisher_matrix,
+    fisher_matrix_per_bin,
+    spectral_density_jacobian,
+)
+from .gaussian import (
+    DenseGaussianLikelihood,
+    Evaluation,
+    GaussianFactor,
     Network,
-    ShotNoiseMode,
-    gaussian_log_likelihood,
-    shot_noise_log_likelihood,
+    catalog_covariance,
+    expected_data,
 )
-from .models import (
-    gwb_likelihood_model,
-)
-from .protocol import LogLikelihood, SpectrumFn
-from .shot_noise import (
-    amplitude_direction,
-    amplitude_shot_noise_variance,
-    per_frequency_direction,
-    rank_one_gaussian_log_likelihood,
-)
+from .grid import grid_log_likelihood, grid_log_prior
+from .model import CatalogModel, Prediction
 
 __all__ = [
-    "GaussianLikelihood",
-    "ImportanceGaussianLikelihood",
-    "LogDensityFn",
-    "LogLikelihood",
+    "AmplitudeCumulants",
+    "CatalogModel",
+    "DenseFisher",
+    "DenseGaussianLikelihood",
+    "Evaluation",
+    "GaussianFactor",
     "Network",
-    "ShotNoiseMode",
+    "Prediction",
     "SpectrumFn",
-    "amplitude_direction",
-    "amplitude_shot_noise_variance",
+    "amplitude_cumulants",
+    "amplitude_template",
+    "catalog_covariance",
+    "dense_fisher_matrix",
+    "expected_data",
     "fisher_matrix_per_bin",
-    "gaussian_log_likelihood",
-    "grid_log_posterior",
-    "gwb_likelihood_model",
-    "per_frequency_direction",
-    "rank_one_gaussian_log_likelihood",
-    "shot_noise_log_likelihood",
+    "grid_log_likelihood",
+    "grid_log_prior",
+    "shape_correction",
+    "shot_noise_variance",
     "spectral_density_jacobian",
+    "whitened_catalog_covariance",
 ]

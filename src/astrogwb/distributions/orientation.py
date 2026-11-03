@@ -29,7 +29,7 @@ class UniformCosineDistribution(dist.Distribution):
 
     Parameters
     ----------
-    validate_args:
+    validate_args
         Forwarded to :class:`~numpyro.distributions.Distribution`.
     """
 
@@ -42,9 +42,15 @@ class UniformCosineDistribution(dist.Distribution):
     def sample(
         self, key: jax.Array | None, sample_shape: tuple[int, ...] = ()
     ) -> jax.Array:
-        """Uniform cosine on ``[-1, 1]``, then the polar angle."""
-        # `None` only exists to match the base-class signature; handlers
-        # always pass a real key.
+        """Uniform cosine on ``[-1, 1]``, then the polar angle.
+
+        Parameters
+        ----------
+        key
+            JAX random key.
+        sample_shape
+            Leading shape of the samples.
+        """
         assert key is not None
         cos_theta = jax.random.uniform(
             key, shape=sample_shape + self.batch_shape, minval=-1.0, maxval=1.0
@@ -53,13 +59,33 @@ class UniformCosineDistribution(dist.Distribution):
 
     @validate_sample
     def log_prob(self, value: ArrayLike) -> jax.Array:
+        """Evaluate the log probability density at ``value``.
+
+        Parameters
+        ----------
+        value
+            Value to evaluate.
+        """
         return jnp.asarray(jnp.log(jnp.sin(value)) - jnp.log(2.0))
 
     def cdf(self, value: ArrayLike) -> jax.Array:
-        # The closed form is even and 2π-periodic, so it would oscillate
-        # outside the support instead of saturating at 0 and 1.
+        # Clip: the closed form is periodic and would not saturate at 0 and 1.
+        """Evaluate the cumulative distribution function at ``value``.
+
+        Parameters
+        ----------
+        value
+            Value to evaluate.
+        """
         value = jnp.clip(jnp.asarray(value), 0.0, math.pi)
         return jnp.asarray((1.0 - jnp.cos(value)) / 2.0)
 
     def icdf(self, q: ArrayLike) -> jax.Array:
+        """Evaluate the inverse cumulative distribution function at ``q``.
+
+        Parameters
+        ----------
+        q
+            Cumulative probability.
+        """
         return jnp.asarray(jnp.arccos(1.0 - 2.0 * q))

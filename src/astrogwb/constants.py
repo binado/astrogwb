@@ -1,11 +1,9 @@
 """Physical constants and unit conversions shared across astrogwb.
 
-A leaf module: it imports nothing from :mod:`astrogwb`, so every other module
-may import it without risk of a cycle. All values are SI unless a name says
-otherwise, and the tabulated ones are the full-precision LALSuite literals
-(``lal/LALConstants.h``) so that astrogwb, ripple, and LALSimulation agree to
-the last representable bit. Values that follow exactly from those literals are
-derived here rather than re-typed, so they cannot drift apart.
+A leaf module: it imports nothing from :mod:`astrogwb`. Values are SI unless a
+name says otherwise; tabulated ones are the full-precision LALSuite literals
+(``lal/LALConstants.h``), so astrogwb, ripple and LALSimulation agree bit for
+bit.
 """
 
 import math
@@ -36,13 +34,9 @@ GRAVITATIONAL_CONSTANT: float = 6.6743e-11  # m^3 / kg / s^2
 
 # --- Solar mass, in the three units the inspiral formulae need ---------------
 #
-# The three are consistent to the last bit: GRAVITATIONAL_CONSTANT *
-# SOLAR_MASS_IN_KILOGRAMS / SPEED_OF_LIGHT**3 reproduces SOLAR_MASS_IN_SECONDS
-# exactly in float64, and likewise / SPEED_OF_LIGHT**2 for
-# SOLAR_MASS_IN_METERS. They are tabulated rather than derived so that a value
-# quoted from astrogwb is bit-identical to one quoted from LALSuite. Note that
-# LAL fixes the mass from the IAU 2015 nominal GM_sun = 1.3271244e20
-# m^3 s^-2; the older 1.32712440018e20 differs by 1.4e-10 relative.
+# Tabulated rather than derived, to stay bit-identical to LALSuite (which uses
+# the IAU 2015 nominal GM_sun = 1.3271244e20 m^3 s^-2). They are mutually
+# consistent in float64.
 
 # Solar mass (LAL_MSUN_SI)
 SOLAR_MASS_IN_KILOGRAMS: float = 1.988409870698050731911960804878414216e30  # kg
@@ -71,24 +65,16 @@ SECONDS_PER_YEAR: float = 31_557_600.0  # s
 
 # --- Earth geometry ----------------------------------------------------------
 
-# IUGG mean Earth radius R_1. This is deliberately NOT LAL_REARTH_SI
-# (6378136.6 m), which is the equatorial radius: the bundled gwfast overlap
-# reduction function reference fixtures were generated with the mean radius,
-# and the detector chord distances that feed them assume a sphere.
+# IUGG mean Earth radius R_1, not the equatorial LAL_REARTH_SI: the gwfast
+# overlap-reduction fixtures assume a sphere of this radius.
 EARTH_MEAN_RADIUS_IN_METERS: float = 6.371e6  # m
 
 # --- Inspiral model constants (dimensionless) --------------------------------
 
-# Schwarzschild test-particle ISCO truncation coefficient, alpha = 1/(pi 6^3/2).
-# Truncates the inspiral at the dominant gravitational-wave frequency -- twice
-# the orbital frequency -- of a test particle at the innermost stable circular
-# orbit of a Schwarzschild black hole of detector-frame total mass M:
+# Schwarzschild ISCO coefficient, alpha = 1/(pi 6^3/2): the dominant GW
+# frequency at the ISCO of detector-frame total mass M_det (in Msun) is
 #
-#     f_end = alpha / (M_det * SOLAR_MASS_IN_SECONDS)   [Hz, M_det in Msun]
-#
-# The convention is *dimensionless*: alpha multiplies an inverse geometrized
-# mass, never an inverse mass in solar masses. Multiply by
-# 1 / SOLAR_MASS_IN_SECONDS = 2.0303e5 to recover the Hz-solar-mass form.
+#     f_end = alpha / (M_det * SOLAR_MASS_IN_SECONDS)   [Hz]
 ISCO_ALPHA: float = 1.0 / (math.pi * 6.0**1.5)  # dimensionless
 
 # Face-on quadrupolar inclination factor, g(0) = 2, the maximum of
