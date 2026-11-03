@@ -45,6 +45,7 @@ from .overlap import overlap_reduction_function
 __all__ = [
     "network_response",
     "pair_response",
+    "pair_response_moment",
     "sample_network_response",
     "sample_pair_response",
 ]
@@ -225,3 +226,70 @@ def sample_pair_response(
         Detectors in the network.
     """
     return pair_response(frequencies, detectors, *_isotropic_angles(key, num_draws))
+
+
+def pair_response_moment(
+    key: jax.Array,
+    num_draws: int,
+    frequencies: ArrayLike,
+    detectors: Sequence[Detector],
+    *,
+    chunk_size: int = 4096,
+) -> jax.Array:
+    r"""The isotropic second moment of :func:`pair_response`, ``(P, F, P, F)``.
+
+    :math:`\langle \gamma_{ab}(\hat n, \psi, \iota; f_k)\,
+    \gamma_{cd}(\hat n, \psi, \iota; f_l) \rangle` over the ``num_draws``
+    isotropic draws of :func:`sample_pair_response` from the same ``key``.
+    The draws are reduced ``chunk_size`` at a time, so the ``(L, P, F)`` array
+    is never formed; the result does not depend on ``chunk_size``. A sample
+    second moment, it is symmetric positive semidefinite.
+
+    Parameters
+    ----------
+    key
+        JAX random key.
+    num_draws
+        Number of isotropic draws.
+    frequencies
+        Frequency grid in Hz, ``(F,)``.
+    detectors
+        Detectors in the network.
+    chunk_size
+        Draws reduced at once, bounding peak memory at ``chunk_size * P * F``.
+
+    Returns
+    -------
+    jax.Array
+        Shape ``(P, F, P, F)``, pairs in the order of :func:`pair_response`.
+    """
+    frequencies = np.asarray(frequencies, dtype=float)
+    detectors = list(detectors)
+    chunk_size = min(chunk_size, num_draws)
+    num_chunks = -(-num_draws // chunk_size)
+    padding = num_chunks * chunk_size - num_draws
+    angles = [
+        jnp.pad(angle, (0, padding)).reshape(num_chunks, chunk_size)
+        for angle in _isotropic_angles(key, num_draws)
+    ]
+    # Padded draws are zero-weighted, so they add nothing to the sum.
+    counted = (jnp.arange(num_chunks * chunk_size) < num_draws).reshape(
+        num_chunks, chunk_size
+    )
+
+    def accumulate(
+        total: jax.Array, chunk: tuple[jax.Array, ...]
+    ) -> tuple[jax.Array, None]:
+        *chunk_angles, weight = chunk
+        draws = pair_response(frequencies, detectors, *chunk_angles)
+        flat = jnp.reshape(draws, (chunk_size, -1)) * weight[:, None]
+        return total + flat.T @ flat, None
+
+    shape = (len(detectors) * (len(detectors) - 1) // 2, frequencies.size)
+    size = shape[0] * shape[1]
+    total, _ = jax.lax.scan(
+        accumulate, jnp.zeros((size, size)), (*angles, counted.astype(float))
+    )
+    # Symmetric to round-off only; made exact for the Cholesky downstream.
+    moment = 0.5 * (total + total.T) / num_draws
+    return jnp.reshape(moment, (*shape, *shape))

@@ -193,11 +193,17 @@ def node_moment(index, weights, gram):    # index (F,), weights (F, 2)
     return jnp.einsum("ka,kalb,lb->kl", weights, block, weights)
 ```
 
-$(i_k, t_k)$ come from one `searchsorted` per node on the redshifted query
-frequencies, shared with the mean (`_node_intensity`). Queries above the
+The redshift nodes and the reference redshift are fixed, so the query
+frequencies $f_k s_z$, and with them $(i_k, t_k)$, do not depend on
+$\Lambda$: they are formed once (`interpolation_weights`). Queries above the
 reference grid get zero weights, matching `jnp.interp(..., right=0.0)`; queries
 below it clamp to the first reference value, matching `jnp.interp`'s default.
-The mean can use the same weights.
+
+Without `density_sites` (every caller today) $G$ is constant too, so the node
+moments $s_z^8 W_z G W_z^T$, `(Z, F, F)` (41 MB at $Z = 32$, $F = 400$), are
+formed once in `from_catalog`, and the power moment at each point is one
+contraction with the $\Lambda$-dependent kernel, $Z F^2 \simeq 5$ Mflop. The gather
+above runs per point only when the importance weights vary.
 
 What is independent of both $\Lambda$ and the network is built once and shared
 by reference: the catalog arrays and the Gram matrix $G$ on `CatalogModel`

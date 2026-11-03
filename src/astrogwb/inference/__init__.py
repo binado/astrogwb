@@ -1,6 +1,8 @@
 from .compound_poisson import AmplitudeDensityMethod, PointSet, amplitude_log_density
 from .density import LogDensityFn, grid_log_posterior
 from .fisher import fisher_matrix_per_bin, spectral_density_jacobian
+from .gaussian import DenseGaussianLikelihood, Evaluation, GaussianFactor
+from .grid import grid_log_likelihood, grid_log_prior
 from .likelihood import (
     GaussianLikelihood,
     ImportanceCompoundPoissonLikelihood,
@@ -10,6 +12,7 @@ from .likelihood import (
     gaussian_log_likelihood,
     shot_noise_log_likelihood,
 )
+from .model import CatalogModel, Prediction
 from .protocol import LogLikelihood, SpectrumFn
 from .shot_noise import (
     amplitude_direction,
@@ -23,6 +26,10 @@ from .shot_noise import (
 
 __all__ = [
     "AmplitudeDensityMethod",
+    "CatalogModel",
+    "DenseGaussianLikelihood",
+    "Evaluation",
+    "GaussianFactor",
     "GaussianLikelihood",
     "ImportanceCompoundPoissonLikelihood",
     "ImportanceGaussianLikelihood",
@@ -30,6 +37,7 @@ __all__ = [
     "LogLikelihood",
     "Network",
     "PointSet",
+    "Prediction",
     "ShotNoiseMode",
     "SpectrumFn",
     "amplitude_direction",
@@ -37,7 +45,9 @@ __all__ = [
     "amplitude_shot_noise_variance",
     "fisher_matrix_per_bin",
     "gaussian_log_likelihood",
+    "grid_log_likelihood",
     "grid_log_posterior",
+    "grid_log_prior",
     "low_rank_gaussian_log_likelihood",
     "pad_modes",
     "per_frequency_direction",
