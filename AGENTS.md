@@ -23,6 +23,8 @@ Every check is a `just` recipe, and CI runs the same string:
 - `Snakefile` is only a cluster job launcher (`--profile workflow/profiles/slurm`),
   not workflow management: outputs are regenerated explicitly, so don't design
   around Snakemake's DAG, rerun triggers or input invalidation.
+- Paper outputs: `just catalogs`, `just draw`, `just cluster`, `just notebook NAME`
+  and `just figures` (run one notebook at a time; the grid notebooks need several GB).
 
 ## Code conventions and styleguide
 

@@ -59,6 +59,34 @@ test: test-core test-paper
 run-notebook notebook:
     uv run --group notebook marimo edit {{ notebook }}
 
+# Paper outputs, not run by CI. Each writes under outputs/; Snakemake skips
+# files that exist, so delete one to redraw it.
+
+# The reference catalogs, locally: seconds each. Seeds live in Snakefile.
+catalogs cores="4":
+    uv run --no-sync snakemake catalogs --cores {{ cores }}
+
+# One ensemble draw locally, e.g. `just draw fiducial 41 0`, the grid
+# notebooks' injection: about 20 min on 8 cores.
+draw ensemble="fiducial" seed="41" index="0" cores="8":
+    uv run --no-sync snakemake outputs/ensembles/{{ ensemble }}/{{ seed }}-{{ index }}.h5 \
+        --cores {{ cores }} --config threads={{ cores }}
+
+# Every ensemble draw and catalog on SLURM; extra arguments go to Snakemake,
+# e.g. `just cluster --dry-run` or `just cluster --config stop=10`.
+cluster *args:
+    uv run --no-sync snakemake --profile workflow/profiles/slurm {{ args }}
+
+# Run a marimo notebook headlessly, writing its figures under
+# outputs/figures/<name>/, e.g. `just notebook fiducial_spectrum`.
+notebook name:
+    uv run --extra notebook python notebooks/{{ name }}.py
+
+# The paper outputs that need only the catalogs and draw 41-0, one at a time:
+# the grid notebooks each hold several GB, too much to run side by side.
+figures: (notebook "fiducial_spectrum") (notebook "cosmology_grid_posteriors") (notebook "madau_dickinson_grid")
+    uv run --extra notebook python scripts/shot_noise_budget.py
+
 # The publishable distribution. `astrogwb.paper` ships inside it but is
 # unimportable without the `paper` extra, whose dependencies stay out of the
 # core requirement set.

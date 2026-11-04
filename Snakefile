@@ -63,6 +63,10 @@ unknown = set(SELECTED) - set(DRAWS)
 if unknown:
     raise ValueError(f"unknown ensembles {sorted(unknown)}; known: {sorted(DRAWS)}")
 
+CATALOG_FILES = [
+    f"{CATALOGS_ROOT}/{catalog}.h5" for name in SELECTED for catalog in CATALOGS[name]
+]
+
 
 def draws(name):
     """Every draw of the ensemble `name`, overridden by --config stop."""
@@ -81,6 +85,7 @@ wildcard_constraints:
 
 localrules:
     all,
+    catalogs,
 
 
 rule all:
@@ -90,7 +95,14 @@ rule all:
             for name in SELECTED
             for seed, index in draws(name)
         ],
-        [f"{CATALOGS_ROOT}/{catalog}.h5" for name in SELECTED for catalog in CATALOGS[name]],
+        CATALOG_FILES,
+
+
+# The reference catalogs alone: seconds each, so `just catalogs` runs them
+# locally rather than through the cluster profile.
+rule catalogs:
+    input:
+        CATALOG_FILES,
 
 
 # INPUT, OUTPUT and job-nanny are the cluster's job requirements; job-nanny is
