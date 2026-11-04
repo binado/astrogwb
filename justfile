@@ -63,28 +63,39 @@ run-notebook notebook:
 # missing file, and, as in the SLURM profile, reruns one older than a config it
 # reads, which then fails on the recorded settings; delete a file to redraw it.
 
-# The reference catalogs, locally: seconds each. Seeds live in Snakefile.
+# Seconds each. Seeds live in Snakefile.
+[doc('Build the reference catalogs locally')]
+[group('paper')]
 catalogs cores="4":
     uv run --no-sync snakemake catalogs --cores {{ cores }} --rerun-triggers mtime
 
-# One ensemble draw locally, e.g. `just draw fiducial 41 0`, the grid
-# notebooks' injection: about 20 min on 8 cores.
+# E.g. `just draw fiducial 41 0`, the grid notebooks' injection: about 20 min
+# on 8 cores.
+[doc('Simulate one ensemble draw locally')]
+[group('paper')]
 draw ensemble="fiducial" seed="41" index="0" cores="8":
     uv run --no-sync snakemake outputs/ensembles/{{ ensemble }}/{{ seed }}-{{ index }}.h5 \
         --cores {{ cores }} --config threads={{ cores }} --rerun-triggers mtime
 
-# Every ensemble draw and catalog on SLURM; extra arguments go to Snakemake,
-# e.g. `just cluster --dry-run` or `just cluster --config stop=10`.
+# Extra arguments go to Snakemake as given, e.g. `just cluster --dry-run` or
+# `just cluster --config "ensembles=fiducial other"`.
+[doc('Run every ensemble draw and catalog on SLURM')]
+[group('paper')]
+[positional-arguments]
 cluster *args:
-    uv run --no-sync snakemake --profile workflow/profiles/slurm {{ args }}
+    uv run --no-sync snakemake --profile workflow/profiles/slurm "$@"
 
-# Run a marimo notebook headlessly, writing its figures under
-# outputs/figures/<name>/, e.g. `just notebook fiducial_spectrum`.
+# Figures land under outputs/figures/<name>/, e.g.
+# `just notebook fiducial_spectrum`.
+[doc('Run a marimo notebook headlessly')]
+[group('paper')]
 notebook name:
     uv run --extra notebook python notebooks/{{ name }}.py
 
-# The paper outputs that need only the catalogs and draw 41-0, one at a time:
-# the grid notebooks each hold several GB, too much to run side by side.
+# One at a time: the grid notebooks each hold several GB, too much to run side
+# by side.
+[doc('Make the figures that need only the catalogs and draw 41-0')]
+[group('paper')]
 figures: (notebook "fiducial_spectrum") (notebook "cosmology_grid_posteriors") (notebook "madau_dickinson_grid")
     uv run --extra notebook python scripts/shot_noise_budget.py
 
