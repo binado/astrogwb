@@ -59,6 +59,46 @@ test: test-core test-paper
 run-notebook notebook:
     uv run --group notebook marimo edit {{ notebook }}
 
+# Paper outputs, not run by CI. Each writes under outputs/. Snakemake builds a
+# missing file, and, as in the SLURM profile, reruns one older than a config it
+# reads, which then fails on the recorded settings; delete a file to redraw it.
+
+# Seconds each. Seeds live in Snakefile.
+[doc('Build the reference catalogs locally')]
+[group('paper')]
+catalogs cores="4":
+    uv run --no-sync snakemake catalogs --cores {{ cores }} --rerun-triggers mtime
+
+# E.g. `just draw fiducial 41 0`, the grid notebooks' injection: about 20 min
+# on 8 cores.
+[doc('Simulate one ensemble draw locally')]
+[group('paper')]
+draw ensemble="fiducial" seed="41" index="0" cores="8":
+    uv run --no-sync snakemake outputs/ensembles/{{ ensemble }}/{{ seed }}-{{ index }}.h5 \
+        --cores {{ cores }} --config threads={{ cores }} --rerun-triggers mtime
+
+# Extra arguments go to Snakemake as given, e.g. `just cluster --dry-run` or
+# `just cluster --config "ensembles=fiducial other"`.
+[doc('Run every ensemble draw and catalog on SLURM')]
+[group('paper')]
+[positional-arguments]
+cluster *args:
+    uv run --no-sync snakemake --profile workflow/profiles/slurm "$@"
+
+# Figures land under outputs/figures/<name>/, e.g.
+# `just notebook fiducial_spectrum`.
+[doc('Run a marimo notebook headlessly')]
+[group('paper')]
+notebook name:
+    uv run --extra notebook python notebooks/{{ name }}.py
+
+# One at a time: the grid notebooks each hold several GB, too much to run side
+# by side.
+[doc('Make the figures that need only the catalogs and draw 41-0')]
+[group('paper')]
+figures: (notebook "fiducial_spectrum") (notebook "cosmology_grid_posteriors") (notebook "madau_dickinson_grid")
+    uv run --extra notebook python scripts/shot_noise_budget.py
+
 # The publishable distribution. `astrogwb.paper` ships inside it but is
 # unimportable without the `paper` extra, whose dependencies stay out of the
 # core requirement set.
