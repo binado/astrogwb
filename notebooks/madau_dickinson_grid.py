@@ -25,6 +25,7 @@ with app.setup(hide_code=True):
     from matplotlib.axes import Axes
     from matplotlib.projections import register_projection
     from numpy.typing import NDArray
+    from scipy.interpolate import RegularGridInterpolator
     from xarray import DataTree
 
     from astrogwb.config import load_config
@@ -45,80 +46,33 @@ with app.setup(hide_code=True):
     from astrogwb.paper.posteriors import pair_network
     from astrogwb.simulators import BackgroundArtifact, network_spectra_ensemble
 
-    # Points of the coarse scan that locates the ridge, Newton iterations that
-    # polish it, points of the integration window, and its half width in
-    # standard deviations of the ridge.
-    NUM_SCAN, NUM_NEWTON, NUM_WINDOW, WINDOW_SIGMAS = 64, 12, 81, 10.0
-    # Gaussian width used where the curvature along the ridge is not negative.
-    FALLBACK_SIGMA = 1e-2
-    # Largest Newton step, in units of the parameter.
-    MAX_NEWTON_STEP = 0.05
-    # Margin kept between the solved ridge and the edges of the prior support.
-    SUPPORT_MARGIN = 1e-4
-    # Residual |gradient| * sigma above which a column counts as unconverged.
-    CONVERGED = 1e-3
-    QUANTILES = (0.025, 0.16, 0.5, 0.84, 0.975)
+    # Grid points evaluated together by lax.map: each holds one dense covariance
+    # and its Cholesky factor, so this bounds the memory.
+    CHUNK = 16
 
     @jax.jit
-    def ridge_columns(
+    def grid_log_likelihood(
         likelihood: DenseGaussianLikelihood,
         fiducial: Mapping[str, ArrayLike],
-        gamma: jax.Array,
-        kappa: jax.Array,
-        z_bounds: jax.Array,
-    ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
-        """Solve and integrate the thin direction at every ``(gamma, kappa)``.
+        points: jax.Array,
+    ) -> jax.Array:
+        """The log likelihood at every ``(z_peak, gamma, kappa)`` row of ``points``.
 
         The likelihood is an argument, so one compilation serves every network of
-        one structure; the grid points are mapped in batches to bound the memory.
+        one structure; the points are mapped in chunks of :data:`CHUNK`.
 
         Returns
         -------
-        tuple of jax.Array
-            ``log_density``, ``z_star``, ``sigma`` and ``gradient_scale``, each
-            ``(num_points,)``: the log of the integral over the window, the ridge
-            position and width, and ``|d ln L / dz| * sigma`` at the ridge.
+        jax.Array
+            ``(num_points,)`` log likelihoods.
         """
 
-        def log_likelihood(z: jax.Array, g: jax.Array, k: jax.Array) -> jax.Array:
+        def one(point: jax.Array) -> jax.Array:
+            z, g, k = point
             params = {**fiducial, "z_peak": z, "gamma": g, "kappa": k}
             return likelihood.log_likelihood(params)[0]
 
-        slope = jax.grad(log_likelihood)
-        curvature = jax.grad(slope)
-        low, high = z_bounds
-
-        def column(point: tuple[jax.Array, jax.Array]) -> tuple[jax.Array, ...]:
-            g, k = point
-            scan = jnp.linspace(low, high, NUM_SCAN)
-            z = scan[jnp.argmax(jax.vmap(lambda zz: log_likelihood(zz, g, k))(scan))]
-
-            def newton(_: int, z: jax.Array) -> jax.Array:
-                h = curvature(z, g, k)
-                step = jnp.where(h < 0, -slope(z, g, k) / h, 0.0)
-                return jnp.clip(
-                    z + jnp.clip(step, -MAX_NEWTON_STEP, MAX_NEWTON_STEP), low, high
-                )
-
-            z = jax.lax.fori_loop(0, NUM_NEWTON, newton, z)
-            h = curvature(z, g, k)
-            sigma = jnp.where(h < 0, 1.0 / jnp.sqrt(-h), FALLBACK_SIGMA)
-            lower = jnp.maximum(low, z - WINDOW_SIGMAS * sigma)
-            upper = jnp.minimum(high, z + WINDOW_SIGMAS * sigma)
-            window = jnp.linspace(lower, upper, NUM_WINDOW)
-            values = jax.vmap(lambda zz: log_likelihood(zz, g, k))(window)
-            peak = jnp.max(values)
-            weights = jnp.exp(values - peak)
-            spacing = (upper - lower) / (NUM_WINDOW - 1)
-            integral = spacing * (jnp.sum(weights) - 0.5 * (weights[0] + weights[-1]))
-            return (
-                jnp.log(integral) + peak,
-                z,
-                sigma,
-                jnp.abs(slope(z, g, k)) * sigma,
-            )
-
-        return jax.lax.map(column, (gamma, kappa), batch_size=256)
+        return jax.lax.map(one, points, batch_size=CHUNK)
 
 
 @app.cell(hide_code=True)
@@ -127,7 +81,7 @@ def _():
     # Grid posteriors on the Madau-Dickinson parameters
 
     Posteriors on the shape of the merger-rate history,
-    $(z_{\mathrm{peak}}, \gamma, \kappa)$, from a **ridge-aligned grid** and not
+    $(z_{\mathrm{peak}}, \gamma, \kappa)$, from a **uniform grid** and not
     from sampling: the posterior is too thin and curved for NUTS to sample
     reliably, which showed as divergences and chains that froze.
 
@@ -143,31 +97,34 @@ def _():
     mo.md(r"""
     ## Method
 
-    **Why not a plain grid.** The data constrain one combination of the three
+    **The ridge.** The data constrain one combination of the three
     parameters, the amplitude of the spectrum, to a small fraction of the prior
-    range: the posterior is a thin curved sheet, of width of order
-    $10^{-4}$ to $10^{-3}$ of the prior range across it, whose normal is mostly along
-    $z_{\mathrm{peak}}$. A uniform grid at the spacing of the soft directions
-    steps over it; one fine enough to resolve it is out of reach.
+    range: the posterior is a thin curved sheet whose normal is mostly along
+    $z_{\mathrm{peak}}$, of width $\sigma \sim 10^{-3}$ to $10^{-2}$ near the
+    fiducial and narrower at large $\gamma$.
 
-    **Solving for the ridge.** The grid runs over $(\gamma, \kappa)$ only.
-    At each point the likelihood is a thin spike in $z_{\mathrm{peak}}$. A coarse
-    scan of `NUM_SCAN` values of $z_{\mathrm{peak}}$ locates the basin, Newton
-    iterations locate the maximum $z^*$, and the curvature there gives the width
-    $\sigma = (-\partial_z^2 \ln \mathcal{L})^{-1/2}$. The marginal density of
-    $(\gamma, \kappa)$ is the trapezoid integral of the likelihood over
-    $z^* \pm$ `WINDOW_SIGMAS` $\sigma$, clipped to the prior. Priors are uniform,
-    so the likelihood is the posterior up to a constant. Draws take
-    $z_{\mathrm{peak}}$ from a Gaussian of width $\sigma$ about $z^*$ of the
-    chosen cell.
+    **Grid.** The likelihood is evaluated at the center of every cell of a
+    uniform grid over the priors, fine along $z_{\mathrm{peak}}$
+    (`num_z` cells) and coarse along $\gamma$ and $\kappa$. Priors are uniform,
+    so the likelihood is the posterior up to a constant. Summing a
+    $(\gamma, \kappa)$ column over $z_{\mathrm{peak}}$ gives its marginal mass,
+    which needs the ridge resolved along $z_{\mathrm{peak}}$ only.
+
+    **Draws along the ridge.** The ridge moves in $z_{\mathrm{peak}}$ by about
+    one unit per unit of $\gamma$, much more than its width across one
+    $\gamma$ cell. Jittering a draw uniformly within its cell would smear it
+    into stripes in $z_{\mathrm{peak}}$, one per $\gamma$ row. Instead the draw's
+    $z_{\mathrm{peak}}$ is shifted by the change of the ridge, the column's
+    posterior-mean $z_{\mathrm{peak}}$ interpolated in $(\gamma, \kappa)$,
+    between the cell center and the jittered point.
 
     **Likelihood.** `likelihood_variant`: `"detector"` (no shot noise) or
     `"dense"`, the dense Gaussian with the catalog covariance of the stacked
     per-pair data under the per-source network response.
 
-    **Checks.** Per network: the posterior mass in columns where Newton did not
-    converge or the ridge sits on the support edge, and how far the quantiles
-    move when the grid is refined by a factor of two.
+    **Checks.** Per network: the posterior mass in columns whose ridge is
+    narrower than a $z_{\mathrm{peak}}$ cell, where the column mass is
+    unreliable, and in columns whose ridge sits at the support edge.
     """)
 
 
@@ -192,7 +149,9 @@ def _():
     minimum_frequency = 2.0
     maximum_frequency = 2048.0
     fiducial_network = "ET-2L-aligned-CE-Hanford"
-    network_names = [name for name, _ in DETECTOR_NETWORKS]
+    # One fiducial-network grid takes about 2.5 h on a laptop at the sizes
+    # below; list more of DETECTOR_NETWORKS to compare networks.
+    network_names = [fiducial_network]
 
     # "detector" | "dense": the likelihood every grid uses.
     likelihood_variant = "dense"
@@ -200,8 +159,10 @@ def _():
     # injections do, reduced once to each network's response moment.
     response_draws, response_seed = 32_768, 0
     sampled = ("z_peak", "gamma", "kappa")
-    num_gamma, num_kappa = 200, 120  # grid cells over (gamma, kappa)
-    num_draws = 20_000  # draws of the posterior, for the plots and summaries
+    # Grid cells over (z_peak, gamma, kappa): fine enough along z_peak to resolve
+    # the ridge near the fiducial.
+    num_z, num_gamma, num_kappa = 1024, 60, 30
+    num_draws = 100_000  # draws of the posterior, for the plots and summaries
     draw_seed = 44
 
     FIDUCIALS = load_config(ROOT_DIR / "config").fiducials
@@ -251,6 +212,7 @@ def _():
         num_draws,
         num_gamma,
         num_kappa,
+        num_z,
         observation_time,
         redshift_nodes,
         reference_catalog_path,
@@ -277,16 +239,13 @@ def cell_centers(low: float, high: float, num: int) -> NDArray[np.float64]:
 
 
 @app.function(hide_code=True)
-def ridge_grid(
+def naive_grid(
     likelihood: DenseGaussianLikelihood,
     fiducial: Mapping[str, ArrayLike],
-    gamma_range: tuple[float, float],
-    kappa_range: tuple[float, float],
-    z_range: tuple[float, float],
-    num_gamma: int,
-    num_kappa: int,
+    ranges: Mapping[str, tuple[float, float]],
+    shape: Sequence[int],
 ) -> dict[str, NDArray[np.float64]]:
-    """The marginal posterior on a ``(gamma, kappa)`` grid, with ``z_peak`` solved.
+    """The log likelihood at the cell centers of a ``(z_peak, gamma, kappa)`` grid.
 
     Parameters
     ----------
@@ -295,73 +254,82 @@ def ridge_grid(
     fiducial
         Value of every parameter; the grid overrides ``z_peak``, ``gamma`` and
         ``kappa``.
-    gamma_range, kappa_range
-        Support of the two gridded parameters; the cells span it.
-    z_range
-        Support of ``z_peak``; the solved ridge and its window stay inside.
-    num_gamma, num_kappa
-        Number of cells along each gridded axis.
+    ranges
+        Support of ``z_peak``, ``gamma`` and ``kappa``, in that order; the cells
+        span it.
+    shape
+        Number of cells along each axis.
 
     Returns
     -------
     dict
-        ``gamma`` and ``kappa`` (cell centers), and ``log_density``, ``z_star``,
-        ``sigma``, ``gradient_scale`` of shape ``(num_gamma, num_kappa)``, plus
-        ``seconds`` (the run time, compile included).
+        ``z_peak``, ``gamma`` and ``kappa`` (cell centers), ``log_likelihood``
+        of shape ``shape``, and ``seconds`` (the run time, compile included).
     """
-    gamma = cell_centers(*gamma_range, num_gamma)
-    kappa = cell_centers(*kappa_range, num_kappa)
-    mesh_gamma, mesh_kappa = np.meshgrid(gamma, kappa, indexing="ij")
-    bounds = jnp.asarray(
-        [z_range[0] + SUPPORT_MARGIN, z_range[1] - SUPPORT_MARGIN], dtype=jnp.float64
-    )
+    axes = {
+        name: cell_centers(*bounds, num)
+        for (name, bounds), num in zip(ranges.items(), shape, strict=True)
+    }
+    mesh = np.meshgrid(*axes.values(), indexing="ij")
+    points = jnp.stack([jnp.asarray(m.ravel()) for m in mesh], axis=-1)
     start = time.perf_counter()
-    solved = jax.block_until_ready(
-        ridge_columns(
+    log_likelihood = jax.block_until_ready(
+        grid_log_likelihood(
             likelihood,
             {name: jnp.asarray(value) for name, value in fiducial.items()},
-            jnp.asarray(mesh_gamma.ravel()),
-            jnp.asarray(mesh_kappa.ravel()),
-            bounds,
+            points,
         )
     )
-    seconds = time.perf_counter() - start
-    shape = (num_gamma, num_kappa)
-    log_density, z_star, sigma, gradient_scale = (
-        np.asarray(array, dtype=np.float64).reshape(shape) for array in solved
-    )
     return {
-        "gamma": gamma,
-        "kappa": kappa,
-        "log_density": log_density,
-        "z_star": z_star,
-        "sigma": sigma,
-        "gradient_scale": gradient_scale,
-        "seconds": np.asarray(seconds),
+        **axes,
+        "log_likelihood": np.asarray(log_likelihood, dtype=np.float64).reshape(shape),
+        "seconds": np.asarray(time.perf_counter() - start),
     }
 
 
 @app.function(hide_code=True)
 def cell_weights(grid: Mapping[str, NDArray[np.float64]]) -> NDArray[np.float64]:
-    """Posterior mass of every ``(gamma, kappa)`` cell, summing to one."""
-    log_density = grid["log_density"]
-    weights = np.exp(log_density - np.max(log_density))
+    """Posterior mass of every grid cell, summing to one."""
+    log_likelihood = grid["log_likelihood"]
+    weights = np.exp(log_likelihood - np.max(log_likelihood))
     return weights / weights.sum()
+
+
+@app.function(hide_code=True)
+def ridge_moments(
+    grid: Mapping[str, NDArray[np.float64]],
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    """Mass, mean and width of ``z_peak`` in every ``(gamma, kappa)`` column.
+
+    Returns
+    -------
+    tuple of numpy.ndarray
+        ``mass``, ``ridge`` and ``width``, each ``(num_gamma, num_kappa)``: the
+        column's posterior mass and the mean and standard deviation of
+        ``z_peak`` within it.
+    """
+    weights = cell_weights(grid)
+    z = grid["z_peak"][:, None, None]
+    mass = weights.sum(axis=0)
+    safe = np.where(mass > 0, mass, 1.0)
+    ridge = (z * weights).sum(axis=0) / safe
+    width = np.sqrt(np.maximum(((z - ridge) ** 2 * weights).sum(axis=0) / safe, 0.0))
+    return mass, ridge, width
 
 
 @app.function(hide_code=True)
 def ridge_samples(
     grid: Mapping[str, NDArray[np.float64]],
-    z_range: tuple[float, float],
     num_draws: int,
     *,
     rng: np.random.Generator,
 ) -> DataTree:
-    """Draws from the grid posterior, in the layout of one MCMC chain.
+    """Draws from the grid posterior, carried along the ridge, as one MCMC chain.
 
-    A cell is chosen with probability equal to its mass and the draw is
-    jittered uniformly within it; ``z_peak`` is Gaussian about the cell's solved
-    ridge with its width, clipped to ``z_range``.
+    A cell is chosen with probability equal to its mass and the draw is jittered
+    uniformly within it. ``z_peak`` is then shifted by the change of the ridge,
+    the column mean of ``z_peak`` interpolated in ``(gamma, kappa)``, between
+    the cell center and the jittered point, and clipped to the grid's support.
 
     Returns
     -------
@@ -369,82 +337,49 @@ def ridge_samples(
         ``posterior`` group with ``z_peak``, ``gamma`` and ``kappa``, dims
         ``(chain, draw)`` of sizes ``(1, num_draws)``.
     """
+    names = ("z_peak", "gamma", "kappa")
     weights = cell_weights(grid)
     cells = np.unravel_index(
         rng.choice(weights.size, size=num_draws, p=weights.ravel()), weights.shape
     )
-    draws = {}
-    for axis, name in enumerate(("gamma", "kappa")):
-        centers = grid[name]
-        half = (centers[1] - centers[0]) / 2
-        draws[name] = (centers[cells[axis]] + rng.uniform(-half, half, num_draws))[None]
-    z = grid["z_star"][cells] + grid["sigma"][cells] * rng.standard_normal(num_draws)
-    draws["z_peak"] = np.clip(z, *z_range)[None]
-    return from_dict({"posterior": draws})
+    halves = [(grid[name][1] - grid[name][0]) / 2 for name in names]
+    draws = {
+        name: grid[name][cells[axis]] + rng.uniform(-half, half, num_draws)
+        for axis, (name, half) in enumerate(zip(names, halves, strict=True))
+        if name != "z_peak"
+    }
+    _, ridge, _ = ridge_moments(grid)
+    ridge_at = RegularGridInterpolator(
+        (grid["gamma"], grid["kappa"]), ridge, bounds_error=False, fill_value=None
+    )
+    shift = ridge_at(np.c_[draws["gamma"], draws["kappa"]]) - ridge[cells[1:]]
+    z = grid["z_peak"][cells[0]] + rng.uniform(-halves[0], halves[0], num_draws)
+    low, high = grid["z_peak"][0] - halves[0], grid["z_peak"][-1] + halves[0]
+    draws["z_peak"] = np.clip(z + shift, low, high)
+    return from_dict({"posterior": {name: draws[name][None] for name in names}})
 
 
 @app.function(hide_code=True)
-def weighted_quantiles(
-    grid: Mapping[str, NDArray[np.float64]], parameter: str
-) -> NDArray[np.float64]:
-    """Quantiles :data:`QUANTILES` of ``parameter`` under the grid's cell masses.
-
-    ``z_peak`` is read at the solved ridge of every cell.
-    """
-    weights = cell_weights(grid).ravel()
-    if parameter == "z_peak":
-        values = grid["z_star"].ravel()
-    else:
-        mesh = np.meshgrid(grid["gamma"], grid["kappa"], indexing="ij")
-        values = mesh[("gamma", "kappa").index(parameter)].ravel()
-    order = np.argsort(values)
-    cumulative = np.cumsum(weights[order])
-    return np.interp(QUANTILES, cumulative / cumulative[-1], values[order])
-
-
-@app.function(hide_code=True)
-def grid_checks(
-    coarse: Mapping[str, NDArray[np.float64]],
-    fine: Mapping[str, NDArray[np.float64]],
-    z_range: tuple[float, float],
-    sampled: Sequence[str],
-) -> dict[str, float]:
-    """How trustworthy one grid is: solver health and sensitivity to resolution.
-
-    Parameters
-    ----------
-    coarse, fine
-        The grid and a refinement of it by a factor of two in each axis.
-    z_range
-        Support of ``z_peak``.
-    sampled
-        Parameters whose quantiles are compared.
+def grid_checks(grid: Mapping[str, NDArray[np.float64]]) -> dict[str, float]:
+    """How trustworthy one grid is along ``z_peak``.
 
     Returns
     -------
     dict
-        ``unconverged_mass``, the posterior mass in columns whose Newton
-        iteration left ``|gradient| * sigma`` above :data:`CONVERGED`;
-        ``edge_mass``, the mass whose solved ridge is within 1% of the
-        support edge; and ``max_shift``, the largest change of any quantile
-        under refinement, in units of the parameter's prior width.
+        ``unresolved_mass``, the posterior mass in columns whose ``z_peak``
+        width is below one cell, so their mass rests on a cell or two; and
+        ``edge_mass``, the mass in columns whose ridge is within 1% of the
+        support edge.
     """
-    weights = cell_weights(coarse)
-    width = z_range[1] - z_range[0]
-    near_edge = (coarse["z_star"] < z_range[0] + 0.01 * width) | (
-        coarse["z_star"] > z_range[1] - 0.01 * width
-    )
-    shifts = [
-        np.max(
-            np.abs(weighted_quantiles(coarse, name) - weighted_quantiles(fine, name))
-        )
-        / (width if name == "z_peak" else 10.0)
-        for name in sampled
-    ]
+    mass, ridge, width = ridge_moments(grid)
+    z = grid["z_peak"]
+    spacing = z[1] - z[0]
+    low, high = z[0] - spacing / 2, z[-1] + spacing / 2
+    margin = 0.01 * (high - low)
+    near_edge = (ridge < low + margin) | (ridge > high - margin)
     return {
-        "unconverged_mass": float(weights[coarse["gradient_scale"] > CONVERGED].sum()),
-        "edge_mass": float(weights[near_edge].sum()),
-        "max_shift": float(max(shifts)),
+        "unresolved_mass": float(mass[width < spacing].sum()),
+        "edge_mass": float(mass[near_edge].sum()),
     }
 
 
@@ -573,26 +508,25 @@ def _():
     mo.md(r"""
     ## Grids
 
-    One ridge-aligned grid per network, and a refinement of it by a factor of
-    two for the resolution check. The first call compiles; the others reuse it.
+    One grid per network. The first call compiles; the others reuse it.
     """)
 
 
 @app.cell
-def _(FIDUCIALS, PRIORS, network_likelihoods, num_gamma, num_kappa):
-    z_range = (float(PRIORS["z_peak"].low), float(PRIORS["z_peak"].high))
-    _gamma_range = (float(PRIORS["gamma"].low), float(PRIORS["gamma"].high))
-    _kappa_range = (float(PRIORS["kappa"].low), float(PRIORS["kappa"].high))
+def _(FIDUCIALS, PRIORS, network_likelihoods, num_gamma, num_kappa, num_z, sampled):
+    _ranges = {
+        name: (float(PRIORS[name].low), float(PRIORS[name].high)) for name in sampled
+    }
     grids = {}
-    fine_grids = {}
     for _name, _lk in network_likelihoods.items():
-        _arguments = (FIDUCIALS, _gamma_range, _kappa_range, z_range)
-        grids[_name] = ridge_grid(_lk, *_arguments, num_gamma, num_kappa)
-        fine_grids[_name] = ridge_grid(_lk, *_arguments, 2 * num_gamma, 2 * num_kappa)
-        print(
-            f"{_name}: {num_gamma}x{num_kappa} in {float(grids[_name]['seconds']):.1f} s"
+        grids[_name] = naive_grid(
+            _lk, FIDUCIALS, _ranges, (num_z, num_gamma, num_kappa)
         )
-    return fine_grids, grids, z_range
+        print(
+            f"{_name}: {num_z}x{num_gamma}x{num_kappa} in "
+            f"{float(grids[_name]['seconds']):.0f} s"
+        )
+    return (grids,)
 
 
 @app.cell(hide_code=True)
@@ -600,24 +534,17 @@ def _():
     mo.md(r"""
     ## Checks
 
-    Per network: the posterior mass in columns where Newton did not converge
-    (`unconverged_mass`) or the ridge sits at the edge of the support
-    (`edge_mass`), and the largest change of any quantile under refinement, as
-    a fraction of the prior width (`max_shift`). All three should be small.
+    Per network: the posterior mass in columns whose ridge is narrower than a
+    $z_{\mathrm{peak}}$ cell (`unresolved_mass`) or sits at the edge of the
+    support (`edge_mass`). Both should be small.
     """)
 
 
 @app.cell
-def _(fine_grids, grids, sampled, z_range):
+def _(grids):
     label = dict(DETECTOR_NETWORKS)
     checks = pd.DataFrame(
-        [
-            {
-                "network": label[name],
-                **grid_checks(grids[name], fine_grids[name], z_range, sampled),
-            }
-            for name in grids
-        ]
+        [{"network": label[name], **grid_checks(grid)} for name, grid in grids.items()]
     )
     checks
     return (checks,)
@@ -631,11 +558,10 @@ def _():
 
 
 @app.cell
-def _(draw_seed, grids, num_draws, z_range):
+def _(draw_seed, grids, num_draws):
     _rng = np.random.default_rng(draw_seed)
     posteriors = {
-        name: ridge_samples(grid, z_range, num_draws, rng=_rng)
-        for name, grid in grids.items()
+        name: ridge_samples(grid, num_draws, rng=_rng) for name, grid in grids.items()
     }
     return (posteriors,)
 
@@ -707,8 +633,11 @@ def _(posteriors, sampled):
 
 
 @app.cell
-def _(FIGURES, checks, corner, correlations, marginals, summary, write_figures):
+def _(FIGURES, checks, corner, correlations, grids, marginals, summary, write_figures):
     if write_figures.value:
+        FIGURES.mkdir(parents=True, exist_ok=True)
+        for _name, _grid in grids.items():
+            np.savez(FIGURES / f"grid_{_name}.npz", **_grid)
         save_figures(
             {
                 **{
