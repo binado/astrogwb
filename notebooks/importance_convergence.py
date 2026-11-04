@@ -165,7 +165,6 @@ def _():
             "minimum_frequency": minimum_frequency,
             "maximum_frequency": 4000.0,
             "frequency_resolution": 0.02,
-            "turnover_frequency": None,
         }
     )
     frequencies = np.asarray(waveform_generator(waveform).frequencies)

@@ -28,23 +28,12 @@ settings or seeds need different paths; the recorded metadata tells which is whi
    `[analysis]`'s `minimum_frequency` and `maximum_frequency`: the catalog grid
    *is* the array every model is evaluated on, and an analysis band selects
    bins on it with a mask rather than compressing it.
-   The grid is `frequency_spacing` over that band: `"loglinear"` (the default) is
-   uniform at `frequency_resolution` up to `turnover_frequency` and geometric
-   above it, with the bin width continuous at the turn, which is ~400 bins for
-   2--2048 Hz at 1 Hz and 100 Hz against 2047 for `"linear"`. `"log"` is
-   geometric throughout, `frequency_resolution` wide at `minimum_frequency`.
-   `turnover_frequency` belongs to `"loglinear"` alone: required there and
-   rejected elsewhere, so one grid has one record. The turn falls on
-   the last uniform point not above `turnover_frequency`. Optional
-   `dlogf` independently bounds the natural-log step of the geometric
-   tail; endpoint alignment may make the actual step slightly smaller. Linear
-   points and the effective turnover stay unchanged, but spacing may jump at
-   the turn. It must be finite and positive, and is rejected for `"linear"`
-   and `"log"`. Omitting it keeps the current grid. For a `"linear"` Ripple
-   waveform `sampling_frequency` is the backend's Nyquist, not the stored grid;
-   the other spacings are built directly to `maximum_frequency` and do not use
-   it. `[waveforms.linear]` is the default on the uniform grid, for comparing the
-   two.
+   The grid is `frequency_spacing` over that band: `"linear"` (the default) is
+   uniform at `frequency_resolution`, 199 bins for 2--200 Hz at 1 Hz, and
+   `"log"` is geometric throughout, `frequency_resolution` wide at
+   `minimum_frequency`. For a `"linear"` Ripple waveform `sampling_frequency`
+   is the backend's Nyquist, not the stored grid; a `"log"` grid is built
+   directly to `maximum_frequency` and does not use it.
    `approximant="AnalyticInspiral"` selects the closed-form inspiral, and is
    the only approximant accepting the optional `alpha` key (the inspiral
    termination constant, defaulting to the Schwarzschild ISCO value); naming it
@@ -310,18 +299,14 @@ the metadata and changed the file layout, so files from earlier versions are
 unusable; remove the old `outputs/catalogs/` and `outputs/spectra/` files and
 regenerate.
 
-The waveform metadata records `frequency_spacing`, `frequency_resolution`,
-`turnover_frequency` and `dlogf` -- what was *requested* of the
-generating backend -- while
+The waveform metadata records `frequency_spacing` and `frequency_resolution`
+-- what was *requested* of the generating backend -- while
 the bin widths used in every integral are derived from the `frequency` dataset
 itself (`astrogwb.frequency.bin_widths`, used directly on
 `data["frequencies"]`); the backend chooses the actual grid, so
 the two can differ. The grid need only be strictly increasing: each bin's width
 is half the distance between its neighbours, which is the grid spacing on a
-uniform grid and grows with frequency above the turn of a `"loglinear"` one.
-
-`dlogf` is serialized even when unset (`null`). Catalogs written
-before it existed lack the field; no migration is provided. Configured defaults and notebook grids are unchanged.
+uniform grid and grows with frequency on a `"log"` one.
 
 The version was bumped with the grid fields (0.2.0), so files from earlier
 versions are refused; regenerate them.

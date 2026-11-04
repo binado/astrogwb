@@ -102,23 +102,16 @@ def test_waveform_metadata_reads_a_record_without_grid_settings_as_uniform() -> 
     attrs = WaveformMetadata.model_validate(
         _grid_settings(frequency_resolution=2.0)
     ).model_dump(mode="json")
-    for name in ("frequency_spacing", "turnover_frequency"):
-        del attrs[name]
+    del attrs["frequency_spacing"]
 
     restored = WaveformMetadata.model_validate_json(json.dumps(attrs))
 
     assert restored.frequency_spacing == "linear"
-    assert restored.turnover_frequency is None
 
 
 @pytest.mark.parametrize(
     ("settings", "message"),
     [
-        ({"frequency_spacing": "loglinear"}, "turnover_frequency is required"),
-        (
-            {"frequency_spacing": "loglinear", "turnover_frequency": 10.0},
-            "strictly between",
-        ),
         (
             {"frequency_spacing": "log", "minimum_frequency": 0.0},
             "minimum_frequency > 0",
@@ -172,8 +165,7 @@ def test_ripple_generator_evaluates_a_non_uniform_grid_directly() -> None:
             _grid_settings(
                 minimum_frequency=20.0,
                 frequency_resolution=2.0,
-                frequency_spacing="loglinear",
-                turnover_frequency=40.0,
+                frequency_spacing="log",
             )
         )
     )
@@ -469,11 +461,11 @@ def test_intensity_matches_the_gwmock_backend(approximant: str) -> None:
 
 @pytest.mark.integration
 @pytest.mark.parametrize("approximant", SUPPORTED_APPROXIMANTS)
-def test_loglinear_intensity_agrees_with_a_dense_uniform_grid(approximant: str) -> None:
-    """Handing Ripple a lin-log grid instead of the FFT grid changes no intensity.
+def test_log_intensity_agrees_with_a_dense_uniform_grid(approximant: str) -> None:
+    """Handing Ripple a log grid instead of the FFT grid changes no intensity.
 
     The reference is the same kernel on the union of a dense 0.25 Hz lattice and
-    the lin-log points: no interpolation, a different ``f[1] - f[0]`` and the
+    the log points: no interpolation, a different ``f[1] - f[0]`` and the
     same grid top, so any dependence on the grid shape would show.
     """
     band = {
@@ -487,23 +479,17 @@ def test_loglinear_intensity_agrees_with_a_dense_uniform_grid(approximant: str) 
     dense = RippleGenerator(
         WaveformMetadata.model_validate({**band, "frequency_resolution": 0.25})
     )
-    loglinear = RippleGenerator(
+    log = RippleGenerator(
         WaveformMetadata.model_validate(
-            {
-                **band,
-                "frequency_spacing": "loglinear",
-                "frequency_resolution": 1.0,
-                "turnover_frequency": 64.0,
-                "dlogf": 0.2,
-            }
+            {**band, "frequency_spacing": "log", "frequency_resolution": 1.0}
         )
     )
-    frequencies = np.asarray(loglinear.frequencies)
+    frequencies = np.asarray(log.frequencies)
     union = np.union1d(np.asarray(dense.frequencies), frequencies)
     assert union[1] - union[0] == 0.25
     assert union[-1] == frequencies[-1]
 
-    intensity = np.asarray(jax.jit(loglinear.generate_batch)(sources))
+    intensity = np.asarray(jax.jit(log.generate_batch)(sources))
     union_intensity = np.asarray(
         jax.jit(dense._kernel)(
             jnp.asarray(union), ripple_parameters(approximant, sources)

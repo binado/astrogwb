@@ -114,14 +114,14 @@ def _():
     # isotropic draws, as in the grid and coverage notebooks.
     response_draws, response_seed = 32_768, 0
 
-    # A geometric grid over the default waveform's band, about 2000 points
-    # (d ln f = 0.0035). The likelihood's loglinear grid is linear at 1 Hz
-    # below 100 Hz, too coarse at the low-frequency noise wall: there it
-    # overestimates the SNR above 10 Hz by about 2.5%. This grid agrees with
-    # one twice as fine to 0.1%.
+    # A geometric grid to 2048 Hz, about 2000 points (d ln f = 0.0035), past
+    # the likelihood's 200 Hz band so the figures show the merger. The
+    # likelihood's grid is linear at 1 Hz, too coarse at the low-frequency
+    # noise wall: there it overestimates the SNR above 10 Hz by about 2.5%.
+    # This grid agrees with one twice as fine to 0.1%.
     _config = load_config(ROOT_DIR / "config")
     _waveform = _config.catalog.waveform
-    maximum_frequency = float(_waveform.maximum_frequency)
+    maximum_frequency = 2048.0
     frequencies = frequency_grid(
         "log", _waveform.minimum_frequency, maximum_frequency, 0.007
     )
@@ -140,8 +140,6 @@ def _():
                     "frequency_spacing": "log",
                     "maximum_frequency": 4000.0,
                     "frequency_resolution": 0.007,
-                    "turnover_frequency": None,
-                    "dlogf": None,
                 }
             ),
             "num_samples": 2**14,

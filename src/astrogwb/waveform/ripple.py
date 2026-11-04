@@ -73,8 +73,6 @@ class RippleGenerator(WaveformGenerator):
                 metadata.minimum_frequency,
                 metadata.maximum_frequency,
                 metadata.frequency_resolution,
-                metadata.turnover_frequency,
-                dlogf=metadata.dlogf,
             )
             band = slice(None)
 

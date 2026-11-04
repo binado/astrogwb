@@ -291,8 +291,6 @@ class AnalyticInspiralGenerator(WaveformGenerator):
             self.metadata.minimum_frequency,
             self.metadata.maximum_frequency,
             self.metadata.frequency_resolution,
-            self.metadata.turnover_frequency,
-            dlogf=self.metadata.dlogf,
         )
 
     def _generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:

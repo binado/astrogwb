@@ -17,7 +17,7 @@
 [analysis]
 observation_time = 1.0
 minimum_frequency = 2.0
-maximum_frequency = 2048.0
+maximum_frequency = 200.0
 
 # The default draw, shaped like astrogwb.importance.catalog.CatalogMetadata: a 32768-source
 # draw from the cosmological population with the default waveform. It is
