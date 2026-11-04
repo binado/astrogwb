@@ -28,6 +28,7 @@ from astrogwb.simulators import (
     simulate_population,
 )
 from astrogwb.simulators import background as background_module
+from astrogwb.simulators.population import segmented_seconds
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import WaveformMetadata, intensity, waveform_generator
 
@@ -54,36 +55,50 @@ def test_population_is_reproducible(population: PopulationArtifact) -> None:
     for name, values in population.source_parameters.items():
         np.testing.assert_array_equal(redrawn.source_parameters[name], values)
     arrival = population.source_parameters["coa_time"]
-    effective = population.observation_seconds / int(
-        population.observation_seconds // 60.0
-    )
-    assert np.all((arrival >= -effective / 2) & (arrival < effective / 2))
+    assert np.all((arrival >= -30.0) & (arrival < 30.0))
     assert np.unique(arrival).size == population.count
 
 
-@pytest.mark.parametrize("segment_duration", [None, 60.0, 600.0])
-def test_coa_time_bounds_use_the_actual_duration(
-    segment_duration: float | None,
-) -> None:
+def test_unsegmented_coa_times_span_the_observation() -> None:
     metadata = _population(1e-4)
-    key = realization_key(41, 0)
-    full = simulate_population(metadata, key)
-    segmented = simulate_population(metadata, key, segment_duration=segment_duration)
+    full = simulate_population(metadata, realization_key(41, 0))
     seconds = metadata.observation_seconds
-    effective = (
-        seconds
-        if segment_duration is None
-        else seconds / int(seconds // segment_duration)
+
+    arrival = full.source_parameters["coa_time"]
+    assert np.all((arrival >= -seconds / 2) & (arrival < seconds / 2))
+
+
+@pytest.mark.parametrize("segment_duration", [60.0, 600.0])
+def test_segments_are_exact_and_drop_the_remainder(segment_duration: float) -> None:
+    """Arrivals fill exactly one segment; the observed time is whole segments."""
+    metadata = _population(1e-4)
+    segmented = simulate_population(
+        metadata, realization_key(41, 0), segment_duration=segment_duration
     )
-    # Changing the bounds rescales the same model draw and leaves every other
-    # column intact, including source identities and population properties.
-    np.testing.assert_allclose(
-        segmented.source_parameters["coa_time"] / effective,
-        full.source_parameters["coa_time"] / seconds,
+    background = simulate_background(
+        segmented, WAVEFORM, NETWORKS, segment_duration=segment_duration
     )
-    for name, values in full.source_parameters.items():
-        if name != "coa_time":
-            np.testing.assert_array_equal(segmented.source_parameters[name], values)
+
+    arrival = segmented.source_parameters["coa_time"]
+    assert np.all((arrival >= -segment_duration / 2) & (arrival < segment_duration / 2))
+    observed = background.observation_seconds
+    assert observed / segment_duration == int(observed / segment_duration)
+    assert 0.0 <= metadata.observation_seconds - observed < segment_duration
+
+
+@pytest.mark.parametrize(
+    "waveform",
+    [
+        WAVEFORM.model_copy(update={"frequency_resolution": 2.5}),
+        WAVEFORM.model_copy(update={"frequency_spacing": "log"}),
+    ],
+    ids=["fractional-modes", "log-grid"],
+)
+def test_segmented_noise_needs_whole_fourier_modes_per_bin(
+    population: PopulationArtifact, waveform: WaveformMetadata
+) -> None:
+    with pytest.raises(ValueError, match="whole number"):
+        simulate_background(population, waveform, NETWORKS, segment_duration=0.5)
 
 
 def test_population_requires_coa_time(population: PopulationArtifact) -> None:
@@ -413,7 +428,8 @@ def test_segment_sums_use_sampled_coa_times_without_rescaling(
         return result._replace(psds=np.full_like(result.psds, np.inf))
 
     monkeypatch.setattr(background_module, "_network_geometry", without_noise)
-    seconds = 0.25
+    # One segment of 0.2 s, two Fourier modes per 10 Hz bin.
+    seconds = 0.2
     sources = {
         name: np.repeat(values[:1], 2)
         for name, values in population.source_parameters.items()
@@ -433,7 +449,7 @@ def test_segment_sums_use_sampled_coa_times_without_rescaling(
     segmented = simulate_background(
         twins, WAVEFORM, NETWORKS, segment_duration=0.2, chunk_size=1
     )
-    ratio = 1 / np.sqrt(seconds * WAVEFORM.frequency_resolution)
+    ratio = 1 / np.sqrt(0.2 * WAVEFORM.frequency_resolution)
     for name, spectrum in baseline.spectra.items():
         np.testing.assert_allclose(
             (segmented.spectra[name][:, 0] / spectrum[:, 0] - 1) / ratio,
@@ -459,7 +475,9 @@ def test_noisy_background_averages_to_the_incoherent_signal(
             for draw in range(150)
         ]
     )
-    expected = projected.spectra["pair"]
+    # The noisy draws normalize by the whole segments they cover.
+    observed = segmented_seconds(population.observation_seconds, segment_duration)
+    expected = projected.spectra["pair"] * population.observation_seconds / observed
     error = draws.std(axis=0, ddof=1) / np.sqrt(len(draws))
 
     assert np.all(abs(draws.mean(axis=0) - expected) < MAX_STANDARD_ERRORS * error)

@@ -39,6 +39,7 @@ __all__ = [
     "Hyperparameter",
     "PopulationArtifact",
     "RealizationMetadata",
+    "segmented_seconds",
     "simulate_population",
 ]
 
@@ -163,6 +164,22 @@ class PopulationArtifact:
         return self.metadata.observation_seconds
 
 
+def segmented_seconds(observation_seconds: float, segment_duration: float) -> float:
+    """The time the whole segments of ``segment_duration`` cover, in seconds.
+
+    ``floor(observation_seconds / segment_duration)`` segments of exactly
+    ``segment_duration``: the remainder shorter than a segment is not observed.
+
+    Parameters
+    ----------
+    observation_seconds
+        The observation time in seconds.
+    segment_duration
+        The segment length in seconds.
+    """
+    return segment_duration * int(observation_seconds // segment_duration)
+
+
 def simulate_population(
     metadata: RealizationMetadata,
     key: jax.Array,
@@ -179,10 +196,12 @@ def simulate_population(
         A single typed JAX key, e.g. from
         :func:`~astrogwb.simulators.realization_key`.
     segment_duration
-        Requested segment duration in seconds. Arrival times are sampled
-        relative to segment center using the effective duration
-        ``T / floor(T / segment_duration)``. ``None`` uses the full observation.
-        Supply the same value to the subsequent background stage.
+        Segment duration in seconds. The observation is cut into
+        ``floor(T / segment_duration)`` segments of exactly this length, the
+        remainder dropped: the source count is drawn for those segments, and
+        arrival times are sampled relative to a segment's center. ``None`` uses
+        the full observation. Supply the same value to the subsequent
+        background stage.
 
     Raises
     ------
@@ -196,19 +215,21 @@ def simulate_population(
     if key.shape != ():
         raise ValueError(f"key must be a single key, got shape {key.shape}")
     seconds = metadata.observation_seconds
+    window = seconds
     if segment_duration is not None:
         if not np.isfinite(segment_duration) or not 0 < segment_duration <= seconds:
             raise ValueError(
                 "segment_duration must be positive and no longer than the observation"
             )
-        seconds /= int(seconds // segment_duration)
-    bounds = (-seconds / 2, seconds / 2)
+        window = segment_duration
+        seconds = segmented_seconds(seconds, segment_duration)
+    bounds = (-window / 2, window / 2)
     theta_key, count_key, source_key = jax.random.split(key, 3)
     with handlers.block():
         theta = dict(handlers.seed(metadata.prior_model(), theta_key)())
     redshift, source_model = metadata.population.build()(theta)
     rate = jnp.reshape(redshift.total_merger_rate(), ())
-    count = int(jax.random.poisson(count_key, rate * metadata.observation_seconds))
+    count = int(jax.random.poisson(count_key, rate * seconds))
     # One sample preserves column names even for an empty realization.
     sources = simulate_sources(
         joint_model(redshift, source_model, coa_time_bounds=bounds),

@@ -116,19 +116,23 @@ combined spectrum is `S_h`.
 By default the background carries no noise. With `segment_duration` (seconds,
 e.g. 2048; `--segment-duration` of `astrogwb simulate`)
 `simulate_background` cuts the observation into `N = floor(T / tau)`
-segments of length `tau_eff = T / N` and assigns every source to a uniformly
-drawn segment (sources are Poisson in time). Each segment has its own coherent
+segments of exactly `tau`, dropping the remainder shorter than `tau`: the
+population is drawn for `T_seg = N tau`, which is also the background's
+`observation_seconds`. Every bin must hold a whole number `tau * df >= 1` of
+the segment's Fourier modes, e.g. a 1 Hz linear grid with a power-of-two
+`tau`; a log grid is refused. Every source is assigned to a uniformly drawn
+segment (sources are Poisson in time). Each segment has its own coherent
 strain `h_a^s = sum_{i in s} H_{a,i}` and fresh independent noise
-`n_a^s ~ CN(0, tau_eff S_a / 2)` per detector and bin; empty segments still
+`n_a^s ~ CN(0, tau S_a / 2)` per detector and bin; empty segments still
 carry noise. With `C_ab = sum_s Re[conj(h_a^s + n_a^s)(h_b^s + n_b^s)]` and
-`r = 1 / sqrt(tau_eff * df)`,
+`r = 1 / sqrt(tau * df)`,
 
-    Y_ab = (5 / T) * [(1 - r) K_ab + r C_ab],   K_ab = sum_i K_ab,i.
+    Y_ab = (5 / T_seg) * [(1 - r) K_ab + r C_ab],   K_ab = sum_i K_ab,i.
 
 Before projection and coherent summation, each source's two polarizations
 are shifted by `exp(-2 pi i f coa_time)`, where
 `coa_time` is sampled directly in seconds relative to segment center
-from `Uniform(-tau_eff / 2, tau_eff / 2)`. The population supplies this column;
+from `Uniform(-tau / 2, tau / 2)`. The population supplies this column;
 the background never redraws or rescales it. Detector projection then applies
 each geometric delay once. Same-source equal-frequency cross powers and intensity-only waveform
 generation are unchanged. The common waveform interface reads an optional
