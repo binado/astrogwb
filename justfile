@@ -59,18 +59,19 @@ test: test-core test-paper
 run-notebook notebook:
     uv run --group notebook marimo edit {{ notebook }}
 
-# Paper outputs, not run by CI. Each writes under outputs/; Snakemake skips
-# files that exist, so delete one to redraw it.
+# Paper outputs, not run by CI. Each writes under outputs/. Snakemake builds a
+# missing file, and, as in the SLURM profile, reruns one older than a config it
+# reads, which then fails on the recorded settings; delete a file to redraw it.
 
 # The reference catalogs, locally: seconds each. Seeds live in Snakefile.
 catalogs cores="4":
-    uv run --no-sync snakemake catalogs --cores {{ cores }}
+    uv run --no-sync snakemake catalogs --cores {{ cores }} --rerun-triggers mtime
 
 # One ensemble draw locally, e.g. `just draw fiducial 41 0`, the grid
 # notebooks' injection: about 20 min on 8 cores.
 draw ensemble="fiducial" seed="41" index="0" cores="8":
     uv run --no-sync snakemake outputs/ensembles/{{ ensemble }}/{{ seed }}-{{ index }}.h5 \
-        --cores {{ cores }} --config threads={{ cores }}
+        --cores {{ cores }} --config threads={{ cores }} --rerun-triggers mtime
 
 # Every ensemble draw and catalog on SLURM; extra arguments go to Snakemake,
 # e.g. `just cluster --dry-run` or `just cluster --config stop=10`.
