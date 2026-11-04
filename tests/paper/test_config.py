@@ -126,8 +126,8 @@ def test_waveform_variants_and_validated_overrides() -> None:
     config = load_config(REPO_ROOT / "config")
     default = config.catalog.waveform
     generator = waveform_generator(default)
-    assert np.asarray(generator.frequencies).size == 400
-    assert config.waveforms["linear"].frequency_spacing == "linear"
+    assert np.asarray(generator.frequencies).size == 199
+    assert default.frequency_spacing == "linear"
     assert config.waveforms["TaylorF2"].approximant == "TaylorF2"
     modified = WaveformMetadata.model_validate(
         {**default.model_dump(), "approximant": "AnalyticInspiral", "alpha": 0.02}

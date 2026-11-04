@@ -10,15 +10,15 @@ in-band bin, and astrogwb never inverse-transforms.
 
 With ``"linear"`` spacing Ripple sees the full one-sided grid above DC and the
 caller slices the result, not the input: ``IMRPhenomXAS_NRTidalv3`` reads
-``f_final = f[-1] + df`` and ``df = f[1] - f[0]``. The ``"log"`` and
-``"loglinear"`` spacings hand Ripple the band itself; the only reads of the
-grid's shape that affect the power are (see
+``f_final = f[-1] + df`` and ``df = f[1] - f[0]``. The ``"log"`` spacing
+hands Ripple the band itself; the only reads of the grid's shape that affect
+the power are (see
 ``tests/core/test_waveform_generator.py``):
 
 * ``IMRPhenomD`` and ``IMRPhenomD_NRTidalv2`` snap the merger cutoff to
-  ``floor(f_cut / df) * df`` with ``df = f[1] - f[0]``. On a lin-log grid that is
-  the linear ``df``, a finer lattice than the grid above the turn, so the
-  cutoff is effectively exact.
+  ``floor(f_cut / df) * df`` with ``df = f[1] - f[0]``. On a log grid that is
+  the first, narrowest gap, a finer lattice than the grid near the cutoff, so
+  the cutoff is effectively exact.
 * ``IMRPhenomXAS_NRTidalv3``'s ``f_final`` enters only the phase slope
   ``linb``; the amplitude never sees it, and the power
   :math:`|h_+|^2 + |h_\times|^2` drops the phase.

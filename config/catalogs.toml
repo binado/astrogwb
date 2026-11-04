@@ -14,11 +14,13 @@ sampling = "sobol"
 population = "${populations.cosmological}"
 fiducials = "${fiducials}"
 
-# Field by field rather than `extends`: the default's loglinear-only fields
-# would not validate on a log grid.
+# Field by field rather than `extends`: a source-frame template on its own
+# band, read at f (1 + z) for every observed f, so it shares only the
+# approximant and its settings with the default. A log grid ignores
+# sampling_frequency; it is the one the catalogs were generated with.
 [catalogs.reference.waveform]
 approximant = "${waveforms.default.approximant}"
-sampling_frequency = "${waveforms.default.sampling_frequency}"
+sampling_frequency = 8192.0
 minimum_frequency = "${waveforms.default.minimum_frequency}"
 maximum_frequency = 4000.0
 reference_frequency = "${waveforms.default.reference_frequency}"

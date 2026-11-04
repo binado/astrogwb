@@ -55,16 +55,8 @@ def test_analytic_generator_evaluates_on_exact_metadata_grid(
 
 @pytest.mark.parametrize(
     "grid_settings",
-    [
-        {"frequency_spacing": "loglinear", "turnover_frequency": 12.0},
-        {"frequency_spacing": "log"},
-        {
-            "frequency_spacing": "loglinear",
-            "turnover_frequency": 12.0,
-            "dlogf": 0.2,
-        },
-    ],
-    ids=["loglinear", "log", "loglinear-independent"],
+    [{"frequency_spacing": "log"}],
+    ids=["log"],
 )
 def test_analytic_generator_evaluates_on_a_log_spaced_grid(
     source_parameters: dict[str, np.ndarray], grid_settings: dict[str, Any]

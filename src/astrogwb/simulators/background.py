@@ -35,25 +35,29 @@ demand.
 
 Without a ``segment_duration`` the background is deterministic given its
 inputs and carries no detector noise. With one, :math:`\tau`, the observation is
-cut into :math:`N_\mathrm{seg} = \lfloor T/\tau \rfloor` segments of length
-:math:`\tau_\mathrm{eff} = T / N_\mathrm{seg}`. Sources are Poisson in time, so
+cut into :math:`N_\mathrm{seg} = \lfloor T/\tau \rfloor` segments of exactly
+:math:`\tau`, and the remainder shorter than :math:`\tau` is dropped: the
+population is drawn for :math:`T_\mathrm{seg} = N_\mathrm{seg} \tau` (see
+:func:`~astrogwb.simulators.simulate_population`). Sources are Poisson in time, so
 each is assigned to a uniformly drawn segment :math:`s`, which holds its own
 coherent strain :math:`h_a^s = \sum_{i \in s} H_{a,i}` and fresh independent
-noise :math:`n_a^s \sim \mathcal{CN}(0, \tau_\mathrm{eff} S_a / 2)` in each
+noise :math:`n_a^s \sim \mathcal{CN}(0, \tau S_a / 2)` in each
 detector and bin; empty segments still carry noise. With the segment
 cross-power :math:`C_{ab} = \sum_s \mathrm{Re}[(h_a^s + n_a^s)^* (h_b^s + n_b^s)]`
-and :math:`r_i = 1 / \sqrt{\tau_\mathrm{eff} \Delta f_i}`, the pair spectrum is
+and :math:`r_i = 1 / \sqrt{\tau \Delta f_i}`, the pair spectrum is
 
 .. math::
 
-    Y_{ab} = \frac{5}{T} \left[ (1 - r_i) \sum_i K_{ab,i} + r_i C_{ab} \right].
+    Y_{ab} = \frac{5}{T_\mathrm{seg}} \left[ (1 - r_i) \sum_i K_{ab,i} + r_i C_{ab} \right].
 
 :math:`E[C_{ab}] = \sum_i K_{ab,i}`, so the mean stays the incoherent signal;
 the zero-mean part (noise by noise, signal by noise, source interference) is
 scaled by :math:`r_i`, which makes the noise-by-noise term have the standard
-deviation :func:`~astrogwb.detector.pair_bin_scale` for any grid and any
-:math:`\tau`. The model holds while signals are mostly shorter than
-:math:`\tau` and :math:`\tau_\mathrm{eff} \Delta f_i \ge 1`. Segment labels
+deviation :func:`~astrogwb.detector.pair_bin_scale`. Every bin must hold a
+whole number :math:`\tau \Delta f_i \ge 1` of the segment's Fourier modes, so
+that bins are sums of disjoint Fourier modes, e.g. a 1 Hz linear grid with a
+power-of-two :math:`\tau`; a log grid does not qualify. The model holds while
+signals are mostly shorter than :math:`\tau`. Segment labels
 and noise are folded from the realization's key (streams
 :data:`SEGMENT_STREAM` and :data:`NOISE_STREAM`). Bins where a PSD is not
 finite get no noise. Earth's rotation during a signal is not modelled.
@@ -61,7 +65,7 @@ finite get no noise. Earth's rotation during a signal is not modelled.
 Before coherent summation, both polarizations receive the geocentric arrival
 phase :math:`\exp(-2\pi i f t_i)`, with
 :math:`t_i` sampled in seconds relative to segment center within
-:math:`[-\tau_\mathrm{eff}/2, \tau_\mathrm{eff}/2)`. The joint population model
+:math:`[-\tau/2, \tau/2)`. The joint population model
 supplies ``coa_time``; it is never redrawn or rescaled here. Detector projection applies geometric delays once. Signals remain
 complete within their assigned segment, without window truncation or boundary
 crossing.
@@ -94,7 +98,7 @@ from astrogwb.detector.projection import project_polarizations_fd
 from astrogwb.frequency import bin_widths
 from astrogwb.simulators._chunks import iter_rows, pad_rows
 from astrogwb.simulators.config import SimulationConfig
-from astrogwb.simulators.population import PopulationArtifact
+from astrogwb.simulators.population import PopulationArtifact, segmented_seconds
 from astrogwb.utils import years_to_seconds
 from astrogwb.utils.io import atomic_h5, h5py
 from astrogwb.waveform.base import WaveformGenerator
@@ -115,6 +119,10 @@ __all__ = [
 #: :math:`\langle K_{ab} \rangle = I \gamma_{ab}` over this, the factor in
 #: :math:`Y_{ab} = 5 D_{ab} / T`.
 PAIR_RESPONSE_DENOMINATOR = 5.0
+
+#: Absolute slack on ``segment_duration * bin width`` being a whole number of
+#: Fourier modes, for the rounding of a grid's spacing.
+_MODE_TOLERANCE = 1e-6
 
 #: The stream folded into a realization's key for the detector noise.
 NOISE_STREAM = 1
@@ -213,8 +221,11 @@ class BackgroundArtifact:
 
     @property
     def observation_seconds(self) -> float:
-        """The observation time in seconds."""
-        return self.config.population.observation_seconds
+        """The observed time in seconds: the whole segments, when segmented."""
+        seconds = self.config.population.observation_seconds
+        if self.segment_duration is None:
+            return seconds
+        return segmented_seconds(seconds, self.segment_duration)
 
     @property
     def segment_duration(self) -> float | None:
@@ -497,8 +508,9 @@ def simulate_background(
         If the sources carry no sky position or polarization angle.
     ValueError
         If a size is not positive, a source value is outside what the
-        approximant represents, or the observation is shorter than
-        ``segment_duration``.
+        approximant represents, the observation is shorter than
+        ``segment_duration``, or a bin does not hold a whole number of the
+        segment's Fourier modes.
     """
     jax.config.update("jax_enable_x64", True)
     if chunk_size <= 0:
@@ -579,18 +591,23 @@ def _segmented(
     segment_batch_size: int,
 ) -> NDArray[np.float64]:
     """The ``(P_union, F)`` pair spectra with per-segment sources and noise."""
-    seconds = population.observation_seconds
-    segments = int(seconds // segment_duration)
+    segments = int(population.observation_seconds // segment_duration)
     if segments < 1:
         raise ValueError(
             f"segment_duration {segment_duration} s exceeds the "
-            f"observation time {seconds} s"
+            f"observation time {population.observation_seconds} s"
         )
-    effective = seconds / segments
+    seconds = segmented_seconds(population.observation_seconds, segment_duration)
     widths = np.asarray(bin_widths(grid), dtype=np.float64)
-    if effective * widths.min() < 1.0:
+    modes = segment_duration * widths
+    if modes.min() < 1.0 or not np.allclose(
+        modes, np.round(modes), rtol=0.0, atol=_MODE_TOLERANCE
+    ):
         raise ValueError(
-            f"segment_duration {segment_duration} s is shorter than 1 / bin width"
+            f"every bin must hold a whole number of the {segment_duration} s "
+            "segment's Fourier modes: segment_duration * bin width must be an "
+            "integer of at least 1, e.g. a 1 Hz linear grid with a power-of-two "
+            "segment"
         )
     wrapped = jax.random.wrap_key_data(
         jnp.asarray(population.rng_key, dtype=jnp.uint32)
@@ -643,10 +660,10 @@ def _segmented(
             psds,
             first,
             second,
-            effective,
+            segment_duration,
             segments,
         )
-    ratio = 1.0 / np.sqrt(effective * widths)
+    ratio = 1.0 / np.sqrt(modes)
     return (
         PAIR_RESPONSE_DENOMINATOR
         / seconds
