@@ -29,7 +29,7 @@ default-resources:
   # the whole batch, so ~4x headroom at 8 threads.
   mem_mb: 8000
   # The first cluster batch, 10 draws on 4 cores, took 50-90 min: 5-9 min a
-  # draw. 8 cores should bring 5 draws to ~15-30 min; 60 leaves room for
-  # imperfect thread scaling, since a job killed at its limit loses its
-  # whole batch.
-  runtime: 60
+  # draw. 8 cores should bring 5 draws to ~15-30 min, but 60 min proved too
+  # short: 180 leaves room for imperfect thread scaling, since a job killed
+  # at its limit loses its whole batch.
+  runtime: 180
