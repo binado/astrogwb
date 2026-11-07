@@ -50,7 +50,7 @@ one task is ready, it submits that task as a regular SLURM job.
 | --- | --- | --- |
 | CPUs per draw (`threads`) | 8 | XLA spreads each waveform chunk over the job's CPUs |
 | `mem_mb` | 4000 | two draws on an M4 peaked at 2.1 GB RSS (`/usr/bin/time -l`), with `chunk_size=8192`; an out-of-memory kill loses a single draw, redrawn by `retries` |
-| `runtime` | 40 min | one draw took 8 min 10 s on 8 threads of an M-series Mac, but 20 min timed out the cluster smoke test; provisional, set it from `sacct` after `just slurm-test`. Backfill places jobs against their time limit, so the shorter the better |
+| `runtime` | 60 min | the slurm-test draws took 26-27 min on the cluster (8 min 10 s on an M-series Mac); 20 min timed out. 60 is about twice the cluster time. Backfill places jobs against their time limit, so the shorter the better |
 | `jobs` | 1000 | up to the cluster's limit of 1000 draws in flight |
 | `slurm-array-limit` | 1000 | at most 1000 tasks per array submission |
 

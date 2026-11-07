@@ -27,10 +27,10 @@ default-resources:
   # out-of-memory kill loses a single draw, redrawn by retries=1, so ~2x
   # headroom is enough (one draw peaked at 2.26 GB on an M-series Mac, 8 threads).
   mem_mb: 4000
-  # One draw took 8 min 10 s wall on 8 threads of an M-series Mac, before
-  # interpreter start and job-nanny's node-local staging. 20 min timed out the
-  # cluster smoke test, so 40 is provisional: read the draw's Elapsed from
-  # `sacct` after `just slurm-test` and set this to about twice that. Backfill
-  # places jobs against their time limit, so the shorter the better, and a job
-  # killed at its limit loses a single draw, redrawn by retries=1.
-  runtime: 40
+  # One draw took 8 min 10 s wall on 8 threads of an M-series Mac but 26-27 min
+  # on the cluster (sacct, slurm-test: two draws, TotalCPU/(Elapsed x CPUs)
+  # about 0.93); 20 min timed out. 60 is about twice the cluster time, for
+  # node-to-node variance. Backfill places jobs against their time limit, so
+  # the shorter the better, and a job killed at its limit loses a single draw,
+  # redrawn by retries=1, which would hit the same limit.
+  runtime: 60
