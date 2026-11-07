@@ -46,6 +46,13 @@ queue, not the compute, is the bottleneck.
 The executor submits ready simulations as arrays of up to 1000 tasks. If only
 one task is ready, it submits that task as a regular SLURM job.
 
+Keep the number of ready jobs at or below `jobs`. When Snakemake hands the
+executor fewer simulations than are ready, the executor waits for the rest
+without submitting them, and the controller can stall. The cluster limit of
+1000 jobs counts array tasks, so `jobs` cannot be raised; instead build
+everything that is not one of the 1000 draws before the cluster run (see
+Submit).
+
 | Setting | Value | Why |
 | --- | --- | --- |
 | CPUs per draw (`threads`) | 8 | XLA spreads each waveform chunk over the job's CPUs |
@@ -110,6 +117,16 @@ draws of the ensemble's first seed), and check them with `sacct`:
 
 ```bash
 uv run --no-sync snakemake --profile workflow/profiles/slurm --config stop=10
+```
+
+The ensemble has 1001 draws (seed 41 index 0-999 and the seed-42 reference
+draw) and the run has two reference catalogs, more than `jobs`. The draws
+read only `config/`, not the catalogs, so build the three extras locally
+first and the cluster run is exactly 1000 draws:
+
+```bash
+just catalogs
+just draw fiducial 42 0
 ```
 
 Then dry-run and submit the rest:
