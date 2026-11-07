@@ -19,10 +19,9 @@
 # written atomically, so a file at its path is the job's output. Editing a
 # committed config does not migrate anything: delete the outputs and rerun.
 #
-# Draw jobs share the `draws` group; the profile's group-components packs
-# several into one SLURM job. Snakemake comes from the project venv, synced
-# with `uv sync --extra notebook --extra cli --group cluster`, so the
-# controller and its jobs share one interpreter.
+# Snakemake comes from the project venv, synced with `uv sync --extra
+# notebook --extra cli --group cluster`, so the controller and its jobs share
+# one interpreter.
 #
 # Config (override with --config key=value):
 #   ensembles  space-separated names           default "fiducial"
@@ -128,8 +127,6 @@ rule simulate:
         f"{ENSEMBLES_ROOT}/{{ensemble}}/{{seed}}-{{index}}.h5",
     log:
         "logs/ensembles/{ensemble}/{seed}-{index}.log",
-    group:
-        "draws"
     threads: THREADS
     shell:
         _RUN

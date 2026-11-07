@@ -38,16 +38,23 @@ version are refused when read; regenerate them too.
 
 ## Job sizing
 
-Draw jobs share the Snakemake group `draws`. The profile's `group-components:
-draws=5` packs five draws into one SLURM job, run one after another.
+Each draw is one SLURM job: one `astrogwb simulate` process, one output file.
+Grouping several draws into a shared job was tried first, to amortize
+job-nanny's node-local staging, but the bundled request (the sum of the
+draws' CPUs and memory) scheduled poorly on a busy partition, where the
+queue, not the compute, is the bottleneck.
 
 | Setting | Value | Why |
 | --- | --- | --- |
-| draws per SLURM job (`group-components`) | 5 | short jobs that schedule easily and lose little on failure; JIT is a negligible share of a ~80 s draw |
 | CPUs per draw (`threads`) | 8 | XLA spreads each waveform chunk over the job's CPUs |
-| `mem_mb` | 8000 | two draws on an M4 peaked at 2.1 GB RSS (`/usr/bin/time -l`), with `chunk_size=8192`; headroom for per-thread buffers |
-| `runtime` | 180 min | the first cluster batch, 10 draws on 4 cores, took 50-90 min; 8 cores should bring 5 draws to ~15-30 min, but a 60 min limit killed batches, so there is headroom for poor thread scaling |
-| `jobs` | 100 | 500 draws in flight at once |
+| `mem_mb` | 4000 | two draws on an M4 peaked at 2.1 GB RSS (`/usr/bin/time -l`), with `chunk_size=8192`; an out-of-memory kill loses a single draw, redrawn by `retries` |
+| `runtime` | 20 min | one ~80 s draw plus startup; backfill places jobs against their time limit, so the shorter the better |
+| `jobs` | 100 | 100 draws in flight, one per job |
+
+The queue is the bottleneck, not the compute: if jobs sit in `squeue` with
+reason `Priority`, the partition is busy with higher-priority work, and the
+way through is requests the scheduler can slot into leftover capacity -- few
+CPUs, little memory, a short time limit -- rather than more queued jobs.
 
 After a job finishes, `sacct` gives its time and CPU use:
 
@@ -57,8 +64,7 @@ sacct -u $USER -S today --format=JobID,JobName%40,AllocCPUS,Elapsed,TotalCPU,Max
 
 `TotalCPU / (Elapsed x AllocCPUS)` is how busy the cores were: near 1, more
 `threads` would still help; well below, prefer more jobs with fewer threads.
-Change `threads` with `--config`, and `group-components`, `runtime` and
-`mem_mb` in the profile.
+Change `threads` with `--config`, and `runtime` and `mem_mb` in the profile.
 
 ## One-time setup on the cluster
 
