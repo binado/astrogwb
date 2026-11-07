@@ -85,7 +85,7 @@ draw ensemble="fiducial" seed="41" index="0" cores="8":
 cluster *args:
     uv run --no-sync snakemake --profile workflow/profiles/slurm "$@"
 
-[doc('Probe SLURM staging with one simulation job')]
+[doc('Probe SLURM staging with a two-task simulation array')]
 [group('paper')]
 [positional-arguments]
 slurm-test *args:

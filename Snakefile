@@ -8,7 +8,7 @@
 # [ensembles.<name>] table of the shared config and config/detectors.toml):
 #
 #   outputs/ensembles/<name>/<seed>-<index>.h5   one file per `astrogwb
-#       simulate` job: every paper network's pair spectra, with the
+#       simulate` task: every paper network's pair spectra, with the
 #       configuration it was simulated from;
 #
 # and the reference catalogs the notebooks name, the [catalogs.<name>] tables,
@@ -110,7 +110,7 @@ rule catalogs:
 # working directory without .venv, so `uv run` alone would create an empty venv
 # there. --active uses VIRTUAL_ENV instead, the shared venv the controller was
 # started from with `uv run`. --no-sync: that venv is synced once on the login
-# node; a hundred jobs each syncing it at once would race on the filesystem.
+# node; concurrent tasks syncing it at once would race on the filesystem.
 _RUN = """
     export INPUT="config"
     export OUTPUT="*"
@@ -143,7 +143,7 @@ rule simulate:
 # A separate output lets the staging probe run without touching paper draws.
 rule slurm_test:
     input:
-        f"{OUTPUTS}/slurm-test/fiducial/41-0.h5",
+        expand(f"{OUTPUTS}/slurm-test/fiducial/41-{{index}}.h5", index=range(2)),
 
 
 use rule simulate as simulate_slurm_test with:

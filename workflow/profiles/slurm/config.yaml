@@ -5,8 +5,10 @@
 # docs/coverage-draws-on-slurm.md.
 # Job logs land under .snakemake/slurm_logs/, each command's own under logs/.
 executor: slurm
-# Concurrent jobs in the queue; one draw per job, so 1000 draws is 1000 jobs.
-jobs: 100
+# One draw per array task, with at most 1000 tasks in flight.
+jobs: 1000
+slurm-array-jobs: simulate,simulate_slurm_test
+slurm-array-limit: 1000
 keep-going: true
 rerun-incomplete: true
 # Re-run a draw only when its file is missing or a config it reads is newer.

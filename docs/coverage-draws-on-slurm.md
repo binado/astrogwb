@@ -7,7 +7,7 @@ input, per ensemble:
 
 | Output | Command | Read by |
 | --- | --- | --- |
-| `outputs/ensembles/<name>/<seed>-<i>.h5` | `astrogwb simulate`, one file per job | every notebook with Poisson draws |
+| `outputs/ensembles/<name>/<seed>-<i>.h5` | `astrogwb simulate`, one file per array task | every notebook with Poisson draws |
 | `outputs/catalogs/reference-*.h5` | `astrogwb model-catalog` | the posterior notebooks, `importance_convergence`, `ensemble_spectrum` |
 
 The one ensemble is `fiducial`, the default waveform and grid: the grid
@@ -38,18 +38,21 @@ version are refused when read; regenerate them too.
 
 ## Job sizing
 
-Each draw is one SLURM job: one `astrogwb simulate` process, one output file.
+Each draw is one SLURM array task: one `astrogwb simulate` process, one output file.
 Grouping several draws into a shared job was tried first, to amortize
 job-nanny's node-local staging, but the bundled request (the sum of the
 draws' CPUs and memory) scheduled poorly on a busy partition, where the
 queue, not the compute, is the bottleneck.
+The executor submits ready simulations as arrays of up to 1000 tasks. If only
+one task is ready, it submits that task as a regular SLURM job.
 
 | Setting | Value | Why |
 | --- | --- | --- |
 | CPUs per draw (`threads`) | 8 | XLA spreads each waveform chunk over the job's CPUs |
 | `mem_mb` | 4000 | two draws on an M4 peaked at 2.1 GB RSS (`/usr/bin/time -l`), with `chunk_size=8192`; an out-of-memory kill loses a single draw, redrawn by `retries` |
 | `runtime` | 20 min | one ~80 s draw plus startup; backfill places jobs against their time limit, so the shorter the better |
-| `jobs` | 100 | 100 draws in flight, one per job |
+| `jobs` | 1000 | up to the cluster's limit of 1000 draws in flight |
+| `slurm-array-limit` | 1000 | at most 1000 tasks per array submission |
 
 The queue is the bottleneck, not the compute: if jobs sit in `squeue` with
 reason `Priority`, the partition is busy with higher-priority work, and the
@@ -81,7 +84,7 @@ project venv, so the controller and every job run one interpreter; `cli`
 installs the `astrogwb` command and `notebook` the catalog script's stack.
 Every command below uses `uv run --no-sync`, and so do the jobs: a plain
 `uv run` would sync the venv back to the default groups and remove Snakemake,
-and a hundred concurrent jobs must never race to sync it.
+and concurrent tasks must never race to sync it.
 
 Jobs go to the `short` partition, whose time limit must cover the profile's
 `runtime`. If the cluster needs an account, uncomment `slurm_account` in the
@@ -92,16 +95,16 @@ whole list, `mem_mb` and `runtime` included.
 ## Submit
 
 The Snakemake controller stays on the login node for the whole run, so start
-it in `tmux` (or `screen`). First probe staging with one draw in a separate
+it in `tmux` (or `screen`). First probe staging with a two-task array in a separate
 test directory:
 
 ```bash
 just slurm-test
 ```
 
-Check `logs/slurm-test/fiducial/41-0.log` and the resulting
-`outputs/slurm-test/fiducial/41-0.h5`. The forced run repeats the probe even
-if its output already exists; `--retries 0` limits it to one submission.
+Check `logs/slurm-test/fiducial/41-{0,1}.log` and the resulting
+`outputs/slurm-test/fiducial/41-{0,1}.h5`. The forced run repeats both tasks
+even if their outputs already exist; `--retries 0` disables Snakemake retries.
 Calibrate on a few draws next (`stop` caps the
 draws of the ensemble's first seed), and check them with `sacct`:
 
