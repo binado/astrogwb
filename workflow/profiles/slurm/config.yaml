@@ -24,11 +24,13 @@ default-resources:
   # slurm_account: <account>
   # Two draws peaked at 2.1 GB RSS on an M4 (/usr/bin/time -l); XLA's
   # per-thread buffers grow with `threads`. With one draw a job, an
-  # out-of-memory kill loses a single ~80 s draw, redrawn by retries=1,
-  # so ~2x headroom is enough.
+  # out-of-memory kill loses a single draw, redrawn by retries=1, so ~2x
+  # headroom is enough (one draw peaked at 2.26 GB on an M-series Mac, 8 threads).
   mem_mb: 4000
-  # One ~80 s draw plus interpreter start and job-nanny's node-local staging
-  # fit well under 10 min; 20 min leaves headroom for a busier node. Backfill
-  # places jobs against their time limit, so the shorter the better, and a
-  # job killed at its limit loses a single draw, redrawn by retries=1.
+  # One draw took 8 min 10 s wall on 8 threads of an M-series Mac, before
+  # interpreter start and job-nanny's node-local staging. 20 min is 2.4x that;
+  # check it against `sacct` from `just slurm-test` and raise it if the cluster
+  # cores are slower. Backfill places jobs against their time limit, so the
+  # shorter the better, and a job killed at its limit loses a single draw,
+  # redrawn by retries=1.
   runtime: 20
