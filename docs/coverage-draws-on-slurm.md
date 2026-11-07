@@ -92,7 +92,17 @@ whole list, `mem_mb` and `runtime` included.
 ## Submit
 
 The Snakemake controller stays on the login node for the whole run, so start
-it in `tmux` (or `screen`). Calibrate on a few draws first (`stop` caps the
+it in `tmux` (or `screen`). First probe staging with one draw in a separate
+test directory:
+
+```bash
+just slurm-test
+```
+
+Check `logs/slurm-test/fiducial/41-0.log` and the resulting
+`outputs/slurm-test/fiducial/41-0.h5`. The forced run repeats the probe even
+if its output already exists; `--retries 0` limits it to one submission.
+Calibrate on a few draws next (`stop` caps the
 draws of the ensemble's first seed), and check them with `sacct`:
 
 ```bash
@@ -112,11 +122,13 @@ uv run --no-sync snakemake --profile workflow/profiles/slurm
 The default is `ensembles=fiducial`. `threads=<n>` and
 `outputs=<path>` go in the same `--config` group.
 
-Each job exports `INPUT="*"` and `OUTPUT="*"` and runs its command under
+Each job exports `INPUT="config"` and `OUTPUT="*"` and runs its command under
 `job-nanny` whenever it is on `PATH`, as the cluster requires. `job-nanny`
 runs the job in a node-local copy of the working directory, which has no
 `.venv`, so jobs run `uv run --active --no-sync`: `--active` takes the shared
 venv from `VIRTUAL_ENV`, which `uv run` sets when it starts the controller.
+The editable installation also requires the checkout's `src/` directory to be
+available on the shared filesystem from compute nodes.
 Start the controller with `uv run` as above, never with a bare `snakemake`.
 If outputs written in the node-local copy do not come back, pass
 `outputs=<absolute path on the shared filesystem>` and link it to `outputs/`.

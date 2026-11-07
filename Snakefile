@@ -85,6 +85,7 @@ wildcard_constraints:
 localrules:
     all,
     catalogs,
+    slurm_test,
 
 
 rule all:
@@ -111,7 +112,7 @@ rule catalogs:
 # started from with `uv run`. --no-sync: that venv is synced once on the login
 # node; a hundred jobs each syncing it at once would race on the filesystem.
 _RUN = """
-    export INPUT="*"
+    export INPUT="config"
     export OUTPUT="*"
     NANNY=
     if command -v job-nanny >/dev/null 2>&1; then
@@ -137,6 +138,19 @@ rule simulate:
             --chunk-size 8192 \
             --cpu-threads {threads} > {log:q} 2>&1
         """
+
+
+# A separate output lets the staging probe run without touching paper draws.
+rule slurm_test:
+    input:
+        f"{OUTPUTS}/slurm-test/fiducial/41-0.h5",
+
+
+use rule simulate as simulate_slurm_test with:
+    output:
+        f"{OUTPUTS}/slurm-test/{{ensemble}}/{{seed}}-{{index}}.h5",
+    log:
+        "logs/slurm-test/{ensemble}/{seed}-{index}.log",
 
 
 rule reference_catalog:
