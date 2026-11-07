@@ -28,9 +28,9 @@ default-resources:
   # headroom is enough (one draw peaked at 2.26 GB on an M-series Mac, 8 threads).
   mem_mb: 4000
   # One draw took 8 min 10 s wall on 8 threads of an M-series Mac, before
-  # interpreter start and job-nanny's node-local staging. 20 min is 2.4x that;
-  # check it against `sacct` from `just slurm-test` and raise it if the cluster
-  # cores are slower. Backfill places jobs against their time limit, so the
-  # shorter the better, and a job killed at its limit loses a single draw,
-  # redrawn by retries=1.
-  runtime: 20
+  # interpreter start and job-nanny's node-local staging. 20 min timed out the
+  # cluster smoke test, so 40 is provisional: read the draw's Elapsed from
+  # `sacct` after `just slurm-test` and set this to about twice that. Backfill
+  # places jobs against their time limit, so the shorter the better, and a job
+  # killed at its limit loses a single draw, redrawn by retries=1.
+  runtime: 40
