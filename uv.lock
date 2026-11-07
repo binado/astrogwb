@@ -237,7 +237,7 @@ provides-extras = ["cuda", "io", "cli", "simulation", "tpu", "paper", "notebook"
 [package.metadata.requires-dev]
 cluster = [
     { name = "snakemake", specifier = ">=9.24" },
-    { name = "snakemake-executor-plugin-slurm", specifier = ">=1.5" },
+    { name = "snakemake-executor-plugin-slurm", specifier = ">=2.6" },
 ]
 dev = [
     { name = "marimo", specifier = ">=0.25.1" },

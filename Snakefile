@@ -8,7 +8,7 @@
 # [ensembles.<name>] table of the shared config and config/detectors.toml):
 #
 #   outputs/ensembles/<name>/<seed>-<index>.h5   one file per `astrogwb
-#       simulate` job: every paper network's pair spectra, with the
+#       simulate` task: every paper network's pair spectra, with the
 #       configuration it was simulated from;
 #
 # and the reference catalogs the notebooks name, the [catalogs.<name>] tables,
@@ -19,10 +19,9 @@
 # written atomically, so a file at its path is the job's output. Editing a
 # committed config does not migrate anything: delete the outputs and rerun.
 #
-# Draw jobs share the `draws` group; the profile's group-components packs
-# several into one SLURM job. Snakemake comes from the project venv, synced
-# with `uv sync --extra notebook --extra cli --group cluster`, so the
-# controller and its jobs share one interpreter.
+# Snakemake comes from the project venv, synced with `uv sync --extra
+# notebook --extra cli --group cluster`, so the controller and its jobs share
+# one interpreter.
 #
 # Config (override with --config key=value):
 #   ensembles  space-separated names           default "fiducial"
@@ -86,6 +85,7 @@ wildcard_constraints:
 localrules:
     all,
     catalogs,
+    slurm_test,
 
 
 rule all:
@@ -110,9 +110,9 @@ rule catalogs:
 # working directory without .venv, so `uv run` alone would create an empty venv
 # there. --active uses VIRTUAL_ENV instead, the shared venv the controller was
 # started from with `uv run`. --no-sync: that venv is synced once on the login
-# node; a hundred jobs each syncing it at once would race on the filesystem.
+# node; concurrent tasks syncing it at once would race on the filesystem.
 _RUN = """
-    export INPUT="*"
+    export INPUT="config"
     export OUTPUT="*"
     NANNY=
     if command -v job-nanny >/dev/null 2>&1; then
@@ -128,8 +128,6 @@ rule simulate:
         f"{ENSEMBLES_ROOT}/{{ensemble}}/{{seed}}-{{index}}.h5",
     log:
         "logs/ensembles/{ensemble}/{seed}-{index}.log",
-    group:
-        "draws"
     threads: THREADS
     shell:
         _RUN
@@ -140,6 +138,19 @@ rule simulate:
             --chunk-size 8192 \
             --cpu-threads {threads} > {log:q} 2>&1
         """
+
+
+# A separate output lets the staging probe run without touching paper draws.
+rule slurm_test:
+    input:
+        expand(f"{OUTPUTS}/slurm-test/fiducial/41-{{index}}.h5", index=range(2)),
+
+
+use rule simulate as simulate_slurm_test with:
+    output:
+        f"{OUTPUTS}/slurm-test/{{ensemble}}/{{seed}}-{{index}}.h5",
+    log:
+        "logs/slurm-test/{ensemble}/{seed}-{index}.log",
 
 
 rule reference_catalog:

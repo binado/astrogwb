@@ -7,7 +7,7 @@ input, per ensemble:
 
 | Output | Command | Read by |
 | --- | --- | --- |
-| `outputs/ensembles/<name>/<seed>-<i>.h5` | `astrogwb simulate`, one file per job | every notebook with Poisson draws |
+| `outputs/ensembles/<name>/<seed>-<i>.h5` | `astrogwb simulate`, one file per array task | every notebook with Poisson draws |
 | `outputs/catalogs/reference-*.h5` | `astrogwb model-catalog` | the posterior notebooks, `importance_convergence`, `ensemble_spectrum` |
 
 The one ensemble is `fiducial`, the default waveform and grid: the grid
@@ -38,16 +38,26 @@ version are refused when read; regenerate them too.
 
 ## Job sizing
 
-Draw jobs share the Snakemake group `draws`. The profile's `group-components:
-draws=5` packs five draws into one SLURM job, run one after another.
+Each draw is one SLURM array task: one `astrogwb simulate` process, one output file.
+Grouping several draws into a shared job was tried first, to amortize
+job-nanny's node-local staging, but the bundled request (the sum of the
+draws' CPUs and memory) scheduled poorly on a busy partition, where the
+queue, not the compute, is the bottleneck.
+The executor submits ready simulations as arrays of up to 1000 tasks. If only
+one task is ready, it submits that task as a regular SLURM job.
 
 | Setting | Value | Why |
 | --- | --- | --- |
-| draws per SLURM job (`group-components`) | 5 | short jobs that schedule easily and lose little on failure; JIT is a negligible share of a ~80 s draw |
 | CPUs per draw (`threads`) | 8 | XLA spreads each waveform chunk over the job's CPUs |
-| `mem_mb` | 8000 | two draws on an M4 peaked at 2.1 GB RSS (`/usr/bin/time -l`), with `chunk_size=8192`; headroom for per-thread buffers |
-| `runtime` | 180 min | the first cluster batch, 10 draws on 4 cores, took 50-90 min; 8 cores should bring 5 draws to ~15-30 min, but a 60 min limit killed batches, so there is headroom for poor thread scaling |
-| `jobs` | 100 | 500 draws in flight at once |
+| `mem_mb` | 4000 | two draws on an M4 peaked at 2.1 GB RSS (`/usr/bin/time -l`), with `chunk_size=8192`; an out-of-memory kill loses a single draw, redrawn by `retries` |
+| `runtime` | 40 min | one draw took 8 min 10 s on 8 threads of an M-series Mac, but 20 min timed out the cluster smoke test; provisional, set it from `sacct` after `just slurm-test`. Backfill places jobs against their time limit, so the shorter the better |
+| `jobs` | 1000 | up to the cluster's limit of 1000 draws in flight |
+| `slurm-array-limit` | 1000 | at most 1000 tasks per array submission |
+
+The queue is the bottleneck, not the compute: if jobs sit in `squeue` with
+reason `Priority`, the partition is busy with higher-priority work, and the
+way through is requests the scheduler can slot into leftover capacity -- few
+CPUs, little memory, a short time limit -- rather than more queued jobs.
 
 After a job finishes, `sacct` gives its time and CPU use:
 
@@ -57,8 +67,7 @@ sacct -u $USER -S today --format=JobID,JobName%40,AllocCPUS,Elapsed,TotalCPU,Max
 
 `TotalCPU / (Elapsed x AllocCPUS)` is how busy the cores were: near 1, more
 `threads` would still help; well below, prefer more jobs with fewer threads.
-Change `threads` with `--config`, and `group-components`, `runtime` and
-`mem_mb` in the profile.
+Change `threads` with `--config`, and `runtime` and `mem_mb` in the profile.
 
 ## One-time setup on the cluster
 
@@ -75,7 +84,7 @@ project venv, so the controller and every job run one interpreter; `cli`
 installs the `astrogwb` command and `notebook` the catalog script's stack.
 Every command below uses `uv run --no-sync`, and so do the jobs: a plain
 `uv run` would sync the venv back to the default groups and remove Snakemake,
-and a hundred concurrent jobs must never race to sync it.
+and concurrent tasks must never race to sync it.
 
 Jobs go to the `short` partition, whose time limit must cover the profile's
 `runtime`. If the cluster needs an account, uncomment `slurm_account` in the
@@ -86,7 +95,17 @@ whole list, `mem_mb` and `runtime` included.
 ## Submit
 
 The Snakemake controller stays on the login node for the whole run, so start
-it in `tmux` (or `screen`). Calibrate on a few draws first (`stop` caps the
+it in `tmux` (or `screen`). First probe staging with a two-task array in a separate
+test directory:
+
+```bash
+just slurm-test
+```
+
+Check `logs/slurm-test/fiducial/41-{0,1}.log` and the resulting
+`outputs/slurm-test/fiducial/41-{0,1}.h5`. The forced run repeats both tasks
+even if their outputs already exist; `--retries 0` disables Snakemake retries.
+Calibrate on a few draws next (`stop` caps the
 draws of the ensemble's first seed), and check them with `sacct`:
 
 ```bash
@@ -106,11 +125,13 @@ uv run --no-sync snakemake --profile workflow/profiles/slurm
 The default is `ensembles=fiducial`. `threads=<n>` and
 `outputs=<path>` go in the same `--config` group.
 
-Each job exports `INPUT="*"` and `OUTPUT="*"` and runs its command under
+Each job exports `INPUT="config"` and `OUTPUT="*"` and runs its command under
 `job-nanny` whenever it is on `PATH`, as the cluster requires. `job-nanny`
 runs the job in a node-local copy of the working directory, which has no
 `.venv`, so jobs run `uv run --active --no-sync`: `--active` takes the shared
 venv from `VIRTUAL_ENV`, which `uv run` sets when it starts the controller.
+The editable installation also requires the checkout's `src/` directory to be
+available on the shared filesystem from compute nodes.
 Start the controller with `uv run` as above, never with a bare `snakemake`.
 If outputs written in the node-local copy do not come back, pass
 `outputs=<absolute path on the shared filesystem>` and link it to `outputs/`.
