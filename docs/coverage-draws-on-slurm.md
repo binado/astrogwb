@@ -7,7 +7,7 @@ input, per ensemble:
 
 | Output | Command | Read by |
 | --- | --- | --- |
-| `outputs/ensembles/<name>/<seed>-<i>.h5` | `astrogwb simulate`, one file per array task | every notebook with Poisson draws |
+| `outputs/ensembles/<name>/<seed>-<i>.h5` | `astrogwb simulate`, one file per job | every notebook with Poisson draws |
 | `outputs/catalogs/reference-*.h5` | `astrogwb model-catalog` | the posterior notebooks, `importance_convergence`, `ensemble_spectrum` |
 
 The one ensemble is `fiducial`, the default waveform and grid: the grid
@@ -38,18 +38,20 @@ version are refused when read; regenerate them too.
 
 ## Job sizing
 
-Each draw is one SLURM array task: one `astrogwb simulate` process, one output file.
+Each draw is one SLURM job: one `astrogwb simulate` process, one output file.
 Grouping several draws into a shared job was tried first, to amortize
 job-nanny's node-local staging, but the bundled request (the sum of the
 draws' CPUs and memory) scheduled poorly on a busy partition, where the
 queue, not the compute, is the bottleneck.
-The executor submits ready simulations as arrays of up to 1000 tasks. If only
-one task is ready, it submits that task as a regular SLURM job.
+The executor submits each ready simulation as its own SLURM job. It does not
+use job arrays: `job-nanny` keys its staging directory on `$SLURM_JOBID`,
+which every task of an array shares, so array tasks would clobber each other's
+staging.
 
 Keep the number of ready jobs at or below `jobs`. When Snakemake hands the
 executor fewer simulations than are ready, the executor waits for the rest
 without submitting them, and the controller can stall. The cluster limit of
-1000 jobs counts array tasks, so `jobs` cannot be raised; instead build
+1000 jobs applies to these jobs too, so `jobs` cannot be raised; instead build
 everything that is not one of the 1000 draws before the cluster run (see
 Submit).
 
@@ -59,7 +61,6 @@ Submit).
 | `mem_mb` | 4000 | two draws on an M4 peaked at 2.1 GB RSS (`/usr/bin/time -l`), with `chunk_size=8192`; an out-of-memory kill loses a single draw, redrawn by `retries` |
 | `runtime` | 60 min | the slurm-test draws took 26-27 min on the cluster (8 min 10 s on an M-series Mac); 20 min timed out. 60 is about twice the cluster time. Backfill places jobs against their time limit, so the shorter the better |
 | `jobs` | 1000 | up to the cluster's limit of 1000 draws in flight |
-| `slurm-array-limit` | 1000 | at most 1000 tasks per array submission |
 
 The queue is the bottleneck, not the compute: if jobs sit in `squeue` with
 reason `Priority`, the partition is busy with higher-priority work, and the
@@ -102,7 +103,7 @@ whole list, `mem_mb` and `runtime` included.
 ## Submit
 
 The Snakemake controller stays on the login node for the whole run, so start
-it in `tmux` (or `screen`). First probe staging with a two-task array in a separate
+it in `tmux` (or `screen`). First probe staging with a two-task run in a separate
 test directory:
 
 ```bash
