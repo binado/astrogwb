@@ -85,6 +85,12 @@ draw ensemble="fiducial" seed="41" index="0" cores="8":
 cluster *args:
     uv run --no-sync snakemake --profile workflow/profiles/slurm "$@"
 
+[doc('Probe SLURM staging with a two-task simulation')]
+[group('paper')]
+[positional-arguments]
+slurm-test *args:
+    uv run --no-sync snakemake --profile workflow/profiles/slurm slurm_test --forcerun simulate_slurm_test --retries 0 "$@"
+
 # Figures land under outputs/figures/<name>/, e.g.
 # `just notebook fiducial_spectrum`.
 [doc('Run a marimo notebook headlessly')]

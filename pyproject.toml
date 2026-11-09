@@ -101,7 +101,7 @@ dev = [
 # project venv, so its jobs see the same interpreter as the scripts they run.
 cluster = [
     "snakemake>=9.24",
-    "snakemake-executor-plugin-slurm>=1.5",
+    "snakemake-executor-plugin-slurm>=2.6",
 ]
 
 [tool.uv]

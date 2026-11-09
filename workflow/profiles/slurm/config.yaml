@@ -5,12 +5,10 @@
 # docs/coverage-draws-on-slurm.md.
 # Job logs land under .snakemake/slurm_logs/, each command's own under logs/.
 executor: slurm
-# Concurrent jobs in the queue; 1000 draws at 5 per job is 200 jobs.
-jobs: 100
-# Draw jobs share the `draws` group; pack five into each SLURM job, run one
-# after another, so a job's ~5 min startup and queue wait are amortized.
-group-components:
-  - draws=5
+# One draw per job, with at most 1000 jobs in flight. Array jobs are not used:
+# job-nanny keys its staging directory on $SLURM_JOBID, which every task of an
+# array shares, so concurrent tasks would clobber each other's staging.
+jobs: 1000
 keep-going: true
 rerun-incomplete: true
 # Re-run a draw only when its file is missing or a config it reads is newer.
@@ -25,11 +23,14 @@ default-resources:
   # Uncomment for clusters that require it:
   # slurm_account: <account>
   # Two draws peaked at 2.1 GB RSS on an M4 (/usr/bin/time -l); XLA's
-  # per-thread buffers grow with `threads`, and an out-of-memory kill loses
-  # the whole batch, so ~4x headroom at 8 threads.
-  mem_mb: 8000
-  # The first cluster batch, 10 draws on 4 cores, took 50-90 min: 5-9 min a
-  # draw. 8 cores should bring 5 draws to ~15-30 min, but 60 min proved too
-  # short: 180 leaves room for imperfect thread scaling, since a job killed
-  # at its limit loses its whole batch.
-  runtime: 180
+  # per-thread buffers grow with `threads`. With one draw a job, an
+  # out-of-memory kill loses a single draw, redrawn by retries=1, so ~2x
+  # headroom is enough (one draw peaked at 2.26 GB on an M-series Mac, 8 threads).
+  mem_mb: 4000
+  # One draw took 8 min 10 s wall on 8 threads of an M-series Mac but 26-27 min
+  # on the cluster (sacct, slurm-test: two draws, TotalCPU/(Elapsed x CPUs)
+  # about 0.93); 20 min timed out. 60 is about twice the cluster time, for
+  # node-to-node variance. Backfill places jobs against their time limit, so
+  # the shorter the better, and a job killed at its limit loses a single draw,
+  # redrawn by retries=1, which would hit the same limit.
+  runtime: 60
