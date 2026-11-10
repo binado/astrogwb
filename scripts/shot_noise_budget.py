@@ -27,12 +27,16 @@ catalog and the fiducial ensemble's detector noise, both written by
   spread of source powers and responses at a fixed count;
 - :math:`\\Sigma^{\\rm lin}` and :math:`\\Sigma^{\\rm circ}`, the linear and
   circular Stokes terms. The per-source response is linear in the Stokes
-  vector :math:`(g, s_Q, 0, s_V)`, so each term's response draws use the same
-  angles. Each draw enters with its images under :math:`\\psi \\to \\psi +
-  \\pi/4`, which flips the sign of the linear response, and :math:`\\cos\\iota
-  \\to -\\cos\\iota`, which flips the circular one; the cross terms between
-  Stokes terms then cancel draw by draw, and the three response moments sum to
-  the full one to round-off.
+  vector :math:`(g, s_Q, 0, s_V)`, so each term's response moment is
+  integrated on the same angles. Each angle point enters with its images under
+  :math:`\\psi \\to \\psi + \\pi/4`, which flips the sign of the linear
+  response, and :math:`\\cos\\iota \\to -\\cos\\iota`, which flips the circular
+  one; the cross terms between Stokes terms then cancel point by point, and
+  the three response moments sum to the full one to round-off.
+
+The angle points are scrambled Sobol nets over direction, :math:`\\psi` and
+:math:`\\cos\\iota`. Each share is the mean over independent scramblings, and
+its ``_error`` column the standard error of that mean.
 
 For comparison it also records the detector-noise template's
 :math:`\\rho^{-2} + \\sigma_{\\rm shot}^2` and the shape correction
@@ -48,6 +52,7 @@ For comparison it also records the detector-noise template's
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 from pathlib import Path
 
 from astrogwb.runtime import configure_runtime
@@ -60,10 +65,10 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 from jax.typing import ArrayLike
+from scipy.stats import qmc
 
 from astrogwb.config import load_config
 from astrogwb.detector.overlap import stokes_cross_power
-from astrogwb.detector.response import _isotropic_angles
 from astrogwb.importance.catalog import read_catalog
 from astrogwb.inference import (
     CatalogModel,
@@ -88,8 +93,12 @@ OUTPUT = ROOT_DIR / "outputs" / "figures" / "shot_noise_budget"
 REDSHIFT_NODES = 32
 MINIMUM_FREQUENCY, MAXIMUM_FREQUENCY = 2.0, 2048.0
 DATA_SEED = 41  # the injection ensemble draw 0
-#: Independent angle draws; each enters with its three parity images.
-RESPONSE_DRAWS, RESPONSE_SEED = 8_192, 0
+#: Each scrambled Sobol net has 2**RESPONSE_EXPONENT angle points, and each point
+#: enters with its three parity images.
+RESPONSE_EXPONENT = 15
+#: Independent scramblings; their spread is the integration error of the shares.
+RESPONSE_SCRAMBLES = 4
+RESPONSE_CHUNK = 4_096
 
 #: The isotropic mean of the bracket of the per-source ORF.
 _ISOTROPIC_PAIR_RESPONSE = 4.0 / 25.0
@@ -126,15 +135,30 @@ def build_model(
     )
 
 
-def parity_symmetric_angles(key: jax.Array, num_draws: int) -> tuple[jax.Array, ...]:
-    r"""Isotropic angles with the images under :math:`\psi + \pi/4` and :math:`-\cos\iota`.
+def sobol_angles(seed: int, exponent: int) -> tuple[np.ndarray, ...]:
+    r"""Isotropic angles on a scrambled Sobol net of :math:`2^{\rm exponent}` points.
 
-    Returns the four angle arrays of
+    Right ascension, declination, :math:`\psi` uniform on :math:`[0, \pi)` and
+    :math:`\cos\iota`, the order of
     :func:`~astrogwb.detector.response._isotropic_angles`, each
-    ``(4 num_draws,)``.
+    ``(2**exponent,)``.
     """
-    right_ascension, declination, polarization_angle, cos_inclination = (
-        _isotropic_angles(key, num_draws)
+    points = qmc.Sobol(4, scramble=True, seed=seed).random_base2(exponent)
+    return (
+        2.0 * np.pi * points[:, 0],
+        np.arcsin(2.0 * points[:, 1] - 1.0),
+        np.pi * points[:, 2],
+        2.0 * points[:, 3] - 1.0,
+    )
+
+
+def with_parity_images(angles: tuple[ArrayLike, ...]) -> tuple[jax.Array, ...]:
+    r"""``angles`` with their images under :math:`\psi + \pi/4` and :math:`-\cos\iota`.
+
+    Each of the four arrays grows from ``(L,)`` to ``(4 L,)``.
+    """
+    right_ascension, declination, polarization_angle, cos_inclination = map(
+        jnp.asarray, angles
     )
     rotation = jnp.array([0.0, 0.25 * jnp.pi, 0.0, 0.25 * jnp.pi])[:, None]
     reflection = jnp.array([1.0, 1.0, -1.0, -1.0])[:, None]
@@ -146,36 +170,60 @@ def parity_symmetric_angles(key: jax.Array, num_draws: int) -> tuple[jax.Array, 
     )
 
 
-def response_moment(draws: jax.Array) -> jax.Array:
-    """The second moment of per-pair response draws ``(L, P, F)``, ``(P, F, P, F)``."""
-    flat = jnp.reshape(draws, (draws.shape[0], -1))
-    moment = flat.T @ flat / draws.shape[0]
-    return jnp.reshape(moment, (*draws.shape[1:], *draws.shape[1:]))
+def stokes_moments(
+    frequencies: np.ndarray, detectors: tuple, angles: tuple[np.ndarray, ...]
+) -> dict[str, jax.Array]:
+    """Each Stokes term's response moment over ``angles`` and their parity images.
 
+    Every pair's per-source response, normalized to the isotropic ORF on
+    average, accumulated over chunks of ``angles``; ``(P, F, P, F)`` per term
+    of :data:`STOKES_TERMS`.
+    """
+    masks = jnp.asarray(np.stack(list(STOKES_TERMS.values()), axis=1))
+    pairs = [
+        (first, second)
+        for first in range(len(detectors))
+        for second in range(first + 1, len(detectors))
+    ]
 
-def term_response(
-    frequencies: np.ndarray, detectors: tuple, angles: tuple, mask: np.ndarray
-) -> jax.Array:
-    """Every pair's per-source response from the Stokes components ``mask``, ``(L, P, F)``."""
-    right_ascension, declination, polarization_angle, cos_inclination = angles
-    stokes = (quadrupolar_stokes_factors(cos_inclination) * mask[:, None])[..., None]
-    return jnp.stack(
-        [
-            stokes_cross_power(
-                frequencies,
-                detectors[first],
-                detectors[second],
-                right_ascension,
-                declination,
-                polarization_angle,
-                stokes,
-            )
-            / _ISOTROPIC_PAIR_RESPONSE
-            for first in range(len(detectors))
-            for second in range(first + 1, len(detectors))
-        ],
-        axis=-2,
+    @jax.jit
+    def chunk_moment(chunk: tuple[jax.Array, ...]) -> jax.Array:
+        right_ascension, declination, polarization_angle, cos_inclination = (
+            with_parity_images(chunk)
+        )
+        # (4, T, L, 1): every term's Stokes vector, broadcast over frequency.
+        stokes = (
+            quadrupolar_stokes_factors(cos_inclination)[:, None, :] * masks[:, :, None]
+        )[..., None]
+        draws = jnp.stack(
+            [
+                stokes_cross_power(
+                    frequencies,
+                    detectors[first],
+                    detectors[second],
+                    right_ascension,
+                    declination,
+                    polarization_angle,
+                    stokes,
+                )
+                for first, second in pairs
+            ],
+            axis=-2,
+        )
+        flat = jnp.reshape(draws, (*draws.shape[:2], -1))
+        return jnp.einsum("tli,tlj->tij", flat, flat)
+
+    num_angles = angles[0].shape[0]
+    total = sum(
+        chunk_moment(tuple(values[start : start + RESPONSE_CHUNK] for values in angles))
+        for start in range(0, num_angles, RESPONSE_CHUNK)
     )
+    shape = (len(pairs), len(frequencies))
+    moments = total / (4 * num_angles * _ISOTROPIC_PAIR_RESPONSE**2)
+    return {
+        term: jnp.reshape(moments[index], shape * 2)
+        for index, term in enumerate(STOKES_TERMS)
+    }
 
 
 def covariance_terms(
@@ -201,6 +249,48 @@ def covariance_terms(
         "intensity": connected["intensity"] - count,
         "linear": connected["linear"],
         "circular": connected["circular"],
+    }
+
+
+def budget_row(
+    prediction: Prediction,
+    network: Callable[[ArrayLike | None], Network],
+    moments: dict[str, jax.Array],
+    num_sources: float,
+) -> dict[str, float]:
+    """One network's budget, template comparison and shape correction.
+
+    ``network`` builds the network with a given response moment, and
+    ``moments`` holds each Stokes term's response moment.
+    """
+    mean, covariances = covariance_terms(
+        prediction,
+        {term: network(moment) for term, moment in moments.items()},
+        num_sources,
+    )
+    budget = amplitude_variance_budget(mean, covariances)
+    variance = float(sum(budget.values()))
+
+    # The detector-noise template, for comparison.
+    full = network(sum(moments.values()))
+    template, squared_snr = amplitude_template(prediction, full)
+    template = template / squared_snr
+    template_variance = 1.0 / float(squared_snr) + float(
+        shot_noise_variance(prediction, full)
+    )
+    return {
+        "sigma_x": float(np.sqrt(variance)),
+        **{
+            f"share_{term}": float(budget[term]) / variance for term in COVARIANCE_TERMS
+        },
+        "rho": float(np.sqrt(squared_snr)),
+        "sigma_x_template": float(np.sqrt(template_variance)),
+        "delta": float(shape_correction(prediction, full)),
+        **{
+            f"template_share_{term}": float(template @ covariances[term] @ template)
+            / template_variance
+            for term in COVARIANCE_TERMS
+        },
     }
 
 
@@ -288,7 +378,7 @@ def main() -> None:
     num_sources = float(prediction.extras["total_merger_rate"]) * float(
         model.observation_seconds
     )
-    angles = parity_symmetric_angles(jax.random.key(RESPONSE_SEED), RESPONSE_DRAWS)
+    nets = [sobol_angles(seed, RESPONSE_EXPONENT) for seed in range(RESPONSE_SCRAMBLES)]
 
     rows = []
     for name, label in DETECTOR_NETWORKS:
@@ -303,51 +393,24 @@ def main() -> None:
                 response_moment=moment,
             )
 
-        moments = {
-            term: response_moment(term_response(frequencies, detectors, angles, mask))
-            for term, mask in STOKES_TERMS.items()
-        }
-        full_moment = response_moment(
-            term_response(frequencies, detectors, angles, np.ones(4))
+        scrambles = pd.DataFrame(
+            [
+                budget_row(
+                    prediction,
+                    network,
+                    stokes_moments(frequencies, detectors, angles),
+                    num_sources,
+                )
+                for angles in nets
+            ]
         )
-        # The Stokes cross terms cancel between parity images.
-        closure = float(
-            jnp.max(jnp.abs(sum(moments.values()) - full_moment))
-            / jnp.max(jnp.abs(full_moment))
-        )
-        mean, covariances = covariance_terms(
-            prediction,
-            {term: network(moment) for term, moment in moments.items()},
-            num_sources,
-        )
-        budget = amplitude_variance_budget(mean, covariances)
-        variance = float(sum(budget.values()))
-
-        # The detector-noise template, for comparison.
-        full = network(full_moment)
-        template, squared_snr = amplitude_template(prediction, full)
-        template = template / squared_snr
-        shot = float(shot_noise_variance(prediction, full))
+        shares = [f"share_{term}" for term in COVARIANCE_TERMS]
+        error = scrambles[shares].std(ddof=1) / np.sqrt(RESPONSE_SCRAMBLES)
         rows.append(
             {
                 "network": label,
-                "sigma_x": np.sqrt(variance),
-                **{
-                    f"share_{term}": float(budget[term]) / variance
-                    for term in COVARIANCE_TERMS
-                },
-                "rho": float(np.sqrt(squared_snr)),
-                "sigma_shot": np.sqrt(shot),
-                "sigma_x_template": np.sqrt(1.0 / squared_snr + shot),
-                "delta": float(shape_correction(prediction, full)),
-                **{
-                    f"template_share_{term}": float(
-                        template @ covariances[term] @ template
-                    )
-                    / (1.0 / float(squared_snr) + shot)
-                    for term in COVARIANCE_TERMS
-                },
-                "stokes_closure": closure,
+                **scrambles.mean().to_dict(),
+                **{f"{column}_error": value for column, value in error.items()},
                 "num_sources": num_sources,
             }
         )

@@ -89,7 +89,7 @@ $\mathbf w^T\Sigma^X\mathbf w / {\rm Var}[\hat x]$:
   estimator that is actually used.
 
 On the fiducial data the shares close to $10^{-15}$. The smallest eigenvalue of
-$\Sigma^I$ is $-10^{-17}$ of its largest, which is zero to round-off.
+$\Sigma^I$ is at most $2\times10^{-16}$ of its largest in magnitude, which is zero to round-off.
 
 ### The same shares as derivatives
 
@@ -144,29 +144,32 @@ circ depend on the method.
 ## Numbers
 
 The fiducials are those of draw `fiducial/41-0`, with $N = 7.26\times10^5$
-($z \ge 0.35$) and $T = 1$ yr. The response moments come from 8192 isotropic
-draws, each with its three parity images. Shares are in percent.
+($z \ge 0.35$) and $T = 1$ yr. Each response moment is averaged over four
+scramblings of a $2^{15}$-point Sobol net, each point entering with its three
+parity images (see [Angle integration](#angle-integration)). The standard error of
+every projected share is at most 0.004 percentage points. Shares are in percent.
+The sequential and Shapley rows use one scrambling.
 
 | network | method | $\sigma_x/x$ | $\Sigma^g$ | count | $I$ | lin | circ |
 |---|---|---|---|---|---|---|---|
-| ET-Δ | projected (adopted) | 0.769% | 88.6 | 2.3 | 9.0 | 0.0 | 0.0 |
-| | template | 0.769% | 88.6 | 2.3 | 9.0 | 0.0 | 0.0 |
-| ET-Δ + CE | projected | 0.643% | 80.8 | 3.3 | 13.0 | 0.1 | 2.8 |
-| | template | 0.646% | 79.4 | 3.3 | 13.4 | 0.1 | 3.8 |
-| | sequential, order of the table | | 80.1 | 3.3 | 13.3 | 0.1 | 3.2 |
-| | Shapley, $\Sigma^g$ first | | 80.1 | 3.3 | 13.2 | 0.1 | 3.3 |
-| ET-2L-par | projected | 0.379% | 50.5 | 9.6 | 39.2 | 0.7 | 0.0 |
-| | template | 0.379% | 50.4 | 9.6 | 39.3 | 0.7 | 0.0 |
-| ET-2L-par + CE | projected | 0.368% | 46.8 | 10.2 | 41.2 | 0.7 | 1.1 |
-| | template | 0.372% | 44.8 | 10.0 | 41.7 | 0.8 | 2.8 |
-| | sequential, order of the table | | 45.7 | 10.2 | 42.0 | 0.8 | 1.4 |
-| | Shapley, $\Sigma^g$ first | | 45.7 | 10.2 | 41.7 | 0.8 | 1.7 |
-| ET-2L-mis | projected | 3.156% | 94.3 | 0.1 | 2.3 | 1.3 | 1.9 |
-| | template | 3.156% | 94.3 | 0.1 | 2.3 | 1.3 | 2.0 |
-| ET-2L-mis + CE | projected | 0.961% | 78.4 | 1.5 | 10.6 | 0.4 | 9.1 |
-| | template | 0.969% | 75.7 | 1.5 | 11.4 | 0.4 | 11.0 |
-| | sequential, order of the table | | 77.0 | 1.5 | 11.2 | 0.4 | 9.8 |
-| | Shapley, $\Sigma^g$ first | | 77.0 | 1.5 | 11.0 | 0.4 | 10.1 |
+| ET-Δ | projected (adopted) | 0.769% | 88.8 | 2.3 | 8.9 | 0.0 | 0.0 |
+| | template | 0.769% | 88.8 | 2.3 | 8.9 | 0.0 | 0.0 |
+| ET-Δ + CE | projected | 0.644% | 80.7 | 3.3 | 13.1 | 0.1 | 2.9 |
+| | template | 0.647% | 79.2 | 3.3 | 13.4 | 0.1 | 4.0 |
+| | sequential, order of the table | | 79.9 | 3.3 | 13.4 | 0.1 | 3.3 |
+| | Shapley, $\Sigma^g$ first | | 79.9 | 3.3 | 13.3 | 0.1 | 3.4 |
+| ET-2L-par | projected | 0.377% | 50.9 | 9.7 | 38.7 | 0.7 | 0.0 |
+| | template | 0.377% | 50.8 | 9.7 | 38.8 | 0.7 | 0.0 |
+| ET-2L-par + CE | projected | 0.367% | 47.2 | 10.2 | 40.7 | 0.7 | 1.1 |
+| | template | 0.371% | 45.0 | 10.0 | 41.3 | 0.8 | 2.9 |
+| | sequential, order of the table | | 46.0 | 10.2 | 41.6 | 0.8 | 1.5 |
+| | Shapley, $\Sigma^g$ first | | 46.0 | 10.2 | 41.3 | 0.8 | 1.8 |
+| ET-2L-mis | projected | 3.157% | 94.3 | 0.1 | 2.4 | 1.3 | 2.0 |
+| | template | 3.158% | 94.2 | 0.1 | 2.4 | 1.3 | 2.1 |
+| ET-2L-mis + CE | projected | 0.965% | 77.8 | 1.5 | 10.8 | 0.4 | 9.6 |
+| | template | 0.974% | 74.9 | 1.5 | 11.6 | 0.4 | 11.6 |
+| | sequential, order of the table | | 76.3 | 1.5 | 11.4 | 0.4 | 10.4 |
+| | Shapley, $\Sigma^g$ first | | 76.3 | 1.5 | 11.2 | 0.4 | 10.6 |
 
 The template shares are the template estimator's own budget, normalized to its
 own variance $\rho^{-2} + \sigma_{\rm shot}^2$. For each network, the shape
@@ -175,28 +178,37 @@ $\delta/(1 + \rho^2\sigma^2_{\rm shot} - \delta)$ are:
 
 | network | $\delta$ | excess |
 |---|---|---|
-| ET-Δ | $6\times10^{-7}$ | $5\times10^{-7}$ |
-| ET-Δ + CE | 0.011 | 0.9% |
-| ET-2L-par | 0.0011 | 0.06% |
-| ET-2L-par + CE | 0.043 | 2.0% |
-| ET-2L-mis | 0.0005 | 0.04% |
-| ET-2L-mis + CE | 0.023 | 1.8% |
+| ET-Δ | $< 10^{-4}$ | $< 10^{-4}$ |
+| ET-Δ + CE | 0.012 | 0.9% |
+| ET-2L-par | 0.0009 | 0.05% |
+| ET-2L-par + CE | 0.045 | 2.1% |
+| ET-2L-mis | 0.0005 | 0.05% |
+| ET-2L-mis + CE | 0.024 | 1.8% |
 
 The weights matter only where $\delta$ is not small. That happens for the networks
 with a CE pair, whose circular term has a spectral shape the full-covariance
 weights can partly project out. For co-located ET-Δ the circular response
 vanishes and $\delta \approx 0$. Under the projected budget, circular
-polarization's share drops from 11.0% to 9.1% for ET-2L-mis + CE, from 3.8% to
-2.8% for ET-Δ + CE, and from 2.8% to 1.1% for ET-2L-par + CE. Detector noise's
+polarization's share drops from 11.6% to 9.6% for ET-2L-mis + CE, from 4.0% to
+2.9% for ET-Δ + CE, and from 2.9% to 1.1% for ET-2L-par + CE. Detector noise's
 share rises accordingly.
 
-## Monte Carlo
+## Angle integration
 
-The response moments $R^X$ are averages over draws of direction, $\psi$ and
-$\cos\iota$. Every draw enters together with its images under $\psi + \pi/4$ and
-$-\cos\iota$. The Stokes cross terms $\langle\mathbf y^X\mathbf y^{Y\,T}\rangle$
-then cancel draw by draw, and $R^I + R^{\rm lin} + R^{\rm circ}$ equals the moment
-of the full response to round-off. The script records this as `stokes_closure`.
-Without the images, the cross terms are Monte Carlo noise of order
-$L^{-1/2}$. In the previous version of the script they left the Stokes shares
-summing to $1 \pm 0.014$.
+The response moments $R^X$ are integrals over direction, $\psi$ and $\cos\iota$.
+
+- **Parity images.** Every angle point enters together with its images under
+  $\psi + \pi/4$ and $-\cos\iota$. The Stokes cross terms
+  $\langle\mathbf y^X\mathbf y^{Y\,T}\rangle$ then cancel point by point, and
+  $R^I + R^{\rm lin} + R^{\rm circ}$ equals the moment of the full response to
+  $10^{-15}$. Without the images, the cross terms are integration noise. In the
+  previous version of the script they left the Stokes shares summing to
+  $1 \pm 0.014$.
+- **Sobol points.** The points are scrambled Sobol nets rather than pseudo-random
+  draws. The integrand is smooth in all four angles: the phase across the longest
+  ET-CE baseline at 200 Hz is a few cycles. So quasi-Monte Carlo converges close to
+  $1/L$ rather than $1/\sqrt L$. Across four scramblings at $2^{15}$ points, the
+  shares scatter by at most 0.008 percentage points. With $2^{13}$ and $2^{15}$
+  pseudo-random draws they scatter by up to 0.48 and 0.26 points. The first draft of this
+  table used $2^{13}$ pseudo-random draws, and its circular share for ET-2L-mis +
+  CE was 9.1% against the converged 9.6%.
