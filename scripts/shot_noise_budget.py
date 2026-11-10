@@ -1,22 +1,43 @@
-"""The shot-noise floor of each network, split by factor and by Stokes term.
+"""The variance budget of each network's amplitude estimator, split by covariance term.
 
-The paper writes the floor of the stacked per-pair data as three factors,
-:math:`\\sigma_{\\rm shot}^2 \\simeq N^{-1} \\langle Q_{\\rm int}^2 \\rangle /
-\\langle Q_{\\rm int} \\rangle^2 \\, \\langle \\bar r^2 \\rangle`, and the response
-moment as intensity, linear and circular terms (eq. ``response-moment-main``).
-This script evaluates both per network at the fiducials, on the grid
-notebook's reference catalog and the fiducial ensemble's detector noise, both
-written by ``Snakefile``:
+The paper's amplitude estimator weights the stacked per-pair data with the
+total covariance, :math:`\\hat x = \\boldsymbol\\mu^T \\Sigma^{-1} \\mathbf d /
+(\\boldsymbol\\mu^T \\Sigma^{-1} \\boldsymbol\\mu)`, with variance
+:math:`(\\boldsymbol\\mu^T \\Sigma^{-1} \\boldsymbol\\mu)^{-1}`
+(eq. ``amplitude-relative-uncertainty``). The covariance is a sum of the
+detector noise and the four connected terms of eq.
+``connected-covariance-decomposition``,
 
-- :math:`\\sigma_{\\rm shot}` under the per-pair response, and under the
-  sky-averaged response, for which :math:`\\langle \\bar r^2 \\rangle = 355/252`;
-- the effective :math:`\\langle \\bar r^2 \\rangle =
-  355/252 \\cdot \\sigma_{\\rm shot}^2 / \\sigma_{\\rm sky}^2`, and the intrinsic
-  factor :math:`N \\sigma_{\\rm sky}^2 / (355/252)`;
-- the share of :math:`\\sigma_{\\rm shot}^2` from each Stokes term. The per-source
-  response is linear in the Stokes vector :math:`(g, s_Q, 0, s_V)`, so each
-  term's response draws use the same angles; cross terms vanish on average,
-  and the three shares sum to one up to Monte Carlo noise, which is reported.
+.. math::
+
+    \\Sigma = \\Sigma^g + \\Sigma^{\\rm count} + \\Sigma^I + \\Sigma^{\\rm lin}
+        + \\Sigma^{\\rm circ},
+
+and this script reports the share :math:`\\mathbf w^T \\Sigma^X \\mathbf w /
+{\\rm Var}[\\hat x]` of each, with the estimator's own weights :math:`\\mathbf
+w` (:func:`~astrogwb.inference.amplitude_variance_budget`). The shares sum to
+one exactly; ``docs/shot-noise-budget.md`` derives them and compares other
+attributions. Per network, at the fiducials, on the grid notebook's reference
+catalog and the fiducial ensemble's detector noise, both written by
+``Snakefile``:
+
+- :math:`\\Sigma^{\\rm count} = \\boldsymbol\\mu\\boldsymbol\\mu^T / N`, the
+  fluctuation of the event count at the mean source;
+- :math:`\\Sigma^I`, the rest of the intensity term of the response moment, the
+  spread of source powers and responses at a fixed count;
+- :math:`\\Sigma^{\\rm lin}` and :math:`\\Sigma^{\\rm circ}`, the linear and
+  circular Stokes terms. The per-source response is linear in the Stokes
+  vector :math:`(g, s_Q, 0, s_V)`, so each term's response draws use the same
+  angles. Each draw enters with its images under :math:`\\psi \\to \\psi +
+  \\pi/4`, which flips the sign of the linear response, and :math:`\\cos\\iota
+  \\to -\\cos\\iota`, which flips the circular one; the cross terms between
+  Stokes terms then cancel draw by draw, and the three response moments sum to
+  the full one to round-off.
+
+For comparison it also records the detector-noise template's
+:math:`\\rho^{-2} + \\sigma_{\\rm shot}^2` and the shape correction
+:math:`\\delta` that separates the two variances,
+:math:`{\\rm Var}[\\hat x] = \\rho^{-2} + \\sigma_{\\rm shot}^2 - \\delta/\\rho^2`.
 
     uv run --extra notebook python scripts/shot_noise_budget.py
     uv run --extra notebook python scripts/shot_noise_budget.py --tex-only
@@ -44,11 +65,14 @@ from astrogwb.config import load_config
 from astrogwb.detector.overlap import stokes_cross_power
 from astrogwb.detector.response import _isotropic_angles
 from astrogwb.importance.catalog import read_catalog
-from astrogwb.importance.spectrum import INCLINATION_SECOND_MOMENT
 from astrogwb.inference import (
     CatalogModel,
     Prediction,
     amplitude_template,
+    amplitude_variance_budget,
+    catalog_covariance,
+    expected_data,
+    shape_correction,
     shot_noise_variance,
 )
 from astrogwb.inference.gaussian import Network
@@ -58,20 +82,32 @@ from astrogwb.simulators import BackgroundArtifact
 from astrogwb.waveform import quadrupolar_stokes_factors
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
+OUTPUT = ROOT_DIR / "outputs" / "figures" / "shot_noise_budget"
 
 # Keep in sync with the configuration of notebooks/cosmology_grid_posteriors.py.
 REDSHIFT_NODES = 32
 MINIMUM_FREQUENCY, MAXIMUM_FREQUENCY = 2.0, 2048.0
 DATA_SEED = 41  # the injection ensemble draw 0
-RESPONSE_DRAWS, RESPONSE_SEED = 32_768, 0
+#: Independent angle draws; each enters with its three parity images.
+RESPONSE_DRAWS, RESPONSE_SEED = 8_192, 0
 
 #: The isotropic mean of the bracket of the per-source ORF.
 _ISOTROPIC_PAIR_RESPONSE = 4.0 / 25.0
-#: Stokes components kept by each term: intensity, linear (Q), circular (V).
-TERMS = {
+#: Stokes components kept by each term: intensity, linear (Q, U), circular (V).
+STOKES_TERMS = {
     "intensity": np.array([1.0, 0.0, 0.0, 0.0]),
     "linear": np.array([0.0, 1.0, 1.0, 0.0]),
     "circular": np.array([0.0, 0.0, 0.0, 1.0]),
+}
+#: The covariance terms in the order of eq. connected-covariance-decomposition.
+COVARIANCE_TERMS = ("detector", "count", "intensity", "linear", "circular")
+#: Their column headers in the paper's table.
+COLUMN_HEADERS = {
+    "detector": r"$\Sigma^g$",
+    "count": r"$\Sigma^{c,{\rm count}}$",
+    "intensity": r"$\Sigma^{c,I}$",
+    "linear": r"$\Sigma^{c,{\rm lin}}$",
+    "circular": r"$\Sigma^{c,{\rm circ}}$",
 }
 
 
@@ -87,6 +123,26 @@ def build_model(
         frequencies=frequencies,
         num_redshift_nodes=REDSHIFT_NODES,
         observation_time=observation_time,
+    )
+
+
+def parity_symmetric_angles(key: jax.Array, num_draws: int) -> tuple[jax.Array, ...]:
+    r"""Isotropic angles with the images under :math:`\psi + \pi/4` and :math:`-\cos\iota`.
+
+    Returns the four angle arrays of
+    :func:`~astrogwb.detector.response._isotropic_angles`, each
+    ``(4 num_draws,)``.
+    """
+    right_ascension, declination, polarization_angle, cos_inclination = (
+        _isotropic_angles(key, num_draws)
+    )
+    rotation = jnp.array([0.0, 0.25 * jnp.pi, 0.0, 0.25 * jnp.pi])[:, None]
+    reflection = jnp.array([1.0, 1.0, -1.0, -1.0])[:, None]
+    return (
+        jnp.tile(right_ascension, 4),
+        jnp.tile(declination, 4),
+        jnp.ravel(polarization_angle + rotation),
+        jnp.ravel(cos_inclination * reflection),
     )
 
 
@@ -122,80 +178,75 @@ def term_response(
     )
 
 
-OUTPUT = ROOT_DIR / "outputs" / "figures" / "shot_noise_budget"
+def covariance_terms(
+    prediction: Prediction,
+    networks: dict[str, Network],
+    num_sources: float,
+) -> tuple[jax.Array, dict[str, jax.Array]]:
+    r"""The expected data and the five covariance terms on the counted entries.
 
-
-def variance_budget(row: pd.Series) -> dict[str, float]:
-    r"""The total variance of the fractional amplitude, split into additive pieces.
-
-    :math:`\rho^{-2} + \sigma_{\rm shot}^2` with :math:`\sigma_{\rm shot}^2 =
-    N^{-1}\, \mathcal I\, \langle \bar r^2 \rangle`, the effects switched on in
-    order and each cross term given to the later one: detector noise
-    :math:`\rho^{-2}`, pure Poisson :math:`1/N`, amplitude spread
-    :math:`(\mathcal I - 1)/N`, geometric shot noise (direction, polarization
-    angle and inclination, in the intensity term)
-    :math:`\mathcal I (\langle \bar r^2 \rangle_{\mathcal I} - 1)/N`, and the
-    linear and circular Stokes terms :math:`\mathcal I \langle \bar r^2
-    \rangle_{X}/N`. The Stokes shares are rescaled to sum to one, removing
-    their Monte Carlo closure error, so the pieces sum to the total exactly.
+    ``networks`` holds one network per Stokes term, the same but for its
+    response moment. :math:`\Sigma^{\rm count}` is the part of the intensity
+    term at the mean source power and response.
     """
-    shares = np.array([row.share_intensity, row.share_linear, row.share_circular])
-    shares = shares / shares.sum()
-    scale = row.intrinsic / row.num_sources
-    return {
-        "detector": 1.0 / row.rho**2,
-        "poisson": 1.0 / row.num_sources,
-        "amplitude": (row.intrinsic - 1.0) / row.num_sources,
-        "geometric": scale * (shares[0] * row.r_bar_squared - 1.0),
-        "linear": scale * shares[1] * row.r_bar_squared,
-        "circular": scale * shares[2] * row.r_bar_squared,
+    mean = expected_data(prediction, networks["intensity"])
+    count = jnp.outer(mean, mean) / num_sources
+    connected = {
+        term: catalog_covariance(prediction, network)
+        for term, network in networks.items()
+    }
+    return mean, {
+        "detector": jnp.diag(networks["intensity"].scale ** 2),
+        "count": count,
+        "intensity": connected["intensity"] - count,
+        "linear": connected["linear"],
+        "circular": connected["circular"],
     }
 
 
 def latex_table(table: pd.DataFrame) -> str:
     """The paper's per-network variance budget table."""
-    intrinsic = float(table["intrinsic"].mean())
     num_sources = float(table["num_sources"].iloc[0])
+    columns = len(COVARIANCE_TERMS)
     lines = [
         r"\begin{table}[htpb]",
         r"\centering",
         r"\small",
         r"\setlength{\tabcolsep}{3.5pt}",
         (
-            r"\caption{Variance budget of the fractional amplitude at the fiducial "
-            r"parameters for $T=1$~year, with the response of the stacked per-pair "
-            r"data. The first column is the relative amplitude uncertainty "
-            r"$\sigma_x/x=(\rho^{-2}+\sigma_{\rm shot}^2)^{1/2}$ of "
-            r"eq.~\eqref{eq:amplitude-relative-uncertainty}. The others split its "
-            r"square, in percent: detector noise, $\rho^{-2}$; pure Poisson noise, "
-            r"$1/N$ for "
-            rf"$N\simeq{num_sources / 1e5:.1f}\times10^5$ sources; the spread of "
-            r"source amplitudes from distances and masses, $(\mathcal I-1)/N$ with "
-            r"$\mathcal I=\langle Q_{\rm int}^2\rangle/\langle Q_{\rm int}\rangle^2"
-            rf"\simeq{intrinsic:.2f}$; geometric shot noise from the direction, "
-            r"polarization angle and inclination of the sources, the intensity term "
-            r"of eq.~\eqref{eq:response-moment-main}; and the polarization leakage "
-            r"of its linear and circular terms. The effects are switched on in this "
-            r"order, and each cross term is assigned to the later effect.}"
+            r"\caption{Amplitude uncertainty and variance shares at the fiducial "
+            r"parameters for $T=1$~year. The second column gives $\sigma_x/x$ from "
+            r"eq.~\eqref{eq:amplitude-relative-uncertainty}. The remaining columns "
+            r"give the percentage of its square contributed by the detector-noise "
+            r"covariance $\Sigma^g$ and by each term of the connected covariance in "
+            r"eq.~\eqref{eq:connected-covariance-decomposition}: the variance "
+            r"$\mathbf w^\top\Sigma^X\mathbf w$ of each term projected on the "
+            r"full-covariance amplitude weights "
+            r"$\mathbf w=\Sigma^{-1}\bm\mu/(\bm\mu^\top\Sigma^{-1}\bm\mu)$, which "
+            r"sum to $(\sigma_x/x)^2$. Each share is also the fractional change "
+            r"in the variance per fractional change in its term. The expected event "
+            rf"count is $N\simeq{num_sources / 1e5:.1f}\times10^5$.}}"
         ),
         r"\label{tab:shot-noise-budget}",
-        r"\begin{tabular}{lrrrrrrr}",
+        r"\begin{tabular}{l" + "r" * (columns + 1) + "}",
         r"\toprule",
-        r"& & \multicolumn{6}{c}{Share of $(\sigma_x/x)^2$ (\%)} \\",
-        r"\cmidrule(lr){3-8}",
-        (
-            r"Detector Network & $\sigma_x/x$ & detector & Poisson "
-            r"& amplitude & geometric & linear & circular \\"
-        ),
+        rf"& & \multicolumn{{{columns}}}{{c}}{{Share of $(\sigma_x/x)^2$ (\%)}} \\",
+        rf"\cmidrule(lr){{3-{columns + 2}}}",
+        " & ".join(
+            [r"Detector Network", r"$\sigma_x/x$"]
+            + [COLUMN_HEADERS[term] for term in COVARIANCE_TERMS]
+        )
+        + r" \\",
         r"\midrule",
     ]
     for row in table.itertuples():
-        parts = variance_budget(row)
-        total = sum(parts.values())
         cells = [
             row.network,
-            f"{100 * np.sqrt(total):.2f}\\%",
-            *(f"{100 * value / total:.1f}" for value in parts.values()),
+            f"{100 * row.sigma_x:.2f}\\%",
+            *(
+                f"{100 * getattr(row, f'share_{term}'):.1f}"
+                for term in COVARIANCE_TERMS
+            ),
         ]
         lines.append(" & ".join(cells) + r" \\")
     lines += [r"\bottomrule", r"\end{tabular}", r"\end{table}"]
@@ -222,12 +273,9 @@ def main() -> None:
     args = parser.parse_args()
     if args.tex_only:
         table = pd.read_csv(OUTPUT / "shot_noise_budget.csv")
-        if "num_sources" not in table:
-            table["num_sources"] = 7.134e5  # older CSVs predate the column
         (OUTPUT / "shot_noise_budget.tex").write_text(latex_table(table))
         return
-    fiducial = load_config(ROOT_DIR / "config").fiducials
-    registry = load_config(ROOT_DIR / "config").registry
+    config = load_config(ROOT_DIR / "config")
     background = BackgroundArtifact.open(args.ensemble / f"{DATA_SEED}-0.h5")
     noise = background.noise()
     frequencies = background.frequencies
@@ -236,18 +284,17 @@ def main() -> None:
         frequencies,
         background.config.population.observation_time,
     )
-    prediction: Prediction = model.predict(fiducial)
+    prediction: Prediction = model.predict(config.fiducials)
     num_sources = float(prediction.extras["total_merger_rate"]) * float(
         model.observation_seconds
     )
-    angles = _isotropic_angles(jax.random.key(RESPONSE_SEED), RESPONSE_DRAWS)
+    angles = parity_symmetric_angles(jax.random.key(RESPONSE_SEED), RESPONSE_DRAWS)
 
     rows = []
     for name, label in DETECTOR_NETWORKS:
-        detectors = registry.build_network(name)
-        overlap = np.asarray(noise[name].pair_overlap)
+        detectors = config.registry.build_network(name)
 
-        def network(moment: ArrayLike | None = None, name=name) -> Network:
+        def network(moment: ArrayLike | None = None, name: str = name) -> Network:
             return pair_network(
                 frequencies,
                 noise[name],
@@ -256,36 +303,51 @@ def main() -> None:
                 response_moment=moment,
             )
 
-        def relative_variance(moment: ArrayLike) -> float:
-            return float(shot_noise_variance(prediction, network(moment)))
-
-        # The sky-averaged response: the inclination scatter alone, 355/252.
-        sky = relative_variance(
-            INCLINATION_SECOND_MOMENT * np.multiply.outer(overlap, overlap)
-        )
-        terms = {
-            term: relative_variance(
-                response_moment(term_response(frequencies, detectors, angles, mask))
-            )
-            for term, mask in TERMS.items()
+        moments = {
+            term: response_moment(term_response(frequencies, detectors, angles, mask))
+            for term, mask in STOKES_TERMS.items()
         }
-        total = relative_variance(
-            response_moment(term_response(frequencies, detectors, angles, np.ones(4)))
+        full_moment = response_moment(
+            term_response(frequencies, detectors, angles, np.ones(4))
         )
-        _, squared_snr = amplitude_template(prediction, network())
-        rho = float(np.sqrt(squared_snr))
+        # The Stokes cross terms cancel between parity images.
+        closure = float(
+            jnp.max(jnp.abs(sum(moments.values()) - full_moment))
+            / jnp.max(jnp.abs(full_moment))
+        )
+        mean, covariances = covariance_terms(
+            prediction,
+            {term: network(moment) for term, moment in moments.items()},
+            num_sources,
+        )
+        budget = amplitude_variance_budget(mean, covariances)
+        variance = float(sum(budget.values()))
+
+        # The detector-noise template, for comparison.
+        full = network(full_moment)
+        template, squared_snr = amplitude_template(prediction, full)
+        template = template / squared_snr
+        shot = float(shot_noise_variance(prediction, full))
         rows.append(
             {
                 "network": label,
-                "sigma_shot": np.sqrt(total),
-                "sigma_sky": np.sqrt(sky),
-                "sigma_shot_sqrt_n": np.sqrt(total * num_sources),
-                "r_bar_squared": INCLINATION_SECOND_MOMENT * total / sky,
-                "intrinsic": num_sources * sky / INCLINATION_SECOND_MOMENT,
-                **{f"share_{term}": value / total for term, value in terms.items()},
-                "share_closure": sum(terms.values()) / total,
-                "rho": rho,
-                "rho_sigma_shot": rho * np.sqrt(total),
+                "sigma_x": np.sqrt(variance),
+                **{
+                    f"share_{term}": float(budget[term]) / variance
+                    for term in COVARIANCE_TERMS
+                },
+                "rho": float(np.sqrt(squared_snr)),
+                "sigma_shot": np.sqrt(shot),
+                "sigma_x_template": np.sqrt(1.0 / squared_snr + shot),
+                "delta": float(shape_correction(prediction, full)),
+                **{
+                    f"template_share_{term}": float(
+                        template @ covariances[term] @ template
+                    )
+                    / (1.0 / float(squared_snr) + shot)
+                    for term in COVARIANCE_TERMS
+                },
+                "stokes_closure": closure,
                 "num_sources": num_sources,
             }
         )

@@ -12,12 +12,13 @@ With the detector noise :math:`\Sigma` and the expected data
 
     \sigma_{\rm shot}^2 = \frac{\mathbf c^T K \mathbf c}{\rho^4}.
 
-The paper's App. ``fisher-amplitude`` whitens with :math:`\Sigma^{-1/2}`:
+Whitening with :math:`\Sigma^{-1/2}` (``docs/shot-noise-budget.md``) gives
 :math:`\tilde K = \Sigma^{-1/2} K \Sigma^{-1/2}`, the mean direction
 :math:`\mathbf u = \Sigma^{-1/2}\boldsymbol\mu/\rho`, the restriction
 :math:`\tilde K_\perp` of :math:`\tilde K` orthogonal to :math:`\mathbf u`,
 and the cross component :math:`\mathbf v = (1 - \mathbf u\mathbf u^T)\tilde
-K\mathbf u`. The amplitude information is reduced from its template value by
+K\mathbf u`. The full-covariance weights recover the amplitude information
+:math:`\delta` that the template loses to the spectral shape:
 
 .. math::
 
@@ -25,7 +26,10 @@ K\mathbf u`. The amplitude information is reduced from its template value by
     \boldsymbol\mu^T C^{-1} \boldsymbol\mu
         = \frac{\rho^2}{1 + \rho^2\sigma_{\rm shot}^2 - \delta}.
 
-Every function takes a :class:`~astrogwb.inference.model.Prediction` and its
+The weights :math:`C^{-1}\boldsymbol\mu` attribute the variance of the
+full-covariance estimator to the terms of :math:`C`
+(:func:`amplitude_variance_budget`). The other functions take a
+:class:`~astrogwb.inference.model.Prediction` and its
 :class:`~astrogwb.inference.gaussian.Network`, so one prediction serves every
 network; :func:`amplitude_cumulants` reaches into the catalog itself.
 """
@@ -37,6 +41,7 @@ from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
+import jax.scipy.linalg
 from jax.typing import ArrayLike
 
 from .gaussian import Network, catalog_covariance, expected_data
@@ -46,6 +51,7 @@ __all__ = [
     "AmplitudeCumulants",
     "amplitude_cumulants",
     "amplitude_template",
+    "amplitude_variance_budget",
     "shape_correction",
     "shot_noise_variance",
     "whitened_catalog_covariance",
@@ -136,6 +142,42 @@ def shape_correction(prediction: Prediction, network: Network) -> jax.Array:
     cross = projection @ whitened @ direction
     system = jnp.eye(direction.shape[0]) + projection @ whitened @ projection
     return cross @ jnp.linalg.solve(system, cross)
+
+
+def amplitude_variance_budget(
+    mean: ArrayLike, covariances: Mapping[str, ArrayLike]
+) -> dict[str, jax.Array]:
+    r"""Each covariance term's variance under the full-covariance amplitude weights.
+
+    With :math:`C = \sum_X C_X` and the generalized least-squares weights
+    :math:`\mathbf w = C^{-1}\boldsymbol\mu / (\boldsymbol\mu^T C^{-1}
+    \boldsymbol\mu)` of the amplitude estimator :math:`\hat a = \mathbf w^T
+    \mathbf d`, term :math:`X` contributes :math:`\mathbf w^T C_X \mathbf w`.
+    The contributions sum to :math:`{\rm Var}[\hat a] = (\boldsymbol\mu^T
+    C^{-1}\boldsymbol\mu)^{-1}`, and each equals the derivative of that
+    variance with respect to a scale factor on :math:`C_X`, at unit scale
+    (``docs/shot-noise-budget.md``).
+
+    Parameters
+    ----------
+    mean
+        The expected data :math:`\boldsymbol\mu`, ``(D,)``.
+    covariances
+        The terms :math:`C_X`, each ``(D, D)``, whose sum is positive definite.
+
+    Returns
+    -------
+    dict[str, jax.Array]
+        :math:`\mathbf w^T C_X \mathbf w` under each key of ``covariances``,
+        each ``()``.
+    """
+    mean = jnp.asarray(mean)
+    terms = {name: jnp.asarray(term) for name, term in covariances.items()}
+    total = sum(terms.values(), jnp.zeros((mean.shape[0],) * 2))
+    factor = jax.scipy.linalg.cho_factor(total, lower=True)
+    projector = jax.scipy.linalg.cho_solve(factor, mean)
+    weights = projector / (projector @ mean)
+    return {name: weights @ term @ weights for name, term in terms.items()}
 
 
 class AmplitudeCumulants(NamedTuple):

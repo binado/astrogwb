@@ -34,6 +34,8 @@ from astrogwb.inference import (
     Prediction,
     amplitude_cumulants,
     amplitude_template,
+    amplitude_variance_budget,
+    catalog_covariance,
     dense_fisher_matrix,
     fisher_matrix_per_bin,
     grid_log_likelihood,
@@ -414,6 +416,60 @@ def test_shape_correction_is_bounded_by_the_largest_orthogonal_eigenvalue(
     delta = float(shape_correction(prediction, network))
 
     assert 0.0 <= delta <= shot * largest / (1.0 + largest) * (1.0 + 1e-12)
+
+
+@pytest.fixture(scope="module")
+def covariance_terms(prediction: Prediction, network: Network) -> dict[str, jax.Array]:
+    """Detector noise, a rank-one term along the mean and the catalog covariance."""
+    mean = network.pair_overlap * prediction.mean[network.bins]
+    return {
+        "detector": jnp.diag(network.scale**2),
+        "count": jnp.outer(mean, mean) / 1e3,
+        "catalog": catalog_covariance(prediction, network),
+    }
+
+
+def test_amplitude_variance_budget_sums_to_the_inverse_amplitude_information(
+    prediction: Prediction, network: Network, covariance_terms: dict[str, jax.Array]
+) -> None:
+    mean = network.pair_overlap * prediction.mean[network.bins]
+    total = sum(covariance_terms.values())
+    cholesky = jnp.linalg.cholesky(total)
+    whitened = solve_triangular(cholesky, mean, lower=True)
+    budget = amplitude_variance_budget(mean, covariance_terms)
+
+    assert float(sum(budget.values())) == pytest.approx(
+        1.0 / float(whitened @ whitened), rel=1e-9
+    )
+
+
+def test_amplitude_variance_budget_is_the_gradient_in_each_term_scale(
+    prediction: Prediction, network: Network, covariance_terms: dict[str, jax.Array]
+) -> None:
+    mean = network.pair_overlap * prediction.mean[network.bins]
+    terms = list(covariance_terms.values())
+
+    def variance(scales: jax.Array) -> jax.Array:
+        total = sum(scale * term for scale, term in zip(scales, terms, strict=True))
+        return 1.0 / (mean @ jnp.linalg.solve(total, mean))
+
+    gradient = jax.grad(variance)(jnp.ones(len(terms)))
+    budget = amplitude_variance_budget(mean, covariance_terms)
+
+    np.testing.assert_allclose(
+        np.array([float(value) for value in budget.values()]),
+        np.asarray(gradient),
+        rtol=1e-9,
+    )
+
+
+def test_amplitude_variance_budget_of_a_term_along_the_mean_is_its_inverse_count(
+    prediction: Prediction, network: Network, covariance_terms: dict[str, jax.Array]
+) -> None:
+    mean = network.pair_overlap * prediction.mean[network.bins]
+    budget = amplitude_variance_budget(mean, covariance_terms)
+
+    assert float(budget["count"]) == pytest.approx(1e-3, rel=1e-9)
 
 
 def test_orthogonal_whitened_covariance_annihilates_the_mean_direction(
