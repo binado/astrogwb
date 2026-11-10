@@ -48,8 +48,8 @@ mass_width = 1.5
 [priors]
 H0 = { dist = "Uniform", kwargs = { low = 20.0, high = 140.0 } }
 Omega_m = { dist = "Normal", kwargs = { loc = 0.3096, scale = 0.006 } }
-xi_0 = { dist = "Uniform", kwargs = { low = 0.5, high = 5.0 } }
-xi_n = { dist = "Uniform", kwargs = { low = 0.3, high = 3.0 } }
+xi_0 = { dist = "Uniform", kwargs = { low = 0.5, high = 2.0 } }
+xi_n = { dist = "Uniform", kwargs = { low = 0.3, high = 5.0 } }
 gamma = { dist = "Uniform", kwargs = { low = 0.0, high = 10.0 } }
 kappa = { dist = "Uniform", kwargs = { low = 0.0, high = 10.0 } }
 z_peak = { dist = "Uniform", kwargs = { low = 0.0, high = 2.5 } }

@@ -145,7 +145,7 @@ def _():
         "H0": (60.0, 76.0),
         "Omega_m": (0.2856, 0.3336),
         "xi_0": (0.94, 1.06),
-        "xi_n": (0.3, 3.0),
+        "xi_n": (0.3, 5.0),
     }
 
     ladder_path = ROOT_DIR / "outputs" / "catalogs" / "reference-ladder.h5"

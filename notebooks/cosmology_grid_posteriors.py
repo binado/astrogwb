@@ -175,7 +175,7 @@ def _():
     h0_omega_window, h0_omega_size = (59.0, 76.5), 351  # H0 in the 2D problem
     omega_m_window, omega_m_size = (0.2856, 0.3336), 41  # +/- 4 prior sigma
     xi_0_window, xi_0_size = (0.86, 1.14), 281
-    xi_n_window, xi_n_size = (0.3, 3.0), 55  # prior range
+    xi_n_window, xi_n_size = (0.3, 5.0), 95  # prior range, spacing 0.05
 
     # Likelihood variants evaluated per problem, and the one every figure
     # shows: "dense" is the paper's likelihood, the dense catalog covariance of
