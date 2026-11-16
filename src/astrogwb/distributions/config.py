@@ -1,6 +1,6 @@
 """Serializable configuration for constructing NumPyro distributions.
 
-The wire format, as in every paper-config ``[priors]`` entry::
+The wire format, as in the experiment's ``[priors]`` entries::
 
     {"dist": "<numpyro.distributions class name>", "kwargs": {...}}
 
