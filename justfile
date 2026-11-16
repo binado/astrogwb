@@ -17,6 +17,11 @@ test-core:
 
 test: test-core
 
+# The core suite on the lowest version each direct dependency allows. Re-resolves
+# instead of reading uv.lock (no --frozen), so it rewrites the lock: run it in CI.
+test-floor:
+    uv run --isolated --resolution lowest-direct --no-default-groups --extra cli --group test python -m pytest -m "not integration"
+
 test-integration:
     uv run --frozen --isolated --no-default-groups --extra cli --extra simulation --group test python -m pytest -m integration
 

@@ -57,6 +57,22 @@ jobs:
       - uses: extractions/setup-just@v4
       - run: just test-core
 
+  test-floor:
+    name: Core tests at dependency floors (Python 3.12)
+    # Informational until the declared floors are known to hold: a failure here
+    # is a floor that is too low, not a broken change.
+    continue-on-error: true
+    needs: [check]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - uses: extractions/setup-just@v4
+      - run: just test-floor
+
   test-parity:
     name: Parity tests (Python 3.12)
     needs: [check]
