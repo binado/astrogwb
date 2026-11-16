@@ -25,7 +25,7 @@ dependencies = [
     "ripplegw>=0.3.1",
     "jax>=0.10.2; sys_platform == 'linux'",
     "jax[cpu]>=0.11.0; sys_platform != 'linux'",
-    "numpy>=2.5.1",
+    "numpy>=2.1",
     "numpyro>=0.21.0",
     # Direct, though gwmock-noise already installs it and imports it at module
     # scope: core owns the metadata models every persisted artifact carries, so
