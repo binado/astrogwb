@@ -20,5 +20,14 @@ test: test-core
 test-integration:
     uv run --frozen --isolated --no-default-groups --extra cli --extra simulation --group test python -m pytest tests/core -m integration
 
+# Comparisons against bilby (live) and pygwb (frozen references).
+test-parity:
+    uv run --frozen --isolated --no-default-groups --group parity python -m pytest tests/parity
+
+# Rewrite tests/parity/references/pygwb.npz; pygwb runs in its own environment.
+parity-references:
+    uv run python tests/parity/references/draw_coba_events.py
+    uv run --no-project tests/parity/references/generate_pygwb.py
+
 build-core:
     uv build --no-sources

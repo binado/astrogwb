@@ -63,8 +63,15 @@ build-backend = "uv_build"
 [dependency-groups]
 # tomli-w writes the TOML inputs of the CLI tests.
 test = ["pytest>=9.0.2", "pytest-xdist>=3.8.0", "tomli-w>=1.2"]
-dev = [
+# Reference packages the parity suite (tests/parity) calls directly. pygwb is
+# not among them: it pins scipy<1.14, so its references are frozen arrays
+# written by tests/parity/references/generate_pygwb.py in its own environment.
+parity = [
     { include-group = "test" },
+    "bilby>=2.8.2",
+]
+dev = [
+    { include-group = "parity" },
     "ruff>=0.16.1",
     "ty>=0.0.69",
 ]
@@ -76,6 +83,7 @@ default-groups = ["dev"]
 include = [
     "src/**/*.py",
     "tests/core/**/*.py",
+    "tests/parity/**/*.py",
     "tests/conftest.py",
     "tests/reference_population.py",
 ]
@@ -87,7 +95,9 @@ extend-select = ["TID"]
 "astrogwb_experiment".msg = "The library must not depend on the experiment application."
 
 [tool.ty.src]
-include = ["src", "tests/core", "tests/conftest.py", "tests/reference_population.py"]
+include = ["src", "tests/core", "tests/parity", "tests/conftest.py", "tests/reference_population.py"]
+# Runs in its own environment (inline script metadata), not this one.
+exclude = ["tests/parity/references/generate_pygwb.py"]
 
 [tool.pytest.ini_options]
 addopts = "-n auto --dist loadscope"
