@@ -1,21 +1,15 @@
 data
 .idea/
 
-# Notebooks are marimo .py files; ignore any stray .ipynb export.
+# Ignore stray notebook exports and Snakemake state from local runs.
 *.ipynb
-
-# Catalogs the root notebooks build for themselves on first run. Regenerated
-# from the notebook's own configuration cell, so they are a cache, not an input.
-notebooks/*.h5
-notebooks/convergence_catalogs*/
+.snakemake/
 
 # Generated artifacts. The working directory is the repository root, so
 # outputs/ is where every catalog, spectrum, and figure lands.
 /out/
 /outputs/
 logs/
-# Snakemake state of workflow/coverage_draws.smk.
-.snakemake/
 figures/
 grids/
 
@@ -24,7 +18,6 @@ grids/
 !AGENTS.md
 !CLAUDE.md
 !docs/**/*.md
-!notebooks/README.md
 
 ## Core latex/pdflatex auxiliary files:
 *.aux
@@ -353,10 +346,4 @@ TSWLatexianTemp*
 #*Notes.bib
 .ruff_cache
 __pycache__
-# A stray local scratch `config` directory, anchored so it cannot swallow the
-# committed campaign config tree at /config/ or the astrogwb.paper.config
-# package. The unanchored form plus per-path re-includes was the old shape;
-# after the move its exceptions named directories that no longer exist, which
-# silently ignored every config/ file that was not already tracked.
-**/config/scratch/
 .DS_Store

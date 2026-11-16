@@ -7,7 +7,7 @@ one pass. Repeat --detector-config PATH to merge detector registry layers in
 argument order. For example::
 
     astrogwb simulate ensemble/41-0.h5 --ensemble fiducial \\
-        --seed 41 --index 0 --detector-config config/detectors.toml
+        --seed 41 --index 0 --detector-config path/to/detectors.toml
 
 The registry contains [detectors.<name>] definitions and [networks]
 memberships. The file carries its configuration as JSON in its ``metadata``

@@ -232,8 +232,8 @@ which remain available as building blocks.
 
 `astrogwb.simulators.network_spectra_ensemble(root, seed, n, names)` reads an
 ensemble's files and stacks each network's spectra. It never simulates;
-`Snakefile` writes the paper's ensembles (see
-`docs/coverage-draws-on-slurm.md`).
+the experiment repository's `Snakefile` writes the paper's ensembles (see
+[the experiment cluster guide](https://github.com/binado/experiments-astrogwb/blob/main/docs/coverage-draws-on-slurm.md)).
 
 ## Command line
 
@@ -242,11 +242,11 @@ one draw of a named ensemble:
 
 ```bash
 astrogwb simulate root/41-0.h5 --ensemble fiducial \
-    --detector-config config/detectors.toml --seed 41 --index 0
+    --detector-config path/to/detectors.toml --seed 41 --index 0
 
 # With sampled detector noise, in segments of 2048 s
 astrogwb simulate root/41-0.h5 --ensemble fiducial \
-    --detector-config config/detectors.toml --seed 41 --segment-duration 2048
+    --detector-config path/to/detectors.toml --seed 41 --segment-duration 2048
 ```
 
 `--ensemble NAME` reads `[ensembles.NAME]` from the shared config merged by
@@ -271,7 +271,7 @@ mixed.
 | `astrogwb.simulators.PopulationMetadata` | `astrogwb.simulators.RealizationMetadata` |
 | `astrogwb.simulators.polarization_power` | `astrogwb.importance.catalog` |
 | `astrogwb.simulators.core.{write,load,content_key}` | `astrogwb.utils.io` |
-| `spectra_ensemble`, `network_spectra_ensemble(EnsembleRecord, ...)` | `Snakefile` writes the ensemble; `network_spectra_ensemble(root, seed, n, names)` reads it |
+| `spectra_ensemble`, `network_spectra_ensemble(EnsembleRecord, ...)` | the experiment repository's `Snakefile` writes the ensemble; `network_spectra_ensemble(root, seed, n, names)` reads it |
 | `scripts/simulate_spectra.py`, `config/simulations/spectrum/` | `astrogwb simulate` |
 | one artifact directory per stage (`metadata.toml` + `data.h5`, `[parent]` references), then realization directories (`metadata.toml` + `source_parameters.h5` + `background.h5`) | one HDF5 file per draw carrying its `SimulationConfig` and version |
 | `PopulationArtifact.write(dir)` / `.open(path)`, `Realization`, `RealizationSimulator`, `simulate_realization` | `simulate(config, key)`; no sources file |
@@ -281,7 +281,7 @@ mixed.
 | `astrogwb simulate population` / `waveforms` / `background`, then `astrogwb simulate DIRECTORY --background --keep-sources` | `astrogwb simulate OUTPUT.h5` with `--ensemble`, `--detector-config`, `--seed` |
 | per-run network metadata snapshots | core `DetectorRegistry`, supplied to simulation and readers |
 | `astrogwb.paper.ensemble.network_spectra_ensemble`, `NetworkSpectra` | `astrogwb.simulators.network_spectra_ensemble`, `NetworkSpectra` |
-| `scripts/write_ensemble_configs.py`, `paper_networks`, `ensemble_metadata` | `config/detectors.toml` and `[ensembles.<name>]` in `config/ensembles.toml`, edited by hand |
+| `scripts/write_ensemble_configs.py`, `paper_networks`, `ensemble_metadata` | `config/detectors.toml` and `[ensembles.<name>]` in `config/ensembles.toml` of the experiment repository, edited by hand |
 | ensemble caches of #389 and #390 (`<cache>/ensembles/<key>/<seed>-<i>/`) | not read; regenerate them with the workflow |
 | one background over the detector union; `BackgroundArtifact.pair_spectra(network)`, `.detectors`, `.pairs` | per-network spectra; `BackgroundArtifact.spectra[name]`, `.pairs[name]` |
 | `Realization.open(dir).background()`, `background.noise(registry)` | `BackgroundArtifact.open(file)`, `background.noise()` |

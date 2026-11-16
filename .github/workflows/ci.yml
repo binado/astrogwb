@@ -57,19 +57,6 @@ jobs:
       - uses: extractions/setup-just@v4
       - run: just test-core
 
-  test-paper:
-    name: Paper tests (Python 3.12)
-    needs: [check]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
-        with:
-          python-version: "3.12"
-          enable-cache: true
-      - uses: extractions/setup-just@v4
-      - run: just test-paper
-
   test-integration:
     name: Test integration (Python 3.12)
     # Boolean inputs only: do not compare to null — Actions coerces false == null.

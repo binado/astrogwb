@@ -8,12 +8,10 @@ repos:
 - hooks:
   - args:
     - --fix
-    exclude: ^packages/astrogwb-paper/notebooks/
     id: ruff
     types_or:
     - python
   - id: ruff-format
-    exclude: ^packages/astrogwb-paper/notebooks/
     types_or:
     - python
   repo: https://github.com/astral-sh/ruff-pre-commit

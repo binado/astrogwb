@@ -7,8 +7,6 @@ one and a pair it contains: every stage runs for real in well under a second.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 
 from astrogwb.detector.config import DetectorRegistry, load_detector_config
@@ -24,8 +22,7 @@ WAVEFORM = WaveformMetadata(
     sampling_frequency=128.0,
     frequency_resolution=10.0,
 )
-_root = Path(__file__).parents[2]
-_base = load_detector_config([_root / "config/detectors.toml"])
+_base = load_detector_config([])
 NETWORKS = DetectorRegistry(
     detectors=_base.detectors,
     networks={"triangle": ("S1", "R1", "C1"), "pair": ("S1", "C1")},

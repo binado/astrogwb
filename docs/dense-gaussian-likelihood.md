@@ -2,6 +2,8 @@
 
 Status: implemented. Supersedes the likelihood parts of the stacked-pair
 design (#382), whose per-pair data layout and simulator output are kept.
+Paper-side paths named below (`paper/posteriors.py`,
+`scripts/shot_noise_budget.py`) now live in `experiments-astrogwb`.
 
 ## Purpose
 
