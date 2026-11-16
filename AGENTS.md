@@ -3,7 +3,9 @@
 ## Layout
 
 `src/astrogwb/` contains the scientific library and CLI. Tests live in
-`tests/core/`. Paper workflows live in the separate `experiments-astrogwb` repository
+`tests/core/`; `tests/parity/` compares the library against established
+packages (bilby directly, pygwb through the frozen arrays in
+`tests/parity/references/`). Paper workflows live in the separate `experiments-astrogwb` repository
 and must not be imported by this package.
 
 ## Commands
@@ -11,6 +13,7 @@ and must not be imported by this package.
 - `uv sync --extra cli --extra simulation --group dev`
 - `just lint`, `just typecheck`, `just fmt`, `just test-core`
 - `just test-integration`, `just build-core`
+- `just test-parity`; `just parity-references` regenerates the pygwb arrays
 
 ## Code conventions and styleguide
 
