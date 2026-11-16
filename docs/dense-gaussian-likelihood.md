@@ -345,10 +345,6 @@ The paper reports quantities derived from the dense covariance. They move to
   App. `catalog-statistics`), from `compound_poisson.cumulants` and the point
   set. The saddlepoint and Gauss-Hermite densities go.
 
-`fisher.py` gains the dense Gaussian Fisher matrix with the
-$\tfrac12 {\rm Tr}[(C^{-1}\partial C)^2]$ term, which App. `fisher-amplitude`
-asks to check against the mean term.
-
 ### D8. Deleted
 
 - `ImportanceCompoundPoissonLikelihood`, `amplitude_log_density`,
@@ -376,7 +372,6 @@ inference/
     model.py         # CatalogModel, Prediction, sparse node moments
     grid.py          # grid_log_likelihood, grid_log_prior
     diagnostics.py   # sigma_shot, delta, whitened spectrum, amplitude cumulants
-    fisher.py        # + dense Fisher
 detector/response.py # + pair_response_moment
 ```
 
@@ -411,7 +406,7 @@ New modules let phase 1 land beside `likelihood.py` without name clashes; phase
 1. **Dense likelihood beside the old one.** `pair_response_moment`,
    `inference/gaussian.py`, `model.py` with the sparse power moment, `grid.py`;
    T1-T8.
-2. **Diagnostics.** `diagnostics.py`, the dense Fisher matrix; port
+2. **Diagnostics.** `diagnostics.py`; port
    `scripts/shot_noise_budget.py` and the covariance-spectrum figure.
 3. **Paper application.** `paper/posteriors.py` builds compressed `Network`s;
    the grid, coverage, Madau-Dickinson, ensemble and importance-convergence

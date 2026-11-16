@@ -25,7 +25,7 @@ dependencies = [
     "ripplegw>=0.3.1",
     "jax>=0.10.2; sys_platform == 'linux'",
     "jax[cpu]>=0.11.0; sys_platform != 'linux'",
-    "numpy>=2.5.1",
+    "numpy>=2.1",
     "numpyro>=0.21.0",
     # Direct, though gwmock-noise already installs it and imports it at module
     # scope: core owns the metadata models every persisted artifact carries, so
@@ -63,8 +63,15 @@ build-backend = "uv_build"
 [dependency-groups]
 # tomli-w writes the TOML inputs of the CLI tests.
 test = ["pytest>=9.0.2", "pytest-xdist>=3.8.0", "tomli-w>=1.2"]
-dev = [
+# Reference packages the parity suite (tests/parity) calls directly. pygwb is
+# not among them: it pins scipy<1.14, so its references are frozen arrays
+# written by tests/parity/references/generate_pygwb.py in its own environment.
+parity = [
     { include-group = "test" },
+    "bilby>=2.8.2",
+]
+dev = [
+    { include-group = "parity" },
     "ruff>=0.16.1",
     "ty>=0.0.69",
 ]
@@ -73,12 +80,7 @@ dev = [
 default-groups = ["dev"]
 
 [tool.ruff]
-include = [
-    "src/**/*.py",
-    "tests/core/**/*.py",
-    "tests/conftest.py",
-    "tests/reference_population.py",
-]
+include = ["src/**/*.py", "tests/**/*.py"]
 
 [tool.ruff.lint]
 extend-select = ["TID"]
@@ -87,11 +89,14 @@ extend-select = ["TID"]
 "astrogwb_experiment".msg = "The library must not depend on the experiment application."
 
 [tool.ty.src]
-include = ["src", "tests/core", "tests/conftest.py", "tests/reference_population.py"]
+include = ["src", "tests"]
+# Runs in its own environment (inline script metadata), not this one.
+exclude = ["tests/parity/references/generate_pygwb.py"]
 
 [tool.pytest.ini_options]
 addopts = "-n auto --dist loadscope"
-testpaths = ["tests/core"]
+# Parity needs its own environment (bilby), so it is run by `just test-parity`.
+testpaths = ["tests/test_*.py"]
 markers = [
     "integration: tests that call external libraries or services (deselect with -m 'not integration')",
 ]

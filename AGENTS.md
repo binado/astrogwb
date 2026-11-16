@@ -3,7 +3,9 @@
 ## Layout
 
 `src/astrogwb/` contains the scientific library and CLI. Tests live in
-`tests/core/`. Paper workflows live in the separate `experiments-astrogwb` repository
+`tests/`; `tests/parity/` compares the library against established
+packages (bilby directly, pygwb through the frozen arrays in
+`tests/parity/references/`). Paper workflows live in the separate `experiments-astrogwb` repository
 and must not be imported by this package.
 
 ## Commands
@@ -11,6 +13,7 @@ and must not be imported by this package.
 - `uv sync --extra cli --extra simulation --group dev`
 - `just lint`, `just typecheck`, `just fmt`, `just test-core`
 - `just test-integration`, `just build-core`
+- `just test-parity`; `just parity-references` regenerates the pygwb arrays
 
 ## Code conventions and styleguide
 
@@ -29,7 +32,7 @@ closing over arguments which may trigger many re-compilations
   formatting, snake_case functions, PascalCase classes, and uppercase constants.
 - Runtime configuration must run before the XLA *backend* is initialized. Importing JAX
   or NumPyro does not initialize it; creating an array or querying devices
-  does. `tests/core/test_cli.py` and `tests/core/test_runtime.py` assert both halves.
+  does. `tests/test_cli.py` and `tests/test_runtime.py` assert both halves.
 - Add core tests for scientific interfaces.
 - Use pytest fixtures and `pytest.mark.parametrize`
 - Avoid tests which re-implement functions
