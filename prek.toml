@@ -1,0 +1,58 @@
+# Configuration file for `prek`, a git hook framework written in Rust.
+# See https://prek.j178.dev for more information.
+#:schema https://www.schemastore.org/prek.json
+
+[[repos]]
+hooks = [
+  { id = "check-yaml" },
+  { id = "end-of-file-fixer" },
+  { id = "trailing-whitespace" }
+]
+repo = "https://github.com/pre-commit/pre-commit-hooks"
+rev = "v5.0.0"
+
+[[repos]]
+hooks = [
+  {
+    args = ["--fix"],
+    id = "ruff",
+    types_or = ["python"]
+  },
+  {
+    id = "ruff-format",
+    types_or = ["python"]
+  }
+]
+repo = "https://github.com/astral-sh/ruff-pre-commit"
+rev = "v0.16.1"
+
+[[repos]]
+repo = "https://github.com/astral-sh/uv-pre-commit"
+rev = "0.12.19"
+hooks = [
+  { id = "uv-lock" }
+]
+
+[[repos]]
+hooks = [
+  {
+    args = [
+      "--remove-empty-cells",
+      "--remove-all-notebook-metadata"
+    ],
+    id = "nb-clean"
+  }
+]
+repo = "https://github.com/srstevenson/nb-clean"
+rev = "4.0.1"
+
+[[repos]]
+hooks = [
+  { id = "commitizen" },
+  {
+    id = "commitizen-branch",
+    stages = ["pre-push"]
+  }
+]
+repo = "https://github.com/commitizen-tools/commitizen"
+rev = "v4.6.0"

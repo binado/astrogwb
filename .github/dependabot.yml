@@ -22,12 +22,3 @@ updates:
     groups:
       actions:
         patterns: ["*"]
-
-  - package-ecosystem: "pre-commit"
-    directory: "/"
-    schedule:
-      interval: "monthly"
-    open-pull-requests-limit: 5
-    groups:
-      pre-commit:
-        patterns: ["*"]
