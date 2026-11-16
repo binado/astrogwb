@@ -80,13 +80,7 @@ dev = [
 default-groups = ["dev"]
 
 [tool.ruff]
-include = [
-    "src/**/*.py",
-    "tests/core/**/*.py",
-    "tests/parity/**/*.py",
-    "tests/conftest.py",
-    "tests/reference_population.py",
-]
+include = ["src/**/*.py", "tests/**/*.py"]
 
 [tool.ruff.lint]
 extend-select = ["TID"]
@@ -95,13 +89,14 @@ extend-select = ["TID"]
 "astrogwb_experiment".msg = "The library must not depend on the experiment application."
 
 [tool.ty.src]
-include = ["src", "tests/core", "tests/parity", "tests/conftest.py", "tests/reference_population.py"]
+include = ["src", "tests"]
 # Runs in its own environment (inline script metadata), not this one.
 exclude = ["tests/parity/references/generate_pygwb.py"]
 
 [tool.pytest.ini_options]
 addopts = "-n auto --dist loadscope"
-testpaths = ["tests/core"]
+# Parity needs its own environment (bilby), so it is run by `just test-parity`.
+testpaths = ["tests/test_*.py"]
 markers = [
     "integration: tests that call external libraries or services (deselect with -m 'not integration')",
 ]
