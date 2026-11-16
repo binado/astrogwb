@@ -6,13 +6,6 @@ from .diagnostics import (
     shot_noise_variance,
     whitened_catalog_covariance,
 )
-from .fisher import (
-    DenseFisher,
-    SpectrumFn,
-    dense_fisher_matrix,
-    fisher_matrix_per_bin,
-    spectral_density_jacobian,
-)
 from .gaussian import (
     DenseGaussianLikelihood,
     Evaluation,
@@ -27,23 +20,18 @@ from .model import CatalogModel, Prediction
 __all__ = [
     "AmplitudeCumulants",
     "CatalogModel",
-    "DenseFisher",
     "DenseGaussianLikelihood",
     "Evaluation",
     "GaussianFactor",
     "Network",
     "Prediction",
-    "SpectrumFn",
     "amplitude_cumulants",
     "amplitude_template",
     "catalog_covariance",
-    "dense_fisher_matrix",
     "expected_data",
-    "fisher_matrix_per_bin",
     "grid_log_likelihood",
     "grid_log_prior",
     "shape_correction",
     "shot_noise_variance",
-    "spectral_density_jacobian",
     "whitened_catalog_covariance",
 ]

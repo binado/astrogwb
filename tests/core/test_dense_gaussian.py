@@ -34,8 +34,6 @@ from astrogwb.inference import (
     Prediction,
     amplitude_cumulants,
     amplitude_template,
-    dense_fisher_matrix,
-    fisher_matrix_per_bin,
     grid_log_likelihood,
     grid_log_prior,
     shape_correction,
@@ -453,40 +451,3 @@ def test_amplitude_cumulants_of_a_positive_template_are_right_skewed(
 
     assert float(cumulants.third_cumulant) > 0.0
     assert float(cumulants.skewness) > 0.0
-
-
-# --------------------------------------------------------------------------- #
-# The dense Fisher matrix
-# --------------------------------------------------------------------------- #
-FISHER_PARAMETERS = ("H0", "Omega_m")
-
-
-def test_dense_fisher_without_shot_noise_is_the_per_bin_fisher_sum(
-    model: CatalogModel, pair_leaves: dict[str, np.ndarray]
-) -> None:
-    """One pair of unit overlap is the combined spectrum the per-bin matrix scores."""
-    scale = pair_leaves["scale"][0]
-    network = Network.from_pairs(scale[None], np.ones((1, NUM_BINS)))
-    likelihood = DenseGaussianLikelihood(
-        model, network, jnp.zeros(NUM_BINS), shot_noise=False
-    )
-
-    fisher = dense_fisher_matrix(likelihood, OFF_FIDUCIAL, FISHER_PARAMETERS)
-    per_bin = fisher_matrix_per_bin(
-        model.spectrum, OFF_FIDUCIAL, FISHER_PARAMETERS, scale=jnp.asarray(scale)
-    )
-
-    np.testing.assert_allclose(fisher.total, per_bin.sum(axis=0), rtol=1e-10)
-    np.testing.assert_array_equal(fisher.covariance, 0.0)
-
-
-def test_dense_fisher_covariance_term_is_symmetric_positive_semidefinite(
-    likelihood: DenseGaussianLikelihood,
-) -> None:
-    covariance = np.asarray(
-        dense_fisher_matrix(likelihood, OFF_FIDUCIAL, FISHER_PARAMETERS).covariance
-    )
-
-    np.testing.assert_allclose(covariance, covariance.T, rtol=1e-12)
-    assert np.linalg.eigvalsh(covariance).min() >= -1e-12 * np.abs(covariance).max()
-    assert np.abs(covariance).max() > 0.0
