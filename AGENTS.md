@@ -2,29 +2,15 @@
 
 ## Layout
 
-One package, `astrogwb`, with the reproducibility application inside it:
-
-- `src/astrogwb/`: publishable scientific library (cosmology, detectors, GWB
-  contractions, NumPyro source populations, importance weighting, waveform intensity
-  reduction, HDF5 catalog serialization).
-- `src/astrogwb/paper/`: the reproducibility application (configuration, runtime
-  setup, plotting style).
-- `config/`, `scripts/`, `notebooks/`, `docs/`: the
-  application's committed assets, at the repository root.
-- `tests/core/` and `tests/paper/`.
+`src/astrogwb/` contains the scientific library and CLI. Tests live in
+`tests/core/`. Paper workflows live in the sibling `../experiment` repository
+and must not be imported by this package.
 
 ## Commands
 
-Every check is a `just` recipe, and CI runs the same string:
-
-- `uv sync --extra notebook --group dev`: full development environment.
-- `just lint`, `just typecheck`, `just fmt`.
-- `just test-core`, `just test-paper`, `just test-integration`.
-- `Snakefile` is only a cluster job launcher (`--profile workflow/profiles/slurm`),
-  not workflow management: outputs are regenerated explicitly, so don't design
-  around Snakemake's DAG, rerun triggers or input invalidation.
-- Paper outputs: `just catalogs`, `just draw`, `just cluster`, `just notebook NAME`
-  and `just figures` (run one notebook at a time; the grid notebooks need several GB).
+- `uv sync --extra cli --extra simulation --group dev`
+- `just lint`, `just typecheck`, `just fmt`, `just test-core`
+- `just test-integration`, `just build-core`
 
 ## Code conventions and styleguide
 
@@ -43,7 +29,7 @@ closing over arguments which may trigger many re-compilations
   formatting, snake_case functions, PascalCase classes, and uppercase constants.
 - Runtime configuration must run before the XLA *backend* is initialized. Importing JAX
   or NumPyro does not initialize it; creating an array or querying devices
-  does. `tests/paper/test_cli.py` asserts both halves.
+  does. `tests/core/test_cli.py` asserts both halves.
 - Add core tests for scientific interfaces.
 - Use pytest fixtures and `pytest.mark.parametrize`
 - Avoid tests which re-implement functions

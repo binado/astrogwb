@@ -17,8 +17,6 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Physics",
 ]
-# The publishable core. The application's own stack -- arviz, xarray, pyyaml --
-# is an extra, so `pip install astrogwb` stays lean.
 dependencies = [
     "gwmock-noise>=0.10.1",
     "gwmock-signal[jax]>=0.15.0",
@@ -51,27 +49,6 @@ cli = ["astrogwb[io]", "typer>=0.16"]
 # gwmock graph any more.
 simulation = ["gwmock-pop>=0.11.4"]
 tpu = ["jax[tpu]>=0.11.0"]
-# The reproducibility application library: astrogwb.paper. It is shipped in the
-# wheel but unimportable without this extra, which is the one-way dependency
-# made physical -- see the ruff TID251 ban below for the other half. Its
-# checkout-only entry points live under scripts/ and are not installed.
-paper = [
-    "astrogwb[io,simulation]",
-    "arviz[h5netcdf]>=1.2.0",
-    # User cache paths, including XDG overrides on macOS.
-    "platformdirs>=4.11.12",
-]
-# The analysis stack the notebooks and figure scripts import.
-notebook = [
-    "astrogwb[paper]",
-    "arviz-base>=1.2.0",
-    "arviz-plots>=1.2.0",
-    "arviz-stats[xarray]>=1.2.0",
-    "corner @ git+https://github.com/dfm/corner.py@d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4",
-    "matplotlib>=3.11.1",
-    "pandas[output-formatting]>=2.0",
-    "scipy>=1.10",
-]
 
 [project.urls]
 Homepage = "https://github.com/binado/astrogwb"
@@ -86,87 +63,35 @@ build-backend = "uv_build"
 [dependency-groups]
 # tomli-w writes the TOML inputs of the CLI tests.
 test = ["pytest>=9.0.2", "pytest-xdist>=3.8.0", "tomli-w>=1.2"]
-# Notebook editor/runner (marimo). The `notebook` extra, by contrast, is the
-# library stack notebooks import.
-notebook = [
-    "marimo>=0.25.1",
-]
 dev = [
-    { include-group = "notebook" },
     { include-group = "test" },
     "ruff>=0.16.1",
     "ty>=0.0.69",
 ]
-# Snakemake on SLURM, for Snakefile. It runs from the
-# project venv, so its jobs see the same interpreter as the scripts they run.
-cluster = [
-    "snakemake>=9.24",
-    "snakemake-executor-plugin-slurm>=2.6",
-]
 
 [tool.uv]
 default-groups = ["dev"]
-# No `default-extras`: ruff's bundled uv schema rejects the key and warns on
-# every lint run. Commands that need the application say so -- `uv run --extra
-# paper ...` -- and a checkout is set up once with
-# `uv sync --extra notebook --group dev`.
-
-[tool.marimo.formatting]
-# Match ruff's default so marimo's saves do not reformat notebooks.
-line_length = 88
 
 [tool.ruff]
-extend-exclude = [".antigravitycli", ".cache", ".claude", ".cursor"]
 include = [
     "src/**/*.py",
-    "tests/**/*.py",
-    "scripts/**/*.py",
-    "notebooks/**/*.py",
+    "tests/core/**/*.py",
+    "tests/conftest.py",
+    "tests/reference_population.py",
 ]
 
 [tool.ruff.lint]
-# ruff 0.16's default rule set is already broad (E/F/B/I/UP/S/SIM/TRY/PTH/...);
-# `extend-select` adds to it rather than replacing it, which a bare `select`
-# would do.
 extend-select = ["TID"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
-# Core must not import the paper application; no packaging check would catch it.
-"astrogwb.paper".msg = "core must not import the paper application; the dependency runs one way (astrogwb.paper -> astrogwb)"
-
-[tool.ruff.lint.per-file-ignores]
-# The application itself, its tests, and the scripts and notebooks that drive
-# it are the intended importers.
-"src/astrogwb/paper/**/*.py" = ["TID251"]
-"tests/paper/**/*.py" = ["TID251"]
-"scripts/**/*.py" = ["TID251"]
-# B018: a bare name on a cell's last line is how a notebook renders a value,
-# not a useless expression. DTZ005: run-artifact filenames are stamped with
-# local wall-clock time on purpose, so the author recognizes their own runs.
-# E402: the Colab bootstrap and configure_runtime must precede JAX imports.
-"notebooks/**/*.py" = ["TID251", "B018", "DTZ005", "E402"]
-# F811: every marimo cell is `def _`, which Pyflakes reads as a redefinition.
-# F401: the setup cell is imports only; later cells are what use those names.
-# PLR1711: marimo writes a bare `return` on cells that export nothing.
-"notebooks/fiducial_spectrum.py" = ["F811", "F401", "PLR1711"]
-"notebooks/spectrum_snrs.py" = ["F811", "F401", "I001", "PLR1711"]
-"notebooks/ensemble_spectrum.py" = ["PLR1711"]
-"notebooks/cosmology_grid_posteriors.py" = ["PLR1711"]
-"notebooks/madau_dickinson_grid.py" = ["PLR1711"]
+"astrogwb_experiment".msg = "The library must not depend on the experiment application."
 
 [tool.ty.src]
-# Most of `scripts/` stays absent because fixture generators can import
-# heavyweight optional dependencies; Ruff continues to cover every script.
-include = [
-    "src",
-    "tests",
-    "notebooks/cosmology_grid_posteriors.py",
-    "notebooks/madau_dickinson_grid.py",
-]
+include = ["src", "tests/core", "tests/conftest.py", "tests/reference_population.py"]
 
 [tool.pytest.ini_options]
 addopts = "-n auto --dist loadscope"
-testpaths = ["tests"]
+testpaths = ["tests/core"]
 markers = [
     "integration: tests that call external libraries or services (deselect with -m 'not integration')",
 ]

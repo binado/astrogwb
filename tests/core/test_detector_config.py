@@ -4,15 +4,12 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from pathlib import Path
 
 from astrogwb.detector.config import DetectorRegistry, load_detector_config
 
-ROOT = Path(__file__).parents[2]
-
 
 def _registry() -> DetectorRegistry:
-    base = load_detector_config([ROOT / "config/detectors.toml"])
+    base = load_detector_config([])
     return DetectorRegistry(
         detectors=base.detectors,
         networks={
@@ -23,10 +20,9 @@ def _registry() -> DetectorRegistry:
 
 
 def test_loading_core_detector_config_does_not_initialize_xla() -> None:
-    code = f"""
-from pathlib import Path
+    code = """
 from astrogwb.detector.config import load_detector_config
-registry = load_detector_config([Path({str(ROOT / "config/detectors.toml")!r})])
+registry = load_detector_config([])
 for detector in registry.build_detectors(["H1", "L1"]):
     detector.geometry.location
     detector.geometry.response_tensor

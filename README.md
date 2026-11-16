@@ -151,20 +151,10 @@ likelihood = DenseGaussianLikelihood(model, network, network.compress(observed))
 log_likelihood, extras = likelihood.log_likelihood(params)
 ```
 
-## The manuscript application
+## Experiments
 
-The reproducibility application -- the shared configuration, plotting style,
-and runtime setup behind the paper notebooks -- ships inside this package as `astrogwb.paper`, behind an extra:
-
-```bash
-pip install "astrogwb[paper]"
-```
-
-Installing `astrogwb` alone leaves it inert: the subpackage is present but its
-dependencies are not, which is how the one-way dependency (`astrogwb.paper`
-may import `astrogwb`, never the reverse) is kept honest.
-
-Its committed assets -- `config/`, `scripts/` and `notebooks/` -- live at the root of the source repository and are not part
-of the wheel; the application is meant to be run from a checkout, with the
-repository root as the working directory. See [`docs/`](docs/) for catalog
-generation and the paper figures.
+Paper notebooks, run configurations, plotting, and cluster workflows live in
+the private [`experiments-astrogwb`](https://github.com/binado/experiments-astrogwb) repository. This distribution
+contains the scientific library and the `astrogwb` CLI (`pip install
+"astrogwb[cli]"`). CLI commands accept external run configuration via
+`--config-dir` and detector layers via `--detector-config`.

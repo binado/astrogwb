@@ -233,7 +233,7 @@ which remain available as building blocks.
 `astrogwb.simulators.network_spectra_ensemble(root, seed, n, names)` reads an
 ensemble's files and stacks each network's spectra. It never simulates;
 `Snakefile` writes the paper's ensembles (see
-`docs/coverage-draws-on-slurm.md`).
+[the experiment cluster guide](https://github.com/binado/experiments-astrogwb/blob/main/docs/coverage-draws-on-slurm.md)).
 
 ## Command line
 
