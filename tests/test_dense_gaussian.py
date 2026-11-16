@@ -362,8 +362,9 @@ def test_grid_log_likelihood_compiles_once_for_data_of_the_same_shape(
 
 def test_grid_log_prior_outside_the_support_is_negative_infinite() -> None:
     priors = {
-        "H0": dist.Uniform(65.0, 80.0),
-        "Omega_m": dist.Normal(0.3, 0.01),
+        # Explicit: numpyro only validates by default from 0.22.
+        "H0": dist.Uniform(65.0, 80.0, validate_args=True),
+        "Omega_m": dist.Normal(0.3, 0.01, validate_args=True),
     }
 
     with pytest.warns(UserWarning, match="Out-of-support"):
