@@ -46,8 +46,9 @@ logger = logging.getLogger(__name__)
 class CatalogMetadata(BaseModel):
     """Everything that determines an intensity catalog's contents.
 
-    Both the request and the provenance: a reference catalog is stored beside it by
-    :func:`~astrogwb.utils.io.write`. The seed is not part of it.
+    Both the request and the provenance: :func:`~astrogwb.importance.spectrum.reference_catalog`
+    draws from it, and :func:`~astrogwb.utils.io.write` stores it beside the
+    catalog. The seed is not part of it.
 
     ``sampling`` is how a reference catalog
     (:func:`~astrogwb.importance.spectrum.reference_catalog`) draws its intrinsic
@@ -72,7 +73,6 @@ class CatalogMetadata(BaseModel):
     num_samples: Annotated[int, Field(gt=0)]
     sampling: Sampling = "random"
     reference_redshift: Annotated[float, Field(ge=0.0)] | None = None
-    # Reference catalogs only; physical catalogs retain sampled inclinations.
     reference_inclination: Annotated[float, Field(ge=0.0, le=0.0)] = 0.0
     version: str = __version__
 

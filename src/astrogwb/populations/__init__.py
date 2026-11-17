@@ -1,10 +1,10 @@
 """Source populations declared as NumPyro models, described by typed records.
 
 One declaration serves generation and inference: a population's source model
-draws a catalog (:func:`~astrogwb.utils.numpyro.sample_and_logprob`), and
-conditioning those draws back into it recovers the per-sample source density
-the importance weights divide by
-(:func:`~astrogwb.utils.numpyro.sample_and_logprob`). A population also
+draws a catalog (:func:`~astrogwb.utils.numpyro.sample_sources_qmc` or
+:func:`~astrogwb.utils.numpyro.sample_and_logprob`), and conditioning those
+draws back into it with :func:`~astrogwb.utils.numpyro.sample_and_logprob`
+recovers the per-sample source density the importance weights divide by. A population also
 provides a source-frame merger rate. Simulation uses it to construct a redshift
 distribution; importance integration evaluates it directly.
 

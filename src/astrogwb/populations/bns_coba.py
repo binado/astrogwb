@@ -8,7 +8,7 @@ Unchecked contracts:
 
 - ``parameters`` carries ``H0``, ``Omega_m``, ``gamma``, ``kappa``,
   ``z_peak`` and ``local_merger_rate`` (:math:`\mathrm{Gpc}^{-3}\,
-  \mathrm{yr}^{-1}`), plus ``minimum_mass`` and ``mass_width`` for
+  \mathrm{yr}^{-1}`; one when absent, which gives the dimensionless shape), plus ``minimum_mass`` and ``mass_width`` for
   ``mass_model="uniform"`` or ``mass_mean`` and ``mass_sigma`` for
   ``mass_model="gaussian"``.
 - Modified GW propagation is applied whenever ``xi_0`` is in ``parameters``
@@ -79,12 +79,13 @@ class BNSCobaPopulation(PopulationMetadata):
 
 
 class _BNSCobaModel:
-    """A shared merger rate and intrinsic model for both pipelines."""
+    """The merger rate and intrinsic source model of a :class:`BNSCobaPopulation`."""
 
     def __init__(self, config: BNSCobaPopulation) -> None:
         self.config = config
 
     def merger_rate(self, redshift: ArrayLike, parameters: Parameters) -> jax.Array:
+        """The Madau-Dickinson rate; dimensionless when ``local_merger_rate`` is absent."""
         return madau_dickinson_rate(
             redshift,
             parameters["gamma"],
@@ -94,6 +95,7 @@ class _BNSCobaModel:
         )
 
     def source_model(self, parameters: Parameters) -> SourceModel:
+        """Component masses, aligned spins, tidal deformabilities and inclination."""
         config = self.config
         draw_masses = _MASS_MODELS[config.mass_model]
 
@@ -117,4 +119,5 @@ class _BNSCobaModel:
 
 
 def _bns_coba_population(config: BNSCobaPopulation) -> Population:
+    """The population a record builds."""
     return _BNSCobaModel(config)

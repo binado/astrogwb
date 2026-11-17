@@ -57,8 +57,8 @@ class RedshiftDistribution(InterpolatedDistribution):
 
     pytree_aux_fields = ("_source_frame_distribution",)
 
-    # NumPyro unions `pytree_data_fields` over the MRO, so `x` and `y` come from
-    # the base. The grid bounds are properties over `x`, not aux fields: aux
+    # `x` and `y` come from the base class's `pytree_data_fields`, which NumPyro
+    # unions over the MRO. The grid bounds are properties over `x`, not aux fields: aux
     # data is hashed into the jit cache key, and the bounds are traced.
     pytree_data_fields = (
         "params",

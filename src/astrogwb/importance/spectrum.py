@@ -285,12 +285,15 @@ def reference_catalog(
 ) -> IntensityData:
     """Every draw of ``metadata`` placed at its reference redshift: intensity ``(F, N)``.
 
-    The model is conditioned on :func:`reference_redshift` and
-    :data:`REFERENCE_INCLINATION`, and the extrinsic parameters are fixed at
-    zero, so they consume no Sobol coordinates. The intrinsic parameters are
-    drawn i.i.d. or, with ``metadata.sampling == "sobol"``, on a scrambled
-    Sobol net. ``chunk_size`` is
-    :meth:`~astrogwb.waveform.WaveformGenerator.generate_batch`'s.
+    The population's source model is drawn with its inclination conditioned on
+    :data:`REFERENCE_INCLINATION`; it declares intrinsic sites only. Redshift
+    is then set to :func:`reference_redshift` for every source, and the
+    luminosity distance is interpolated on the grid physical redshift draws
+    use, times the modified-propagation ratio when ``xi_0`` is among the
+    fiducials. No extrinsic parameters are drawn, so none consume Sobol
+    coordinates. The intrinsic parameters are drawn i.i.d. or, with
+    ``metadata.sampling == "sobol"``, on a scrambled Sobol net. ``chunk_size``
+    is :meth:`~astrogwb.waveform.WaveformGenerator.generate_batch`'s.
 
     Parameters
     ----------
@@ -301,7 +304,8 @@ def reference_catalog(
     chunk_size
         Number of sources per chunk.
     """
-    # Enable x64 before drawing sources, before the waveform backend runs.
+    # Before the draw: ripplegw enables x64 on import, but only once the
+    # generator runs, after the sources are sampled.
     jax.config.update("jax_enable_x64", True)
     require_current_version(metadata.version)
     logger.info(

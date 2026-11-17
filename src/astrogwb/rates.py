@@ -14,6 +14,8 @@ from jax.typing import ArrayLike
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import differential_comoving_volume
 
+#: A source-frame merger-rate shape :math:`\psi(z)`, called as
+#: ``fn(redshift, params)`` and returning an array shaped like ``redshift``.
 type SourceFrameDistributionFn = Callable[
     [ArrayLike, Mapping[str, ArrayLike]], jax.Array
 ]
