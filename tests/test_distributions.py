@@ -38,7 +38,6 @@ from astrogwb.distributions.mass import (
 from astrogwb.distributions.orientation import UniformCosineDistribution
 from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.rates import total_merger_rate
-from astrogwb.utils import gauss_legendre_nodes_weights
 
 #: Redshifts to evaluate at: interior to the grid, and not on a node.
 SAMPLE_REDSHIFTS = jnp.array([0.5, 1.234, 3.7, 12.0, 19.5])
@@ -407,13 +406,12 @@ def test_merger_rate_is_pointwise_and_keeps_the_shape_of_its_input() -> None:
 
 
 def test_total_merger_rate_by_quadrature_matches_the_distribution() -> None:
-    """The node-based rate and the table-based one integrate the same function."""
+    """The quadrature rate and the table-based one integrate the same function."""
     distribution = _distribution()
-    nodes, weights = gauss_legendre_nodes_weights(Z_MIN, Z_MAX, 256)
     quadrature = total_merger_rate(
-        nodes,
-        weights,
-        distribution.merger_rate(nodes),
+        Z_MIN,
+        Z_MAX,
+        distribution.merger_rate,
         FIDUCIALS["H0"],
         FIDUCIALS["Omega_m"],
     )

@@ -38,7 +38,7 @@ from astrogwb.inference import (
     CatalogModel,
 )
 from astrogwb.populations import BNSCobaPopulation
-from astrogwb.rates import madau_dickinson_rate, total_merger_rate
+from astrogwb.rates import differential_merger_rate, madau_dickinson_rate
 from astrogwb.simulators import realization_key
 from astrogwb.simulators.population import EXTRINSIC_SITES
 from astrogwb.utils import gauss_legendre_nodes_weights
@@ -397,7 +397,7 @@ def test_phinney_kernel_times_the_distance_ratio_squared_is_the_rate_density(
     xi_0: float,
 ) -> None:
     """Undoing the distance factor leaves ``psi / (1 + z) dV_c/dz`` per second."""
-    redshift, weights = redshift_quadrature(0.1, 5.0, 24)
+    redshift, _ = redshift_quadrature(0.1, 5.0, 24)
     hubble_constant, omega_m, reference_distance = 67.66, 0.3096, 700.0
     merger_rate = np.asarray(madau_dickinson_rate(redshift, 1.42, 4.62, 1.84, 770.0))
     distance_ratio = xi_0 + (1.0 - xi_0) * (1.0 + redshift) ** -2.0
@@ -414,8 +414,8 @@ def test_phinney_kernel_times_the_distance_ratio_squared_is_the_rate_density(
     undone = np.asarray(kernel) * (np.asarray(distance) / reference_distance) ** 2
 
     np.testing.assert_allclose(
-        np.sum(weights * undone),
-        total_merger_rate(redshift, weights, merger_rate, hubble_constant, omega_m),
+        undone,
+        differential_merger_rate(redshift, merger_rate, hubble_constant, omega_m),
         rtol=1e-12,
     )
 
