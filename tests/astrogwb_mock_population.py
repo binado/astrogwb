@@ -80,7 +80,8 @@ def distance_model(redshift: RedshiftDistribution) -> Callable[[], None]:
 
     def model() -> None:
         z = jnp.asarray(numpyro.sample("redshift", redshift))
-        numpyro.deterministic("luminosity_distance", redshift.gw_luminosity_distance(z))
+        gw_distance = redshift.luminosity_distance(z) * redshift.distance_ratio(z)
+        numpyro.deterministic("luminosity_distance", gw_distance)
 
     return model
 

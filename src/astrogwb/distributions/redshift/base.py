@@ -175,18 +175,6 @@ class RedshiftDistribution(InterpolatedDistribution):
         """
         return gw_distance_ratio(redshift, self.params)
 
-    def gw_luminosity_distance(self, redshift: ArrayLike) -> jax.Array:
-        r"""Gravitational-wave luminosity distance in Mpc at redshift(s).
-
-        The electromagnetic distance, times :meth:`distance_ratio`.
-
-        Parameters
-        ----------
-        redshift
-            Redshift.
-        """
-        return self.luminosity_distance(redshift) * self.distance_ratio(redshift)
-
     def differential_comoving_volume(self, redshift: ArrayLike) -> jax.Array:
         r"""All-sky :math:`\mathrm{d}V_c/\mathrm{d}z` in :math:`\mathrm{Mpc}^3`.
 
