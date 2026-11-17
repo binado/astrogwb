@@ -58,7 +58,6 @@ class _WaveformNames(Sequence[str]):
         self._filters = filters
 
     def _names(self) -> tuple[str, ...]:
-        # Imported here, not at module scope -- see the module docstring.
         import ripplegw
 
         return tuple(
@@ -135,7 +134,6 @@ _SMOOTH_FACTORS = (2, 3, 5)
 
 def _approximant_metadata(approximant: str) -> dict[str, Any]:
     """Return Ripple metadata for a supported frequency-domain CBC model."""
-    # Imported here, not at module scope -- see the module docstring.
     import ripplegw
 
     available = tuple(SUPPORTED_APPROXIMANTS)
@@ -257,7 +255,6 @@ def ripple_parameters(
     Validates names and shapes only; physical values are checked eagerly by
     :func:`check_sources`.
     """
-    # Imported here, not at module scope -- see the module docstring.
     from ripplegw.conversions import ms_to_Mc_eta
 
     arrays = _canonical_arrays(approximant, source_parameters)
@@ -332,7 +329,6 @@ def build_intensity_kernel(
     callers supply their own jit. ``nan_to_num`` guards the forward sum only;
     it cannot make a NaN gradient finite.
     """
-    # Imported here, not at module scope -- see the module docstring.
     from ripplegw.interfaces import AmplitudePhaseWaveform
 
     waveform = _build_ripple_waveform(
@@ -396,7 +392,6 @@ def _build_ripple_waveform(
     use_taper_in_tidal_corrections: bool,
 ) -> Any:
     """Construct the Ripple waveform object once, shared by both kernels."""
-    # Imported here, not at module scope -- see the module docstring.
     import ripplegw
 
     metadata = _approximant_metadata(approximant)

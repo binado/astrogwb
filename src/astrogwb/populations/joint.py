@@ -23,8 +23,7 @@ __all__ = [
     "joint_model",
 ]
 
-#: The redshift site every population must declare; its density is never
-#: excluded.
+#: The redshift site, whose density is never excluded.
 REDSHIFT_SITE = "redshift"
 
 #: The intrinsic density factors of a source model: the ordered source-frame
