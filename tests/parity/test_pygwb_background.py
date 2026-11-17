@@ -18,10 +18,7 @@ import pytest
 from conftest import REFERENCES
 from numpy.typing import NDArray
 
-from astrogwb.background.spectral import (
-    omega_gw_from_spectral_density,
-    spectral_density,
-)
+from astrogwb.background.spectral import omega_gw_from_spectral_density
 from astrogwb.waveform import WaveformMetadata
 from astrogwb.waveform.base import WaveformGenerator
 from astrogwb.waveform.factory import waveform_generator
@@ -70,7 +67,7 @@ def test_catalog_omega_gw_matches_pygwb(
     rate = count / float(pygwb_reference["cbc_observation_seconds"])
 
     omega = omega_gw_from_spectral_density(
-        spectral_density(intensity, jnp.ones(count), rate),
+        rate * jnp.mean(intensity, axis=-1),
         jnp.asarray(generator.frequencies),
         hubble_constant=hubble_constant,
     )

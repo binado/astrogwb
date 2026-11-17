@@ -21,7 +21,6 @@ from reference_population import reference_merger_rate_distance_and_logprob
 
 from astrogwb.background import (
     analytic_spectral_density_from_mass_moments,
-    spectral_density,
     uniform_prior_mass_moments,
 )
 from astrogwb.constants import ISCO_ALPHA
@@ -90,11 +89,7 @@ def test_catalog_contraction_matches_the_analytic_spectrum(
             samples["redshift"],
             redshift_grid=make_redshift_grid(),
         )
-        contracted = spectral_density(
-            intensity,
-            jnp.ones(num_sources),
-            total_merger_rate,
-        )
+        contracted = total_merger_rate * jnp.mean(intensity, axis=-1)
         analytic_values = np.asarray(analytic)
         contracted_values = np.asarray(contracted)
         # Above the smallest sampled cutoff, a finite catalog can be exactly

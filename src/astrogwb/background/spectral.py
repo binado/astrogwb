@@ -8,30 +8,6 @@ from astrogwb.cosmology import hubble_constant_si
 from astrogwb.detector import log_frequency_noise_scale
 
 
-def spectral_density(
-    intensity: jax.Array,
-    weights: jax.Array,
-    total_merger_rate: float | jax.Array,
-) -> jax.Array:
-    """Compute the weighted catalog estimate of the strain spectral density.
-
-    Parameters
-    ----------
-    intensity
-        Intensity with sources on the last axis.
-    weights
-        Per-source importance weights.
-    total_merger_rate
-        Total merger rate in inverse seconds.
-
-    Returns
-    -------
-    jax.Array
-        Weighted spectral density, with the source axis contracted.
-    """
-    return total_merger_rate * jnp.dot(intensity, weights) / weights.shape[0]
-
-
 def omega_gw_from_spectral_density(
     spectral_density: jax.Array,
     frequencies: jax.Array,
