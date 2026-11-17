@@ -24,6 +24,7 @@ and must not be imported by this package.
 - When manipulating numpyro models, prefer desigining useful custom effect handlers
 - When designing methods that will be jit compiled, avoid capturing large constants or
 closing over arguments which may trigger many re-compilations
+- Don't use comments for enforcing patterns or invariants. Those should be enforced naturally by the API design. Use comments for documenting behavior or gotchas.
 
 
 ## Python conventions
