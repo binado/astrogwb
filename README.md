@@ -58,22 +58,22 @@ hanford = load_detector("H1")
 sensitivity = load_sensitivity("H1")
 ```
 
-A population is drawn, reduced to intensity, and stored together with
-the declaration that produced it:
+A reference catalog draws intrinsic sources, computes their intensities, and
+stores them together with the declaration that produced them:
 
 ```python
 import jax
 
-from astrogwb.importance.catalog import CatalogMetadata, simulate_catalog
+from astrogwb.importance.catalog import CatalogMetadata
+from astrogwb.importance.spectrum import reference_catalog
 from astrogwb.populations import BNSCobaPopulation
 from astrogwb.utils.io import write
 from astrogwb.waveform import WaveformMetadata
 
 # A population record's fields are its construction settings; build() returns
-# hyperparameters -> (redshift distribution, source model). Isotropic
-# inclination is always sampled.
+# hyperparameters -> (redshift distribution, source model).
 population = BNSCobaPopulation(
-    mass_model="uniform", minimum_redshift=0.0, maximum_redshift=20.0, n_grid=4096
+    mass_model="uniform", minimum_redshift=0.01, maximum_redshift=20.0, n_grid=4096
 )
 params = {
     "H0": 67.66,
@@ -96,24 +96,20 @@ waveform = WaveformMetadata(
 metadata = CatalogMetadata(
     waveform=waveform, population=population, fiducials=params, num_samples=1024
 )
-catalog = simulate_catalog(metadata, jax.random.key(42))
-write("catalog.h5", catalog, metadata, seed=42)
+reference = reference_catalog(metadata, jax.random.key(42))
+write("catalog.h5", reference, metadata, seed=42)
 ```
 
-A spectrum prediction starts from a *reference catalog* instead: the same
-draw, with every source placed at the lower edge of the redshift window, so that
+A spectrum prediction uses the reference catalog, with every source placed at
+the lower edge of the redshift window and face-on, so that
 a source at any redshift is a rescaling of its reference power. Intrinsic
 parameters are reweighted to a target population; redshift is integrated by
 closed-form quadrature, so it needs no weights at all.
 
 ```python
-import jax
 import numpy as np
 
-from astrogwb.importance.spectrum import reference_catalog
 from astrogwb.inference import CatalogModel
-
-reference = reference_catalog(metadata, jax.random.key(42))
 
 model = CatalogModel.from_catalog(
     reference,

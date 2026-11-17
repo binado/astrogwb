@@ -1,12 +1,10 @@
 """Importance-integration reference catalogs: per-source intensity.
 
-:class:`CatalogMetadata` is the record a catalog is drawn from and cached
-under. :func:`intensity_data` turns a generator and source columns
-into :class:`IntensityData`, one intensity column per source; where the
-sources come from is the caller's. :func:`simulate_catalog` is the plain
-catalog -- the population a record names, drawn at its fiducials from one key
--- and :func:`~astrogwb.importance.spectrum.reference_catalog` draws at the redshift
-window's lower edge. :func:`read_catalog` reads back what
+:class:`CatalogMetadata` is the record a catalog is drawn from.
+:func:`intensity_data` turns a generator and source columns into
+:class:`IntensityData`, one intensity column per source.
+:func:`~astrogwb.importance.spectrum.reference_catalog` draws at a reference
+redshift. :func:`read_catalog` reads back what
 :func:`~astrogwb.utils.io.write` stored.
 
 These are fixed-size draws for importance weighting, not Poisson realizations
@@ -28,13 +26,10 @@ from numpy.typing import ArrayLike, NDArray
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from astrogwb import __version__
-from astrogwb.populations.joint import fix_extrinsic_parameters, joint_model
 from astrogwb.populations.metadata import AnyPopulation
-from astrogwb.simulators.sources import Sampling, simulate_sources
-from astrogwb.utils import require_current_version
+from astrogwb.simulators.sources import Sampling
 from astrogwb.utils.io import load
 from astrogwb.waveform.base import WaveformGenerator
-from astrogwb.waveform.factory import waveform_generator
 from astrogwb.waveform.metadata import WaveformMetadata
 
 __all__ = [
@@ -42,7 +37,6 @@ __all__ = [
     "IntensityData",
     "intensity_data",
     "read_catalog",
-    "simulate_catalog",
     "validate_matching_frequency_grids",
 ]
 
@@ -52,15 +46,14 @@ logger = logging.getLogger(__name__)
 class CatalogMetadata(BaseModel):
     """Everything that determines an intensity catalog's contents.
 
-    Both the request and the provenance: :func:`simulate_catalog` turns it and a
-    PRNG key into a catalog, stored beside it by
+    Both the request and the provenance: a reference catalog is stored beside it by
     :func:`~astrogwb.utils.io.write`. The seed is not part of it.
 
     ``sampling`` is how a reference catalog
     (:func:`~astrogwb.importance.spectrum.reference_catalog`) draws its intrinsic
     parameters: ``"random"`` i.i.d., or ``"sobol"`` on a scrambled Sobol net
     (:func:`~astrogwb.utils.numpyro.sample_sources_qmc`), which needs a
-    power-of-two ``num_samples``. A plain catalog is always random.
+    power-of-two ``num_samples``.
 
     ``reference_redshift`` is the redshift a reference catalog's waveforms are
     generated at; ``None`` means the population's ``minimum_redshift``, the
@@ -68,8 +61,7 @@ class CatalogMetadata(BaseModel):
     window that starts at or above it
     (:func:`~astrogwb.importance.spectrum.reference_redshift`).
     ``reference_inclination`` records the reference-only face-on convention.
-    It does not condition plain :func:`simulate_catalog` draws. Intensity always
-    means the literal sum of squared polarization amplitudes.
+    Intensity always means the literal sum of squared polarization amplitudes.
     """
 
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
@@ -144,38 +136,6 @@ def intensity_data(
         "intensity": np.asarray(generate(columns)),
         "source_parameters": columns,
     }
-
-
-def simulate_catalog(
-    metadata: CatalogMetadata, key: jax.Array, *, chunk_size: int | None = None
-) -> IntensityData:
-    """The plain catalog ``key`` draws: ``num_samples`` sources at the fiducials.
-
-    Parameters
-    ----------
-    metadata
-        Metadata describing the object.
-    key
-        JAX random key.
-    chunk_size
-        Number of sources per chunk.
-    """
-    # Before the draw: ripplegw enables x64 on import, but only once the
-    # generator runs, after the sources are sampled.
-    jax.config.update("jax_enable_x64", True)
-    require_current_version(metadata.version)
-    logger.info(
-        "Catalog: num_samples=%d population=%r",
-        metadata.num_samples,
-        metadata.population,
-    )
-    model = fix_extrinsic_parameters(
-        joint_model(*metadata.population.build()(metadata.fiducials))
-    )
-    sources = simulate_sources(model, key, metadata.num_samples)
-    return intensity_data(
-        waveform_generator(metadata.waveform), sources, chunk_size=chunk_size
-    )
 
 
 def read_catalog(

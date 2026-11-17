@@ -319,7 +319,7 @@ def reference_catalog(
     chunk_size
         Number of sources per chunk.
     """
-    # x64 before the draw: see simulate_catalog.
+    # Enable x64 before drawing sources, before the waveform backend runs.
     jax.config.update("jax_enable_x64", True)
     require_current_version(metadata.version)
     logger.info(

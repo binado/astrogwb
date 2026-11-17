@@ -1,4 +1,4 @@
-"""Plain intensity catalogs, end to end on the closed-form inspiral.
+"""Reference intensity catalogs, end to end on the closed-form inspiral.
 
 Each test generates for real -- a tiny population, a four-bin grid -- so what
 is checked is the draw, not a mock of it: a key names its realization, and a
@@ -15,9 +15,9 @@ import pytest
 from astrogwb.importance.catalog import (
     CatalogMetadata,
     read_catalog,
-    simulate_catalog,
     validate_matching_frequency_grids,
 )
+from astrogwb.importance.spectrum import reference_catalog
 from astrogwb.populations import BNSCobaPopulation
 from astrogwb.simulators import realization_key
 from astrogwb.utils.io import Arrays, write
@@ -43,7 +43,7 @@ WAVEFORM = WaveformMetadata(
 )
 POPULATION = BNSCobaPopulation(
     mass_model="uniform",
-    minimum_redshift=0.0,
+    minimum_redshift=0.01,
     maximum_redshift=5.0,
     n_grid=64,
 )
@@ -67,7 +67,7 @@ def _same(first: Arrays, second: Arrays) -> None:
 
 @pytest.mark.integration
 def test_intensity_round_trips_through_a_file(tmp_path: Path) -> None:
-    fresh = simulate_catalog(CATALOG, realization_key(41, 0))
+    fresh = reference_catalog(CATALOG, realization_key(41, 0))
     path = write(tmp_path / "catalog.h5", fresh, CATALOG, seed=41)
 
     data, metadata, seed = read_catalog(path)
@@ -85,29 +85,3 @@ def test_reading_a_missing_catalog_names_the_path(tmp_path: Path) -> None:
 def test_catalogs_on_different_frequency_grids_are_refused() -> None:
     with pytest.raises(ValueError, match="identical frequency grids"):
         validate_matching_frequency_grids(np.array([2.0, 3.0]), np.array([2.0, 4.0]))
-
-
-@pytest.mark.integration
-def test_intensity_key_picks_the_realization() -> None:
-    one = simulate_catalog(CATALOG, realization_key(41, 0))
-    again = simulate_catalog(CATALOG, realization_key(41, 0))
-    other = simulate_catalog(CATALOG, realization_key(42, 0))
-
-    np.testing.assert_array_equal(one["intensity"], again["intensity"])
-    assert not np.array_equal(one["intensity"], other["intensity"])
-
-
-@pytest.mark.integration
-@pytest.mark.parametrize("chunk_size", [4, 100])
-def test_intensity_is_independent_of_chunk_size(chunk_size: int) -> None:
-    key = realization_key(41, 0)
-    whole = simulate_catalog(CATALOG, key, chunk_size=None)
-    chunked = simulate_catalog(CATALOG, key, chunk_size=chunk_size)
-
-    # Sources are drawn before chunking, so they are exact. The power is the
-    # same elementwise computation, but XLA may fuse a differently shaped chunk
-    # differently, which moves the last bit.
-    _same(whole["source_parameters"], chunked["source_parameters"])  # ty: ignore[invalid-argument-type]
-    np.testing.assert_allclose(
-        chunked["intensity"], whole["intensity"], rtol=1e-12, atol=0
-    )
