@@ -396,6 +396,16 @@ def test_uniform_cosine_cdf_and_icdf_are_inverses(
 # --------------------------------------------------------------------------- #
 # Merger rate off the grid
 # --------------------------------------------------------------------------- #
+def test_merger_rate_is_pointwise_and_keeps_the_shape_of_its_input() -> None:
+    distribution = _distribution()
+    redshift = jnp.array([[0.3, 1.0, 4.0], [0.5, 2.0, 7.5]])
+    rate = distribution.merger_rate(redshift)
+    assert rate.shape == redshift.shape
+    np.testing.assert_allclose(
+        rate[0, 1], distribution.merger_rate(jnp.asarray(1.0)), rtol=1e-12
+    )
+
+
 def test_total_merger_rate_by_quadrature_matches_the_distribution() -> None:
     """The node-based rate and the table-based one integrate the same function."""
     distribution = _distribution()

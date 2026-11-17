@@ -30,12 +30,11 @@ from astrogwb.importance.spectrum import (
 )
 from astrogwb.inference import CatalogModel
 from astrogwb.populations import (
-    DEFAULT_DENSITY_SITES,
     BNSCobaPopulation,
     Population,
 )
 from astrogwb.populations._types import SourceModel
-from astrogwb.populations.joint import extrinsic_priors
+from astrogwb.simulators.population import extrinsic_priors
 from astrogwb.utils.numpyro import sample_and_logprob, sample_sources_qmc
 from astrogwb.waveform import AnalyticInspiralGenerator, WaveformMetadata
 
@@ -239,10 +238,11 @@ def catalog_samples(data: IntensityData) -> dict[str, jax.Array]:
     }
 
 
-#: The density factors a reference-catalog spectrum may weight: the default
-#: sites minus redshift, which the quadrature integrates instead.
-INTRINSIC_DENSITY_SITES: tuple[str, ...] = tuple(
-    site for site in DEFAULT_DENSITY_SITES if site != "redshift"
+#: The density factors a reference-catalog spectrum may weight: the intrinsic
+#: mass pair. Redshift is integrated by the quadrature instead.
+INTRINSIC_DENSITY_SITES: tuple[str, ...] = (
+    "source_frame_mass_1",
+    "source_frame_mass_2",
 )
 
 #: Redshift nodes of the mock spectra: enough for a smooth kernel on the window.

@@ -17,17 +17,9 @@ record and the hyperparameters needed to rebuild the density that drew it.
 from astrogwb.populations._types import Population
 from astrogwb.populations.base import PopulationMetadata
 from astrogwb.populations.bns_coba import BNSCobaPopulation
-from astrogwb.populations.joint import (
-    DEFAULT_DENSITY_SITES,
-    INTRINSIC_DENSITY_SITES,
-    REDSHIFT_SITE,
-)
 from astrogwb.populations.metadata import AnyPopulation
 
 __all__ = [
-    "DEFAULT_DENSITY_SITES",
-    "INTRINSIC_DENSITY_SITES",
-    "REDSHIFT_SITE",
     "AnyPopulation",
     "BNSCobaPopulation",
     "Population",

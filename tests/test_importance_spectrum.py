@@ -38,9 +38,9 @@ from astrogwb.inference import (
     CatalogModel,
 )
 from astrogwb.populations import BNSCobaPopulation
-from astrogwb.populations.joint import EXTRINSIC_SITES
 from astrogwb.rates import madau_dickinson_rate, total_merger_rate
 from astrogwb.simulators import realization_key
+from astrogwb.simulators.population import EXTRINSIC_SITES
 from astrogwb.utils import gauss_legendre_nodes_weights
 from astrogwb.utils.io import write
 from astrogwb.utils.numpyro import sample_and_logprob

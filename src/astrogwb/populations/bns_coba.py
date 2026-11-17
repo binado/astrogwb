@@ -10,12 +10,10 @@ Unchecked contracts:
   ``z_peak`` and ``local_merger_rate`` (:math:`\mathrm{Gpc}^{-3}\,
   \mathrm{yr}^{-1}`), plus ``minimum_mass`` and ``mass_width`` for
   ``mass_model="uniform"`` or ``mass_mean`` and ``mass_sigma`` for
-  ``mass_model="gaussian"``, plus ``delay_slope`` when ``time_delay=True``.
+  ``mass_model="gaussian"``.
 - Modified GW propagation is applied whenever ``xi_0`` is in ``parameters``
   (``xi_n`` must then be too); :math:`\Xi_0 = 1` is plain propagation.
-- ``local_merger_rate`` is a pure overall scaling of the spectrum; ``H0`` is
-  too, except when ``time_delay=True``: the delay is in Gyr while lookback time
-  scales as :math:`1/H_0`, so the normalized redshift law depends on ``H0``.
+- ``local_merger_rate`` is a pure overall scaling of the spectrum.
 - Component masses are an ordered pair: the first is the larger one. The
   uniform law has compact support, so a hyperparameter step that moves its
   edges can send catalog samples outside it; the Gaussian law has none.
@@ -28,22 +26,20 @@ Unchecked contracts:
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import Annotated, Literal, Self
+from typing import Annotated, Literal
 
 import jax
 import numpyro
 import numpyro.distributions as dist
 from jax.typing import ArrayLike
-from pydantic import Field, model_validator
+from pydantic import Field
 
-from astrogwb.cosmology import lookback_time
 from astrogwb.distributions import UniformCosineDistribution
-from astrogwb.distributions.delay import PowerLawDelayDistribution
 from astrogwb.populations._types import Parameters, Population, SourceModel
 from astrogwb.populations.base import PopulationMetadata
 from astrogwb.populations.mass.gaussian_mass_pair import gaussian_mass_pair_model
 from astrogwb.populations.mass.uniform_mass_pair import uniform_mass_pair_model
-from astrogwb.rates import madau_dickinson_rate, time_delayed_merger_rate
+from astrogwb.rates import madau_dickinson_rate
 
 __all__ = ["BNSCobaPopulation"]
 
@@ -68,32 +64,15 @@ class BNSCobaPopulation(PopulationMetadata):
         The grid the cosmology integrals and the redshift normalization run on.
     mass_model
         ``"uniform"`` or ``"gaussian"`` ordered component masses.
-    time_delay
-        Read the Madau-Dickinson law as the *formation* rate and delay mergers
-        by :math:`p(\tau) \propto \tau^{\alpha}`; requires ``minimum_delay``
-        (Gyr), and ``delay_slope`` in the hyperparameters.
-    minimum_delay, maximum_formation_redshift, n_delay_nodes
-        The delay floor, the formation cut-off and the order of the delay
-        quadrature. Only read when ``time_delay`` is true.
     maximum_tidal_deformability, maximum_aligned_spin_component
         Bounds of the uniform tidal-deformability and aligned-spin priors.
     """
 
     model_name: Literal["bns_coba"] = "bns_coba"
     mass_model: Literal["uniform", "gaussian"]
-    time_delay: bool = False
-    minimum_delay: Annotated[float, Field(gt=0.0)] | None = None
-    maximum_formation_redshift: Annotated[float, Field(gt=0.0)] = 20.0
-    n_delay_nodes: Annotated[int, Field(gt=0)] = 48
     n_grid: Annotated[int, Field(gt=1)] = 1000
     maximum_tidal_deformability: Annotated[float, Field(gt=0.0)] = 2000.0
     maximum_aligned_spin_component: Annotated[float, Field(gt=0.0)] = 0.05
-
-    @model_validator(mode="after")
-    def _delay_needs_a_floor(self) -> Self:
-        if self.time_delay and self.minimum_delay is None:
-            raise ValueError("time_delay=True requires minimum_delay")
-        return self
 
     def _build(self) -> Population:
         return _bns_coba_population(self)
@@ -106,31 +85,12 @@ class _BNSCobaModel:
         self.config = config
 
     def merger_rate(self, redshift: ArrayLike, parameters: Parameters) -> jax.Array:
-        def formation_rate(z: ArrayLike, params: Parameters) -> jax.Array:
-            return madau_dickinson_rate(
-                z,
-                params["gamma"],
-                params["kappa"],
-                params["z_peak"],
-                params.get("local_merger_rate", 1.0),
-            )
-
-        config = self.config
-        if not config.time_delay:
-            return formation_rate(redshift, parameters)
-        assert config.minimum_delay is not None
-        longest_delay = lookback_time(
-            config.maximum_formation_redshift, parameters["H0"], parameters["Omega_m"]
-        )
-        return time_delayed_merger_rate(
+        return madau_dickinson_rate(
             redshift,
-            parameters,
-            formation_rate=formation_rate,
-            delay=PowerLawDelayDistribution(
-                parameters["delay_slope"], config.minimum_delay, longest_delay
-            ),
-            n_delay_nodes=config.n_delay_nodes,
-            maximum_formation_redshift=config.maximum_formation_redshift,
+            parameters["gamma"],
+            parameters["kappa"],
+            parameters["z_peak"],
+            parameters.get("local_merger_rate", 1.0),
         )
 
     def source_model(self, parameters: Parameters) -> SourceModel:

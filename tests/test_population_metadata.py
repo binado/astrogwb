@@ -44,7 +44,6 @@ def test_json_round_trip_restores_the_subclass_and_its_types() -> None:
         ({**SETTINGS, "no_such_setting": 0.1}, "no_such_setting"),
         ({**SETTINGS, "mass_model": "flat"}, "mass_model"),
         ({**SETTINGS, "maximum_redshift": 0.05}, "must exceed"),
-        ({**SETTINGS, "time_delay": True}, "requires minimum_delay"),
     ],
 )
 def test_an_invalid_record_is_refused_when_validated(

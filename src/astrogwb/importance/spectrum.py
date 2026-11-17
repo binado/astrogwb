@@ -86,8 +86,8 @@ from numpyro import handlers
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import (
     distance_and_volume_grid,
+    gw_distance_ratio,
     hubble_distance,
-    log_gw_em_ratio,
     normalized_hubble_parameter,
 )
 from astrogwb.importance.catalog import (
@@ -96,9 +96,6 @@ from astrogwb.importance.catalog import (
     intensity_data,
 )
 from astrogwb.populations._types import Population, SourceModel
-from astrogwb.populations.joint import (
-    REDSHIFT_SITE,
-)
 from astrogwb.rates import total_merger_rate
 from astrogwb.simulators.sources import simulate_sources
 from astrogwb.utils import gauss_legendre_nodes_weights, require_current_version
@@ -334,12 +331,10 @@ def reference_catalog(
     distance_grid, _ = distance_and_volume_grid(
         grid, hubble_constant=parameters["H0"], omega_m=parameters["Omega_m"]
     )
-    distance = jnp.interp(reference, grid, distance_grid)
-    if "xi_0" in parameters:
-        distance *= jnp.exp(
-            log_gw_em_ratio(reference, parameters["xi_0"], parameters["xi_n"])
-        )
-    samples[REDSHIFT_SITE] = np.full(metadata.num_samples, reference)
+    distance = jnp.interp(reference, grid, distance_grid) * gw_distance_ratio(
+        reference, parameters
+    )
+    samples["redshift"] = np.full(metadata.num_samples, reference)
     samples[_LUMINOSITY_DISTANCE] = np.full(metadata.num_samples, float(distance))
     return intensity_data(
         waveform_generator(metadata.waveform), samples, chunk_size=chunk_size
@@ -402,11 +397,7 @@ def _shared_terms(
     omega_m = params["Omega_m"]
     merger_rate = population.merger_rate(redshift, params)
     # The GW distance over the electromagnetic one: modified propagation alone.
-    distance_ratio = (
-        jnp.exp(log_gw_em_ratio(redshift, params["xi_0"], params["xi_n"]))
-        if "xi_0" in params
-        else jnp.ones_like(redshift)
-    )
+    distance_ratio = gw_distance_ratio(redshift, params)
     kernel = redshift_weights * phinney_kernel(
         redshift,
         merger_rate,
@@ -477,7 +468,7 @@ def _rescaling_arrays(
     intrinsic = {
         name: jnp.asarray(np.asarray(values))
         for name, values in columns.items()
-        if name not in (REDSHIFT_SITE, INCLINATION_SITE, _LUMINOSITY_DISTANCE)
+        if name not in ("redshift", INCLINATION_SITE, _LUMINOSITY_DISTANCE)
     }
     fiducial_source_model = metadata.population.build().source_model(metadata.fiducials)
     return {

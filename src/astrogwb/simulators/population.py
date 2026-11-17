@@ -4,7 +4,7 @@ A realization owns every stochastic property of its sources: the
 hyperparameters (fixed or drawn once), the Poisson count
 :math:`N \\sim \\mathrm{Poisson}(\\mathcal{R}\\, T)`, the intrinsic parameters
 and inclination the population model draws, and the extrinsic angles drawn
-by the joint model -- an isotropic direction (``declination``,
+by the extrinsic priors -- an isotropic direction (``declination``,
 ``right_ascension``), the polarization angle ``polarization_angle`` and the
 coalescence phase ``coa_phase`` and geocentric ``coa_time`` in seconds. The downstream stages draw nothing.
 
@@ -16,6 +16,7 @@ count; only waveform evaluation works in fixed-size chunks.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Annotated, Any
@@ -24,22 +25,25 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import numpyro
+import numpyro.distributions as dist
 from numpy.typing import NDArray
 from numpyro import handlers
 from pydantic import BaseModel, ConfigDict, Field
 
 from astrogwb import __version__
 from astrogwb.distributions.config import DistributionConfig
+from astrogwb.distributions.orientation import UniformCosineDistribution
 from astrogwb.distributions.redshift.base import RedshiftDistribution
-from astrogwb.populations.joint import EXTRINSIC_SITES, extrinsic_priors
 from astrogwb.populations.metadata import AnyPopulation
 from astrogwb.simulators.sources import simulate_sources
 from astrogwb.utils import require_current_version, years_to_seconds
 
 __all__ = [
+    "EXTRINSIC_SITES",
     "Hyperparameter",
     "PopulationArtifact",
     "RealizationMetadata",
+    "extrinsic_priors",
     "segmented_seconds",
     "simulate_population",
 ]
@@ -47,6 +51,41 @@ __all__ = [
 #: One hyperparameter: a fixed value, or the prior it is drawn from once per
 #: realization.
 type Hyperparameter = float | DistributionConfig
+
+#: The extrinsic sites sampled by physical simulations.
+EXTRINSIC_SITES = (
+    "declination",
+    "right_ascension",
+    "polarization_angle",
+    "coa_phase",
+    "coa_time",
+)
+
+
+def extrinsic_priors(
+    coa_time_bounds: tuple[float, float] = (-0.5, 0.5),
+) -> dict[str, dist.Distribution]:
+    """The prior of each :data:`EXTRINSIC_SITES` entry.
+
+    Declination is the cosine law shifted from colatitude to
+    :math:`[-\\pi/2, \\pi/2]`. Built on call: constructing distributions
+    creates arrays, which must not happen at import.
+
+    Parameters
+    ----------
+    coa_time_bounds
+        Lower and upper geocentric arrival times in seconds.
+    """
+    return {
+        "declination": dist.TransformedDistribution(
+            UniformCosineDistribution(),
+            dist.transforms.AffineTransform(-math.pi / 2.0, 1.0),
+        ),
+        "right_ascension": dist.Uniform(0.0, 2.0 * math.pi),
+        "polarization_angle": dist.Uniform(0.0, math.pi),
+        "coa_phase": dist.Uniform(0.0, 2.0 * math.pi),
+        "coa_time": dist.Uniform(*coa_time_bounds),
+    }
 
 
 class RealizationMetadata(BaseModel):
@@ -133,7 +172,7 @@ class PopulationArtifact:
     """One population realization, in memory.
 
     ``source_parameters`` holds one ``(count,)`` column per source parameter,
-    the extrinsic columns :data:`~astrogwb.populations.joint.EXTRINSIC_SITES` included; source ``i`` has
+    the extrinsic columns :data:`~astrogwb.simulators.population.EXTRINSIC_SITES` included; source ``i`` has
     the stable ID ``i``. ``total_merger_rate`` is the realized
     :math:`\\mathcal{R}` in events per second and ``hyperparameters`` the
     realized values. ``rng_key`` is the key's data, the realization's

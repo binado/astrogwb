@@ -6,13 +6,14 @@ given, so no static scalar is extracted from a traced value.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import overload
 
 import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 
-from astrogwb.constants import MPC_IN_METERS, SECONDS_PER_YEAR, SPEED_OF_LIGHT
+from astrogwb.constants import MPC_IN_METERS, SPEED_OF_LIGHT
 from astrogwb.utils import gauss_legendre_nodes_weights
 
 #: Fixed Gauss-Legendre quadrature order used by the grid helpers. 4 nodes per
@@ -61,6 +62,32 @@ def log_gw_em_ratio(z: ArrayLike, xi_0: ArrayLike, xi_n: ArrayLike) -> jax.Array
         ``log(xi_0 + (1 - xi_0) * exp(-xi_n * log1p(z)))``, same shape as ``z``.
     """
     return jnp.log(xi_0 + (1.0 - xi_0) * jnp.exp(-(xi_n * jnp.log1p(z))))
+
+
+def gw_distance_ratio(
+    redshift: ArrayLike, params: Mapping[str, ArrayLike]
+) -> jax.Array:
+    r"""The GW-to-EM luminosity-distance ratio :math:`\Xi(z)`.
+
+    :math:`\Xi(z)` of :func:`log_gw_em_ratio` when ``xi_0`` is in ``params``
+    (``xi_n`` must then be too), else one: plain propagation.
+
+    Parameters
+    ----------
+    redshift
+        Redshift.
+    params
+        Hyperparameter values.
+
+    Returns
+    -------
+    jax.Array
+        The ratio, same shape as ``redshift``.
+    """
+    redshift = jnp.asarray(redshift)
+    if "xi_0" not in params:
+        return jnp.ones_like(redshift)
+    return jnp.exp(log_gw_em_ratio(redshift, params["xi_0"], params["xi_n"]))
 
 
 def normalized_hubble_parameter(redshift: ArrayLike, omega_m: ArrayLike) -> jax.Array:
@@ -253,89 +280,3 @@ def differential_comoving_volume(
         hubble_constant,
         omega_m,
     )
-
-
-def hubble_time_gyr(h0: ArrayLike) -> jax.Array:
-    r"""Hubble time $1 / H_0$ in Gyr, with $H_0$ in $\mathrm{km\,s^{-1}\,Mpc^{-1}}$.
-
-    Parameters
-    ----------
-    h0
-        Hubble constant in km s^-1 Mpc^-1.
-    """
-    return 1.0 / (hubble_constant_si(jnp.asarray(h0)) * SECONDS_PER_YEAR * 1e9)
-
-
-def _lambda_matter_ratio(omega_m: ArrayLike) -> tuple[jax.Array, jax.Array]:
-    r"""$\sqrt{\Omega_\Lambda}$ and $\sqrt{\Omega_\Lambda / \Omega_m}$ for flat $\Lambda$CDM."""
-    omega_m = jnp.asarray(omega_m)
-    sqrt_omega_lambda = jnp.sqrt(1.0 - omega_m)
-    return sqrt_omega_lambda, sqrt_omega_lambda / jnp.sqrt(omega_m)
-
-
-def lookback_time(
-    redshift: ArrayLike, hubble_constant: ArrayLike, omega_m: ArrayLike
-) -> jax.Array:
-    r"""Lookback time in Gyr for flat $\Lambda$CDM without radiation.
-
-    The closed form of $t_L(z) = t_H \int_0^z \mathrm{d}z' / [(1+z') E(z')]$:
-
-    .. math::
-
-        t_L(z) = \frac{2 t_H}{3\sqrt{\Omega_\Lambda}} \left[
-            \operatorname{arsinh}\sqrt{\Omega_\Lambda/\Omega_m}
-            - \operatorname{arsinh}\left(\sqrt{\Omega_\Lambda/\Omega_m}
-                \,(1+z)^{-3/2}\right)\right],
-
-    with $t_H = 1/H_0$ and $\Omega_\Lambda = 1 - \Omega_m$, which must be
-    positive. As $z \to \infty$ it tends to the age of the universe.
-    Broadcasts ``redshift``, ``hubble_constant`` and ``omega_m``.
-
-    Parameters
-    ----------
-    redshift
-        Redshift.
-    hubble_constant
-        Hubble constant in km s^-1 Mpc^-1.
-    omega_m
-        Matter density parameter.
-    """
-    sqrt_omega_lambda, ratio = _lambda_matter_ratio(omega_m)
-    scale = 2.0 * hubble_time_gyr(hubble_constant) / (3.0 * sqrt_omega_lambda)
-    return scale * (
-        jnp.arcsinh(ratio) - jnp.arcsinh(ratio * (1.0 + jnp.asarray(redshift)) ** -1.5)
-    )
-
-
-def redshift_at_lookback_time(
-    time: ArrayLike, hubble_constant: ArrayLike, omega_m: ArrayLike
-) -> jax.Array:
-    r"""Invert :func:`lookback_time`: redshift at a lookback time in Gyr.
-
-    .. math::
-
-        1 + z = \left[\frac{\sqrt{\Omega_\Lambda/\Omega_m}}{\sinh A}\right]^{2/3},
-        \qquad
-        A = \operatorname{arsinh}\sqrt{\Omega_\Lambda/\Omega_m}
-            - \frac{3\sqrt{\Omega_\Lambda}}{2}\,\frac{t}{t_H}.
-
-    Returns ``inf`` at and beyond the age of the universe ($A \le 0$), with
-    gradient-safe masking.
-
-    Parameters
-    ----------
-    time
-        Lookback time in Gyr.
-    hubble_constant
-        Hubble constant in km s^-1 Mpc^-1.
-    omega_m
-        Matter density parameter.
-    """
-    sqrt_omega_lambda, ratio = _lambda_matter_ratio(omega_m)
-    angle = jnp.arcsinh(ratio) - 1.5 * sqrt_omega_lambda * jnp.asarray(
-        time
-    ) / hubble_time_gyr(hubble_constant)
-    in_range = angle > 0.0
-    safe_angle = jnp.where(in_range, angle, 1.0)
-    redshift = (ratio / jnp.sinh(safe_angle)) ** (2.0 / 3.0) - 1.0
-    return jnp.where(in_range, redshift, jnp.inf)

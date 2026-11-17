@@ -4,12 +4,10 @@
 - :mod:`astrogwb.distributions.redshift` -- redshift densities from merger-rate
   models
 - :mod:`astrogwb.distributions.mass` -- ordered component-mass densities
-- :mod:`astrogwb.distributions.delay` -- merger delay-time densities
 - :mod:`astrogwb.distributions.orientation` -- isotropic polar-angle densities
 - :mod:`astrogwb.distributions.config` -- serializable distribution configurations
 """
 
-from astrogwb.distributions.delay import PowerLawDelayDistribution
 from astrogwb.distributions.mass import (
     MaxOfTwoNormalsDistribution,
     MaxOfTwoUniformsDistribution,
@@ -19,6 +17,5 @@ from astrogwb.distributions.orientation import UniformCosineDistribution
 __all__ = [
     "MaxOfTwoNormalsDistribution",
     "MaxOfTwoUniformsDistribution",
-    "PowerLawDelayDistribution",
     "UniformCosineDistribution",
 ]

@@ -24,7 +24,7 @@ import numpyro
 from jax.typing import ArrayLike
 
 from astrogwb.constants import SECONDS_PER_YEAR
-from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
+from astrogwb.cosmology import distance_and_volume_grid, gw_distance_ratio
 from astrogwb.distributions.interpolated import InterpolatedDistribution
 from astrogwb.rates import SourceFrameDistributionFn
 
@@ -174,12 +174,7 @@ class RedshiftDistribution(InterpolatedDistribution):
         redshift
             Redshift.
         """
-        redshift = jnp.asarray(redshift)
-        if "xi_0" in self.params:
-            return jnp.exp(
-                log_gw_em_ratio(redshift, self.params["xi_0"], self.params["xi_n"])
-            )
-        return jnp.ones_like(redshift, dtype=self.x.dtype)
+        return gw_distance_ratio(redshift, self.params)
 
     def gw_luminosity_distance(self, redshift: ArrayLike) -> jax.Array:
         r"""Gravitational-wave luminosity distance in Mpc at redshift(s).
