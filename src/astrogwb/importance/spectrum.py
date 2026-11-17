@@ -62,9 +62,9 @@ Unchecked contracts:
   isotropic.
 - The waveform is :math:`(2, 2)`-mode, aligned-spin and quasi-circular: its
   intensity is a function of :math:`M_d f` times :math:`M_d^2`.
-- ``density_sites`` names intrinsic sites only: redshift is integrated, never
-  weighted.
-- The catalog's reference redshift is the population window's lower edge.
+- The target and proposal log densities cover the same intrinsic variables and
+  measure. Redshift is integrated independently.
+- The catalog's reference redshift is at or below the window's lower edge.
 - The reference catalog's frequency grid starts at or below the observed
   grid's and extends past the highest detector-frame merger frequency at
   :math:`z_{\min}`: intensity above it is zero.
@@ -73,7 +73,7 @@ Unchecked contracts:
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping
 from typing import Any, NamedTuple
 
 import jax
@@ -93,13 +93,13 @@ from astrogwb.cosmology import (
 from astrogwb.importance.catalog import (
     CatalogMetadata,
     IntensityData,
+    ReferenceCatalog,
     intensity_data,
 )
-from astrogwb.populations._types import Population, SourceModel
+from astrogwb.populations._types import Parameters
 from astrogwb.rates import differential_merger_rate
 from astrogwb.simulators.sources import simulate_sources
 from astrogwb.utils import gauss_legendre_nodes_weights, require_current_version
-from astrogwb.utils.numpyro import sample_and_logprob
 from astrogwb.waveform.factory import waveform_generator
 
 __all__ = [
@@ -181,26 +181,13 @@ def redshift_quadrature(
     """
     if num_nodes <= 0:
         raise ValueError("num_nodes must be positive")
+    if not 0.0 <= minimum_redshift < maximum_redshift:
+        raise ValueError("redshift bounds must satisfy 0 <= minimum < maximum")
     lower, upper = 1.0 / (1.0 + maximum_redshift), 1.0 / (1.0 + minimum_redshift)
     nodes, weights = gauss_legendre_nodes_weights(lower, upper, num_nodes)
     scale_factor = np.asarray(nodes, dtype=np.float64)[::-1]
     weights = np.asarray(weights, dtype=np.float64)[::-1]
     return 1.0 / scale_factor - 1.0, weights / scale_factor**2
-
-
-def _intrinsic_log_prob(
-    source_model: SourceModel,
-    intrinsic: Mapping[str, jax.Array],
-    density_sites: Sequence[str],
-) -> jax.Array:
-    _, log_prob = sample_and_logprob(
-        handlers.condition(
-            source_model, data={INCLINATION_SITE: REFERENCE_INCLINATION}
-        ),
-        density_sites=density_sites,
-        values=intrinsic,
-    )
-    return log_prob
 
 
 def phinney_kernel(
@@ -377,13 +364,17 @@ class _SharedTerms(NamedTuple):
     total_rate: jax.Array
 
 
+type MergerRate = Callable[[ArrayLike, Parameters], jax.Array]
+type IntrinsicLogProb = Callable[[Mapping[str, jax.Array], Parameters], jax.Array]
+
+
 def _shared_terms(
     params: Mapping[str, ArrayLike],
     *,
-    population: Population,
+    merger_rate: MergerRate,
+    log_prob: IntrinsicLogProb | None,
     intrinsic: Mapping[str, jax.Array],
     proposal_log_prob: jax.Array,
-    density_sites: Sequence[str],
     redshift: jax.Array,
     redshift_weights: jax.Array,
     reference_distance: jax.Array,
@@ -393,18 +384,19 @@ def _shared_terms(
     ``kernel`` is the quadrature weights times :func:`phinney_kernel`, ``(Z,)``;
     ``total_rate`` is the observer-frame merger rate in mergers per second.
     """
-    source_model = population.source_model(params)
     log_weights = (
-        _intrinsic_log_prob(source_model, intrinsic, density_sites) - proposal_log_prob
+        jnp.zeros_like(proposal_log_prob)
+        if log_prob is None
+        else log_prob(intrinsic, params) - proposal_log_prob
     )
     hubble_constant = params["H0"]
     omega_m = params["Omega_m"]
-    merger_rate = population.merger_rate(redshift, params)
+    rate = merger_rate(redshift, params)
     # The GW distance over the electromagnetic one: modified propagation alone.
     distance_ratio = gw_distance_ratio(redshift, params)
     kernel = redshift_weights * phinney_kernel(
         redshift,
-        merger_rate,
+        rate,
         distance_ratio,
         hubble_constant,
         omega_m,
@@ -412,7 +404,7 @@ def _shared_terms(
     )
     total_rate = jnp.sum(
         redshift_weights
-        * differential_merger_rate(redshift, merger_rate, hubble_constant, omega_m)
+        * differential_merger_rate(redshift, rate, hubble_constant, omega_m)
     )
     return _SharedTerms(
         log_weights, kernel, distance_ratio, hubble_constant, omega_m, total_rate
@@ -420,42 +412,14 @@ def _shared_terms(
 
 
 def _rescaling_arrays(
-    data: IntensityData,
-    metadata: CatalogMetadata,
+    catalog: ReferenceCatalog,
     frequencies: ArrayLike,
     num_redshift_nodes: int,
-    density_sites: Sequence[str],
-    minimum_redshift: float | None = None,
+    minimum_redshift: float,
+    maximum_redshift: float,
 ) -> dict[str, Any]:
-    """Every array a rescaled estimator binds except the catalog's intensity.
-
-    The redshift nodes and weights of the window, the query frequencies
-    ``(F, Z)``, the node amplitude :math:`s_j^4`, the intrinsic columns, the
-    drawn intrinsic density at the catalog's fiducials, and the reference
-    distance.
-
-    The window is ``(minimum_redshift, maximum_redshift)``. The upper edge is
-    the population's; the lower defaults to its ``minimum_redshift``. The scale
-    factors are relative to :func:`reference_redshift`, which the lower edge
-    must not undercut.
-
-    Raises
-    ------
-    ValueError
-        If the window's lower edge is below the reference redshift: the query
-        frequencies would fall below the reference grid, where
-        :func:`_node_intensity` clamps instead of following the power law.
-    """
-    _require_quadrupole_waveform(metadata)
-    inclination = np.asarray(data["source_parameters"].get(INCLINATION_SITE))
-    if not np.all(inclination == REFERENCE_INCLINATION):
-        raise ValueError(
-            "reference catalog source inclinations must all be face-on (0)"
-        )
-    maximum_redshift = metadata.population.maximum_redshift
-    if minimum_redshift is None:
-        minimum_redshift = metadata.population.minimum_redshift
-    reference = reference_redshift(metadata)
+    """Bind the intrinsic columns and compute quadrature and query frequencies."""
+    reference = catalog.reference_redshift
     if minimum_redshift < reference:
         raise ValueError(
             f"the window's lower edge, {minimum_redshift}, is below the reference "
@@ -469,24 +433,17 @@ def _rescaling_arrays(
         np.log(np.asarray(frequencies, dtype=np.float64))[:, None]
         + np.log(scale)[None, :]
     )
-    columns = data["source_parameters"]
-    intrinsic = {
-        name: jnp.asarray(np.asarray(values))
-        for name, values in columns.items()
-        if name not in ("redshift", INCLINATION_SITE, _LUMINOSITY_DISTANCE)
-    }
-    fiducial_source_model = metadata.population.build().source_model(metadata.fiducials)
     return {
-        "intrinsic": intrinsic,
-        "proposal_log_prob": _intrinsic_log_prob(
-            fiducial_source_model, intrinsic, density_sites
-        ),
-        "log_reference_frequencies": jnp.log(jnp.asarray(data["frequencies"])),
+        "intrinsic": {
+            name: jnp.asarray(values) for name, values in catalog.intrinsic.items()
+        },
+        "proposal_log_prob": jnp.asarray(catalog.proposal_log_prob, dtype=jnp.float64),
+        "log_reference_frequencies": jnp.log(jnp.asarray(catalog.frequencies)),
         "query_log_frequencies": jnp.asarray(query_log_frequencies),
         "amplitude": jnp.asarray(scale**4),
         "redshift": jnp.asarray(redshift),
         "redshift_weights": jnp.asarray(redshift_weights),
         "reference_distance": jnp.asarray(
-            np.asarray(columns[_LUMINOSITY_DISTANCE], dtype=np.float64)[0]
+            catalog.reference_distance, dtype=jnp.float64
         ),
     }

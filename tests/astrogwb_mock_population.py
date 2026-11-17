@@ -19,7 +19,7 @@ import numpy as np
 import numpyro
 from jax.typing import ArrayLike
 
-from astrogwb.constants import ISCO_ALPHA
+from astrogwb.constants import ISCO_ALPHA, SECONDS_PER_YEAR
 from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.importance.catalog import (
     CatalogMetadata,
@@ -28,7 +28,7 @@ from astrogwb.importance.catalog import (
 from astrogwb.importance.spectrum import (
     reference_catalog,
 )
-from astrogwb.inference import CatalogModel
+from astrogwb.inference import CatalogModel, ReferenceCatalog
 from astrogwb.populations import (
     BNSCobaPopulation,
     Population,
@@ -290,26 +290,55 @@ def build_reference_catalog(
     )
 
 
+def uniform_bns_log_prob(
+    intrinsic: Mapping[str, jax.Array], params: Mapping[str, ArrayLike]
+) -> jax.Array:
+    """Joint density of two ordered, independently uniform component masses."""
+    primary, secondary = (intrinsic[name] for name in INTRINSIC_DENSITY_SITES)
+    low, width = params["minimum_mass"], params["mass_width"]
+    support = (low <= secondary) & (secondary <= primary) & (primary <= low + width)
+    return jnp.where(support, jnp.log(2.0) - 2.0 * jnp.log(width), -jnp.inf)
+
+
+def bns_reference_catalog(
+    data: IntensityData, proposal: Mapping[str, ArrayLike]
+) -> ReferenceCatalog:
+    """Bind the ordered mass draws and their joint proposal log density."""
+    columns = data["source_parameters"]
+    intrinsic = {name: jnp.asarray(columns[name]) for name in INTRINSIC_DENSITY_SITES}
+    return ReferenceCatalog(
+        frequencies=data["frequencies"],
+        intensity=data["intensity"],
+        intrinsic=intrinsic,
+        proposal_log_prob=uniform_bns_log_prob(intrinsic, proposal),
+        reference_redshift=float(columns["redshift"][0]),
+        reference_distance=float(columns["luminosity_distance"][0]),
+    )
+
+
 def build_reference_spectrum(
     data: IntensityData,
     metadata: CatalogMetadata,
     *,
     frequencies: ArrayLike | None = None,
-    density_sites: tuple[str, ...] = INTRINSIC_DENSITY_SITES,
-    population: Population | None = None,
+    reweight_masses: bool = True,
     observation_time: float = 1.0,
+    num_redshift_nodes: int = NUM_REDSHIFT_NODES,
+    minimum_redshift: float | None = None,
 ) -> CatalogModel:
-    """The mock reference catalog bound to the mock target.
-
-    ``frequencies`` is the observed grid, the catalog's own by default;
-    ``observation_time`` in years scales the power moment alone.
-    """
+    """The mock reference catalog bound to its ordered uniform BNS target."""
     return CatalogModel.from_catalog(
-        data,
-        metadata,
-        population=mock_population() if population is None else population,
+        bns_reference_catalog(data, metadata.fiducials),
+        merger_rate=metadata.population.build().merger_rate,
         frequencies=data["frequencies"] if frequencies is None else frequencies,
-        num_redshift_nodes=NUM_REDSHIFT_NODES,
-        observation_time=observation_time,
-        density_sites=density_sites,
+        num_redshift_nodes=num_redshift_nodes,
+        minimum_redshift=(
+            metadata.population.minimum_redshift
+            if minimum_redshift is None
+            else minimum_redshift
+        ),
+        maximum_redshift=metadata.population.maximum_redshift,
+        observation_seconds=observation_time * SECONDS_PER_YEAR,
+        log_prob=uniform_bns_log_prob if reweight_masses else None,
+        target_matches_proposal=not reweight_masses,
     )

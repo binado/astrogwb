@@ -17,10 +17,9 @@ type SourceModel = Callable[[], None]
 class Population(Protocol):
     """A source-frame merger rate and intrinsic source model.
 
-    Both methods take the same hyperparameter mapping. Simulation builds a
-    redshift distribution from ``merger_rate`` and composes it with
-    ``source_model``; importance integration evaluates ``merger_rate`` pointwise
-    and conditions ``source_model`` on catalog draws.
+    Both methods take the same hyperparameter mapping. Reference generation
+    draws intrinsic samples with ``source_model``. Catalog inference can
+    use ``merger_rate`` directly.
     """
 
     def merger_rate(self, redshift: ArrayLike, parameters: Parameters) -> jax.Array:

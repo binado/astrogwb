@@ -2,19 +2,25 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 import jax
+import jax.numpy as jnp
 import numpy as np
 import pytest
 from astrogwb_mock_population import (
     FIDUCIALS,
+    INTRINSIC_DENSITY_SITES,
+    bns_reference_catalog,
     build_reference_catalog,
     build_reference_spectrum,
     population_models,
     source_draw_model,
+    uniform_bns_log_prob,
 )
+from jax.typing import ArrayLike
 from numpyro import handlers
 
 from astrogwb.constants import SECONDS_PER_YEAR
@@ -36,6 +42,7 @@ from astrogwb.importance.spectrum import (
 )
 from astrogwb.inference import (
     CatalogModel,
+    ReferenceCatalog,
 )
 from astrogwb.populations import BNSCobaPopulation
 from astrogwb.rates import differential_merger_rate, madau_dickinson_rate
@@ -123,13 +130,13 @@ def test_importance_path_does_not_construct_a_redshift_distribution(
         "astrogwb.distributions.redshift.base.RedshiftDistribution.__init__", fail
     )
     data = reference_catalog(reference_metadata, realization_key(41, 0))
-    model = CatalogModel.from_catalog(
+    model = build_reference_spectrum(
         data,
         reference_metadata,
-        population=reference_metadata.population.build(),
         frequencies=np.asarray(waveform_generator(OBSERVED_WAVEFORM).frequencies),
         num_redshift_nodes=NUM_NODES,
         observation_time=OBSERVATION_TIME,
+        reweight_masses=False,
     )
     assert np.all(np.isfinite(model.spectrum(reference_metadata.fiducials)))
 
@@ -304,15 +311,13 @@ def _rescaled_and_brute_force(
     """Rescaled and brute-force spectra, or variances, on the same draws and nodes."""
     key = realization_key(41, 0)
     reference = reference_catalog(metadata, key)
-    target = metadata.population.build()
-    settings: dict[str, Any] = {
-        "population": target,
-        "frequencies": waveform_generator(OBSERVED_WAVEFORM).frequencies,
-        "num_redshift_nodes": NUM_NODES,
-        "density_sites": density_sites,
-    }
-    model = CatalogModel.from_catalog(
-        reference, metadata, observation_time=OBSERVATION_TIME, **settings
+    model = build_reference_spectrum(
+        reference,
+        metadata,
+        frequencies=np.asarray(waveform_generator(OBSERVED_WAVEFORM).frequencies),
+        num_redshift_nodes=NUM_NODES,
+        observation_time=OBSERVATION_TIME,
+        reweight_masses=bool(density_sites),
     )
     rescaled = [
         np.asarray(_bin_variance(model, p) if variance else model.spectrum(p))
@@ -358,20 +363,96 @@ def test_rescaled_prediction_reweights_like_waveforms_generated_at_every_node(
     np.testing.assert_allclose(rescaled, brute_force, rtol=1e-5)
 
 
+@pytest.mark.integration
+def test_explicit_bns_weights_at_proposal_and_shifted_support(
+    reference_metadata: CatalogMetadata,
+) -> None:
+    metadata = reference_metadata.model_copy(
+        update={"num_samples": 32, "sampling": "sobol"}
+    )
+    fiducials = metadata.fiducials
+    data = reference_catalog(metadata, realization_key(41, 0))
+    source_model = metadata.population.build().source_model
+    reference = bns_reference_catalog(data, fiducials)
+
+    def merger_rate(redshift: ArrayLike, params: Mapping[str, ArrayLike]) -> jax.Array:
+        return madau_dickinson_rate(
+            redshift,
+            params["gamma"],
+            params["kappa"],
+            params["z_peak"],
+            params["local_merger_rate"],
+        )
+
+    frequencies = np.asarray(waveform_generator(OBSERVED_WAVEFORM).frequencies)
+    settings: dict[str, Any] = {
+        "frequencies": frequencies,
+        "num_redshift_nodes": NUM_NODES,
+        "observation_seconds": OBSERVATION_TIME * SECONDS_PER_YEAR,
+        "minimum_redshift": metadata.population.minimum_redshift,
+        "maximum_redshift": metadata.population.maximum_redshift,
+        "merger_rate": merger_rate,
+    }
+    explicit = CatalogModel.from_catalog(
+        reference, log_prob=uniform_bns_log_prob, **settings
+    )
+    cached = CatalogModel.from_catalog(
+        reference, target_matches_proposal=True, **settings
+    )
+    predict = jax.jit(CatalogModel.predict)
+    weights = jax.jit(CatalogModel.log_weights)
+    cumulants = jax.jit(CatalogModel.projected_cumulants)
+    projectors = jnp.ones((1, frequencies.size))
+    narrow = {**fiducials, "mass_width": 1.0}
+    assert cached.node_moments is not None
+    np.testing.assert_array_equal(weights(cached, fiducials), 0)
+
+    def traced_density(params: dict[str, float]) -> jax.Array:
+        _, log_prob = sample_and_logprob(
+            source_model(params),
+            density_sites=INTRINSIC_DENSITY_SITES,
+            values=data["source_parameters"],
+        )
+        return log_prob
+
+    shifted_weights = weights(explicit, narrow)
+    assert np.any(np.isneginf(shifted_weights))
+    assert np.any(np.isfinite(shifted_weights))
+    with pytest.warns(UserWarning, match="Out-of-support"):
+        expected_weights = traced_density(narrow) - traced_density(fiducials)
+    np.testing.assert_allclose(shifted_weights, expected_weights, rtol=0, atol=1e-14)
+
+    for result, baseline in zip(
+        jax.tree.leaves(predict(explicit, fiducials)),
+        jax.tree.leaves(predict(cached, fiducials)),
+        strict=True,
+    ):
+        np.testing.assert_allclose(result, baseline, rtol=1e-12, atol=0)
+    np.testing.assert_allclose(
+        cumulants(explicit, fiducials, projectors),
+        cumulants(cached, fiducials, projectors),
+        rtol=1e-12,
+        atol=0,
+    )
+    np.testing.assert_array_equal(
+        predict(explicit, narrow).extras["total_merger_rate"],
+        predict(explicit, fiducials).extras["total_merger_rate"],
+    )
+
+
 @pytest.fixture
 def shot_noise_builder(reference_metadata: CatalogMetadata) -> Any:
     """``observation_time -> likelihood`` on one reference catalog."""
     data = reference_catalog(reference_metadata, realization_key(41, 0))
-    target = reference_metadata.population.build()
 
     def build(observation_time: float) -> CatalogModel:
-        return CatalogModel.from_catalog(
+        return build_reference_spectrum(
             data,
             reference_metadata,
-            population=target,
             frequencies=np.asarray(waveform_generator(OBSERVED_WAVEFORM).frequencies),
             num_redshift_nodes=NUM_NODES,
             observation_time=observation_time,
+            reweight_masses=False,
         )
 
     return build
@@ -455,14 +536,14 @@ def _bound_predictions(
     minimum_redshift: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """The spectrum and shot-noise variance of ``data`` at the fiducials."""
-    model = CatalogModel.from_catalog(
+    model = build_reference_spectrum(
         data,
         metadata,
-        population=metadata.population.build(),
         frequencies=np.asarray(waveform_generator(OBSERVED_WAVEFORM).frequencies),
         num_redshift_nodes=NUM_NODES,
         observation_time=OBSERVATION_TIME,
         minimum_redshift=minimum_redshift,
+        reweight_masses=False,
     )
     return (
         np.asarray(model.spectrum(metadata.fiducials)),
@@ -585,13 +666,12 @@ def test_dense_covariance_matches_physical_inclination_quadrature(
 ) -> None:
     key = realization_key(41, 0)
     params = {**reference_metadata.fiducials, "minimum_mass": 0.9, "mass_width": 1.6}
-    model = CatalogModel.from_catalog(
+    model = build_reference_spectrum(
         reference_catalog(reference_metadata, key),
         reference_metadata,
-        population=reference_metadata.population.build(),
         frequencies=np.asarray(waveform_generator(OBSERVED_WAVEFORM).frequencies),
         num_redshift_nodes=NUM_NODES,
-        density_sites=density_sites,
+        reweight_masses=bool(density_sites),
         observation_time=OBSERVATION_TIME,
     )
     _, expected = _spectrum_on_nodes(
@@ -607,23 +687,32 @@ def test_dense_covariance_matches_physical_inclination_quadrature(
     )
 
 
-@pytest.mark.parametrize("inclination", [None, 1.0])
-def test_catalog_model_rejects_non_face_on_source_columns(
+@pytest.mark.parametrize(
+    ("minimum", "maximum", "message"),
+    [(0.05, 1.0, "below the reference redshift"), (0.5, 0.5, "redshift bounds")],
+)
+def test_catalog_model_rejects_invalid_integration_bounds(
     reference_metadata: CatalogMetadata,
-    inclination: float | None,
+    minimum: float,
+    maximum: float,
+    message: str,
 ) -> None:
-    columns = {} if inclination is None else {"inclination": np.full(6, inclination)}
-    with pytest.raises(ValueError, match="inclinations must all be face-on"):
+    catalog = ReferenceCatalog(
+        frequencies=np.array([20.0, 30.0]),
+        intensity=np.ones((2, 6)),
+        intrinsic={},
+        proposal_log_prob=np.zeros(6),
+        reference_redshift=0.1,
+        reference_distance=475.0,
+    )
+    with pytest.raises(ValueError, match=message):
         CatalogModel.from_catalog(
-            {
-                "frequencies": np.array([20.0]),
-                "intensity": np.ones((1, 6)),
-                "source_parameters": columns,
-            },
-            reference_metadata,
-            population=reference_metadata.population.build(),
+            catalog,
+            merger_rate=reference_metadata.population.build().merger_rate,
             frequencies=np.array([20.0]),
             num_redshift_nodes=3,
-            density_sites=(),
-            observation_time=1.0,
+            minimum_redshift=minimum,
+            maximum_redshift=maximum,
+            target_matches_proposal=True,
+            observation_seconds=SECONDS_PER_YEAR,
         )

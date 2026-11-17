@@ -17,10 +17,13 @@ from pathlib import Path
 
 import jax
 import numpy as np
+import numpyro
 
+from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.populations import BNSCobaPopulation
-from astrogwb.simulators import RealizationMetadata, simulate_population
-from astrogwb.simulators.population import Hyperparameter
+from astrogwb.simulators import simulate_sources
+from astrogwb.simulators.population import extrinsic_priors
+from astrogwb.utils import years_to_seconds
 
 OUTPUT = Path(__file__).with_name("coba_bns_events.json")
 
@@ -54,15 +57,28 @@ HYPERPARAMETERS: dict[str, float] = {
 def main() -> None:
     """Draw the events and write them as JSON."""
     jax.config.update("jax_enable_x64", True)
-    hyperparameters: dict[str, Hyperparameter] = dict(HYPERPARAMETERS)
-    metadata = RealizationMetadata(
-        population=BNSCobaPopulation(
-            mass_model="uniform", minimum_redshift=0.05, maximum_redshift=10.0
-        ),
-        hyperparameters=hyperparameters,
-        observation_time=OBSERVATION_TIME,
+    population = BNSCobaPopulation(
+        mass_model="uniform", minimum_redshift=0.05, maximum_redshift=10.0
     )
-    samples = simulate_population(metadata, jax.random.key(SEED)).source_parameters
+    model = population.build()
+    redshift = RedshiftDistribution(
+        params=HYPERPARAMETERS,
+        source_frame_distribution=model.merger_rate,
+        minimum_redshift=population.minimum_redshift,
+        maximum_redshift=population.maximum_redshift,
+        n_grid=population.n_grid,
+    )
+    seconds = years_to_seconds(OBSERVATION_TIME)
+    _, count_key, source_key = jax.random.split(jax.random.key(SEED), 3)
+    count = int(jax.random.poisson(count_key, redshift.total_merger_rate() * seconds))
+
+    def source() -> None:
+        redshift.distance_model()()
+        model.source_model(HYPERPARAMETERS)()
+        for name, prior in extrinsic_priors((-seconds / 2, seconds / 2)).items():
+            numpyro.sample(name, prior)
+
+    samples = simulate_sources(source, source_key, count)
     events = {name: np.asarray(samples[name], dtype=float).tolist() for name in COLUMNS}
     payload = {
         "population": "bns_coba, uniform masses",

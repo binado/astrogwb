@@ -5,12 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import h5py
+import jax
 import numpy as np
 import pytest
 from astrogwb_tiny_pipeline import (
     NETWORKS,
     WAVEFORM,
     assert_same_spectra,
+    event_pool,
     population_metadata,
 )
 
@@ -19,9 +21,7 @@ from astrogwb.simulators import (
     SimulationConfig,
     network_spectra_ensemble,
     realization_key,
-    simulate,
     simulate_background,
-    simulate_population,
 )
 
 SEED = 41
@@ -37,10 +37,37 @@ def _config(segment_duration: float | None = None) -> SimulationConfig:
     )
 
 
+def _artifact(index: int) -> BackgroundArtifact:
+    config = _config()
+    key = realization_key(SEED, index)
+    pool = event_pool()
+    rate = 16 / config.population.observation_seconds
+    draw = simulate_background(
+        key,
+        pool,
+        config.waveform,
+        config.detectors,
+        observer_rate_hz=rate,
+        num_segments=1,
+        segment_seconds=config.population.observation_seconds,
+        incoherent=True,
+        chunk_size=CHUNK,
+    )
+    return BackgroundArtifact(
+        draw.frequencies,
+        draw.spectra,
+        config,
+        tuple(map(int, jax.random.key_data(key))),
+        int(draw.segment_counts.sum()),
+        rate,
+        config.population.fixed,
+    )
+
+
 @pytest.fixture(scope="module")
 def simulated() -> BackgroundArtifact:
     """The tiny configuration simulated at ``(SEED, 0)``."""
-    return simulate(_config(), realization_key(SEED, 0), chunk_size=CHUNK)
+    return _artifact(0)
 
 
 @pytest.fixture(scope="module")
@@ -76,35 +103,12 @@ def test_a_file_of_another_version_is_refused(written: Path, tmp_path: Path) -> 
         BackgroundArtifact.open(stale)
 
 
-@pytest.mark.parametrize("segment_duration", [None, 60.0])
-def test_simulate_is_the_two_building_blocks_composed(
-    segment_duration: float | None,
-) -> None:
-    config = _config(segment_duration)
-    key = realization_key(SEED, 0)
-    simulated = simulate(config, key, chunk_size=CHUNK)
-    population = simulate_population(
-        config.population, key, segment_duration=segment_duration
-    )
-
-    by_hand = simulate_background(
-        population,
-        WAVEFORM,
-        NETWORKS,
-        chunk_size=CHUNK,
-        segment_duration=segment_duration,
-    )
-
-    assert_same_spectra(simulated, by_hand)
-    assert simulated.rng_key == population.rng_key
-
-
 @pytest.fixture(scope="module")
 def ensemble(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Two draws of ``SEED``, each recorded by every tiny network."""
     root = tmp_path_factory.mktemp("ensemble")
     for index in range(2):
-        draw = simulate(_config(), realization_key(SEED, index), chunk_size=CHUNK)
+        draw = _artifact(index)
         draw.write(root / f"{SEED}-{index}.h5")
     return root
 

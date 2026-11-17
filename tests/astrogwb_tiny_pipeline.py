@@ -60,3 +60,24 @@ def population_metadata(observation_time: float = 1e-4) -> RealizationMetadata:
         },
         observation_time=observation_time,
     )
+
+
+def event_pool(size: int = 64, *, seed: int = 41) -> dict[str, np.ndarray]:
+    """An isotropic sample with physical waveform inputs and unique sky positions."""
+    rng = np.random.default_rng(seed)
+    masses = np.sort(rng.uniform(1, 2.5, (2, size)), axis=0)
+    return {
+        "source_frame_mass_1": masses[1],
+        "source_frame_mass_2": masses[0],
+        "spin_1z": np.zeros(size),
+        "spin_2z": np.zeros(size),
+        "lambda_1": np.full(size, 400.0),
+        "lambda_2": np.full(size, 400.0),
+        "redshift": np.full(size, 0.1),
+        "luminosity_distance": np.full(size, 450.0),
+        "inclination": np.arccos(rng.uniform(-1, 1, size)),
+        "declination": np.arcsin(rng.uniform(-1, 1, size)),
+        "right_ascension": rng.uniform(0, 2 * np.pi, size),
+        "polarization_angle": rng.uniform(0, np.pi, size),
+        "coa_phase": rng.uniform(0, 2 * np.pi, size),
+    }

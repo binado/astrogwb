@@ -7,21 +7,21 @@
 redshift. :func:`read_catalog` reads back what
 :func:`~astrogwb.utils.io.write` stored.
 
-These are fixed-size draws for importance weighting, not Poisson realizations
-(:func:`~astrogwb.simulators.simulate_population`); both draw their sources
-through :func:`~astrogwb.simulators.simulate_sources`.
+Reference generation uses fixed-size intrinsic draws.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import Annotated, Any, Self, TypedDict, cast
 
 import jax
 import numpy as np
+from jax.typing import ArrayLike as JaxArrayLike
 from numpy.typing import ArrayLike, NDArray
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -35,6 +35,7 @@ from astrogwb.waveform.metadata import WaveformMetadata
 __all__ = [
     "CatalogMetadata",
     "IntensityData",
+    "ReferenceCatalog",
     "intensity_data",
     "read_catalog",
     "validate_matching_frequency_grids",
@@ -95,6 +96,42 @@ class IntensityData(TypedDict):
     frequencies: NDArray[np.float64]
     intensity: NDArray[np.float64]
     source_parameters: dict[str, NDArray[Any]]
+
+
+@dataclass(frozen=True)
+class ReferenceCatalog:
+    """Waveform intensities at one distance and redshift.
+
+    Reference waveforms are face-on, quasi-circular, and aligned-spin with
+    only the dominant quadrupole mode. Intrinsic columns exclude redshift,
+    luminosity distance, and inclination.
+
+    Attributes
+    ----------
+    frequencies
+        Positive, increasing reference frequency grid in Hz, shape
+        ``(F_ref,)``. Cover the redshifted query frequencies through the
+        waveform's nonzero support.
+    intensity
+        Sum of the squared polarization amplitudes, shape ``(F_ref, N)``.
+    intrinsic
+        Source-frame intrinsic columns, in intensity column order.
+    proposal_log_prob
+        Finite joint log density of each draw under the proposal, shape
+        ``(N,)``. Use the same variables and measure as the target log density.
+    reference_redshift
+        Redshift at which all reference waveforms were generated.
+    reference_distance
+        Positive gravitational-wave luminosity distance in Mpc used for the
+        waveforms.
+    """
+
+    frequencies: JaxArrayLike
+    intensity: JaxArrayLike
+    intrinsic: Mapping[str, JaxArrayLike]
+    proposal_log_prob: JaxArrayLike
+    reference_redshift: float
+    reference_distance: float
 
 
 def intensity_data(

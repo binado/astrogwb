@@ -33,13 +33,9 @@ in one fused kernel, and each network keeps its own rows, ``(P_n, F)``.
 :func:`combine_pair_spectra` weights them into a network spectrum ``(F,)`` on
 demand.
 
-Without a ``segment_duration`` the background is deterministic given its
-inputs and carries no detector noise. With one, :math:`\tau`, the observation is
-cut into :math:`N_\mathrm{seg} = \lfloor T/\tau \rfloor` segments of exactly
-:math:`\tau`, and the remainder shorter than :math:`\tau` is dropped: the
-population is drawn for :math:`T_\mathrm{seg} = N_\mathrm{seg} \tau` (see
-:func:`~astrogwb.simulators.simulate_population`). Sources are Poisson in time, so
-each is assigned to a uniformly drawn segment :math:`s`, which holds its own
+The simulator draws independent Poisson counts in segments of exactly
+:math:`\tau` seconds and selects distinct rows from the supplied pool. Each
+selected merger belongs to one segment; each segment holds its own
 coherent strain :math:`h_a^s = \sum_{i \in s} H_{a,i}` and fresh independent
 noise :math:`n_a^s \sim \mathcal{CN}(0, \tau S_a / 2)` in each
 detector and bin; empty segments still carry noise. With the segment
@@ -57,16 +53,13 @@ deviation :func:`~astrogwb.detector.pair_bin_scale`. Every bin must hold a
 whole number :math:`\tau \Delta f_i \ge 1` of the segment's Fourier modes, so
 that bins are sums of disjoint Fourier modes, e.g. a 1 Hz linear grid with a
 power-of-two :math:`\tau`; a log grid does not qualify. The model holds while
-signals are mostly shorter than :math:`\tau`. Segment labels
-and noise are folded from the realization's key (streams
-:data:`SEGMENT_STREAM` and :data:`NOISE_STREAM`). Bins where a PSD is not
+signals are mostly shorter than :math:`\tau`.  Bins where a PSD is not
 finite get no noise. Earth's rotation during a signal is not modelled.
 
 Before coherent summation, both polarizations receive the geocentric arrival
 phase :math:`\exp(-2\pi i f t_i)`, with
 :math:`t_i` sampled in seconds relative to segment center within
-:math:`[-\tau/2, \tau/2)`. The population stage
-supplies ``coa_time``; it is never redrawn or rescaled here. Detector projection applies geometric delays once. Signals remain
+:math:`[-\tau/2, \tau/2)`. The simulator draws these times independently of row selection. Detector projection applies geometric delays once. Signals remain
 complete within their assigned segment, without window truncation or boundary
 crossing.
 """
@@ -84,7 +77,8 @@ from typing import NamedTuple, Self
 import jax
 import jax.numpy as jnp
 import numpy as np
-from numpy.typing import ArrayLike, NDArray
+from jax.typing import ArrayLike
+from numpy.typing import NDArray
 
 from astrogwb import __version__
 from astrogwb.detector import (
@@ -98,7 +92,7 @@ from astrogwb.detector.projection import project_polarizations_fd
 from astrogwb.frequency import bin_widths
 from astrogwb.simulators._chunks import iter_rows, pad_rows
 from astrogwb.simulators.config import SimulationConfig
-from astrogwb.simulators.population import PopulationArtifact, segmented_seconds
+from astrogwb.simulators.population import segmented_seconds
 from astrogwb.utils import years_to_seconds
 from astrogwb.utils.io import atomic_h5, h5py
 from astrogwb.waveform.base import WaveformGenerator
@@ -106,11 +100,11 @@ from astrogwb.waveform.factory import waveform_generator
 from astrogwb.waveform.metadata import WaveformMetadata
 
 __all__ = [
-    "NOISE_STREAM",
-    "SEGMENT_STREAM",
     "BackgroundArtifact",
+    "BackgroundDraw",
     "NetworkNoise",
     "combine_pair_spectra",
+    "project_background",
     "select_networks",
     "simulate_background",
 ]
@@ -123,12 +117,6 @@ PAIR_RESPONSE_DENOMINATOR = 5.0
 #: Absolute slack on ``segment_duration * bin width`` being a whole number of
 #: Fourier modes, for the rounding of a grid's spacing.
 _MODE_TOLERANCE = 1e-6
-
-#: The stream folded into a realization's key for the detector noise.
-NOISE_STREAM = 1
-
-#: The stream folded into a realization's key for the segment of each source.
-SEGMENT_STREAM = 2
 
 
 class NetworkNoise(NamedTuple):
@@ -305,7 +293,7 @@ class BackgroundArtifact:
             if version != __version__:
                 raise ValueError(
                     f"{path} was written by astrogwb {version}, but {__version__} "
-                    "is installed; regenerate it with astrogwb simulate"
+                    "is installed; regenerate the ensemble draw"
                 )
             config = SimulationConfig.model_validate_json(file.attrs["metadata"])
             realization = json.loads(file.attrs["realization"])
@@ -462,127 +450,148 @@ def _kernels(
     )
 
 
-def simulate_background(
-    population: PopulationArtifact,
-    waveform: WaveformMetadata,
-    registry: DetectorRegistry,
-    *,
-    chunk_size: int = 1024,
-    segment_duration: float | None = None,
-    segment_batch_size: int = 1024,
-    validate_sources: bool = True,
-) -> BackgroundArtifact:
-    """The per-network pair spectra of ``population`` projected onto ``registry``.
+class BackgroundDraw(NamedTuple):
+    """Realized pair spectra per network, frequency grid in Hz and event counts."""
 
-    Waveforms are generated over fixed-size padded source chunks, one fused
-    JIT call per chunk: one compile whatever the realized count, and peak
-    memory of one chunk. The compiled kernels are cached per waveform and
-    pair layout, so repeated calls compile once.
+    frequencies: NDArray[np.float64]
+    spectra: dict[str, NDArray[np.float64]]
+    segment_counts: NDArray[np.int64]
 
-    A ``segment_duration`` in seconds assigns every source to a segment and
-    adds sampled detector noise to the pair spectra, segment by segment (see
-    the module docstring); ``None`` leaves them noiseless.
 
-    Parameters
-    ----------
-    population
-        The realization to project. For a uniform arrival prior over each
-        segment, draw it with the same ``segment_duration`` supplied here.
-    waveform
-        The waveform its polarizations are generated with.
-    registry
-        The detectors and networks it is projected onto.
-    chunk_size
-        Waveforms evaluated per chunk.
-    segment_duration
-        Noise segment length in seconds; ``None`` for no noise.
-    segment_batch_size
-        Noise segments whose strains are held at once. Like ``chunk_size`` it
-        changes cost, never the result.
-    validate_sources
-        Check that every source value is one the approximant represents.
-
-    Raises
-    ------
-    KeyError
-        If the sources carry no sky position or polarization angle.
-    ValueError
-        If a size is not positive, a source value is outside what the
-        approximant represents, the observation is shorter than
-        ``segment_duration``, or a bin does not hold a whole number of the
-        segment's Fourier modes.
-    """
+def _projection(
+    waveform: WaveformMetadata, detectors: DetectorRegistry
+) -> tuple[jax.Array, _Geometry, _Kernels]:
     jax.config.update("jax_enable_x64", True)
-    if chunk_size <= 0:
-        raise ValueError("chunk_size must be positive")
-    if segment_batch_size <= 0:
-        raise ValueError("segment_batch_size must be positive")
-    if segment_duration is not None and segment_duration <= 0:
-        raise ValueError("segment_duration must be positive")
-    missing = {"declination", "right_ascension", "polarization_angle"} - set(
-        population.source_parameters
-    )
-    if missing:
-        raise KeyError(f"population has no extrinsic columns {sorted(missing)}")
-    frequencies = np.asarray(waveform_generator(waveform).frequencies, dtype=np.float64)
-    geometry = _network_geometry(registry, frequencies)
-    kernels = _kernels(waveform, geometry.pairs)
-    if validate_sources and population.count:
-        kernels.generator.check_sources(population.source_parameters)
-    grid = jnp.asarray(frequencies)
-    if segment_duration is None:
-        union = _noiseless(population, grid, geometry, kernels, chunk_size)
-    else:
-        union = _segmented(
-            population,
-            grid,
-            geometry,
-            kernels,
-            chunk_size,
-            segment_duration,
-            segment_batch_size,
-        )
-    return BackgroundArtifact(
-        frequencies=frequencies,
-        spectra={name: union[rows] for name, rows in geometry.rows.items()},
-        config=SimulationConfig(
-            population=population.metadata,
-            waveform=waveform,
-            detectors=registry,
-            segment_duration=segment_duration,
-        ),
-        rng_key=population.rng_key,
-        count=population.count,
-        total_merger_rate=population.total_merger_rate,
-        hyperparameters=dict(population.hyperparameters),
-    )
+    frequencies = np.asarray(waveform_generator(waveform).frequencies)
+    geometry = _network_geometry(detectors, frequencies)
+    return jnp.asarray(frequencies), geometry, _kernels(waveform, geometry.pairs)
 
 
-def _noiseless(
-    population: PopulationArtifact,
-    grid: jax.Array,
-    geometry: _Geometry,
-    kernels: _Kernels,
-    chunk_size: int,
-) -> NDArray[np.float64]:
-    """The ``(P_union, F)`` incoherent pair spectra, ``5 K / T``."""
+def project_background(
+    sources: Mapping[str, ArrayLike],
+    waveform: WaveformMetadata,
+    detectors: DetectorRegistry,
+    *,
+    observation_seconds: float,
+    chunk_size: int = 1024,
+) -> BackgroundDraw:
+    """Project supplied physical events into incoherent pair spectra, in Hz^-1.
+
+    Each row contributes exactly once. The normalization is the observation
+    duration in seconds. The count has one entry for the whole observation.
+    """
+    if observation_seconds <= 0:
+        raise ValueError("observation_seconds must be positive")
+    grid, geometry, kernels = _projection(waveform, detectors)
+    columns = {name: np.asarray(values) for name, values in sources.items()}
+    count = len(columns["right_ascension"])
+    if count:
+        kernels.generator.check_sources(columns)
     tensors = jnp.asarray(geometry.tensors)
     locations = jnp.asarray(geometry.locations)
-    total = jnp.zeros((len(geometry.pairs), grid.shape[0]))
-    for start, _ in iter_rows(population.count, chunk_size):
-        rows, valid = pad_rows(population.source_parameters, start, chunk_size)
-        total = total + kernels.pair_sums(
-            grid, rows, jnp.asarray(valid), tensors, locations
+    total = jnp.zeros((len(geometry.pairs), grid.size))
+    for start, _ in iter_rows(count, chunk_size):
+        rows, valid = pad_rows(columns, start, chunk_size)
+        total += kernels.pair_sums(grid, rows, jnp.asarray(valid), tensors, locations)
+    union = PAIR_RESPONSE_DENOMINATOR * np.asarray(total) / observation_seconds
+    return BackgroundDraw(
+        np.asarray(grid),
+        {k: union[v] for k, v in geometry.rows.items()},
+        np.array([count]),
+    )
+
+
+def _draw_events(
+    key: jax.Array,
+    sources: Mapping[str, ArrayLike],
+    observer_rate_hz: float,
+    num_segments: int,
+    segment_seconds: float,
+) -> tuple[dict[str, NDArray], NDArray[np.int64]]:
+    if not np.isfinite(observer_rate_hz) or observer_rate_hz < 0:
+        raise ValueError("observer_rate_hz must be finite and nonnegative")
+    if num_segments < 1 or not np.isfinite(segment_seconds) or segment_seconds <= 0:
+        raise ValueError("num_segments and segment_seconds must be positive")
+    # Row selection runs on host arrays. A varying event count need not
+    # compile a new random kernel for every realization.
+    rng = np.random.default_rng(np.asarray(jax.random.key_data(key)))
+    counts = rng.poisson(observer_rate_hz * segment_seconds, num_segments)
+    count = int(counts.sum())
+    size = len(np.asarray(sources["right_ascension"]))
+    if any(np.shape(col) != (size,) for col in sources.values()):
+        raise ValueError("event pool columns must have the same one-dimensional shape")
+    if count > size:
+        raise ValueError(f"event pool has {size} rows but this draw requires {count}")
+    indices = rng.choice(size, size=count, replace=False)
+    selected = {name: np.asarray(col)[indices] for name, col in sources.items()}
+    selected["coa_time"] = rng.uniform(-segment_seconds / 2, segment_seconds / 2, count)
+    return selected, counts
+
+
+def simulate_background(
+    key: jax.Array,
+    sources: Mapping[str, ArrayLike],
+    waveform: WaveformMetadata,
+    detectors: DetectorRegistry,
+    *,
+    observer_rate_hz: float,
+    num_segments: int,
+    segment_seconds: float,
+    chunk_size: int = 1024,
+    segment_batch_size: int = 1024,
+    incoherent: bool = False,
+) -> BackgroundDraw:
+    """Draw independent Poisson segment counts from a fixed physical event pool.
+
+    Each pool row supplies waveform parameters, right ascension, declination
+    and polarization angle. Rows are selected uniformly without replacement
+    across the entire draw. The observer rate (events per second) must match
+    the population represented by these rows. Arrival times are drawn uniformly
+    within each segment; any catalog coalescence times are replaced.
+
+    The default sums coherent strain and detector noise in each segment.
+    With incoherent=True, sum individual event powers over the same observation.
+    Each network has one row per detector pair in registry order.
+    """
+    if min(chunk_size, segment_batch_size) < 1:
+        raise ValueError("chunk and segment batch sizes must be positive")
+    jax.config.update("jax_enable_x64", True)
+    event_key, noise_key = jax.random.split(key)
+    columns, counts = _draw_events(
+        event_key, sources, observer_rate_hz, num_segments, segment_seconds
+    )
+    if incoherent:
+        result = project_background(
+            columns,
+            waveform,
+            detectors,
+            observation_seconds=num_segments * segment_seconds,
+            chunk_size=chunk_size,
         )
-    return (
-        PAIR_RESPONSE_DENOMINATOR
-        * np.asarray(total, dtype=np.float64)
-        / population.observation_seconds
+        return result._replace(segment_counts=counts)
+    grid, geometry, kernels = _projection(waveform, detectors)
+    if counts.any():
+        kernels.generator.check_sources(columns)
+    union = _segmented(
+        columns,
+        counts,
+        noise_key,
+        grid,
+        geometry,
+        kernels,
+        chunk_size,
+        segment_seconds,
+        segment_batch_size,
+    )
+    return BackgroundDraw(
+        np.asarray(grid), {k: union[v] for k, v in geometry.rows.items()}, counts
     )
 
 
 def _segmented(
-    population: PopulationArtifact,
+    columns: Mapping[str, NDArray],
+    counts: NDArray[np.int64],
+    noise_key: jax.Array,
     grid: jax.Array,
     geometry: _Geometry,
     kernels: _Kernels,
@@ -590,14 +599,9 @@ def _segmented(
     segment_duration: float,
     segment_batch_size: int,
 ) -> NDArray[np.float64]:
-    """The ``(P_union, F)`` pair spectra with per-segment sources and noise."""
-    segments = int(population.observation_seconds // segment_duration)
-    if segments < 1:
-        raise ValueError(
-            f"segment_duration {segment_duration} s exceeds the "
-            f"observation time {population.observation_seconds} s"
-        )
-    seconds = segmented_seconds(population.observation_seconds, segment_duration)
+    """The pair spectra with per-segment sources and detector noise."""
+    segments = len(counts)
+    seconds = segments * segment_duration
     widths = np.asarray(bin_widths(grid), dtype=np.float64)
     modes = segment_duration * widths
     if modes.min() < 1.0 or not np.allclose(
@@ -609,24 +613,7 @@ def _segmented(
             "integer of at least 1, e.g. a 1 Hz linear grid with a power-of-two "
             "segment"
         )
-    wrapped = jax.random.wrap_key_data(
-        jnp.asarray(population.rng_key, dtype=jnp.uint32)
-    )
-    labels = np.asarray(
-        jax.random.randint(
-            jax.random.fold_in(wrapped, SEGMENT_STREAM),
-            (population.count,),
-            0,
-            segments,
-        )
-    )
-    order = np.argsort(labels, kind="stable")
-    labels = labels[order]
-    columns = {
-        name: np.asarray(values)[order]
-        for name, values in population.source_parameters.items()
-    }
-    noise_key = jax.random.fold_in(wrapped, NOISE_STREAM)
+    labels = np.repeat(np.arange(segments), counts)
     first, second = (jnp.asarray(index) for index in zip(*geometry.pairs, strict=True))
     psds = jnp.asarray(geometry.psds)
     tensors = jnp.asarray(geometry.tensors)

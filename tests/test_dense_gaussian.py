@@ -17,10 +17,8 @@ import numpyro.distributions as dist
 import pytest
 from astrogwb_mock_population import (
     FIDUCIALS,
-    INTRINSIC_DENSITY_SITES,
-    NUM_REDSHIFT_NODES,
     build_reference_catalog,
-    mock_population,
+    build_reference_spectrum,
 )
 from jax.scipy.linalg import solve_triangular
 
@@ -39,8 +37,6 @@ from astrogwb.inference import (
     whitened_catalog_covariance,
 )
 from astrogwb.inference.model import interpolation_weights
-
-_TARGET = mock_population()
 
 NUM_PAIRS = 2
 NUM_BINS = 12
@@ -64,16 +60,12 @@ def frequencies(catalog: Any) -> np.ndarray:
 
 @pytest.fixture(scope="module")
 def model_factory(catalog: Any, frequencies: np.ndarray) -> Callable[..., CatalogModel]:
-    def build(density_sites: tuple[str, ...] = ()) -> CatalogModel:
-        data, metadata = catalog
-        return CatalogModel.from_catalog(
-            data,
-            metadata,
-            population=_TARGET,
+    def build(reweight_masses: bool = False) -> CatalogModel:
+        return build_reference_spectrum(
+            *catalog,
             frequencies=frequencies,
-            num_redshift_nodes=NUM_REDSHIFT_NODES,
             observation_time=OBSERVATION_TIME,
-            density_sites=density_sites,
+            reweight_masses=reweight_masses,
         )
 
     return build
@@ -157,7 +149,7 @@ def test_power_moment_held_node_moments_match_the_weighted_gather_at_the_fiducia
 ) -> None:
     """At the fiducials every weight is one, so both paths are the same moment."""
     held = model_factory()
-    weighted = model_factory(INTRINSIC_DENSITY_SITES)
+    weighted = model_factory(reweight_masses=True)
     assert held.node_moments is not None and weighted.node_moments is None
 
     np.testing.assert_allclose(
