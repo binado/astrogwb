@@ -34,8 +34,9 @@ pip install astrogwb[io]
   using an explicit reference catalog, intrinsic density and merger rate.
   The inference module also provides detector-network likelihoods.
 - `astrogwb.simulators.simulate_background` draws segmented detector-pair spectra
-  from a supplied physical event pool and observer-frame rate. See the
-  [simulation API and normalization](docs/simulator-pipeline.md).
+  from a supplied physical event pool and observer-frame rate, and
+  `astrogwb simulate` runs it on a gwmock-pop population catalogue. See the
+  [simulation API, command and normalization](docs/simulator-pipeline.md).
 - `astrogwb.waveform` owns intensity generators, reduces raw
   plus/cross polarizations to power, applies GW-distance corrections to plain
   arrays, and provides a closed-form quadrupolar inspiral model. Persistence
@@ -177,5 +178,6 @@ log_likelihood, extras = likelihood.log_likelihood(params)
 Paper notebooks, run configurations, plotting, and cluster workflows live in
 the private [`experiments-astrogwb`](https://github.com/binado/experiments-astrogwb) repository. This distribution
 contains the scientific library and the `astrogwb` CLI (`pip install
-"astrogwb[cli]"`). CLI commands accept external run configuration via
-`--config-dir` and detector layers via `--detector-config`.
+"astrogwb[cli]"`). `astrogwb simulate` takes waveform settings via
+`--waveform-config` and detector layers via `--detector-config`;
+`astrogwb model-catalog` reads shared run configuration from `--config-dir`.

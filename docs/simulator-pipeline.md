@@ -33,6 +33,30 @@ places the complete waveform in the assigned segment. Network pairs follow
 `detectors.pairs(network_name)`. Source chunks and segment batches bound
 working memory.
 
+## Command line
+
+`astrogwb simulate` runs the simulator on a gwmock-pop population catalogue
+(HDF5 or CSV, canonical gwmock-pop column names) and writes one HDF5 file:
+
+```
+astrogwb simulate 41-0.h5 events.h5 \
+    --waveform-config waveform.toml --detector-config detectors.toml \
+    --rate-per-year 1e5 --num-segments 1024 --segment-seconds 16 --seed 41
+```
+
+The catalogue must hold `distance` (luminosity distance in Mpc, renamed
+`luminosity_distance`), the sky columns, and the detector-frame or
+source-frame masses; other columns pass through. `--waveform-config` is a TOML
+file of the `WaveformMetadata` fields. `--rate-per-year` is the observer-frame
+rate of the population the catalogue represents; it is converted to
+`observer_rate_hz`. `--incoherent` skips noise and sums event powers, the
+noiseless expected signal of the same Poisson draw. The file stores the
+`BackgroundDraw` (`frequencies`, `segment_counts` and each network's
+`pair_spectral_density`) and, as JSON in its `metadata` attribute, the
+`SimulationConfig` it was made with and the astrogwb `version`.
+`read_background` returns both, and `network_noise` rebuilds the noise inputs
+from the config.
+
 ## Normalization and noise
 
 Let $K$ be the sum of individual event cross-powers for a detector pair,

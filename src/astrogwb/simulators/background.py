@@ -53,26 +53,27 @@ deviation :func:`~astrogwb.detector.pair_bin_scale`. Every bin must hold a
 whole number :math:`\tau \Delta f_i \ge 1` of the segment's Fourier modes, so
 that bins are sums of disjoint Fourier modes, e.g. a 1 Hz linear grid with a
 power-of-two :math:`\tau`; a log grid does not qualify. The model holds while
-signals are mostly shorter than :math:`\tau`.  Bins where a PSD is not
+signals are mostly shorter than :math:`\tau`. Bins where a PSD is not
 finite get no noise. Earth's rotation during a signal is not modelled.
 
 Before coherent summation, both polarizations receive the geocentric arrival
-phase :math:`\exp(-2\pi i f t_i)`, with
-:math:`t_i` sampled in seconds relative to segment center within
-:math:`[-\tau/2, \tau/2)`. The simulator draws these times independently of row selection. Detector projection applies geometric delays once. Signals remain
-complete within their assigned segment, without window truncation or boundary
-crossing.
+phase :math:`\exp(-2\pi i f t_i)`, with :math:`t_i` sampled in seconds relative
+to segment center within :math:`[-\tau/2, \tau/2)`. The simulator draws these
+times independently of row selection. Detector projection applies geometric
+delays once. Signals remain complete within their assigned segment, without
+window truncation or boundary crossing.
+
+A background is stored with :func:`write_background` together with the
+:class:`~astrogwb.simulators.SimulationConfig` it was simulated with.
 """
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
 from functools import cache
 from itertools import combinations
 from pathlib import Path
-from typing import NamedTuple, Self
+from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
@@ -92,7 +93,6 @@ from astrogwb.detector.projection import project_polarizations_fd
 from astrogwb.frequency import bin_widths
 from astrogwb.simulators._chunks import iter_rows, pad_rows
 from astrogwb.simulators.config import SimulationConfig
-from astrogwb.simulators.population import segmented_seconds
 from astrogwb.utils import years_to_seconds
 from astrogwb.utils.io import atomic_h5, h5py
 from astrogwb.waveform.base import WaveformGenerator
@@ -100,14 +100,19 @@ from astrogwb.waveform.factory import waveform_generator
 from astrogwb.waveform.metadata import WaveformMetadata
 
 __all__ = [
-    "BackgroundArtifact",
     "BackgroundDraw",
     "NetworkNoise",
     "combine_pair_spectra",
+    "network_noise",
     "project_background",
+    "read_background",
     "select_networks",
     "simulate_background",
+    "write_background",
 ]
+
+#: The columns every event pool must supply besides its waveform parameters.
+SKY_COLUMNS = ("right_ascension", "declination", "polarization_angle")
 
 
 #: :math:`\langle K_{ab} \rangle = I \gamma_{ab}` over this, the factor in
@@ -179,144 +184,6 @@ def used_detectors(registry: DetectorRegistry, names: Sequence[str]) -> tuple[st
         Names to select.
     """
     return tuple(sorted(registry.select(names).detectors))
-
-
-@dataclass(frozen=True)
-class BackgroundArtifact:
-    """The per-network spectra of one simulation, in memory or read from disk.
-
-    ``spectra`` holds each network's pair spectra :math:`Y_{ab}` in
-    :math:`\\mathrm{Hz}^{-1}`, ``(P_n, F)``, keyed by network name in sorted
-    order; the pair axis follows :meth:`pairs`. ``config`` is the
-    :class:`~astrogwb.simulators.SimulationConfig` it was simulated from and
-    ``rng_key`` the data of the key it was drawn at. ``count``,
-    ``total_merger_rate`` (per second) and ``hyperparameters`` are the
-    realization's, carried over from its population.
-    """
-
-    frequencies: NDArray[np.float64]
-    spectra: dict[str, NDArray[np.float64]]
-    config: SimulationConfig
-    rng_key: tuple[int, ...]
-    count: int
-    total_merger_rate: float
-    hyperparameters: dict[str, float]
-
-    @property
-    def pairs(self) -> dict[str, tuple[tuple[str, str], ...]]:
-        """The detector pairs of each network's pair axis."""
-        return {name: tuple(self.config.detectors.pairs(name)) for name in self.spectra}
-
-    @property
-    def observation_seconds(self) -> float:
-        """The observed time in seconds: the whole segments, when segmented."""
-        seconds = self.config.population.observation_seconds
-        if self.segment_duration is None:
-            return seconds
-        return segmented_seconds(seconds, self.segment_duration)
-
-    @property
-    def segment_duration(self) -> float | None:
-        """The noise segment length in seconds; ``None`` for no noise."""
-        return self.config.segment_duration
-
-    def noise(self) -> dict[str, NetworkNoise]:
-        """Each network's :class:`NetworkNoise` on this background's grid.
-
-        Derived from the config, not stored.
-        """
-        registry = self.config.detectors
-        grid = np.asarray(self.frequencies, dtype=np.float64)
-        years = self.observation_seconds / years_to_seconds(1.0)
-        noise = {}
-        for name in self.spectra:
-            detectors = registry.build_network(name)
-            psd = effective_psd(grid, detectors)
-            noise[name] = NetworkNoise(
-                pair_overlap=np.stack(
-                    [term.overlap for term in pair_terms(grid, detectors)]
-                ),
-                pair_scale=np.asarray(pair_bin_scale(grid, detectors, years)),
-                effective_psd=np.asarray(psd),
-                scale=np.asarray(gaussian_bin_scale(jnp.asarray(psd), years, grid)),
-            )
-        return noise
-
-    def write(self, path: str | Path) -> Path:
-        """Write the spectra to the HDF5 file ``path``, atomically.
-
-        Datasets ``frequencies`` and, per network,
-        ``networks/<name>/pair_spectral_density``. The root attributes are
-        ``metadata``, the config as JSON, ``version``, the package version,
-        and ``realization``, a JSON of ``rng_key``, ``count``,
-        ``total_merger_rate`` and ``hyperparameters``.
-
-        Parameters
-        ----------
-        path
-            File path.
-        """
-        with atomic_h5(path) as file:
-            file.attrs["metadata"] = self.config.model_dump_json()
-            file.attrs["version"] = __version__
-            file.attrs["realization"] = json.dumps(
-                {
-                    "rng_key": list(self.rng_key),
-                    "count": self.count,
-                    "total_merger_rate": self.total_merger_rate,
-                    "hyperparameters": self.hyperparameters,
-                }
-            )
-            file.create_dataset("frequencies", data=self.frequencies)
-            for name, spectrum in self.spectra.items():
-                group = file.create_group(f"networks/{name}")
-                group.create_dataset("pair_spectral_density", data=spectrum)
-        return Path(path)
-
-    @classmethod
-    def open(cls, path: str | Path) -> Self:
-        """Read the background at ``path``, config included.
-
-        Parameters
-        ----------
-        path
-            File path.
-
-        Raises
-        ------
-        ValueError
-            If the file's ``version`` attribute is missing or is not the
-            installed astrogwb version.
-        """
-        with h5py.File(path, "r") as file:
-            version = file.attrs.get("version")
-            if version != __version__:
-                raise ValueError(
-                    f"{path} was written by astrogwb {version}, but {__version__} "
-                    "is installed; regenerate the ensemble draw"
-                )
-            config = SimulationConfig.model_validate_json(file.attrs["metadata"])
-            realization = json.loads(file.attrs["realization"])
-            frequencies = np.asarray(file["frequencies"][()], dtype=np.float64)
-            stored = file["networks"]
-            spectra = {
-                name: np.asarray(
-                    stored[name]["pair_spectral_density"][()], dtype=np.float64
-                )
-                for name in sorted(stored)
-            }
-        return cls(
-            frequencies=frequencies,
-            spectra=spectra,
-            config=config,
-            rng_key=tuple(int(v) for v in realization["rng_key"]),
-            count=int(realization["count"]),
-            total_merger_rate=float(realization["total_merger_rate"]),
-            hyperparameters={
-                name: float(value)
-                for name, value in realization["hyperparameters"].items()
-            },
-        )
 
 
 class _Geometry(NamedTuple):
@@ -451,11 +318,162 @@ def _kernels(
 
 
 class BackgroundDraw(NamedTuple):
-    """Realized pair spectra per network, frequency grid in Hz and event counts."""
+    """The realized background of the networks of a registry.
+
+    Attributes
+    ----------
+    frequencies
+        The frequency grid in Hz, ``(F,)``.
+    spectra
+        Each network's pair spectra :math:`Y_{ab}` in :math:`\\mathrm{Hz}^{-1}`,
+        ``(P_n, F)``, keyed by network name. The pair axis follows
+        :meth:`~astrogwb.detector.config.DetectorRegistry.pairs`.
+    segment_counts
+        The number of events in each segment, ``(num_segments,)``. The
+        projection of :func:`project_background` has one entry for the whole
+        observation.
+    """
 
     frequencies: NDArray[np.float64]
     spectra: dict[str, NDArray[np.float64]]
     segment_counts: NDArray[np.int64]
+
+
+def write_background(
+    path: str | Path, draw: BackgroundDraw, config: SimulationConfig
+) -> Path:
+    """Write a background and the configuration it was simulated with, atomically.
+
+    The file holds the datasets ``frequencies``, ``segment_counts`` and, per
+    network, ``networks/<name>/pair_spectral_density``. Its root attributes are
+    ``metadata``, the configuration as JSON, and ``version``, the astrogwb
+    version.
+
+    Parameters
+    ----------
+    path
+        File path.
+    draw
+        The background.
+    config
+        The configuration the background was simulated with.
+
+    Returns
+    -------
+    pathlib.Path
+        The file written.
+    """
+    with atomic_h5(path) as file:
+        file.attrs["metadata"] = config.model_dump_json()
+        file.attrs["version"] = __version__
+        file.create_dataset("frequencies", data=draw.frequencies)
+        file.create_dataset("segment_counts", data=draw.segment_counts)
+        for name, spectrum in draw.spectra.items():
+            group = file.create_group(f"networks/{name}")
+            group.create_dataset("pair_spectral_density", data=spectrum)
+    return Path(path)
+
+
+def read_background(path: str | Path) -> tuple[BackgroundDraw, SimulationConfig]:
+    """Read a background and its configuration written by :func:`write_background`.
+
+    Parameters
+    ----------
+    path
+        File path.
+
+    Returns
+    -------
+    BackgroundDraw
+        The background, networks in sorted order.
+    SimulationConfig
+        The configuration it was simulated with.
+
+    Raises
+    ------
+    ValueError
+        If the file's ``version`` attribute is missing or is not the installed
+        astrogwb version.
+    """
+    with h5py.File(path, "r") as file:
+        version = file.attrs.get("version")
+        if version != __version__:
+            raise ValueError(
+                f"{path} was written by astrogwb {version}, but {__version__} "
+                "is installed; regenerate the background"
+            )
+        config = SimulationConfig.model_validate_json(file.attrs["metadata"])
+        stored = file["networks"]
+        draw = BackgroundDraw(
+            np.asarray(file["frequencies"][()], dtype=np.float64),
+            {
+                name: np.asarray(
+                    stored[name]["pair_spectral_density"][()], dtype=np.float64
+                )
+                for name in sorted(stored)
+            },
+            np.asarray(file["segment_counts"][()], dtype=np.int64),
+        )
+    return draw, config
+
+
+def network_noise(
+    config: SimulationConfig, frequencies: NDArray[np.float64]
+) -> dict[str, NetworkNoise]:
+    """Each network's :class:`NetworkNoise` on a background's grid.
+
+    Derived from the configuration, not stored in the file.
+
+    Parameters
+    ----------
+    config
+        The configuration the background was simulated with.
+    frequencies
+        The background's frequency grid in Hz, ``(F,)``.
+    """
+    registry = config.detectors
+    grid = np.asarray(frequencies, dtype=np.float64)
+    years = config.observation_seconds / years_to_seconds(1.0)
+    noise = {}
+    for name in select_networks(registry):
+        detectors = registry.build_network(name)
+        psd = effective_psd(grid, detectors)
+        noise[name] = NetworkNoise(
+            pair_overlap=np.stack(
+                [term.overlap for term in pair_terms(grid, detectors)]
+            ),
+            pair_scale=np.asarray(pair_bin_scale(grid, detectors, years)),
+            effective_psd=np.asarray(psd),
+            scale=np.asarray(gaussian_bin_scale(jnp.asarray(psd), years, grid)),
+        )
+    return noise
+
+
+def _event_columns(
+    sources: Mapping[str, ArrayLike], required: Sequence[str] = SKY_COLUMNS
+) -> dict[str, NDArray]:
+    """The columns of an event pool as host arrays, validated.
+
+    Raises
+    ------
+    ValueError
+        If a ``required`` column is missing, a column is not one-dimensional
+        or the columns differ in length, or a column holds a non-finite value.
+    """
+    columns = {name: np.asarray(values) for name, values in sources.items()}
+    missing = [name for name in required if name not in columns]
+    if missing:
+        raise ValueError(f"event pool is missing the columns {missing}")
+    size = len(next(iter(columns.values()), ()))
+    for name, column in columns.items():
+        if column.shape != (size,):
+            raise ValueError(
+                f"event pool column {name!r} has shape {column.shape}; "
+                f"every column must have shape ({size},)"
+            )
+        if not np.isfinite(column).all():
+            raise ValueError(f"event pool column {name!r} has non-finite values")
+    return columns
 
 
 def _projection(
@@ -478,12 +496,40 @@ def project_background(
     """Project supplied physical events into incoherent pair spectra, in Hz^-1.
 
     Each row contributes exactly once. The normalization is the observation
-    duration in seconds. The count has one entry for the whole observation.
+    duration in seconds. No noise is added.
+
+    Parameters
+    ----------
+    sources
+        The events, one column per waveform parameter plus the sky columns
+        ``right_ascension``, ``declination`` and ``polarization_angle``, all
+        one-dimensional and of the same length.
+    waveform
+        Waveform generator settings.
+    detectors
+        Detector registry; every network is projected.
+    observation_seconds
+        The normalization, in seconds.
+    chunk_size
+        Waveforms per batch; sets cost, not the result.
+
+    Returns
+    -------
+    BackgroundDraw
+        The spectra, with ``segment_counts`` of one entry, the number of rows.
+
+    Raises
+    ------
+    ValueError
+        If ``observation_seconds`` or ``chunk_size`` is not positive, or the
+        pool is invalid (see the event pool columns above).
     """
     if observation_seconds <= 0:
         raise ValueError("observation_seconds must be positive")
+    if chunk_size < 1:
+        raise ValueError("chunk_size must be positive")
     grid, geometry, kernels = _projection(waveform, detectors)
-    columns = {name: np.asarray(values) for name, values in sources.items()}
+    columns = _event_columns(sources)
     count = len(columns["right_ascension"])
     if count:
         kernels.generator.check_sources(columns)
@@ -510,20 +556,25 @@ def _draw_events(
 ) -> tuple[dict[str, NDArray], NDArray[np.int64]]:
     if not np.isfinite(observer_rate_hz) or observer_rate_hz < 0:
         raise ValueError("observer_rate_hz must be finite and nonnegative")
-    if num_segments < 1 or not np.isfinite(segment_seconds) or segment_seconds <= 0:
-        raise ValueError("num_segments and segment_seconds must be positive")
+    if num_segments < 1:
+        raise ValueError(f"num_segments must be positive; got {num_segments}")
+    if not np.isfinite(segment_seconds) or segment_seconds <= 0:
+        raise ValueError(f"segment_seconds must be positive; got {segment_seconds}")
+    pool = _event_columns(sources, required=())
     # Row selection runs on host arrays. A varying event count need not
     # compile a new random kernel for every realization.
     rng = np.random.default_rng(np.asarray(jax.random.key_data(key)))
     counts = rng.poisson(observer_rate_hz * segment_seconds, num_segments)
     count = int(counts.sum())
-    size = len(np.asarray(sources["right_ascension"]))
-    if any(np.shape(col) != (size,) for col in sources.values()):
-        raise ValueError("event pool columns must have the same one-dimensional shape")
+    size = len(next(iter(pool.values()), ()))
     if count > size:
-        raise ValueError(f"event pool has {size} rows but this draw requires {count}")
+        raise ValueError(
+            f"event pool has {size} rows but this draw requires {count} "
+            f"(expected {observer_rate_hz * segment_seconds * num_segments:.1f}); "
+            "supply a larger pool or lower the rate"
+        )
     indices = rng.choice(size, size=count, replace=False)
-    selected = {name: np.asarray(col)[indices] for name, col in sources.items()}
+    selected = {name: col[indices] for name, col in pool.items()}
     selected["coa_time"] = rng.uniform(-segment_seconds / 2, segment_seconds / 2, count)
     return selected, counts
 
@@ -545,20 +596,62 @@ def simulate_background(
 
     Each pool row supplies waveform parameters, right ascension, declination
     and polarization angle. Rows are selected uniformly without replacement
-    across the entire draw. The observer rate (events per second) must match
-    the population represented by these rows. Arrival times are drawn uniformly
-    within each segment; any catalog coalescence times are replaced.
+    across the entire draw. Arrival times are drawn uniformly within each
+    segment; any catalog coalescence times are replaced.
 
     The default sums coherent strain and detector noise in each segment.
-    With incoherent=True, sum individual event powers over the same observation.
-    Each network has one row per detector pair in registry order.
+    With ``incoherent=True``, it sums individual event powers over the same
+    observation: the noiseless expected-signal spectrum of the same selection,
+    with no segment interference and no whole-mode requirement on the grid.
+    Each network has one row per detector pair in registry order. The same key
+    gives the same draw.
+
+    Parameters
+    ----------
+    key
+        Typed PRNG key of the draw.
+    sources
+        The event pool; see :func:`project_background` for its columns.
+    waveform
+        Waveform generator settings.
+    detectors
+        Detector registry; every network is projected.
+    observer_rate_hz
+        Rate in events per second of the population the pool represents.
+    num_segments
+        Number of segments.
+    segment_seconds
+        Segment length in seconds.
+    chunk_size
+        Waveforms per batch; sets cost, not the result.
+    segment_batch_size
+        Segments per batch in the coherent path; sets cost, not the result.
+    incoherent
+        Skip noise and coherent summation.
+
+    Returns
+    -------
+    BackgroundDraw
+        The spectra, normalized by ``num_segments * segment_seconds``, with
+        the event count of each segment.
+
+    Raises
+    ------
+    ValueError
+        If a count, duration, rate or batch size is not valid, the pool is
+        invalid, the draw needs more rows than the pool holds, or (coherent
+        path) a bin is not a whole number of the segment's Fourier modes.
     """
     if min(chunk_size, segment_batch_size) < 1:
         raise ValueError("chunk and segment batch sizes must be positive")
     jax.config.update("jax_enable_x64", True)
     event_key, noise_key = jax.random.split(key)
     columns, counts = _draw_events(
-        event_key, sources, observer_rate_hz, num_segments, segment_seconds
+        event_key,
+        _event_columns(sources),
+        observer_rate_hz,
+        num_segments,
+        segment_seconds,
     )
     if incoherent:
         result = project_background(

@@ -2,95 +2,90 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import h5py
-import jax
 import numpy as np
 import pytest
 from astrogwb_tiny_pipeline import (
     NETWORKS,
     WAVEFORM,
-    assert_same_spectra,
     event_pool,
-    population_metadata,
+    write_population_csv,
 )
 
 from astrogwb.simulators import (
-    BackgroundArtifact,
+    BackgroundDraw,
     SimulationConfig,
+    network_noise,
     network_spectra_ensemble,
+    read_background,
+    read_event_pool,
     realization_key,
     simulate_background,
+    write_background,
 )
 
 SEED = 41
 CHUNK = 8
+SEGMENT_SECONDS = 1.0
+RATE_HZ = 8.0
 
 
-def _config(segment_duration: float | None = None) -> SimulationConfig:
+def _config(index: int = 0, *, incoherent: bool = True) -> SimulationConfig:
     return SimulationConfig(
-        population=population_metadata(),
         waveform=WAVEFORM,
         detectors=NETWORKS,
-        segment_duration=segment_duration,
+        observer_rate_hz=RATE_HZ,
+        num_segments=2,
+        segment_seconds=SEGMENT_SECONDS,
+        incoherent=incoherent,
+        population="pool.csv",
+        seed=SEED,
+        index=index,
     )
 
 
-def _artifact(index: int) -> BackgroundArtifact:
-    config = _config()
-    key = realization_key(SEED, index)
-    pool = event_pool()
-    rate = 16 / config.population.observation_seconds
-    draw = simulate_background(
-        key,
-        pool,
+def _simulate(config: SimulationConfig) -> BackgroundDraw:
+    return simulate_background(
+        realization_key(config.seed, config.index),
+        event_pool(),
         config.waveform,
         config.detectors,
-        observer_rate_hz=rate,
-        num_segments=1,
-        segment_seconds=config.population.observation_seconds,
-        incoherent=True,
+        observer_rate_hz=config.observer_rate_hz,
+        num_segments=config.num_segments,
+        segment_seconds=config.segment_seconds,
+        incoherent=config.incoherent,
         chunk_size=CHUNK,
     )
-    return BackgroundArtifact(
-        draw.frequencies,
-        draw.spectra,
-        config,
-        tuple(map(int, jax.random.key_data(key))),
-        int(draw.segment_counts.sum()),
-        rate,
-        config.population.fixed,
+
+
+@pytest.fixture(scope="module")
+def draw() -> BackgroundDraw:
+    """The tiny configuration simulated at ``(SEED, 0)``."""
+    return _simulate(_config())
+
+
+@pytest.fixture(scope="module")
+def written(draw: BackgroundDraw, tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return write_background(
+        tmp_path_factory.mktemp("one-pass") / f"{SEED}-0.h5", draw, _config()
     )
 
 
-@pytest.fixture(scope="module")
-def simulated() -> BackgroundArtifact:
-    """The tiny configuration simulated at ``(SEED, 0)``."""
-    return _artifact(0)
-
-
-@pytest.fixture(scope="module")
-def written(
-    simulated: BackgroundArtifact, tmp_path_factory: pytest.TempPathFactory
-) -> Path:
-    return simulated.write(tmp_path_factory.mktemp("one-pass") / f"{SEED}-0.h5")
-
-
-def test_a_file_round_trips_the_artifact(
-    simulated: BackgroundArtifact, written: Path
+def test_a_file_round_trips_the_draw_and_its_config(
+    draw: BackgroundDraw, written: Path
 ) -> None:
-    reopened = BackgroundArtifact.open(written)
+    reopened, config = read_background(written)
 
-    assert simulated.count > 0
-    assert reopened.config == simulated.config
-    assert reopened.rng_key == simulated.rng_key
-    assert reopened.count == simulated.count
-    assert reopened.total_merger_rate == simulated.total_merger_rate
-    assert reopened.hyperparameters == simulated.hyperparameters
-    assert reopened.pairs == simulated.pairs
-    np.testing.assert_array_equal(reopened.frequencies, simulated.frequencies)
-    assert_same_spectra(reopened, simulated)
+    assert draw.segment_counts.sum() > 0
+    assert config == _config()
+    np.testing.assert_array_equal(reopened.frequencies, draw.frequencies)
+    np.testing.assert_array_equal(reopened.segment_counts, draw.segment_counts)
+    assert reopened.spectra.keys() == draw.spectra.keys()
+    for name, spectrum in draw.spectra.items():
+        np.testing.assert_array_equal(reopened.spectra[name], spectrum)
 
 
 def test_a_file_of_another_version_is_refused(written: Path, tmp_path: Path) -> None:
@@ -100,7 +95,20 @@ def test_a_file_of_another_version_is_refused(written: Path, tmp_path: Path) -> 
         file.attrs["version"] = "0.0.0-stale"
 
     with pytest.raises(ValueError, match="regenerate"):
-        BackgroundArtifact.open(stale)
+        read_background(stale)
+
+
+def test_observation_seconds_is_the_segments_together() -> None:
+    assert _config().observation_seconds == 2 * SEGMENT_SECONDS
+
+
+def test_network_noise_has_one_row_per_pair_of_the_draw(draw: BackgroundDraw) -> None:
+    noise = network_noise(_config(), draw.frequencies)
+
+    assert noise.keys() == draw.spectra.keys()
+    for name, spectrum in draw.spectra.items():
+        assert noise[name].pair_scale.shape == spectrum.shape
+        assert noise[name].pair_overlap.shape == spectrum.shape
 
 
 @pytest.fixture(scope="module")
@@ -108,8 +116,8 @@ def ensemble(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Two draws of ``SEED``, each recorded by every tiny network."""
     root = tmp_path_factory.mktemp("ensemble")
     for index in range(2):
-        draw = _artifact(index)
-        draw.write(root / f"{SEED}-{index}.h5")
+        config = _config(index)
+        write_background(root / f"{SEED}-{index}.h5", _simulate(config), config)
     return root
 
 
@@ -117,10 +125,23 @@ def test_network_spectra_ensemble_stacks_every_draws_pairs(ensemble: Path) -> No
     triangle, pair = network_spectra_ensemble(ensemble, SEED, 2, ["triangle", "pair"])
 
     assert triangle["pair_spectral_density"].shape[:2] == (2, 3)
+    assert triangle["n_events"].shape == (2,)
     # Sorted pairs: the triangle's (C1, S1) is its second, the pair's only one.
     np.testing.assert_array_equal(
         pair["pair_spectral_density"][:, 0], triangle["pair_spectral_density"][:, 1]
     )
+
+
+def test_network_spectra_ensemble_counts_the_events_of_every_segment(
+    ensemble: Path,
+) -> None:
+    (stacked,) = network_spectra_ensemble(ensemble, SEED, 2, ["pair"])
+
+    expected = [
+        read_background(ensemble / f"{SEED}-{index}.h5")[0].segment_counts.sum()
+        for index in range(2)
+    ]
+    np.testing.assert_array_equal(stacked["n_events"], expected)
 
 
 def test_network_spectra_ensemble_from_start_is_a_suffix(ensemble: Path) -> None:
@@ -130,3 +151,106 @@ def test_network_spectra_ensemble_from_start_is_a_suffix(ensemble: Path) -> None
     np.testing.assert_array_equal(
         second["pair_spectral_density"], full["pair_spectral_density"][1:]
     )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("num_segments", 0), ("segment_seconds", 0.0), ("observer_rate_hz", -1.0)],
+)
+def test_config_rejects_a_nonphysical_observation(field: str, value: float) -> None:
+    fields = {**_config().model_dump(), field: value}
+
+    with pytest.raises(ValueError, match=field):
+        SimulationConfig.model_validate(fields)
+
+
+@pytest.fixture
+def pool() -> dict[str, np.ndarray]:
+    return event_pool()
+
+
+@pytest.fixture
+def simulate_pool() -> Callable[[dict[str, np.ndarray]], BackgroundDraw]:
+    def run(sources: dict[str, np.ndarray]) -> BackgroundDraw:
+        return simulate_background(
+            realization_key(SEED, 0),
+            sources,
+            WAVEFORM,
+            NETWORKS,
+            observer_rate_hz=RATE_HZ,
+            num_segments=2,
+            segment_seconds=SEGMENT_SECONDS,
+            incoherent=True,
+            chunk_size=CHUNK,
+        )
+
+    return run
+
+
+@pytest.mark.parametrize(
+    "column", ["right_ascension", "declination", "polarization_angle"]
+)
+def test_a_pool_without_a_sky_column_is_refused(
+    pool: dict[str, np.ndarray],
+    simulate_pool: Callable[[dict[str, np.ndarray]], BackgroundDraw],
+    column: str,
+) -> None:
+    del pool[column]
+
+    with pytest.raises(ValueError, match=column):
+        simulate_pool(pool)
+
+
+def test_a_pool_of_ragged_columns_is_refused(
+    pool: dict[str, np.ndarray],
+    simulate_pool: Callable[[dict[str, np.ndarray]], BackgroundDraw],
+) -> None:
+    pool["spin_1z"] = pool["spin_1z"][:-1]
+
+    with pytest.raises(ValueError, match="spin_1z"):
+        simulate_pool(pool)
+
+
+def test_a_pool_with_a_nonfinite_value_is_refused(
+    pool: dict[str, np.ndarray],
+    simulate_pool: Callable[[dict[str, np.ndarray]], BackgroundDraw],
+) -> None:
+    pool["luminosity_distance"][3] = np.nan
+
+    with pytest.raises(ValueError, match="luminosity_distance"):
+        simulate_pool(pool)
+
+
+def test_a_pool_smaller_than_the_draw_names_the_expected_count(
+    pool: dict[str, np.ndarray],
+    simulate_pool: Callable[[dict[str, np.ndarray]], BackgroundDraw],
+) -> None:
+    small = {name: column[:2] for name, column in pool.items()}
+
+    with pytest.raises(ValueError, match="larger pool"):
+        simulate_pool(small)
+
+
+@pytest.mark.integration
+def test_an_event_pool_read_from_a_gwmock_catalogue_renames_the_distance(
+    tmp_path: Path,
+) -> None:
+    pytest.importorskip("gwmock_pop")
+    path = write_population_csv(tmp_path / "pool.csv")
+
+    pool = read_event_pool(path)
+
+    assert "distance" not in pool
+    np.testing.assert_array_equal(
+        pool["luminosity_distance"], event_pool()["luminosity_distance"]
+    )
+
+
+@pytest.mark.integration
+def test_an_event_pool_without_a_distance_is_refused(tmp_path: Path) -> None:
+    pytest.importorskip("gwmock_pop")
+    path = tmp_path / "pool.csv"
+    path.write_text("detector_frame_mass_1,detector_frame_mass_2\n1.4,1.3\n")
+
+    with pytest.raises(ValueError, match="distance"):
+        read_event_pool(path)

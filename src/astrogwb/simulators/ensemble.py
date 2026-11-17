@@ -1,7 +1,8 @@
 """Read an ensemble of simulated backgrounds back, stacked per network.
 
-The experiment workflow writes one file per draw,
-``<root>/<seed>-<index>.h5``, each a :class:`BackgroundArtifact`.
+``astrogwb simulate`` writes one file per draw, ``<root>/<seed>-<index>.h5``,
+each a :class:`~astrogwb.simulators.BackgroundDraw` stored by
+:func:`~astrogwb.simulators.write_background`.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from typing import TypedDict
 import numpy as np
 from numpy.typing import NDArray
 
-from astrogwb.simulators.background import BackgroundArtifact
+from astrogwb.simulators.background import BackgroundDraw, read_background
 
 __all__ = ["NetworkSpectra", "network_spectra_ensemble"]
 
@@ -23,17 +24,13 @@ class NetworkSpectra(TypedDict):
 
     ``frequencies`` ``(F,)``; ``pair_spectral_density`` ``(D, P, F)``, which
     :func:`~astrogwb.simulators.combine_pair_spectra` weights into a network
-    spectrum ``(D, F)``; ``n_events`` and
-    ``total_merger_rate`` ``(D,)``; each ``hyperparameters`` value ``(D,)``.
-    ``n_events`` is each draw's ``count``, named as the Poisson-count model's
-    site is.
+    spectrum ``(D, F)``; ``n_events`` ``(D,)``, the number of events each draw
+    selected.
     """
 
     frequencies: NDArray[np.float64]
     pair_spectral_density: NDArray[np.float64]
     n_events: NDArray[np.int64]
-    total_merger_rate: NDArray[np.float64]
-    hyperparameters: dict[str, NDArray[np.float64]]
 
 
 def network_spectra_ensemble(
@@ -46,8 +43,7 @@ def network_spectra_ensemble(
 ) -> list[NetworkSpectra]:
     """Draws ``start .. num_draws - 1`` of the networks ``names``, stacked per network.
 
-    Draw ``i`` is the background file ``<root>/<seed>-<i>.h5``,
-    as the experiment workflow lays them out, draw ``i`` keyed by
+    Draw ``i`` is the background file ``<root>/<seed>-<i>.h5``, simulated at
     ``realization_key(seed, i)``.
 
     Parameters
@@ -62,7 +58,7 @@ def network_spectra_ensemble(
         Networks, each recorded in every draw's background.
     start
         The first index read; must be below ``num_draws``. Every draw is
-        taken to share one frequency grid and one set of hyperparameters.
+        taken to share one frequency grid.
 
     Returns
     -------
@@ -78,23 +74,18 @@ def network_spectra_ensemble(
     """
     root = Path(root)
     draws = [
-        BackgroundArtifact.open(root / f"{int(seed)}-{index}.h5")
+        read_background(root / f"{int(seed)}-{index}.h5")[0]
         for index in range(start, num_draws)
     ]
     return [_stack(draws, name) for name in names]
 
 
-def _stack(draws: Sequence[BackgroundArtifact], name: str) -> NetworkSpectra:
+def _stack(draws: Sequence[BackgroundDraw], name: str) -> NetworkSpectra:
     """One network's spectra of every draw, stacked."""
     return {
         "frequencies": draws[0].frequencies,
         "pair_spectral_density": np.stack([draw.spectra[name] for draw in draws]),
-        "n_events": np.asarray([draw.count for draw in draws], dtype=np.int64),
-        "total_merger_rate": np.asarray(
-            [draw.total_merger_rate for draw in draws], dtype=np.float64
+        "n_events": np.asarray(
+            [draw.segment_counts.sum() for draw in draws], dtype=np.int64
         ),
-        "hyperparameters": {
-            key: np.asarray([draw.hyperparameters[key] for draw in draws])
-            for key in draws[0].hyperparameters
-        },
     }

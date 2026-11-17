@@ -4,6 +4,13 @@ import typer
 
 from astrogwb.runtime import configure_runtime
 
+DETECTOR_CONFIG_OPTION = typer.Option(
+    "--detector-config",
+    exists=True,
+    dir_okay=False,
+    help="Detector registry TOML layer; repeat to merge.",
+)
+
 CONFIG_DIR_OPTION = typer.Option(
     "--config-dir",
     exists=True,
