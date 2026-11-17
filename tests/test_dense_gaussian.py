@@ -7,7 +7,7 @@ whose response draws vary across the band.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from typing import Any
 
 import jax
@@ -23,10 +23,8 @@ from astrogwb_mock_population import (
     mock_population,
 )
 from jax.scipy.linalg import solve_triangular
-from jax.typing import ArrayLike
 
 from astrogwb.detector import load_detector, pair_response_moment
-from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.inference import (
     CatalogModel,
     DenseGaussianLikelihood,
@@ -41,7 +39,6 @@ from astrogwb.inference import (
     whitened_catalog_covariance,
 )
 from astrogwb.inference.model import interpolation_weights
-from astrogwb.populations._types import SourceModel
 
 _TARGET = mock_population()
 
@@ -50,13 +47,6 @@ NUM_BINS = 12
 NUM_DRAWS = 64
 OBSERVATION_TIME = 2.0
 OFF_FIDUCIAL = {**FIDUCIALS, "H0": 70.0}
-
-
-def pinned_target(
-    params: Mapping[str, ArrayLike],
-) -> tuple[RedshiftDistribution, SourceModel]:
-    """The target population, unsampled hyperparameters pinned at the fiducials."""
-    return _TARGET({**FIDUCIALS, **params})
 
 
 # --------------------------------------------------------------------------- #
@@ -79,7 +69,7 @@ def model_factory(catalog: Any, frequencies: np.ndarray) -> Callable[..., Catalo
         return CatalogModel.from_catalog(
             data,
             metadata,
-            population=pinned_target,
+            population=_TARGET,
             frequencies=frequencies,
             num_redshift_nodes=NUM_REDSHIFT_NODES,
             observation_time=OBSERVATION_TIME,
@@ -319,7 +309,8 @@ GRIDS = {"H0": jnp.array([60.0, 67.66, 75.0]), "Omega_m": jnp.array([0.28, 0.32]
 def test_grid_log_likelihood_matches_the_pointwise_log_likelihood(
     likelihood: DenseGaussianLikelihood, observed: jax.Array
 ) -> None:
-    grid = grid_log_likelihood(likelihood, GRIDS, fixed={"xi_0": 1.0})
+    fixed = {name: value for name, value in FIDUCIALS.items() if name not in GRIDS}
+    grid = grid_log_likelihood(likelihood, GRIDS, fixed=fixed)
     pointwise = [
         [
             likelihood.log_likelihood(
@@ -351,7 +342,11 @@ def test_grid_log_likelihood_compiles_once_for_data_of_the_same_shape(
     grids = {"H0": jnp.linspace(62.0, 72.0, 5)}
     results = [
         grid_log_likelihood(
-            DenseGaussianLikelihood(likelihood.model, likelihood.network, data), grids
+            DenseGaussianLikelihood(likelihood.model, likelihood.network, data),
+            grids,
+            fixed={
+                name: value for name, value in FIDUCIALS.items() if name not in grids
+            },
         )
         for data in (observed, 2.0 * observed)
     ]

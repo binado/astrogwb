@@ -11,14 +11,16 @@ tests reweight with.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 
 import jax
 import jax.numpy as jnp
 import numpy as np
+import numpyro
 from jax.typing import ArrayLike
 
 from astrogwb.constants import ISCO_ALPHA
+from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.importance.catalog import (
     CatalogMetadata,
     IntensityData,
@@ -28,13 +30,51 @@ from astrogwb.importance.spectrum import (
 )
 from astrogwb.inference import CatalogModel
 from astrogwb.populations import (
-    DEFAULT_DENSITY_SITES,
     BNSCobaPopulation,
     Population,
-    joint_model,
 )
+from astrogwb.populations._types import SourceModel
+from astrogwb.simulators.population import extrinsic_priors
 from astrogwb.utils.numpyro import sample_and_logprob, sample_sources_qmc
 from astrogwb.waveform import AnalyticInspiralGenerator, WaveformMetadata
+
+
+def source_draw_model(
+    redshift: RedshiftDistribution,
+    source_model: SourceModel,
+    *,
+    coa_time_bounds: tuple[float, float] = (-0.5, 0.5),
+) -> Callable[[], None]:
+    """Compose source sites for density and replay tests."""
+
+    def model() -> None:
+        redshift.distance_model()()
+        source_model()
+        for name, prior in extrinsic_priors(coa_time_bounds).items():
+            numpyro.sample(name, prior)
+
+    return model
+
+
+def population_models(
+    population: Population,
+    params: Mapping[str, ArrayLike],
+    *,
+    minimum_redshift: float = 0.3,
+    maximum_redshift: float = 20.0,
+    n_grid: int = 256,
+) -> tuple[RedshiftDistribution, SourceModel]:
+    """Build the redshift sampler and source model for replay tests."""
+    return (
+        RedshiftDistribution(
+            params=params,
+            source_frame_distribution=population.merger_rate,
+            minimum_redshift=minimum_redshift,
+            maximum_redshift=maximum_redshift,
+            n_grid=n_grid,
+        ),
+        population.source_model(params),
+    )
 
 
 def derived_columns(
@@ -47,7 +87,7 @@ def derived_columns(
     Sample sites take the supplied values and deterministic outputs are
     recomputed through :func:`astrogwb.utils.numpyro.sample_and_logprob`.
     """
-    model = joint_model(*population(params))
+    model = source_draw_model(*population_models(population, params))
     outputs, _ = sample_and_logprob(model, density_sites=(), values=sources)
     return outputs
 
@@ -116,7 +156,7 @@ def mock_population(n_grid: int = N_GRID) -> Population:
 
 def load_mock_population(num_sources: int = 1024) -> dict[str, np.ndarray]:
     """Draw a Sobol population for stable spectrum integration checks."""
-    model = joint_model(*mock_population()(POPULATION_PARAMS))
+    model = source_draw_model(*population_models(mock_population(), POPULATION_PARAMS))
     samples = sample_sources_qmc(
         model,
         jax.random.PRNGKey(MOCK_POPULATION_SEED),
@@ -198,10 +238,11 @@ def catalog_samples(data: IntensityData) -> dict[str, jax.Array]:
     }
 
 
-#: The density factors a reference-catalog spectrum may weight: the default
-#: sites minus redshift, which the quadrature integrates instead.
-INTRINSIC_DENSITY_SITES: tuple[str, ...] = tuple(
-    site for site in DEFAULT_DENSITY_SITES if site != "redshift"
+#: The density factors a reference-catalog spectrum may weight: the intrinsic
+#: mass pair. Redshift is integrated by the quadrature instead.
+INTRINSIC_DENSITY_SITES: tuple[str, ...] = (
+    "source_frame_mass_1",
+    "source_frame_mass_2",
 )
 
 #: Redshift nodes of the mock spectra: enough for a smooth kernel on the window.

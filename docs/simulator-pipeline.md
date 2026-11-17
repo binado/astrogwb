@@ -41,8 +41,10 @@ hyperparameters (fixed, or drawn from their priors), a Poisson count
 
 All sources are drawn in one batch through `simulate_sources`, which the
 importance catalogs of `astrogwb.importance` share, with independent
-random streams for hyperparameters, count, and the joint source model.
-The joint model samples intrinsic parameters and extrinsic angles together.
+random streams for hyperparameters, count, and the source model. The source
+model composes the redshift distance model, the population's intrinsic source
+model and the extrinsic priors, so intrinsic parameters and extrinsic angles are
+drawn together.
 Counts are Poisson only; the
 fixed-count mode was removed. A fixed-size Monte Carlo sample of a population
 is a reference catalog for importance weighting (`astrogwb.importance.catalog`), not
@@ -137,11 +139,10 @@ the background never redraws or rescales it. Detector projection then applies
 each geometric delay once. Same-source equal-frequency cross powers and intensity-only waveform
 generation are unchanged. The common waveform interface reads an optional
 `coa_time` column in the source-parameter mapping, defaulting to no shift,
-for every backend. `joint_model(..., coa_time_bounds=(low, high))` controls
-the sampling bounds in seconds (default `(-0.5, 0.5)` for general model use).
-The one-pass simulator forwards `segment_duration` into the population stage,
-which computes the effective duration and passes the centered bounds to the
-joint model. When calling the stages separately, supply the same
+for every backend. `simulate_population` draws `coa_time` uniformly on
+`(-window / 2, window / 2)` seconds, where `window` is `segment_duration` or the
+full observation. The one-pass simulator forwards `segment_duration` into the
+population stage, which computes the effective duration. When calling the stages separately, supply the same
 `segment_duration` to `simulate_population` and `simulate_background`; omission
 at the population stage samples over the full observation duration.
 

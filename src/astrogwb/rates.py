@@ -1,9 +1,11 @@
-r"""Madau-Dickinson source-frame merger-rate densities.
+r"""Madau-Dickinson source-frame merger-rate density and its quadrature total.
 
 Kept free of NumPyro, so analytic callers of :math:`\psi(z)` do not import it.
 """
 
 from __future__ import annotations
+
+from collections.abc import Callable, Mapping
 
 import jax
 import jax.numpy as jnp
@@ -11,6 +13,12 @@ from jax.typing import ArrayLike
 
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import differential_comoving_volume
+
+#: A source-frame merger-rate shape :math:`\psi(z)`, called as
+#: ``fn(redshift, params)`` and returning an array shaped like ``redshift``.
+type SourceFrameDistributionFn = Callable[
+    [ArrayLike, Mapping[str, ArrayLike]], jax.Array
+]
 
 
 def madau_dickinson_rate(

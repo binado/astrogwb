@@ -21,6 +21,7 @@ import numpyro.distributions as dist
 import pytest
 from astrogwb_mock_population import (
     FIDUCIALS,
+    INTRINSIC_DENSITY_SITES,
     N_GRID,
     POPULATION_PARAMS,
     Z_MAX,
@@ -28,22 +29,17 @@ from astrogwb_mock_population import (
     derived_columns,
     make_redshift_grid,
     mock_population,
+    population_models,
+    source_draw_model,
 )
 from jax.typing import ArrayLike
 from numpyro import handlers
 from reference_population import reference_merger_rate_distance_and_logprob
 
 from astrogwb.cosmology import log_gw_em_ratio
-from astrogwb.distributions.delay import PowerLawDelayDistribution
-from astrogwb.distributions.redshift import (
-    madau_dickinson_time_delayed_redshift_distribution,
-)
 from astrogwb.populations import (
-    DEFAULT_DENSITY_SITES,
-    REDSHIFT_SITE,
     BNSCobaPopulation,
     Population,
-    joint_model,
 )
 from astrogwb.utils.numpyro import sample_and_logprob
 
@@ -68,7 +64,7 @@ OFF_FIDUCIALS: dict[str, float] = {
 
 STOCHASTIC_SITES = frozenset(
     {
-        REDSHIFT_SITE,
+        "redshift",
         "source_frame_mass_1",
         "source_frame_mass_2",
         "spin_1z",
@@ -94,7 +90,7 @@ def sample_values(redshift: jax.Array = SAMPLE_REDSHIFTS) -> dict[str, jax.Array
     """Every stochastic site, with the redshifts under test."""
     ones = jnp.ones_like(redshift)
     return {
-        REDSHIFT_SITE: redshift,
+        "redshift": redshift,
         "declination": 0.1 * ones,
         "right_ascension": 0.2 * ones,
         "polarization_angle": 0.3 * ones,
@@ -114,10 +110,10 @@ def evaluate(
     population: Population,
     params: Mapping[str, ArrayLike],
     values: Mapping[str, ArrayLike],
-    density_sites: Sequence[str] = DEFAULT_DENSITY_SITES,
+    density_sites: Sequence[str] = INTRINSIC_DENSITY_SITES,
 ) -> tuple[jax.Array, jax.Array]:
     """Selected ``(N,)`` density and recomputed distance, in one isolated pass."""
-    model = joint_model(*population(params))
+    model = source_draw_model(*population_models(population, params))
     outputs, log_prob = sample_and_logprob(
         model, density_sites=density_sites, values=values
     )
@@ -126,7 +122,7 @@ def evaluate(
 
 def merger_rate(population: Population, params: Mapping[str, ArrayLike]) -> jax.Array:
     """The observer-frame rate, from the same call that builds the model."""
-    redshift_distribution, _ = population(params)
+    redshift_distribution, _ = population_models(population, params)
     return redshift_distribution.total_merger_rate()
 
 
@@ -172,49 +168,11 @@ def reference(params: dict[str, float]) -> tuple[jax.Array, jax.Array, jax.Array
 # --------------------------------------------------------------------------- #
 # Population records
 # --------------------------------------------------------------------------- #
-#: The time-delayed population: a 20 Myr floor and formation cut off at
-#: z = 20, which also caps the delay.
-DELAYED = BNSCobaPopulation(
-    mass_model="uniform",
-    minimum_redshift=Z_MIN,
-    maximum_redshift=Z_MAX,
-    n_grid=N_GRID,
-    time_delay=True,
-    minimum_delay=0.02,
-    maximum_formation_redshift=20.0,
-    n_delay_nodes=48,
-)
 
 
 # --------------------------------------------------------------------------- #
 # Explicit site metadata and recomputation
 # --------------------------------------------------------------------------- #
-@pytest.mark.parametrize("coa_time_bounds", [(-0.5, 0.5), (-20.0, 40.0)])
-def test_joint_model_extrinsics_are_conditionable_sample_sites(
-    coa_time_bounds: tuple[float, float],
-) -> None:
-    model = joint_model(
-        *mock_population()(POPULATION_PARAMS), coa_time_bounds=coa_time_bounds
-    )
-    fixed: dict[str, ArrayLike] = {
-        "declination": 0.1,
-        "right_ascension": 0.2,
-        "polarization_angle": 0.3,
-        "coa_phase": 0.4,
-        "coa_time": 0.2,
-    }
-    conditioned = handlers.condition(model, data=fixed)
-    trace = handlers.trace(handlers.seed(conditioned, 0)).get_trace()
-    arrival_prior = trace["coa_time"]["fn"]
-    assert isinstance(arrival_prior, dist.Uniform)
-    assert arrival_prior.low == coa_time_bounds[0]
-    assert arrival_prior.high == coa_time_bounds[1]
-    for name, value in fixed.items():
-        assert trace[name]["type"] == "sample"
-        assert trace[name]["is_observed"]
-        assert trace[name]["value"] == value
-
-
 @pytest.mark.parametrize("coa_time_bounds", [(-0.5, 0.5), (-20.0, 40.0)])
 def test_identical_arrival_priors_cancel_from_importance_ratios(
     coa_time_bounds: tuple[float, float],
@@ -223,14 +181,20 @@ def test_identical_arrival_priors_cancel_from_importance_ratios(
     population = mock_population()
     target, _ = evaluate(population, OFF_FIDUCIALS, values)
     reference, _ = evaluate(population, POPULATION_PARAMS, values)
-    sites = (*DEFAULT_DENSITY_SITES, "coa_time")
+    sites = (*INTRINSIC_DENSITY_SITES, "coa_time")
     _, target_with_arrival = sample_and_logprob(
-        joint_model(*population(OFF_FIDUCIALS), coa_time_bounds=coa_time_bounds),
+        source_draw_model(
+            *population_models(population, OFF_FIDUCIALS),
+            coa_time_bounds=coa_time_bounds,
+        ),
         values=values,
         density_sites=sites,
     )
     _, reference_with_arrival = sample_and_logprob(
-        joint_model(*population(POPULATION_PARAMS), coa_time_bounds=coa_time_bounds),
+        source_draw_model(
+            *population_models(population, POPULATION_PARAMS),
+            coa_time_bounds=coa_time_bounds,
+        ),
         values=values,
         density_sites=sites,
     )
@@ -254,7 +218,12 @@ def test_source_evaluate_needs_no_physical_rate() -> None:
 # One call supplies the density, the distance and the rate
 # --------------------------------------------------------------------------- #
 def test_one_execution_supplies_per_sample_density_distance_and_scalar_rate() -> None:
-    log_prob, distance = evaluate(mock_population(), POPULATION_PARAMS, sample_values())
+    log_prob, distance = evaluate(
+        mock_population(),
+        POPULATION_PARAMS,
+        sample_values(),
+        density_sites=("redshift", *INTRINSIC_DENSITY_SITES),
+    )
     rate = merger_rate(mock_population(), POPULATION_PARAMS)
     assert log_prob.shape == SAMPLE_REDSHIFTS.shape
     assert distance.shape == SAMPLE_REDSHIFTS.shape
@@ -271,10 +240,10 @@ def test_one_execution_supplies_per_sample_density_distance_and_scalar_rate() ->
 
 
 def test_source_model_never_sees_redshift() -> None:
-    _, source_model = mock_population()(POPULATION_PARAMS)
+    source_model = mock_population().source_model(POPULATION_PARAMS)
     trace = handlers.trace(handlers.seed(source_model, 0)).get_trace()
 
-    assert not {REDSHIFT_SITE, LUMINOSITY_DISTANCE_SITE} & set(trace)
+    assert not {"redshift", LUMINOSITY_DISTANCE_SITE} & set(trace)
 
 
 # --------------------------------------------------------------------------- #
@@ -314,7 +283,12 @@ def test_modified_propagation_reduces_exactly_to_the_cosmological_model() -> Non
 def test_density_selection_preserves_supplied_values_and_deterministics() -> None:
     values = sample_values()
     model = mock_population()
-    log_prob, luminosity_distance = evaluate(model, POPULATION_PARAMS, values)
+    log_prob, luminosity_distance = evaluate(
+        model,
+        POPULATION_PARAMS,
+        values,
+        density_sites=("redshift", *INTRINSIC_DENSITY_SITES),
+    )
     selected_log_prob, selected_distance = evaluate(
         model, POPULATION_PARAMS, values, density_sites=("redshift", "spin_1z")
     )
@@ -386,7 +360,7 @@ def draw(
     num_samples: int,
 ) -> dict[str, jax.Array]:
     """``num_samples`` sources from ``population`` at ``params``."""
-    model = joint_model(*population(params))
+    model = source_draw_model(*population_models(population, params))
     return sample_and_logprob(model, key, num_samples=num_samples, density_sites=())[0]
 
 
@@ -555,92 +529,3 @@ def test_inclination_is_absent_from_the_default_density() -> None:
     log_prob, _ = evaluate(mock_population(), POPULATION_PARAMS, values)
     log_moved, _ = evaluate(mock_population(), POPULATION_PARAMS, moved)
     np.testing.assert_array_equal(np.asarray(log_prob), np.asarray(log_moved))
-
-
-# --------------------------------------------------------------------------- #
-# Time-delayed population
-# --------------------------------------------------------------------------- #
-DELAYED_PARAMS: dict[str, float] = {**POPULATION_PARAMS, "delay_slope": -1.0}
-
-
-def _delayed_population() -> Population:
-    return DELAYED.build()
-
-
-def test_time_delayed_draws_evaluate_to_a_finite_density_with_a_slope_gradient() -> (
-    None
-):
-    population = _delayed_population()
-    samples = draw(population, DELAYED_PARAMS, jax.random.PRNGKey(0), 64)
-    assert jnp.all((samples["redshift"] >= Z_MIN) & (samples["redshift"] <= Z_MAX))
-
-    def total(slope: jax.Array) -> jax.Array:
-        log_prob, _ = evaluate(
-            population, {**DELAYED_PARAMS, "delay_slope": slope}, samples
-        )
-        return jnp.sum(log_prob)
-
-    # The fiducial slope sits exactly where numpyro's power law special-cases.
-    value, gradient = jax.value_and_grad(total)(jnp.asarray(-1.0))
-    assert jnp.isfinite(value)
-    assert jnp.isfinite(gradient)
-    nearby = jax.grad(total)(jnp.asarray(-1.0 + 1e-10))
-    np.testing.assert_allclose(nearby, gradient, rtol=1e-6)
-
-
-def test_time_delayed_rate_is_linear_in_the_local_rate_but_not_in_h0() -> None:
-    """Why the population declares ``local_merger_rate`` and not ``H0``.
-
-    The local rate only rescales. H0 changes lookback time against a delay
-    fixed in Gyr, so it reshapes the redshift law: ``R * H0^3`` is no longer
-    constant, which is what the H0 amplitude scaling assumes.
-    """
-    delayed = _delayed_population()
-
-    def rate(params: Mapping[str, ArrayLike]) -> jax.Array:
-        return merger_rate(delayed, params)
-
-    base = rate(DELAYED_PARAMS)
-    scaled = rate(
-        {
-            **DELAYED_PARAMS,
-            "local_merger_rate": 3.0 * DELAYED_PARAMS["local_merger_rate"],
-        }
-    )
-    np.testing.assert_allclose(scaled, 3.0 * base, rtol=1e-12)
-
-    h0 = DELAYED_PARAMS["H0"]
-    moved = rate({**DELAYED_PARAMS, "H0": 1.2 * h0})
-    assert not np.isclose(moved * (1.2 * h0) ** 3, base * h0**3, rtol=1e-3)
-
-
-@pytest.mark.parametrize("slope", [-1.5, -1.0, 0.5])
-def test_time_delayed_ceiling_is_cosmological_not_a_fixed_number(slope: float) -> None:
-    """A delay longer than the lookback time to the cut-off is never available.
-
-    So the population's ceiling, t_L(z_cut), must give the same rate as an
-    effectively unbounded one: a higher ceiling only rescales the delay CDF,
-    which leaves every quadrature node in tau where it was. The H0 gradient
-    runs through the ceiling as well as through the cosmology.
-    """
-    params = {**DELAYED_PARAMS, "delay_slope": slope}
-    delayed = _delayed_population()
-
-    def rate(values: Mapping[str, ArrayLike]) -> jax.Array:
-        return merger_rate(delayed, values)
-
-    unbounded = madau_dickinson_time_delayed_redshift_distribution(
-        params=params,
-        time_delay_distribution=PowerLawDelayDistribution(
-            slope, DELAYED.minimum_delay, 1.0e3
-        ),
-        n_delay_nodes=48,
-        maximum_formation_redshift=20.0,
-        minimum_redshift=Z_MIN,
-        maximum_redshift=Z_MAX,
-        n_grid=N_GRID,
-    )
-    np.testing.assert_allclose(rate(params), unbounded.total_merger_rate(), rtol=1e-10)
-
-    gradient = jax.grad(lambda h0: rate({**params, "H0": h0}))(params["H0"])
-    assert jnp.isfinite(gradient)

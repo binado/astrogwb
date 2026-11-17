@@ -24,13 +24,9 @@ import numpyro
 from jax.typing import ArrayLike
 
 from astrogwb.constants import SECONDS_PER_YEAR
-from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
+from astrogwb.cosmology import distance_and_volume_grid, gw_distance_ratio
 from astrogwb.distributions.interpolated import InterpolatedDistribution
-
-type SourceFrameDistributionFn = Callable[
-    [ArrayLike, Mapping[str, ArrayLike]], jax.Array
-]
-"""Callable defining the unnormalized source-frame rate shape."""
+from astrogwb.rates import SourceFrameDistributionFn
 
 
 class RedshiftDistribution(InterpolatedDistribution):
@@ -61,8 +57,8 @@ class RedshiftDistribution(InterpolatedDistribution):
 
     pytree_aux_fields = ("_source_frame_distribution",)
 
-    # NumPyro unions `pytree_data_fields` over the MRO, so `x` and `y` come from
-    # the base. The grid bounds are properties over `x`, not aux fields: aux
+    # `x` and `y` come from the base class's `pytree_data_fields`, which NumPyro
+    # unions over the MRO. The grid bounds are properties over `x`, not aux fields: aux
     # data is hashed into the jit cache key, and the bounds are traced.
     pytree_data_fields = (
         "params",
@@ -94,24 +90,11 @@ class RedshiftDistribution(InterpolatedDistribution):
             )
         )
         y = (
-            self._merger_rate(redshift_grid, params)
+            self._source_frame_distribution(redshift_grid, params)
             / (1.0 + redshift_grid)
             * self.differential_comoving_volume_grid
         )
         super().__init__(redshift_grid, y, validate_args=validate_args)
-
-    def _merger_rate(
-        self, redshift: jax.Array, params: Mapping[str, ArrayLike]
-    ) -> jax.Array:
-        r"""Source-frame merger rate on the grid: :math:`\psi(z)` itself.
-
-        The one hook a subclass overrides to change the rate while keeping the
-        cosmology, normalization and sampler; see
-        :class:`~astrogwb.distributions.redshift.time_delayed.TimeDelayedRedshiftDistribution`.
-        Called from ``__init__``, so it may read only attributes a subclass
-        assigns *before* calling ``super().__init__``.
-        """
-        return self._source_frame_distribution(redshift, params)
 
     def merger_rate(self, redshift: ArrayLike) -> jax.Array:
         r"""The source-frame merger rate :math:`\psi(z)` at any redshift.
@@ -124,7 +107,7 @@ class RedshiftDistribution(InterpolatedDistribution):
         redshift
             Redshift.
         """
-        return self._merger_rate(jnp.asarray(redshift), self.params)
+        return self._source_frame_distribution(jnp.asarray(redshift), self.params)
 
     def source_frame_distribution(
         self, redshift: ArrayLike, params: Mapping[str, ArrayLike]
@@ -191,12 +174,7 @@ class RedshiftDistribution(InterpolatedDistribution):
         redshift
             Redshift.
         """
-        redshift = jnp.asarray(redshift)
-        if "xi_0" in self.params:
-            return jnp.exp(
-                log_gw_em_ratio(redshift, self.params["xi_0"], self.params["xi_n"])
-            )
-        return jnp.ones_like(redshift, dtype=self.x.dtype)
+        return gw_distance_ratio(redshift, self.params)
 
     def gw_luminosity_distance(self, redshift: ArrayLike) -> jax.Array:
         r"""Gravitational-wave luminosity distance in Mpc at redshift(s).

@@ -85,21 +85,18 @@ from numpyro import handlers
 
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import (
+    distance_and_volume_grid,
+    gw_distance_ratio,
     hubble_distance,
     normalized_hubble_parameter,
 )
-from astrogwb.distributions.rates import total_merger_rate
 from astrogwb.importance.catalog import (
     CatalogMetadata,
     IntensityData,
     intensity_data,
 )
-from astrogwb.populations._types import Population, PopulationModel, SourceModel
-from astrogwb.populations.joint import (
-    REDSHIFT_SITE,
-    fix_extrinsic_parameters,
-    joint_model,
-)
+from astrogwb.populations._types import Population, SourceModel
+from astrogwb.rates import total_merger_rate
 from astrogwb.simulators.sources import simulate_sources
 from astrogwb.utils import gauss_legendre_nodes_weights, require_current_version
 from astrogwb.utils.numpyro import sample_and_logprob
@@ -280,21 +277,6 @@ def reference_redshift(metadata: CatalogMetadata) -> float:
     return metadata.population.minimum_redshift
 
 
-def _pin_redshift_and_inclination(
-    model: PopulationModel, redshift: ArrayLike
-) -> PopulationModel:
-    """``model`` with reference distance, inclination and extrinsics fixed."""
-    return fix_extrinsic_parameters(
-        handlers.condition(
-            model,
-            data={
-                REDSHIFT_SITE: jnp.asarray(redshift),
-                INCLINATION_SITE: REFERENCE_INCLINATION,
-            },
-        )
-    )
-
-
 def reference_catalog(
     metadata: CatalogMetadata,
     key: jax.Array,
@@ -303,12 +285,15 @@ def reference_catalog(
 ) -> IntensityData:
     """Every draw of ``metadata`` placed at its reference redshift: intensity ``(F, N)``.
 
-    The model is conditioned on :func:`reference_redshift` and
-    :data:`REFERENCE_INCLINATION`, and the extrinsic parameters are fixed at
-    zero, so they consume no Sobol coordinates. The intrinsic parameters are
-    drawn i.i.d. or, with ``metadata.sampling == "sobol"``, on a scrambled
-    Sobol net. ``chunk_size`` is
-    :meth:`~astrogwb.waveform.WaveformGenerator.generate_batch`'s.
+    The population's source model is drawn with its inclination conditioned on
+    :data:`REFERENCE_INCLINATION`; it declares intrinsic sites only. Redshift
+    is then set to :func:`reference_redshift` for every source, and the
+    luminosity distance is interpolated on the grid physical redshift draws
+    use, times the modified-propagation ratio when ``xi_0`` is among the
+    fiducials. No extrinsic parameters are drawn, so none consume Sobol
+    coordinates. The intrinsic parameters are drawn i.i.d. or, with
+    ``metadata.sampling == "sobol"``, on a scrambled Sobol net. ``chunk_size``
+    is :meth:`~astrogwb.waveform.WaveformGenerator.generate_batch`'s.
 
     Parameters
     ----------
@@ -319,7 +304,8 @@ def reference_catalog(
     chunk_size
         Number of sources per chunk.
     """
-    # x64 before the draw: see simulate_catalog.
+    # Before the draw: ripplegw enables x64 on import, but only once the
+    # generator runs, after the sources are sampled.
     jax.config.update("jax_enable_x64", True)
     require_current_version(metadata.version)
     logger.info(
@@ -330,16 +316,30 @@ def reference_catalog(
     _require_quadrupole_waveform(metadata)
     reference = reference_redshift(metadata)
     population = metadata.population
-    if reference < population.minimum_redshift:
-        # The distance table clamps outside its grid: extend it down to the pin.
-        population = population.replace(minimum_redshift=reference)
-    model = joint_model(*population.build()(metadata.fiducials))
+    parameters = metadata.fiducials
+    source_model = population.build().source_model(parameters)
     samples = simulate_sources(
-        _pin_redshift_and_inclination(model, reference),
+        handlers.condition(
+            source_model, data={INCLINATION_SITE: REFERENCE_INCLINATION}
+        ),
         key,
         metadata.num_samples,
         sampling=metadata.sampling,
     )
+    # Match the distance grid used by physical redshift draws.
+    grid = jnp.linspace(
+        min(reference, population.minimum_redshift),
+        population.maximum_redshift,
+        population.n_grid,
+    )
+    distance_grid, _ = distance_and_volume_grid(
+        grid, hubble_constant=parameters["H0"], omega_m=parameters["Omega_m"]
+    )
+    distance = jnp.interp(reference, grid, distance_grid) * gw_distance_ratio(
+        reference, parameters
+    )
+    samples["redshift"] = np.full(metadata.num_samples, reference)
+    samples[_LUMINOSITY_DISTANCE] = np.full(metadata.num_samples, float(distance))
     return intensity_data(
         waveform_generator(metadata.waveform), samples, chunk_size=chunk_size
     )
@@ -367,7 +367,7 @@ def _node_intensity(
 
 
 class _SharedTerms(NamedTuple):
-    """What the spectrum and its variance both take from ``population(params)``."""
+    """What the spectrum and its variance both take from the population."""
 
     log_weights: jax.Array
     kernel: jax.Array
@@ -393,15 +393,15 @@ def _shared_terms(
     ``kernel`` is the quadrature weights times :func:`phinney_kernel`, ``(Z,)``;
     ``total_rate`` is the observer-frame merger rate in mergers per second.
     """
-    distribution, source_model = population(params)
+    source_model = population.source_model(params)
     log_weights = (
         _intrinsic_log_prob(source_model, intrinsic, density_sites) - proposal_log_prob
     )
-    hubble_constant = distribution.params["H0"]
-    omega_m = distribution.params["Omega_m"]
-    merger_rate = distribution.merger_rate(redshift)
+    hubble_constant = params["H0"]
+    omega_m = params["Omega_m"]
+    merger_rate = population.merger_rate(redshift, params)
     # The GW distance over the electromagnetic one: modified propagation alone.
-    distance_ratio = distribution.distance_ratio(redshift)
+    distance_ratio = gw_distance_ratio(redshift, params)
     kernel = redshift_weights * phinney_kernel(
         redshift,
         merger_rate,
@@ -472,9 +472,9 @@ def _rescaling_arrays(
     intrinsic = {
         name: jnp.asarray(np.asarray(values))
         for name, values in columns.items()
-        if name not in (REDSHIFT_SITE, INCLINATION_SITE, _LUMINOSITY_DISTANCE)
+        if name not in ("redshift", INCLINATION_SITE, _LUMINOSITY_DISTANCE)
     }
-    _, fiducial_source_model = metadata.population.build()(metadata.fiducials)
+    fiducial_source_model = metadata.population.build().source_model(metadata.fiducials)
     return {
         "intrinsic": intrinsic,
         "proposal_log_prob": _intrinsic_log_prob(

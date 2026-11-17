@@ -16,7 +16,7 @@ from jax.typing import ArrayLike
 
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import distance_and_volume_grid
-from astrogwb.distributions.rates import madau_dickinson_rate
+from astrogwb.rates import madau_dickinson_rate
 
 __all__ = ["reference_merger_rate_distance_and_logprob"]
 

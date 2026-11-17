@@ -65,7 +65,7 @@ finite get no noise. Earth's rotation during a signal is not modelled.
 Before coherent summation, both polarizations receive the geocentric arrival
 phase :math:`\exp(-2\pi i f t_i)`, with
 :math:`t_i` sampled in seconds relative to segment center within
-:math:`[-\tau/2, \tau/2)`. The joint population model
+:math:`[-\tau/2, \tau/2)`. The population stage
 supplies ``coa_time``; it is never redrawn or rescaled here. Detector projection applies geometric delays once. Signals remain
 complete within their assigned segment, without window truncation or boundary
 crossing.

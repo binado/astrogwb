@@ -2,8 +2,7 @@
 
 :func:`simulate_sources` is the one place a population model becomes source
 columns: a Poisson realization
-(:func:`~astrogwb.simulators.simulate_population`), a plain catalog
-(:func:`~astrogwb.importance.catalog.simulate_catalog`) and a reference catalog
+(:func:`~astrogwb.simulators.simulate_population`) and a reference catalog
 (:func:`~astrogwb.importance.spectrum.reference_catalog`) differ only in the model
 they hand it and how many sources they ask for.
 """
@@ -41,8 +40,7 @@ def simulate_sources(
     Parameters
     ----------
     model
-        No-argument NumPyro model declaring the source sites, such as
-        :func:`~astrogwb.populations.joint_model`.
+        No-argument NumPyro model declaring the source sites.
     key
         JAX random key.
     num_samples
