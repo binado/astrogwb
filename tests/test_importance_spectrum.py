@@ -11,6 +11,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from astrogwb_mock_population import (
+    EXTRINSIC_SITES,
     FIDUCIALS,
     INTRINSIC_DENSITY_SITES,
     bns_reference_catalog,
@@ -47,7 +48,6 @@ from astrogwb.inference import (
 from astrogwb.populations import BNSCobaPopulation
 from astrogwb.rates import differential_merger_rate, madau_dickinson_rate
 from astrogwb.simulators import realization_key
-from astrogwb.simulators.population import EXTRINSIC_SITES
 from astrogwb.utils import gauss_legendre_nodes_weights
 from astrogwb.utils.io import write
 from astrogwb.utils.numpyro import sample_and_logprob

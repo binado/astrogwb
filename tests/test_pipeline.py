@@ -28,7 +28,6 @@ from astrogwb.simulators import (
     simulate_background,
 )
 from astrogwb.simulators import background as background_module
-from astrogwb.simulators.population import segmented_seconds
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import WaveformMetadata, intensity, waveform_generator
 
@@ -356,7 +355,8 @@ def test_pure_noise_matches_the_pair_scale(empty: Pool) -> None:
                 pair_bin_scale(
                     background.frequencies,
                     NETWORKS.build_network(name),
-                    segmented_seconds(OBSERVATION_SECONDS, segment_duration)
+                    int(OBSERVATION_SECONDS // segment_duration)
+                    * segment_duration
                     / years_to_seconds(1.0),
                 )
             )

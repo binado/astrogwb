@@ -14,14 +14,12 @@ from astrogwb.simulators.background import (
 from astrogwb.simulators.config import SimulationConfig
 from astrogwb.simulators.ensemble import NetworkSpectra, network_spectra_ensemble
 from astrogwb.simulators.pool import read_event_pool
-from astrogwb.simulators.population import RealizationMetadata
 from astrogwb.simulators.sources import simulate_sources
 
 __all__ = [
     "BackgroundDraw",
     "NetworkNoise",
     "NetworkSpectra",
-    "RealizationMetadata",
     "SimulationConfig",
     "combine_pair_spectra",
     "network_noise",

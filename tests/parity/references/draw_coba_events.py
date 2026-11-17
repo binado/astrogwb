@@ -13,6 +13,7 @@ the comparison, so neither side depends on the other's sampler.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import jax
@@ -22,8 +23,10 @@ import numpyro
 from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.populations import BNSCobaPopulation
 from astrogwb.simulators import simulate_sources
-from astrogwb.simulators.population import extrinsic_priors
 from astrogwb.utils import years_to_seconds
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from astrogwb_mock_population import extrinsic_priors
 
 OUTPUT = Path(__file__).with_name("coba_bns_events.json")
 

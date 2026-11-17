@@ -4,15 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-import jax
-import jax.numpy as jnp
 import pytest
-from numpyro import handlers
 from pydantic import TypeAdapter, ValidationError
 
-from astrogwb.distributions.config import DistributionConfig
 from astrogwb.populations import AnyPopulation, BNSCobaPopulation
-from astrogwb.simulators import RealizationMetadata
 
 SETTINGS: dict[str, Any] = {
     "model_name": "bns_coba",
@@ -62,33 +57,3 @@ def test_replace_revalidates() -> None:
     assert _record().replace(minimum_redshift=0.2).minimum_redshift == 0.2
     with pytest.raises(ValidationError, match="must exceed"):
         _record().replace(minimum_redshift=20.0)
-
-
-def _draw_metadata() -> RealizationMetadata:
-    return RealizationMetadata(
-        population=_record(),
-        hyperparameters={
-            "H0": 67.66,
-            "gamma": DistributionConfig(
-                dist="Uniform", kwargs={"low": 1.0, "high": 2.0}
-            ),
-        },
-        observation_time=1.0,
-    )
-
-
-def test_prior_model_has_a_scalar_site_per_hyperparameter() -> None:
-    metadata = _draw_metadata()
-    model = metadata.prior_model()
-    trace = handlers.trace(handlers.seed(model, jax.random.key(0))).get_trace()
-    sampled = {n for n, s in trace.items() if s["type"] == "sample"}
-    deterministic = {n for n, s in trace.items() if s["type"] == "deterministic"}
-    assert sampled == set(metadata.sampled)
-    assert deterministic == set(metadata.fixed)
-    assert trace["H0"]["value"].dtype == jnp.float64
-    assert float(trace["H0"]["value"]) == 67.66
-
-    theta = handlers.seed(model, jax.random.key(3))()
-    assert set(theta) == {"H0", "gamma"}
-    assert all(v.shape == () for v in theta.values())
-    assert 1.0 <= float(theta["gamma"]) <= 2.0

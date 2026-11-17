@@ -11,15 +11,18 @@ tests reweight with.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Mapping
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 import numpyro
+import numpyro.distributions as dist
 from jax.typing import ArrayLike
 
 from astrogwb.constants import ISCO_ALPHA, SECONDS_PER_YEAR
+from astrogwb.distributions.orientation import UniformCosineDistribution
 from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.importance.catalog import (
     CatalogMetadata,
@@ -34,9 +37,42 @@ from astrogwb.populations import (
     Population,
 )
 from astrogwb.populations._types import SourceModel
-from astrogwb.simulators.population import extrinsic_priors
 from astrogwb.utils.numpyro import sample_and_logprob, sample_sources_qmc
 from astrogwb.waveform import AnalyticInspiralGenerator, WaveformMetadata
+
+#: The extrinsic sites of a physical source.
+EXTRINSIC_SITES = (
+    "declination",
+    "right_ascension",
+    "polarization_angle",
+    "coa_phase",
+    "coa_time",
+)
+
+
+def extrinsic_priors(
+    coa_time_bounds: tuple[float, float] = (-0.5, 0.5),
+) -> dict[str, dist.Distribution]:
+    """The prior of each :data:`EXTRINSIC_SITES` entry.
+
+    Declination is the cosine law shifted from colatitude to
+    :math:`[-\\pi/2, \\pi/2]`.
+
+    Parameters
+    ----------
+    coa_time_bounds
+        Lower and upper geocentric arrival times in seconds.
+    """
+    return {
+        "declination": dist.TransformedDistribution(
+            UniformCosineDistribution(),
+            dist.transforms.AffineTransform(-math.pi / 2.0, 1.0),
+        ),
+        "right_ascension": dist.Uniform(0.0, 2.0 * math.pi),
+        "polarization_angle": dist.Uniform(0.0, math.pi),
+        "coa_phase": dist.Uniform(0.0, 2.0 * math.pi),
+        "coa_time": dist.Uniform(*coa_time_bounds),
+    }
 
 
 def source_draw_model(
