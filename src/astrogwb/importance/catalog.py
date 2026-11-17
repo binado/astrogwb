@@ -38,7 +38,6 @@ __all__ = [
     "ReferenceCatalog",
     "intensity_data",
     "read_catalog",
-    "validate_matching_frequency_grids",
 ]
 
 logger = logging.getLogger(__name__)
@@ -196,24 +195,3 @@ def read_catalog(
         raise FileNotFoundError(f"no catalog at {path}")
     data, metadata, attrs = load(path, CatalogMetadata)
     return cast(IntensityData, data), metadata, int(attrs["seed"])
-
-
-def validate_matching_frequency_grids(
-    first: ArrayLike, second: ArrayLike, *, label: str = "injection and proposal"
-) -> None:
-    """Require two catalogs to share the exact frequency grid.
-
-    Parameters
-    ----------
-    first, second
-        The catalogs' frequency grids.
-    label
-        Label used in error messages.
-
-    Raises
-    ------
-    ValueError
-        If the grids differ.
-    """
-    if not np.array_equal(np.asarray(first), np.asarray(second)):
-        raise ValueError(f"{label} catalogs must have identical frequency grids")

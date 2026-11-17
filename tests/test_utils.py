@@ -8,20 +8,10 @@ import numpy as np
 import pytest
 
 from astrogwb.utils import (
-    array_dict_shape,
     cumulative_trapezoid,
     gauss_legendre_nodes_weights,
     require_x64,
 )
-
-
-def test_array_dict_shape_returns_the_common_shape() -> None:
-    assert array_dict_shape({"mass": np.ones(3), "redshift": jnp.ones(3)}) == (3,)
-
-
-def test_array_dict_shape_rejects_mismatched_shapes() -> None:
-    with pytest.raises(ValueError, match=r"mass.*\(2,\).*redshift.*\(3,\)"):
-        array_dict_shape({"mass": np.ones(2), "redshift": np.ones(3)})
 
 
 def test_require_x64_raises_when_disabled() -> None:

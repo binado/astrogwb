@@ -105,7 +105,6 @@ from astrogwb.waveform.factory import waveform_generator
 __all__ = [
     "INCLINATION_MEAN",
     "INCLINATION_RAW_SECOND_MOMENT",
-    "INCLINATION_SECOND_MOMENT",
     "REFERENCE_INCLINATION",
     "phinney_kernel",
     "redshift_quadrature",
@@ -126,9 +125,6 @@ INCLINATION_MEAN = 2.0 / 5.0
 
 #: Isotropic raw intensity product relative to the face-on product.
 INCLINATION_RAW_SECOND_MOMENT = 71.0 / 315.0
-
-#: Relative second moment <P^2>/<P>^2 for unit-mean inclination response draws.
-INCLINATION_SECOND_MOMENT = 355.0 / 252.0
 
 # Analytic averaging and redshift rescaling require aligned-spin,
 # quasi-circular dominant-quadrupole waveforms, excluding higher modes.

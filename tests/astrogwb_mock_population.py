@@ -75,6 +75,16 @@ def extrinsic_priors(
     }
 
 
+def distance_model(redshift: RedshiftDistribution) -> Callable[[], None]:
+    """A NumPyro model of a source's redshift and GW luminosity distance."""
+
+    def model() -> None:
+        z = jnp.asarray(numpyro.sample("redshift", redshift))
+        numpyro.deterministic("luminosity_distance", redshift.gw_luminosity_distance(z))
+
+    return model
+
+
 def source_draw_model(
     redshift: RedshiftDistribution,
     source_model: SourceModel,
@@ -84,7 +94,7 @@ def source_draw_model(
     """Compose source sites for density and replay tests."""
 
     def model() -> None:
-        redshift.distance_model()()
+        distance_model(redshift)()
         source_model()
         for name, prior in extrinsic_priors(coa_time_bounds).items():
             numpyro.sample(name, prior)

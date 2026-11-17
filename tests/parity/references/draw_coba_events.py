@@ -26,7 +26,7 @@ from astrogwb.simulators import simulate_sources
 from astrogwb.utils import years_to_seconds
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from astrogwb_mock_population import extrinsic_priors
+from astrogwb_mock_population import distance_model, extrinsic_priors
 
 OUTPUT = Path(__file__).with_name("coba_bns_events.json")
 
@@ -76,7 +76,7 @@ def main() -> None:
     count = int(jax.random.poisson(count_key, redshift.total_merger_rate() * seconds))
 
     def source() -> None:
-        redshift.distance_model()()
+        distance_model(redshift)()
         model.source_model(HYPERPARAMETERS)()
         for name, prior in extrinsic_priors((-seconds / 2, seconds / 2)).items():
             numpyro.sample(name, prior)

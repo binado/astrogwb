@@ -89,11 +89,6 @@ _CBC_FILTERS = {"domain": "FD", "source_type": "cbc"}
 _EXCLUDED_APPROXIMANTS = frozenset({"IMRPhenomXP_NRTidalv3"})
 
 SUPPORTED_APPROXIMANTS = _WaveformNames(**_CBC_FILTERS)
-ALIGNED_SPIN_MODELS = _WaveformNames(
-    **_CBC_FILTERS, is_precessing=False, is_tidal=False
-)
-TIDAL_MODELS = _WaveformNames(**_CBC_FILTERS, is_tidal=True)
-PRECESSING_MODELS = _WaveformNames(**_CBC_FILTERS, is_precessing=True)
 
 #: Canonical source names this adapter requires of every catalog. The two
 #: detector-frame masses may instead be given as source-frame masses and a

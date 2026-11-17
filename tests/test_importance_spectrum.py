@@ -35,7 +35,6 @@ from astrogwb.importance.catalog import (
 from astrogwb.importance.spectrum import (
     INCLINATION_MEAN,
     INCLINATION_RAW_SECOND_MOMENT,
-    INCLINATION_SECOND_MOMENT,
     REFERENCE_INCLINATION,
     phinney_kernel,
     redshift_quadrature,
@@ -52,6 +51,9 @@ from astrogwb.utils import gauss_legendre_nodes_weights
 from astrogwb.utils.io import write
 from astrogwb.utils.numpyro import sample_and_logprob
 from astrogwb.waveform import WaveformMetadata, inclination_factor, waveform_generator
+
+#: Relative second moment <P^2>/<P>^2 for unit-mean inclination response draws.
+INCLINATION_SECOND_MOMENT = 355.0 / 252.0
 
 #: The observed grid of the comparisons: four 10 Hz bins from 20 Hz.
 OBSERVED_WAVEFORM = WaveformMetadata(

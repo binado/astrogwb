@@ -1,9 +1,8 @@
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from functools import wraps
 
 import jax
 import jax.numpy as jnp
-import numpy as np
 from jax.typing import ArrayLike
 from numpy.polynomial.legendre import leggauss
 
@@ -40,33 +39,6 @@ def years_to_seconds(observation_time_yr: float) -> float:
         Observation time in years.
     """
     return observation_time_yr * SECONDS_PER_YEAR
-
-
-def array_dict_shape(parameters: Mapping[str, ArrayLike]) -> tuple[int, ...]:
-    """Return the common shape of arrays in ``parameters``.
-
-    Every value must have exactly the same shape. Scalar values are therefore
-    valid and return ``()``; callers that require a particular rank should
-    validate it separately.
-
-    Parameters
-    ----------
-    parameters
-        Parameter values by name.
-    """
-    shapes = [(name, np.shape(values)) for name, values in parameters.items()]
-    if not shapes:
-        raise ValueError("parameters must contain at least one array")
-
-    reference_name, reference_shape = shapes[0]
-    for name, shape in shapes[1:]:
-        if shape != reference_shape:
-            raise ValueError(
-                "parameter arrays must have matching shapes; "
-                f"{reference_name!r} has shape {reference_shape}, "
-                f"but {name!r} has shape {shape}"
-            )
-    return tuple(reference_shape)
 
 
 def require_x64[**P, R](function: Callable[P, R]) -> Callable[P, R]:

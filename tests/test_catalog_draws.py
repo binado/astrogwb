@@ -15,7 +15,6 @@ import pytest
 from astrogwb.importance.catalog import (
     CatalogMetadata,
     read_catalog,
-    validate_matching_frequency_grids,
 )
 from astrogwb.importance.spectrum import reference_catalog
 from astrogwb.populations import BNSCobaPopulation
@@ -80,8 +79,3 @@ def test_intensity_round_trips_through_a_file(tmp_path: Path) -> None:
 def test_reading_a_missing_catalog_names_the_path(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="missing.h5"):
         read_catalog(tmp_path / "missing.h5")
-
-
-def test_catalogs_on_different_frequency_grids_are_refused() -> None:
-    with pytest.raises(ValueError, match="identical frequency grids"):
-        validate_matching_frequency_grids(np.array([2.0, 3.0]), np.array([2.0, 4.0]))
