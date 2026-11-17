@@ -13,6 +13,7 @@ from jax.typing import ArrayLike
 
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import differential_comoving_volume
+from astrogwb.utils import gauss_legendre_nodes_weights
 
 #: A source-frame merger-rate shape :math:`\psi(z)`, called as
 #: ``fn(redshift, params)`` and returning an array shaped like ``redshift``.
@@ -68,40 +69,62 @@ def madau_dickinson_rate(
     )
 
 
-def total_merger_rate(
+def differential_merger_rate(
     redshift: ArrayLike,
-    weights: ArrayLike,
     merger_rate: ArrayLike,
     hubble_constant: ArrayLike,
     omega_m: ArrayLike,
 ) -> jax.Array:
-    r"""Total merger rate in mergers per second, by quadrature over given nodes.
-
-    .. math::
-
-        \mathcal{R} = \int \frac{\psi(z)}{1 + z}
-            \frac{\mathrm{d}V_c}{\mathrm{d}z}\,\mathrm{d}z
-        \approx \sum_j w_j \frac{\psi(z_j)}{1 + z_j}
-            \frac{\mathrm{d}V_c}{\mathrm{d}z}(z_j),
-
-    the same quantity as
-    :meth:`~astrogwb.distributions.redshift.base.RedshiftDistribution.total_merger_rate`,
-    but with no distribution, grid or normalization table: only the rate
-    :math:`\psi` at the nodes and the cosmology.
+    """Observer-frame merger rate in mergers per second per unit redshift.
 
     Parameters
     ----------
-    redshift, weights
-        Quadrature nodes and weights of :math:`\int \mathrm{d}z`, shape ``(Z,)``.
+    redshift
+        Redshift at which to evaluate the integrand.
     merger_rate
-        The source-frame rate :math:`\psi` at ``redshift``, in
-        :math:`\mathrm{Gpc}^{-3}\,\mathrm{yr}^{-1}`, shape ``(Z,)``.
+        Source-frame merger-rate density at ``redshift``, in Gpc^-3 yr^-1.
     hubble_constant, omega_m
-        Flat :math:`\Lambda`CDM cosmology, as in :mod:`astrogwb.cosmology`.
+        Flat LambdaCDM cosmology, as in :mod:`astrogwb.cosmology`.
     """
     redshift = jnp.asarray(redshift)
     volume = differential_comoving_volume(redshift, hubble_constant, omega_m)
-    integral = jnp.sum(
-        jnp.asarray(weights) * jnp.asarray(merger_rate) / (1.0 + redshift) * volume
+    rate = jnp.asarray(merger_rate) * volume / (1.0 + redshift)
+    return 1e-9 * rate / SECONDS_PER_YEAR
+
+
+def total_merger_rate(
+    minimum_redshift: ArrayLike,
+    maximum_redshift: ArrayLike,
+    merger_rate: Callable[[ArrayLike], ArrayLike],
+    hubble_constant: ArrayLike,
+    omega_m: ArrayLike,
+    *,
+    num_nodes: int = 64,
+) -> jax.Array:
+    """Integrate the observer-frame merger rate with Gauss-Legendre quadrature.
+
+    Parameters
+    ----------
+    minimum_redshift, maximum_redshift
+        Lower and upper redshift bounds. Array bounds broadcast to give
+        one integral per interval.
+    merger_rate
+        Callable returning the source-frame rate density in Gpc^-3 yr^-1
+        at the supplied redshifts.
+    hubble_constant, omega_m
+        Flat LambdaCDM cosmology, as in :mod:`astrogwb.cosmology`.
+    num_nodes
+        Number of Gauss-Legendre nodes per interval. Static under JIT.
+
+    Returns
+    -------
+    jax.Array
+        Observer-frame rate in mergers per second.
+    """
+    redshift, weights = gauss_legendre_nodes_weights(
+        minimum_redshift, maximum_redshift, num_nodes
     )
-    return 1e-9 * integral / SECONDS_PER_YEAR
+    integrand = differential_merger_rate(
+        redshift, merger_rate(redshift), hubble_constant, omega_m
+    )
+    return jnp.sum(weights * integrand, axis=-1)

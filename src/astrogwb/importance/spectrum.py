@@ -96,7 +96,7 @@ from astrogwb.importance.catalog import (
     intensity_data,
 )
 from astrogwb.populations._types import Population, SourceModel
-from astrogwb.rates import total_merger_rate
+from astrogwb.rates import differential_merger_rate
 from astrogwb.simulators.sources import simulate_sources
 from astrogwb.utils import gauss_legendre_nodes_weights, require_current_version
 from astrogwb.utils.numpyro import sample_and_logprob
@@ -410,8 +410,9 @@ def _shared_terms(
         omega_m,
         reference_distance,
     )
-    total_rate = total_merger_rate(
-        redshift, redshift_weights, merger_rate, hubble_constant, omega_m
+    total_rate = jnp.sum(
+        redshift_weights
+        * differential_merger_rate(redshift, merger_rate, hubble_constant, omega_m)
     )
     return _SharedTerms(
         log_weights, kernel, distance_ratio, hubble_constant, omega_m, total_rate
