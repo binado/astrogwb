@@ -30,7 +30,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from astrogwb import __version__
 from astrogwb.distributions.config import DistributionConfig
-from astrogwb.populations.joint import EXTRINSIC_SITES, joint_model
+from astrogwb.distributions.redshift.base import RedshiftDistribution
+from astrogwb.populations.joint import EXTRINSIC_SITES, extrinsic_priors
 from astrogwb.populations.metadata import AnyPopulation
 from astrogwb.simulators.sources import simulate_sources
 from astrogwb.utils import require_current_version, years_to_seconds
@@ -226,12 +227,27 @@ def simulate_population(
     theta_key, count_key, source_key = jax.random.split(key, 3)
     with handlers.block():
         theta = dict(handlers.seed(metadata.prior_model(), theta_key)())
-    redshift, source_model = metadata.population.build()(theta)
+    population = metadata.population.build()
+    redshift = RedshiftDistribution(
+        params=theta,
+        source_frame_distribution=population.merger_rate,
+        minimum_redshift=metadata.population.minimum_redshift,
+        maximum_redshift=metadata.population.maximum_redshift,
+        n_grid=metadata.population.n_grid,
+    )
+    source_model = population.source_model(theta)
     rate = jnp.reshape(redshift.total_merger_rate(), ())
     count = int(jax.random.poisson(count_key, rate * seconds))
+
+    def model() -> None:
+        redshift.distance_model()()
+        source_model()
+        for name, prior in extrinsic_priors(bounds).items():
+            numpyro.sample(name, prior)
+
     # One sample preserves column names even for an empty realization.
     sources = simulate_sources(
-        joint_model(redshift, source_model, coa_time_bounds=bounds),
+        model,
         source_key,
         max(count, 1),
     )

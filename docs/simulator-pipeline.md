@@ -137,8 +137,7 @@ the background never redraws or rescales it. Detector projection then applies
 each geometric delay once. Same-source equal-frequency cross powers and intensity-only waveform
 generation are unchanged. The common waveform interface reads an optional
 `coa_time` column in the source-parameter mapping, defaulting to no shift,
-for every backend. `joint_model(..., coa_time_bounds=(low, high))` controls
-the sampling bounds in seconds (default `(-0.5, 0.5)` for general model use).
+for every backend. The population stage sets the sampling bounds in seconds.
 The one-pass simulator forwards `segment_duration` into the population stage,
 which computes the effective duration and passes the centered bounds to the
 joint model. When calling the stages separately, supply the same

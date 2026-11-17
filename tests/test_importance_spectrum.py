@@ -12,12 +12,14 @@ from astrogwb_mock_population import (
     FIDUCIALS,
     build_reference_catalog,
     build_reference_spectrum,
+    population_models,
+    source_draw_model,
 )
+from numpyro import handlers
 
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import luminosity_distance
 from astrogwb.distributions.mass import MaxOfTwoUniformsDistribution
-from astrogwb.distributions.rates import madau_dickinson_rate, total_merger_rate
 from astrogwb.importance.catalog import (
     CatalogMetadata,
     intensity_data,
@@ -28,7 +30,6 @@ from astrogwb.importance.spectrum import (
     INCLINATION_RAW_SECOND_MOMENT,
     INCLINATION_SECOND_MOMENT,
     REFERENCE_INCLINATION,
-    _pin_redshift_and_inclination,
     phinney_kernel,
     redshift_quadrature,
     reference_catalog,
@@ -36,7 +37,9 @@ from astrogwb.importance.spectrum import (
 from astrogwb.inference import (
     CatalogModel,
 )
-from astrogwb.populations import BNSCobaPopulation, joint_model
+from astrogwb.populations import BNSCobaPopulation
+from astrogwb.populations.joint import EXTRINSIC_SITES
+from astrogwb.rates import madau_dickinson_rate, total_merger_rate
 from astrogwb.simulators import realization_key
 from astrogwb.utils import gauss_legendre_nodes_weights
 from astrogwb.utils.io import write
@@ -109,6 +112,28 @@ def test_reference_inclination_is_face_on() -> None:
     )
 
 
+@pytest.mark.integration
+def test_importance_path_does_not_construct_a_redshift_distribution(
+    reference_metadata: CatalogMetadata, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("importance should not construct a redshift distribution")
+
+    monkeypatch.setattr(
+        "astrogwb.distributions.redshift.base.RedshiftDistribution.__init__", fail
+    )
+    data = reference_catalog(reference_metadata, realization_key(41, 0))
+    model = CatalogModel.from_catalog(
+        data,
+        reference_metadata,
+        population=reference_metadata.population.build(),
+        frequencies=np.asarray(waveform_generator(OBSERVED_WAVEFORM).frequencies),
+        num_redshift_nodes=NUM_NODES,
+        observation_time=OBSERVATION_TIME,
+    )
+    assert np.all(np.isfinite(model.spectrum(reference_metadata.fiducials)))
+
+
 def test_inclination_second_moment_is_the_isotropic_ratio_of_moments() -> None:
     # g is a polynomial of degree four in cos(iota), so five nodes integrate
     # g**2 exactly under the isotropic (uniform in cos) average.
@@ -141,6 +166,7 @@ def test_sobol_reference_catalog_stratifies_the_primary_mass(
     data = reference_catalog(metadata, realization_key(41, 0))
 
     columns = data["source_parameters"]
+    assert not set(EXTRINSIC_SITES) & columns.keys()
     np.testing.assert_array_equal(columns["redshift"], np.full(8, 0.1))
     np.testing.assert_array_equal(
         columns["inclination"], np.full(8, REFERENCE_INCLINATION)
@@ -174,9 +200,23 @@ def _spectrum_on_nodes(
     population = metadata.population
     minimum, maximum = population.minimum_redshift, population.maximum_redshift
     redshift, weights = redshift_quadrature(minimum, maximum, NUM_NODES)
-    fiducial_model = joint_model(*population.build()(metadata.fiducials))
+    fiducial_model = source_draw_model(
+        *population_models(
+            population.build(),
+            metadata.fiducials,
+            minimum_redshift=minimum,
+            maximum_redshift=maximum,
+            n_grid=population.n_grid,
+        )
+    )
     samples = sample_and_logprob(
-        _pin_redshift_and_inclination(fiducial_model, minimum),
+        handlers.condition(
+            handlers.condition(
+                fiducial_model,
+                data={"redshift": minimum, "inclination": REFERENCE_INCLINATION},
+            ),
+            data={name: 0.0 for name in EXTRINSIC_SITES},
+        ),
         key,
         num_samples=metadata.num_samples,
         density_sites=(),
@@ -209,9 +249,15 @@ def _spectrum_on_nodes(
     power = np.einsum("l,lfzn->fzn", orientation_weights / 2, powers)
     squared_power = np.einsum("l,lfzn->fzn", orientation_weights / 2, powers**2)
 
-    redshift_distribution, source_model = population.build()(params)
+    redshift_distribution, source_model = population_models(
+        population.build(),
+        params,
+        minimum_redshift=minimum,
+        maximum_redshift=maximum,
+        n_grid=population.n_grid,
+    )
     merger_rate = redshift_distribution.total_merger_rate()
-    model = joint_model(redshift_distribution, source_model)
+    model = source_draw_model(redshift_distribution, source_model)
     outputs, log_density = sample_and_logprob(
         model, density_sites=("redshift",), values=rows
     )

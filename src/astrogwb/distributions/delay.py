@@ -63,7 +63,7 @@ class PowerLawDelayDistribution(dist.DoublyTruncatedPowerLaw):
 
     Takes the parent's ``alpha``, ``low`` and ``high``: the index and the
     delay bounds, in the units the caller measures delays in (Gyr for
-    :class:`~astrogwb.distributions.redshift.TimeDelayedRedshiftDistribution`).
+    :func:`~astrogwb.rates.time_delayed_merger_rate`).
 
     ``low`` must be strictly positive, where the parent also accepts zero: the
     formulas run in :math:`\log(\tau / a)`. A delay has a physical floor anyway,

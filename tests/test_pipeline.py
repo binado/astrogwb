@@ -54,6 +54,14 @@ def test_population_is_reproducible(population: PopulationArtifact) -> None:
     assert redrawn.source_parameters.keys() == population.source_parameters.keys()
     for name, values in population.source_parameters.items():
         np.testing.assert_array_equal(redrawn.source_parameters[name], values)
+    for name, low, high in (
+        ("declination", -np.pi / 2, np.pi / 2),
+        ("right_ascension", 0.0, 2 * np.pi),
+        ("polarization_angle", 0.0, np.pi),
+        ("coa_phase", 0.0, 2 * np.pi),
+    ):
+        values = population.source_parameters[name]
+        assert np.all((values >= low) & (values <= high))
     arrival = population.source_parameters["coa_time"]
     assert np.all((arrival >= -30.0) & (arrival < 30.0))
     assert np.unique(arrival).size == population.count

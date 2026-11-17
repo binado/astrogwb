@@ -7,39 +7,57 @@ finer run of its own quantile rule.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import jax
 import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
 import pytest
+from jax.typing import ArrayLike
 from scipy.integrate import quad
 
 from astrogwb.cosmology import lookback_time, redshift_at_lookback_time
 from astrogwb.distributions.delay import PowerLawDelayDistribution
-from astrogwb.distributions.rates import madau_dickinson_rate
-from astrogwb.distributions.redshift import (
-    MadauDickinsonRedshiftDistribution,
-    TimeDelayedRedshiftDistribution,
-    madau_dickinson_time_delayed_redshift_distribution,
-)
+from astrogwb.distributions.redshift import RedshiftDistribution
+from astrogwb.rates import madau_dickinson_rate, time_delayed_merger_rate
 
 PARAMS = {"H0": 67.66, "Omega_m": 0.3096, "gamma": 2.7, "kappa": 2.9, "z_peak": 1.9}
 N_GRID = 256
 MAXIMUM_FORMATION_REDSHIFT = 20.0
 
 
+def _formation_rate(redshift: ArrayLike, params: Mapping[str, ArrayLike]) -> jax.Array:
+    return madau_dickinson_rate(
+        redshift,
+        params["gamma"],
+        params["kappa"],
+        params["z_peak"],
+        params.get("local_merger_rate", 1.0),
+    )
+
+
 def _delayed(
-    delay: dist.Distribution, **params: float
-) -> TimeDelayedRedshiftDistribution:
-    return madau_dickinson_time_delayed_redshift_distribution(
+    delay: dist.Distribution, *, minimum_redshift: float = 0.0, **params: float
+) -> RedshiftDistribution:
+    def rate(redshift: ArrayLike, values: Mapping[str, ArrayLike]) -> jax.Array:
+        return time_delayed_merger_rate(
+            redshift,
+            values,
+            formation_rate=_formation_rate,
+            delay=delay,
+            maximum_formation_redshift=MAXIMUM_FORMATION_REDSHIFT,
+        )
+
+    return RedshiftDistribution(
         params={**PARAMS, **params},
-        time_delay_distribution=delay,
-        maximum_formation_redshift=MAXIMUM_FORMATION_REDSHIFT,
+        source_frame_distribution=rate,
+        minimum_redshift=minimum_redshift,
         n_grid=N_GRID,
     )
 
 
-def _merger_rate_on_grid(distribution: TimeDelayedRedshiftDistribution) -> jax.Array:
+def _merger_rate_on_grid(distribution: RedshiftDistribution) -> jax.Array:
     """Undo the (1 + z)^-1 dV_c/dz factor to recover R_m on the grid."""
     return (
         distribution.y
@@ -55,7 +73,9 @@ def _merger_rate_on_grid(distribution: TimeDelayedRedshiftDistribution) -> jax.A
 
 def test_negligible_delay_reproduces_the_undelayed_distribution() -> None:
     delayed = _delayed(dist.DoublyTruncatedPowerLaw(-1.0, 1e-6, 2e-6))
-    undelayed = MadauDickinsonRedshiftDistribution(params=PARAMS, n_grid=N_GRID)
+    undelayed = RedshiftDistribution(
+        params=PARAMS, source_frame_distribution=_formation_rate, n_grid=N_GRID
+    )
     # Skip z = 0, where both tables vanish with dV_c/dz.
     np.testing.assert_allclose(
         delayed.normalized_y[1:], undelayed.normalized_y[1:], rtol=1e-4
@@ -64,11 +84,10 @@ def test_negligible_delay_reproduces_the_undelayed_distribution() -> None:
 
 def test_merger_rate_today_is_the_local_merger_rate() -> None:
     """R_m(0) = local_merger_rate. Read just above z = 0, where dV_c/dz > 0."""
-    delayed = madau_dickinson_time_delayed_redshift_distribution(
-        params={**PARAMS, "local_merger_rate": 320.0},
-        time_delay_distribution=dist.DoublyTruncatedPowerLaw(-1.0, 0.02, 13.0),
+    delayed = _delayed(
+        dist.DoublyTruncatedPowerLaw(-1.0, 0.02, 13.0),
+        local_merger_rate=320.0,
         minimum_redshift=1e-6,
-        n_grid=N_GRID,
     )
     np.testing.assert_allclose(_merger_rate_on_grid(delayed)[0], 320.0, rtol=1e-5)
 
@@ -146,11 +165,10 @@ def test_distribution_round_trips_as_a_pytree() -> None:
     distribution = _delayed(dist.DoublyTruncatedPowerLaw(-1.0, 0.02, 13.0))
     leaves, treedef = jax.tree_util.tree_flatten(distribution)
     rebuilt = jax.tree_util.tree_unflatten(treedef, leaves)
-    assert type(rebuilt) is TimeDelayedRedshiftDistribution
+    assert type(rebuilt) is RedshiftDistribution
     z = jnp.array([0.5, 1.234, 3.7])
     jitted = jax.jit(lambda d, value: d.log_prob(value))(distribution, z)
     np.testing.assert_allclose(jitted, distribution.log_prob(z), rtol=1e-15)
-    assert rebuilt.n_delay_nodes == distribution.n_delay_nodes
     np.testing.assert_array_equal(rebuilt.log_prob(z), distribution.log_prob(z))
 
 

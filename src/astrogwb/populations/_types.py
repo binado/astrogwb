@@ -1,8 +1,8 @@
 from collections.abc import Callable, Mapping
+from typing import Protocol
 
+import jax
 from jax.typing import ArrayLike
-
-from astrogwb.distributions.redshift.base import RedshiftDistribution
 
 type Parameters = Mapping[str, ArrayLike]
 
@@ -13,5 +13,10 @@ type PopulationModel = Callable[[], None]
 #: knows nothing about redshift or distance.
 type SourceModel = Callable[[], None]
 
-#: ``parameters -> (redshift_distribution, source_model)``.
-type Population = Callable[[Parameters], tuple[RedshiftDistribution, SourceModel]]
+
+class Population(Protocol):
+    """A source-frame merger rate and intrinsic source model."""
+
+    def merger_rate(self, redshift: ArrayLike, parameters: Parameters) -> jax.Array: ...
+
+    def source_model(self, parameters: Parameters) -> SourceModel: ...

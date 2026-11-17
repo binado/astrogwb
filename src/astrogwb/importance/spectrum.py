@@ -85,21 +85,21 @@ from numpyro import handlers
 
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import (
+    distance_and_volume_grid,
     hubble_distance,
+    log_gw_em_ratio,
     normalized_hubble_parameter,
 )
-from astrogwb.distributions.rates import total_merger_rate
 from astrogwb.importance.catalog import (
     CatalogMetadata,
     IntensityData,
     intensity_data,
 )
-from astrogwb.populations._types import Population, PopulationModel, SourceModel
+from astrogwb.populations._types import Population, SourceModel
 from astrogwb.populations.joint import (
     REDSHIFT_SITE,
-    fix_extrinsic_parameters,
-    joint_model,
 )
+from astrogwb.rates import total_merger_rate
 from astrogwb.simulators.sources import simulate_sources
 from astrogwb.utils import gauss_legendre_nodes_weights, require_current_version
 from astrogwb.utils.numpyro import sample_and_logprob
@@ -280,21 +280,6 @@ def reference_redshift(metadata: CatalogMetadata) -> float:
     return metadata.population.minimum_redshift
 
 
-def _pin_redshift_and_inclination(
-    model: PopulationModel, redshift: ArrayLike
-) -> PopulationModel:
-    """``model`` with reference distance, inclination and extrinsics fixed."""
-    return fix_extrinsic_parameters(
-        handlers.condition(
-            model,
-            data={
-                REDSHIFT_SITE: jnp.asarray(redshift),
-                INCLINATION_SITE: REFERENCE_INCLINATION,
-            },
-        )
-    )
-
-
 def reference_catalog(
     metadata: CatalogMetadata,
     key: jax.Array,
@@ -330,16 +315,32 @@ def reference_catalog(
     _require_quadrupole_waveform(metadata)
     reference = reference_redshift(metadata)
     population = metadata.population
-    if reference < population.minimum_redshift:
-        # The distance table clamps outside its grid: extend it down to the pin.
-        population = population.replace(minimum_redshift=reference)
-    model = joint_model(*population.build()(metadata.fiducials))
+    parameters = metadata.fiducials
+    source_model = population.build().source_model(parameters)
     samples = simulate_sources(
-        _pin_redshift_and_inclination(model, reference),
+        handlers.condition(
+            source_model, data={INCLINATION_SITE: REFERENCE_INCLINATION}
+        ),
         key,
         metadata.num_samples,
         sampling=metadata.sampling,
     )
+    # Match the distance grid used by physical redshift draws.
+    grid = jnp.linspace(
+        min(reference, population.minimum_redshift),
+        population.maximum_redshift,
+        population.n_grid,
+    )
+    distance_grid, _ = distance_and_volume_grid(
+        grid, hubble_constant=parameters["H0"], omega_m=parameters["Omega_m"]
+    )
+    distance = jnp.interp(reference, grid, distance_grid)
+    if "xi_0" in parameters:
+        distance *= jnp.exp(
+            log_gw_em_ratio(reference, parameters["xi_0"], parameters["xi_n"])
+        )
+    samples[REDSHIFT_SITE] = np.full(metadata.num_samples, reference)
+    samples[_LUMINOSITY_DISTANCE] = np.full(metadata.num_samples, float(distance))
     return intensity_data(
         waveform_generator(metadata.waveform), samples, chunk_size=chunk_size
     )
@@ -367,7 +368,7 @@ def _node_intensity(
 
 
 class _SharedTerms(NamedTuple):
-    """What the spectrum and its variance both take from ``population(params)``."""
+    """What the spectrum and its variance both take from the population."""
 
     log_weights: jax.Array
     kernel: jax.Array
@@ -393,15 +394,19 @@ def _shared_terms(
     ``kernel`` is the quadrature weights times :func:`phinney_kernel`, ``(Z,)``;
     ``total_rate`` is the observer-frame merger rate in mergers per second.
     """
-    distribution, source_model = population(params)
+    source_model = population.source_model(params)
     log_weights = (
         _intrinsic_log_prob(source_model, intrinsic, density_sites) - proposal_log_prob
     )
-    hubble_constant = distribution.params["H0"]
-    omega_m = distribution.params["Omega_m"]
-    merger_rate = distribution.merger_rate(redshift)
+    hubble_constant = params["H0"]
+    omega_m = params["Omega_m"]
+    merger_rate = population.merger_rate(redshift, params)
     # The GW distance over the electromagnetic one: modified propagation alone.
-    distance_ratio = distribution.distance_ratio(redshift)
+    distance_ratio = (
+        jnp.exp(log_gw_em_ratio(redshift, params["xi_0"], params["xi_n"]))
+        if "xi_0" in params
+        else jnp.ones_like(redshift)
+    )
     kernel = redshift_weights * phinney_kernel(
         redshift,
         merger_rate,
@@ -474,7 +479,7 @@ def _rescaling_arrays(
         for name, values in columns.items()
         if name not in (REDSHIFT_SITE, INCLINATION_SITE, _LUMINOSITY_DISTANCE)
     }
-    _, fiducial_source_model = metadata.population.build()(metadata.fiducials)
+    fiducial_source_model = metadata.population.build().source_model(metadata.fiducials)
     return {
         "intrinsic": intrinsic,
         "proposal_log_prob": _intrinsic_log_prob(

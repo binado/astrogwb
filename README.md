@@ -71,7 +71,7 @@ from astrogwb.utils.io import write
 from astrogwb.waveform import WaveformMetadata
 
 # A population record's fields are its construction settings; build() returns
-# hyperparameters -> (redshift distribution, source model).
+# the source-frame merger rate and intrinsic source model.
 population = BNSCobaPopulation(
     mass_model="uniform", minimum_redshift=0.01, maximum_redshift=20.0, n_grid=4096
 )

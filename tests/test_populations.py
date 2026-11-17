@@ -28,6 +28,8 @@ from astrogwb_mock_population import (
     derived_columns,
     make_redshift_grid,
     mock_population,
+    population_models,
+    source_draw_model,
 )
 from jax.typing import ArrayLike
 from numpyro import handlers
@@ -35,16 +37,14 @@ from reference_population import reference_merger_rate_distance_and_logprob
 
 from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.distributions.delay import PowerLawDelayDistribution
-from astrogwb.distributions.redshift import (
-    madau_dickinson_time_delayed_redshift_distribution,
-)
+from astrogwb.distributions.redshift import RedshiftDistribution
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
     REDSHIFT_SITE,
     BNSCobaPopulation,
     Population,
-    joint_model,
 )
+from astrogwb.rates import madau_dickinson_rate, time_delayed_merger_rate
 from astrogwb.utils.numpyro import sample_and_logprob
 
 #: The deterministic output governing waveform amplitude.
@@ -117,7 +117,7 @@ def evaluate(
     density_sites: Sequence[str] = DEFAULT_DENSITY_SITES,
 ) -> tuple[jax.Array, jax.Array]:
     """Selected ``(N,)`` density and recomputed distance, in one isolated pass."""
-    model = joint_model(*population(params))
+    model = source_draw_model(*population_models(population, params))
     outputs, log_prob = sample_and_logprob(
         model, density_sites=density_sites, values=values
     )
@@ -126,7 +126,7 @@ def evaluate(
 
 def merger_rate(population: Population, params: Mapping[str, ArrayLike]) -> jax.Array:
     """The observer-frame rate, from the same call that builds the model."""
-    redshift_distribution, _ = population(params)
+    redshift_distribution, _ = population_models(population, params)
     return redshift_distribution.total_merger_rate()
 
 
@@ -190,32 +190,6 @@ DELAYED = BNSCobaPopulation(
 # Explicit site metadata and recomputation
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("coa_time_bounds", [(-0.5, 0.5), (-20.0, 40.0)])
-def test_joint_model_extrinsics_are_conditionable_sample_sites(
-    coa_time_bounds: tuple[float, float],
-) -> None:
-    model = joint_model(
-        *mock_population()(POPULATION_PARAMS), coa_time_bounds=coa_time_bounds
-    )
-    fixed: dict[str, ArrayLike] = {
-        "declination": 0.1,
-        "right_ascension": 0.2,
-        "polarization_angle": 0.3,
-        "coa_phase": 0.4,
-        "coa_time": 0.2,
-    }
-    conditioned = handlers.condition(model, data=fixed)
-    trace = handlers.trace(handlers.seed(conditioned, 0)).get_trace()
-    arrival_prior = trace["coa_time"]["fn"]
-    assert isinstance(arrival_prior, dist.Uniform)
-    assert arrival_prior.low == coa_time_bounds[0]
-    assert arrival_prior.high == coa_time_bounds[1]
-    for name, value in fixed.items():
-        assert trace[name]["type"] == "sample"
-        assert trace[name]["is_observed"]
-        assert trace[name]["value"] == value
-
-
-@pytest.mark.parametrize("coa_time_bounds", [(-0.5, 0.5), (-20.0, 40.0)])
 def test_identical_arrival_priors_cancel_from_importance_ratios(
     coa_time_bounds: tuple[float, float],
 ) -> None:
@@ -225,12 +199,18 @@ def test_identical_arrival_priors_cancel_from_importance_ratios(
     reference, _ = evaluate(population, POPULATION_PARAMS, values)
     sites = (*DEFAULT_DENSITY_SITES, "coa_time")
     _, target_with_arrival = sample_and_logprob(
-        joint_model(*population(OFF_FIDUCIALS), coa_time_bounds=coa_time_bounds),
+        source_draw_model(
+            *population_models(population, OFF_FIDUCIALS),
+            coa_time_bounds=coa_time_bounds,
+        ),
         values=values,
         density_sites=sites,
     )
     _, reference_with_arrival = sample_and_logprob(
-        joint_model(*population(POPULATION_PARAMS), coa_time_bounds=coa_time_bounds),
+        source_draw_model(
+            *population_models(population, POPULATION_PARAMS),
+            coa_time_bounds=coa_time_bounds,
+        ),
         values=values,
         density_sites=sites,
     )
@@ -271,7 +251,7 @@ def test_one_execution_supplies_per_sample_density_distance_and_scalar_rate() ->
 
 
 def test_source_model_never_sees_redshift() -> None:
-    _, source_model = mock_population()(POPULATION_PARAMS)
+    source_model = mock_population().source_model(POPULATION_PARAMS)
     trace = handlers.trace(handlers.seed(source_model, 0)).get_trace()
 
     assert not {REDSHIFT_SITE, LUMINOSITY_DISTANCE_SITE} & set(trace)
@@ -386,7 +366,7 @@ def draw(
     num_samples: int,
 ) -> dict[str, jax.Array]:
     """``num_samples`` sources from ``population`` at ``params``."""
-    model = joint_model(*population(params))
+    model = source_draw_model(*population_models(population, params))
     return sample_and_logprob(model, key, num_samples=num_samples, density_sites=())[0]
 
 
@@ -629,13 +609,26 @@ def test_time_delayed_ceiling_is_cosmological_not_a_fixed_number(slope: float) -
     def rate(values: Mapping[str, ArrayLike]) -> jax.Array:
         return merger_rate(delayed, values)
 
-    unbounded = madau_dickinson_time_delayed_redshift_distribution(
+    delay = PowerLawDelayDistribution(slope, DELAYED.minimum_delay, 1.0e3)
+
+    def delayed_rate(z: ArrayLike, values: Mapping[str, ArrayLike]) -> jax.Array:
+        def formation_rate(z: ArrayLike, p: Mapping[str, ArrayLike]) -> jax.Array:
+            return madau_dickinson_rate(
+                z, p["gamma"], p["kappa"], p["z_peak"], p["local_merger_rate"]
+            )
+
+        return time_delayed_merger_rate(
+            z,
+            values,
+            formation_rate=formation_rate,
+            delay=delay,
+            n_delay_nodes=48,
+            maximum_formation_redshift=20.0,
+        )
+
+    unbounded = RedshiftDistribution(
         params=params,
-        time_delay_distribution=PowerLawDelayDistribution(
-            slope, DELAYED.minimum_delay, 1.0e3
-        ),
-        n_delay_nodes=48,
-        maximum_formation_redshift=20.0,
+        source_frame_distribution=delayed_rate,
         minimum_redshift=Z_MIN,
         maximum_redshift=Z_MAX,
         n_grid=N_GRID,

@@ -25,7 +25,7 @@ from astrogwb.background import (
     uniform_prior_mass_moments,
 )
 from astrogwb.constants import ISCO_ALPHA
-from astrogwb.distributions.rates import madau_dickinson_rate
+from astrogwb.rates import madau_dickinson_rate
 
 CATALOG_DF = 8.0
 SMALL_CATALOG_SIZE = 256

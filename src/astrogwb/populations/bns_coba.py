@@ -33,20 +33,17 @@ from typing import Annotated, Literal, Self
 import jax
 import numpyro
 import numpyro.distributions as dist
+from jax.typing import ArrayLike
 from pydantic import Field, model_validator
 
 from astrogwb.cosmology import lookback_time
 from astrogwb.distributions import UniformCosineDistribution
 from astrogwb.distributions.delay import PowerLawDelayDistribution
-from astrogwb.distributions.redshift import MadauDickinsonRedshiftDistribution
-from astrogwb.distributions.redshift.base import RedshiftDistribution
-from astrogwb.distributions.redshift.madau_dickinson import (
-    madau_dickinson_time_delayed_redshift_distribution,
-)
 from astrogwb.populations._types import Parameters, Population, SourceModel
 from astrogwb.populations.base import PopulationMetadata
 from astrogwb.populations.mass.gaussian_mass_pair import gaussian_mass_pair_model
 from astrogwb.populations.mass.uniform_mass_pair import uniform_mass_pair_model
+from astrogwb.rates import madau_dickinson_rate, time_delayed_merger_rate
 
 __all__ = ["BNSCobaPopulation"]
 
@@ -60,12 +57,10 @@ class BNSCobaPopulation(PopulationMetadata):
     r"""The BNS population's construction settings.
 
     See the module docstring for the hyperparameters each setting requires.
-    :meth:`build` returns ``parameters -> (redshift_distribution,
-    source_model)``. The distribution's ``total_merger_rate()`` is the
-    observer-frame rate in mergers per second, shape ``()``, and its
-    ``distance_model()`` samples redshift and GW distance; ``source_model()``
-    declares the intrinsic sites only.
-    :func:`~astrogwb.populations.joint.joint_model` composes the two.
+    :meth:`build` returns a population exposing ``merger_rate(redshift,
+    parameters)`` and ``source_model(parameters)``. Physical simulation builds
+    a redshift distribution from the rate and combines its distance model with
+    the intrinsic source model and extrinsic priors.
 
     Attributes
     ----------
@@ -104,62 +99,62 @@ class BNSCobaPopulation(PopulationMetadata):
         return _bns_coba_population(self)
 
 
-def _redshift_distribution(
-    parameters: Parameters, config: BNSCobaPopulation
-) -> RedshiftDistribution:
-    """The Madau-Dickinson law of ``config``, delayed when ``config.time_delay``.
+class _BNSCobaModel:
+    """A shared merger rate and intrinsic model for both pipelines."""
 
-    ``delay_slope`` is traced; the floor and quadrature are construction
-    settings. The delay's upper bound is the lookback time to
-    ``maximum_formation_redshift``, so it follows ``H0`` and ``Omega_m``.
-    """
-    if not config.time_delay:
-        return MadauDickinsonRedshiftDistribution(
-            params=parameters,
-            minimum_redshift=config.minimum_redshift,
-            maximum_redshift=config.maximum_redshift,
-            n_grid=config.n_grid,
+    def __init__(self, config: BNSCobaPopulation) -> None:
+        self.config = config
+
+    def merger_rate(self, redshift: ArrayLike, parameters: Parameters) -> jax.Array:
+        def formation_rate(z: ArrayLike, params: Parameters) -> jax.Array:
+            return madau_dickinson_rate(
+                z,
+                params["gamma"],
+                params["kappa"],
+                params["z_peak"],
+                params.get("local_merger_rate", 1.0),
+            )
+
+        config = self.config
+        if not config.time_delay:
+            return formation_rate(redshift, parameters)
+        assert config.minimum_delay is not None
+        longest_delay = lookback_time(
+            config.maximum_formation_redshift, parameters["H0"], parameters["Omega_m"]
         )
-    assert config.minimum_delay is not None
-    longest_delay = lookback_time(
-        config.maximum_formation_redshift, parameters["H0"], parameters["Omega_m"]
-    )
-    return madau_dickinson_time_delayed_redshift_distribution(
-        params=parameters,
-        time_delay_distribution=PowerLawDelayDistribution(
-            parameters["delay_slope"], config.minimum_delay, longest_delay
-        ),
-        n_delay_nodes=config.n_delay_nodes,
-        maximum_formation_redshift=config.maximum_formation_redshift,
-        minimum_redshift=config.minimum_redshift,
-        maximum_redshift=config.maximum_redshift,
-        n_grid=config.n_grid,
-    )
+        return time_delayed_merger_rate(
+            redshift,
+            parameters,
+            formation_rate=formation_rate,
+            delay=PowerLawDelayDistribution(
+                parameters["delay_slope"], config.minimum_delay, longest_delay
+            ),
+            n_delay_nodes=config.n_delay_nodes,
+            maximum_formation_redshift=config.maximum_formation_redshift,
+        )
 
+    def source_model(self, parameters: Parameters) -> SourceModel:
+        config = self.config
+        draw_masses = _MASS_MODELS[config.mass_model]
 
-def _bns_coba_population(config: BNSCobaPopulation) -> Population:
-    """The population ``config`` describes."""
-    draw_masses = _MASS_MODELS[config.mass_model]
-    spin_bound = config.maximum_aligned_spin_component
-
-    def _redshift_distribution_and_source_model(
-        parameters: Parameters,
-    ) -> tuple[RedshiftDistribution, SourceModel]:
-        def _source_model() -> None:
+        def model() -> None:
             draw_masses(parameters)
-
-            spin_dist = dist.Uniform(-spin_bound, spin_bound, validate_args=True)
+            spin_dist = dist.Uniform(
+                -config.maximum_aligned_spin_component,
+                config.maximum_aligned_spin_component,
+                validate_args=True,
+            )
             numpyro.sample("spin_1z", spin_dist)
             numpyro.sample("spin_2z", spin_dist)
-
             lambda_dist = dist.Uniform(
                 0.0, config.maximum_tidal_deformability, validate_args=True
             )
             numpyro.sample("lambda_1", lambda_dist)
             numpyro.sample("lambda_2", lambda_dist)
-
             numpyro.sample("inclination", UniformCosineDistribution(validate_args=True))
 
-        return _redshift_distribution(parameters, config), _source_model
+        return model
 
-    return _redshift_distribution_and_source_model
+
+def _bns_coba_population(config: BNSCobaPopulation) -> Population:
+    return _BNSCobaModel(config)

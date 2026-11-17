@@ -20,7 +20,14 @@ import pytest
 
 # The mock population's fiducials and grid: the tight agreement tests below
 # need both implementations on the same grid.
-from astrogwb_mock_population import FIDUCIALS, N_GRID, Z_MAX, Z_MIN, make_redshift_grid
+from astrogwb_mock_population import (
+    FIDUCIALS,
+    N_GRID,
+    Z_MAX,
+    Z_MIN,
+    make_redshift_grid,
+    mock_population,
+)
 from reference_population import reference_merger_rate_distance_and_logprob
 
 from astrogwb.distributions.interpolated import InterpolatedDistribution
@@ -29,11 +36,8 @@ from astrogwb.distributions.mass import (
     MaxOfTwoUniformsDistribution,
 )
 from astrogwb.distributions.orientation import UniformCosineDistribution
-from astrogwb.distributions.rates import total_merger_rate
 from astrogwb.distributions.redshift.base import RedshiftDistribution
-from astrogwb.distributions.redshift.madau_dickinson import (
-    MadauDickinsonRedshiftDistribution,
-)
+from astrogwb.rates import total_merger_rate
 from astrogwb.utils import gauss_legendre_nodes_weights
 
 #: Redshifts to evaluate at: interior to the grid, and not on a node.
@@ -42,7 +46,8 @@ SAMPLE_REDSHIFTS = jnp.array([0.5, 1.234, 3.7, 12.0, 19.5])
 
 def _distribution(**overrides: float) -> RedshiftDistribution:
     """The Madau-Dickinson specimen at the mock fiducials, on the mock grid."""
-    return MadauDickinsonRedshiftDistribution(
+    return RedshiftDistribution(
+        source_frame_distribution=mock_population().merger_rate,
         params={**FIDUCIALS, **overrides},
         minimum_redshift=Z_MIN,
         maximum_redshift=Z_MAX,

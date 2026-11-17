@@ -40,8 +40,7 @@ def simulate_sources(
     Parameters
     ----------
     model
-        No-argument NumPyro model declaring the source sites, such as
-        :func:`~astrogwb.populations.joint_model`.
+        No-argument NumPyro model declaring the source sites.
     key
         JAX random key.
     num_samples
