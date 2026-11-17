@@ -18,7 +18,6 @@ from astrogwb.background.spectral import (
     characteristic_noise,
     characteristic_strain,
     omega_gw_from_spectral_density,
-    spectral_density,
     spectral_density_from_omega_gw,
 )
 
@@ -31,7 +30,6 @@ __all__ = [
     "characteristic_strain",
     "omega_gw_from_spectral_density",
     "precompute_cumulative_mass_moments",
-    "spectral_density",
     "spectral_density_from_omega_gw",
     "spectral_snr",
     "spectral_snr_squared",
