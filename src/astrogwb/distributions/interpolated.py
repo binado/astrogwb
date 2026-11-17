@@ -39,10 +39,6 @@ class InterpolatedDistribution(dist.Distribution):
 
     # No `arg_constraints`: NumPyro would check the `(n_grid,)` table against
     # the `()` batch shape and fail.
-    #
-    # The lazy properties must stay out of this tuple: `tree_flatten` reads
-    # `__dict__`, so they would flatten to `None` before first access and to an
-    # array after, changing the treedef and retracing every jit.
     pytree_data_fields = ("x", "y")
 
     def __init__(

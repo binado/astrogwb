@@ -209,7 +209,6 @@ def simulate_population(
         If ``key`` is not a single key, or ``metadata`` is for another astrogwb
         version, or the requested segment duration is invalid.
     """
-    # Set precision before creating arrays or initializing the backend.
     jax.config.update("jax_enable_x64", True)
     require_current_version(metadata.version)
     if key.shape != ():

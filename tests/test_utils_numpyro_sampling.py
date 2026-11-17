@@ -125,7 +125,6 @@ def test_a_missing_column_raises_naming_the_site() -> None:
         sample_and_logprob(
             _source_model(0.5), density_sites=(), values={"z": FIXED["z"]}
         )
-    # An enclosing seed must not turn the missing column into fresh draws.
     with handlers.seed(rng_seed=0), pytest.raises(KeyError, match="'m'"):
         sample_and_logprob(
             _source_model(0.5), density_sites=(), values={"z": FIXED["z"]}

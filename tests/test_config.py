@@ -28,7 +28,6 @@ def test_detector_loader_merges_packaged_definitions_and_ordered_overrides(
         encoding="utf-8",
     )
     registry = load_detector_config([base, override])
-    # Members keep the order of the last layer; pairs are in canonical order.
     assert registry.networks["reference"] == ("S1", "C1")
     assert registry.networks["comparison"] == ("S1", "C1")
     assert registry.pairs("reference") == [("C1", "S1")]
