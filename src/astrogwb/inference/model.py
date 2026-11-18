@@ -51,11 +51,16 @@ class SpectralDensityPrediction(NamedTuple):
         round-off.
     extras
         Scalar diagnostics, with the same keys at every parameter point.
+    merger_rate
+        The observer-frame merger rate :math:`\mathcal R` in mergers per
+        second, ``()``, or ``None`` when the model does not predict it. It
+        separates the count fluctuations from the intensity second moment.
     """
 
     spectral_density: jax.Array
     intensity_second_moment: jax.Array | None
     extras: Mapping[str, jax.Array]
+    merger_rate: jax.Array | None = None
 
 
 class SpectralDensityModel(Protocol):

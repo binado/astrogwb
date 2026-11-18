@@ -30,8 +30,8 @@ divided by the realized count.
 
 Each pair requested by at least one network is projected once per chunk in
 one fused kernel, and each network keeps its own rows, ``(P_n, F)``.
-:func:`combine_pair_spectra` weights them into a network spectrum ``(F,)`` on
-demand.
+:func:`~astrogwb.statistics.combine_pair_spectra` weights them into a network
+spectrum ``(F,)`` on demand.
 
 The simulator draws independent Poisson counts in segments of exactly
 :math:`\tau` seconds and selects distinct rows from the supplied pool. Each
@@ -102,7 +102,6 @@ from astrogwb.waveform.metadata import WaveformMetadata
 __all__ = [
     "BackgroundDraw",
     "NetworkNoise",
-    "combine_pair_spectra",
     "network_noise",
     "project_background",
     "read_background",
@@ -752,47 +751,3 @@ def _segment_power(
     power = jnp.real(jnp.conj(total[:, first]) * total[:, second])
     real = (segment_ids < num_segments)[:, None, None]
     return jnp.where(real, power, 0.0).sum(axis=0)
-
-
-def _combine(
-    numerator: NDArray[np.float64], denominator: NDArray[np.float64]
-) -> NDArray[np.float64]:
-    """``numerator / denominator``, zero in the bins without a usable weight."""
-    usable = denominator > 0.0
-    return np.where(usable, numerator / np.where(usable, denominator, 1.0), 0.0)
-
-
-def combine_pair_spectra(
-    pair_spectral_density: ArrayLike,
-    frequencies: ArrayLike,
-    network: DetectorNetworkConfig,
-) -> NDArray[np.float64]:
-    r"""The network spectrum of per-pair spectra ``(..., P, F)``, ``(..., F)``.
-
-    :math:`\sum_{a<b} w_{ab} Y_{ab} / \sum_{a<b} w_{ab} \gamma_{ab}` with the
-    optimal weights :math:`w_{ab} = \gamma_{ab} / (S_a S_b)` of
-    :func:`~astrogwb.detector.pair_terms`, the pairs in the order of
-    :meth:`DetectorNetworkConfig.pairs`; its mean is :math:`S_h` for an
-    isotropic, unpolarized population. Bins where no pair has a finite weight
-    return zero.
-
-    Parameters
-    ----------
-    pair_spectral_density
-        The pair spectra :math:`Y_{ab}`, ``(..., P, F)``.
-    frequencies
-        The frequency grid in Hz, ``(F,)``.
-    network
-        The resolved network the pairs belong to.
-
-    Returns
-    -------
-    numpy.ndarray
-        The network spectrum, ``(..., F)``.
-    """
-    detectors = network.build_detectors()
-    terms = pair_terms(np.asarray(frequencies), detectors)
-    weights = np.stack([term.weight for term in terms])
-    denominator = np.sum([term.weight * term.overlap for term in terms], axis=0)
-    numerator = np.sum(weights * np.asarray(pair_spectral_density), axis=-2)
-    return _combine(numerator, denominator)

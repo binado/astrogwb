@@ -25,7 +25,6 @@ from numpy.typing import NDArray
 
 from astrogwb.background.simulation import (
     BackgroundDraw,
-    combine_pair_spectra,
     project_background,
     simulate_background,
 )
@@ -36,6 +35,7 @@ from astrogwb.detector import (
     pair_bin_scale,
 )
 from astrogwb.detector.projection import project_polarizations_fd
+from astrogwb.statistics import combine_pair_spectra
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import WaveformMetadata, intensity, waveform_generator
 

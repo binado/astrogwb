@@ -22,11 +22,9 @@ from astrogwb_mock_population import (
     build_reference_spectrum,
     mock_merger_rate,
 )
-from jax.scipy.linalg import solve_triangular
 from jax.tree_util import Partial
 from jax.typing import ArrayLike
 
-from astrogwb.background.importance.diagnostics import amplitude_cumulants
 from astrogwb.background.importance.model import CatalogModel, interpolation_weights
 from astrogwb.background.importance.spectrum import (
     INCLINATION_MEAN,
@@ -34,7 +32,9 @@ from astrogwb.background.importance.spectrum import (
 )
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.detector import (
+    ConnectedOverlap,
     connected_overlap,
+    connected_overlap_components,
     load_detector,
     pair_names,
     pair_response,
@@ -43,14 +43,16 @@ from astrogwb.detector.response import _isotropic_angles
 from astrogwb.inference import (
     DenseGaussianLikelihood,
     SpectralDensityPrediction,
-    amplitude_template,
     grid_log_likelihood,
     grid_log_prior,
-    shape_correction,
-    shot_noise_variance,
-    whitened_catalog_covariance,
 )
 from astrogwb.inference.gaussian import _Network
+from astrogwb.statistics import (
+    amplitude,
+    amplitude_variance,
+    amplitude_variance_budget,
+    amplitude_weights,
+)
 from astrogwb.utils import gauss_legendre_nodes_weights
 
 NUM_PAIRS = 2
@@ -201,7 +203,7 @@ def test_network_from_leaves_keeps_only_the_counted_entries(
     network: _Network, pair_leaves: dict[str, Any]
 ) -> None:
     assert network.scale.shape == (int(pair_leaves["mask"].sum()),)
-    assert network.connected_overlap is not None
+    assert isinstance(network.connected_overlap, jax.Array)
     assert network.connected_overlap.shape == (network.scale.size,) * 2
 
 
@@ -226,7 +228,8 @@ def test_log_likelihood_is_the_multivariate_normal_with_the_catalog_covariance(
 ) -> None:
     (prediction, factor) = likelihood.evaluate(OFF_FIDUCIAL)
     moment = prediction.intensity_second_moment
-    assert moment is not None and network.connected_overlap is not None
+    assert moment is not None
+    assert isinstance(network.connected_overlap, jax.Array)
     seconds = OBSERVATION_TIME * SECONDS_PER_YEAR
     covariance = moment[network.bins][
         :, network.bins
@@ -434,6 +437,28 @@ def test_constructor_with_shot_noise_gives_a_finite_log_likelihood(
     assert bool(jnp.isfinite(likelihood.log_likelihood(OFF_FIDUCIAL)[0]))
 
 
+def test_constructor_with_stokes_components_splits_its_covariance(
+    model: CatalogModel,
+    frequencies: np.ndarray,
+    triangle: list[Any],
+) -> None:
+    likelihood = _triangle_likelihood(
+        model,
+        triangle,
+        frequencies,
+        None,
+        shot_noise=True,
+        num_draws=256,
+        stokes_components=True,
+    )
+    _, factor = likelihood.evaluate(OFF_FIDUCIAL)
+    components = likelihood.covariance_components(OFF_FIDUCIAL)
+
+    np.testing.assert_allclose(
+        sum(components.values()), factor.cholesky @ factor.cholesky.T, rtol=1e-10
+    )
+
+
 # --------------------------------------------------------------------------- #
 # connected_overlap
 # --------------------------------------------------------------------------- #
@@ -604,77 +629,145 @@ def test_grid_log_prior_outside_the_support_is_negative_infinite() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Diagnostics
+# The amplitude statistic
 # --------------------------------------------------------------------------- #
-def test_shape_correction_and_shot_variance_give_the_amplitude_information(
-    likelihood: DenseGaussianLikelihood[CatalogModel],
-) -> None:
-    r""":math:`\mu^T C^{-1} \mu = \rho^2 / (1 + \rho^2 \sigma^2 - \delta)` (App. B)."""
-    _, factor = likelihood.evaluate(OFF_FIDUCIAL)
-    whitened = solve_triangular(factor.cholesky, factor.mean, lower=True)
-    _, squared_snr = amplitude_template(likelihood, OFF_FIDUCIAL)
-    shot = shot_noise_variance(likelihood, OFF_FIDUCIAL)
-    delta = shape_correction(likelihood, OFF_FIDUCIAL)
-
-    assert float(whitened @ whitened) == pytest.approx(
-        float(squared_snr / (1.0 + squared_snr * shot - delta)), rel=1e-9
+@pytest.fixture(scope="module")
+def split_network(pair_leaves: dict[str, Any], response_draws: jax.Array) -> _Network:
+    """Three Stokes components, each the moment of a disjoint third of the draws."""
+    flat = np.reshape(np.asarray(response_draws), (NUM_DRAWS, -1))
+    parts = np.array_split(flat, 3)
+    moments = [
+        RESPONSE_TO_CONNECTED
+        * (part.T @ part / NUM_DRAWS).reshape((NUM_PAIRS, NUM_BINS) * 2)
+        for part in parts
+    ]
+    return _Network.from_leaves(
+        **pair_leaves, connected_overlap=ConnectedOverlap(*moments)
     )
 
 
-def test_shape_correction_is_bounded_by_the_largest_orthogonal_eigenvalue(
+@pytest.fixture(scope="module")
+def split_likelihood(
+    model: CatalogModel, split_network: _Network
+) -> DenseGaussianLikelihood[CatalogModel]:
+    return DenseGaussianLikelihood._from_network(model, split_network, None)
+
+
+def test_amplitude_weights_have_unit_response_to_the_template(
     likelihood: DenseGaussianLikelihood[CatalogModel],
 ) -> None:
-    _, squared_snr = amplitude_template(likelihood, OFF_FIDUCIAL)
-    shot = float(squared_snr * shot_noise_variance(likelihood, OFF_FIDUCIAL))
-    largest = float(
-        jnp.max(
-            jnp.linalg.eigvalsh(
-                whitened_catalog_covariance(likelihood, OFF_FIDUCIAL, orthogonal=True)
-            )
-        )
+    weights = amplitude_weights(likelihood, OFF_FIDUCIAL)
+
+    assert float(weights @ likelihood.mean(OFF_FIDUCIAL)) == pytest.approx(
+        1.0, rel=1e-12
     )
-    delta = float(shape_correction(likelihood, OFF_FIDUCIAL))
-
-    assert 0.0 <= delta <= shot * largest / (1.0 + largest) * (1.0 + 1e-12)
 
 
-def test_orthogonal_whitened_covariance_annihilates_the_mean_direction(
+def test_amplitude_of_a_rescaled_template_is_the_scale(
+    model: CatalogModel, network: _Network
+) -> None:
+    template = DenseGaussianLikelihood._from_network(model, network, None)
+    scaled = DenseGaussianLikelihood._from_network(
+        model, network, jnp.array([0.5, 1.3])[:, None] * template.mean(OFF_FIDUCIAL)
+    )
+
+    np.testing.assert_allclose(amplitude(scaled, OFF_FIDUCIAL), [0.5, 1.3], rtol=1e-12)
+
+
+def test_amplitude_without_data_raises(model: CatalogModel, network: _Network) -> None:
+    likelihood = DenseGaussianLikelihood._from_network(model, network, None)
+
+    with pytest.raises(ValueError, match="without observed data"):
+        amplitude(likelihood, OFF_FIDUCIAL)
+
+
+def test_amplitude_variance_without_shot_noise_is_the_inverse_squared_snr(
     likelihood: DenseGaussianLikelihood[CatalogModel], network: _Network
 ) -> None:
-    mean = likelihood.model.spectral_density(OFF_FIDUCIAL)[network.bins]
-    direction = network.pair_overlap * mean / network.scale
-    projected = whitened_catalog_covariance(likelihood, OFF_FIDUCIAL, orthogonal=True)
-    full = whitened_catalog_covariance(likelihood, OFF_FIDUCIAL)
+    diagonal = DenseGaussianLikelihood._from_network(
+        likelihood.model, network, None, shot_noise=False
+    )
+    squared_snr = jnp.sum((likelihood.mean(OFF_FIDUCIAL) / network.scale) ** 2)
 
-    assert float(jnp.linalg.norm(projected @ direction)) <= 1e-12 * float(
-        jnp.linalg.norm(full @ direction)
+    assert float(amplitude_variance(diagonal, OFF_FIDUCIAL)) == pytest.approx(
+        float(1.0 / squared_snr), rel=1e-12
     )
 
 
-def test_amplitude_cumulants_shot_variance_is_the_response_moment_variance(
+def test_amplitude_variance_grows_with_shot_noise(
+    likelihood: DenseGaussianLikelihood[CatalogModel], network: _Network
+) -> None:
+    diagonal = DenseGaussianLikelihood._from_network(
+        likelihood.model, network, None, shot_noise=False
+    )
+
+    assert float(amplitude_variance(likelihood, OFF_FIDUCIAL)) > float(
+        amplitude_variance(diagonal, OFF_FIDUCIAL)
+    )
+
+
+def test_amplitude_variance_budget_sums_to_the_amplitude_variance(
+    split_likelihood: DenseGaussianLikelihood[CatalogModel],
+) -> None:
+    budget = amplitude_variance_budget(split_likelihood, OFF_FIDUCIAL)
+
+    assert set(budget) == {"detector", "count", "intensity", "linear", "circular"}
+    assert float(sum(budget.values())) == pytest.approx(
+        float(amplitude_variance(split_likelihood, OFF_FIDUCIAL)), rel=1e-10
+    )
+
+
+def test_amplitude_variance_budget_without_stokes_components_raises(
     likelihood: DenseGaussianLikelihood[CatalogModel],
-    keyed_draws: dict[tuple[str, str], jax.Array],
 ) -> None:
-    """The per-draw catalog sum and the connected overlap of the same draws agree."""
-    cumulants = amplitude_cumulants(likelihood, OFF_FIDUCIAL, keyed_draws)
+    with pytest.raises(ValueError, match="stokes_components"):
+        amplitude_variance_budget(likelihood, OFF_FIDUCIAL)
 
-    assert float(cumulants.shot_variance) == pytest.approx(
-        float(shot_noise_variance(likelihood, OFF_FIDUCIAL)), rel=1e-10
+
+def test_covariance_count_term_is_the_template_over_the_expected_count(
+    split_likelihood: DenseGaussianLikelihood[CatalogModel],
+) -> None:
+    r"""The count term is rank one along the mean, scaled by :math:`1/(\mathcal R T)`."""
+    count = split_likelihood.covariance_components(OFF_FIDUCIAL)["count"]
+    mean = split_likelihood.mean(OFF_FIDUCIAL)
+    rate = split_likelihood.model(OFF_FIDUCIAL, shot_noise=False).merger_rate
+    assert rate is not None
+    expected_count = float(rate) * OBSERVATION_TIME * SECONDS_PER_YEAR
+
+    assert float(mean @ count @ mean / (mean @ mean) ** 2) == pytest.approx(
+        1.0 / expected_count, rel=1e-10
+    )
+    assert int(jnp.linalg.matrix_rank(count)) == 1
+
+
+# --------------------------------------------------------------------------- #
+# connected_overlap_components
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("name", ConnectedOverlap._fields)
+def test_connected_overlap_component_is_symmetric_positive_semidefinite(
+    triangle: list[Any], name: str
+) -> None:
+    components = connected_overlap_components(
+        jax.random.key(8), 200, RESPONSE_FREQUENCIES, triangle
+    )
+    matrix = np.reshape(
+        np.asarray(getattr(components, name)), (3 * RESPONSE_FREQUENCIES.size,) * 2
+    )
+    eigenvalues = np.linalg.eigvalsh(matrix)
+
+    np.testing.assert_array_equal(matrix, matrix.T)
+    assert eigenvalues.min() >= -1e-12 * eigenvalues.max()
+
+
+def test_connected_overlap_components_sum_to_the_overlap_up_to_the_cross_term_noise(
+    triangle: list[Any],
+) -> None:
+    r"""The dropped :math:`\langle IQ'\rangle` term averages out over the draws."""
+    key, num_draws = jax.random.key(9), 4096
+    total = connected_overlap(key, num_draws, RESPONSE_FREQUENCIES, triangle)
+    components = connected_overlap_components(
+        key, num_draws, RESPONSE_FREQUENCIES, triangle
     )
 
-
-def test_amplitude_cumulants_of_a_positive_template_are_right_skewed(
-    model: CatalogModel,
-    pair_leaves: dict[str, Any],
-    keyed_draws: dict[tuple[str, str], jax.Array],
-) -> None:
-    """Positive overlaps and responses make every source's contribution positive."""
-    leaves = {**pair_leaves, "pair_overlap": np.abs(pair_leaves["pair_overlap"])}
-    likelihood = DenseGaussianLikelihood._from_network(
-        model, _Network.from_leaves(**leaves), None, shot_noise=False
-    )
-
-    cumulants = amplitude_cumulants(likelihood, OFF_FIDUCIAL, keyed_draws)
-
-    assert float(cumulants.third_cumulant) > 0.0
-    assert float(cumulants.skewness) > 0.0
+    residual = np.abs(np.asarray(components.total - total)).max()
+    assert residual < 0.05 * np.abs(np.asarray(total)).max()

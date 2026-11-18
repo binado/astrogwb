@@ -5,7 +5,6 @@ from astrogwb.background.simulation.config import SimulationConfig
 from astrogwb.background.simulation.draw import (
     BackgroundDraw,
     NetworkNoise,
-    combine_pair_spectra,
     network_noise,
     project_background,
     read_background,
@@ -23,7 +22,6 @@ __all__ = [
     "NetworkNoise",
     "NetworkSpectra",
     "SimulationConfig",
-    "combine_pair_spectra",
     "network_noise",
     "network_spectra_ensemble",
     "project_background",

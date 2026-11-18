@@ -21,6 +21,7 @@ moment, not to the overlap.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
@@ -33,7 +34,9 @@ from .geometry import Detector
 from .overlap import overlap_reduction_function, stokes_cross_power
 
 __all__ = [
+    "ConnectedOverlap",
     "connected_overlap",
+    "connected_overlap_components",
     "pair_names",
     "pair_response",
     "sample_pair_response",
@@ -171,17 +174,62 @@ def sample_pair_response(
     return pair_response(frequencies, detectors, *_isotropic_angles(key, num_draws))
 
 
-def _inclination_moment_factor() -> np.ndarray:
+def _inclination_moment_factor(stokes: Sequence[int] = (0, 1, 2, 3)) -> np.ndarray:
     r""":math:`L` with :math:`L L^T = \langle s s^T\rangle_\iota / \langle s_I^2\rangle_\iota`, ``(4, 4)``.
 
-    :math:`s` the quadrupolar Stokes factors over a uniform :math:`\cos\iota`.
+    :math:`s` the quadrupolar Stokes factors :math:`(I, Q, U, V)` over a
+    uniform :math:`\cos\iota`, restricted to the rows and columns of
+    ``stokes``; the rest of the moment is zeroed.
     """
     nodes, weights = np.polynomial.legendre.leggauss(_INCLINATION_NODES)
-    stokes = np.asarray(quadrupolar_stokes_factors(nodes), dtype=float)
-    moment = (stokes * weights) @ stokes.T
+    factors = np.asarray(quadrupolar_stokes_factors(nodes), dtype=float)
+    moment = (factors * weights) @ factors.T
     moment /= moment[0, 0]
+    kept = np.zeros(4, dtype=bool)
+    kept[list(stokes)] = True
+    moment = np.where(np.outer(kept, kept), moment, 0.0)
     values, vectors = np.linalg.eigh(moment)
     return vectors * np.sqrt(np.clip(values, 0.0, None))
+
+
+class ConnectedOverlap(NamedTuple):
+    r"""The connected overlap split by Stokes parameter, each ``(P, F, P, F)``.
+
+    The terms of the paper's connected-covariance decomposition that the
+    overlap carries:
+
+    .. math::
+
+        \Gamma^c_{ab,cd} = \Gamma^{II}_{ab,cd}
+            + \frac{\Gamma^{QQ}_{ab,cd} + \Gamma^{UU}_{ab,cd}}{71}
+            + \frac{69}{71}\Gamma^{VV}_{ab,cd}.
+
+    Their sum omits the :math:`\langle IQ'\rangle` cross term that
+    :func:`connected_overlap` keeps: it vanishes under the polarization-angle
+    average, so on a finite number of draws it is sampling noise only.
+
+    Attributes
+    ----------
+    intensity
+        :math:`\Gamma^{II}`, the Stokes-I overlap.
+    linear
+        :math:`(\Gamma^{QQ} + \Gamma^{UU}) / 71`, the linear polarization.
+    circular
+        :math:`69\,\Gamma^{VV} / 71`, the circular polarization.
+    """
+
+    intensity: jax.Array
+    linear: jax.Array
+    circular: jax.Array
+
+    @property
+    def total(self) -> jax.Array:
+        """The sum of the three components."""
+        return self.intensity + self.linear + self.circular
+
+
+#: The Stokes indices (I, Q, U, V) of each ConnectedOverlap component.
+_COMPONENT_STOKES = ((0,), (1, 2), (3,))
 
 
 def connected_overlap(
@@ -210,7 +258,8 @@ def connected_overlap(
     from ``key``; the inclination is averaged exactly, and the coefficients
     above emerge from the polarization average. A sum of outer products, the
     result is symmetric positive semidefinite, and does not depend on
-    ``chunk_size``.
+    ``chunk_size``. :func:`connected_overlap_components` splits it by Stokes
+    parameter.
 
     Multiplied elementwise by :math:`4\mathcal R\langle I_k I_l\rangle / T`, it
     is the connected covariance of the per-pair data.
@@ -238,6 +287,65 @@ def connected_overlap(
     jax.Array
         Shape ``(P, F, P, F)``, pairs in the order of :func:`pair_response`.
     """
+    factors = _inclination_moment_factor()[None]
+    (overlap,) = _connected_moments(
+        key, num_draws, frequencies, detectors, factors, normalize, chunk_size
+    )
+    return overlap
+
+
+def connected_overlap_components(
+    key: jax.Array,
+    num_draws: int,
+    frequencies: ArrayLike,
+    detectors: Sequence[Detector],
+    *,
+    normalize: bool = True,
+    chunk_size: int = 4096,
+) -> ConnectedOverlap:
+    r"""The connected overlap split by Stokes parameter, :class:`ConnectedOverlap`.
+
+    The same draws as :func:`connected_overlap` with the same arguments; holds
+    three times its memory.
+
+    Parameters
+    ----------
+    key
+        JAX random key.
+    num_draws
+        Number of isotropic draws.
+    frequencies
+        Frequency grid in Hz, ``(F,)``.
+    detectors
+        Detectors in the network.
+    normalize
+        Whether to use the normalized isotropic ORF's units, as in
+        :func:`connected_overlap`.
+    chunk_size
+        Draws reduced at once.
+    """
+    factors = np.stack([_inclination_moment_factor(s) for s in _COMPONENT_STOKES])
+    return ConnectedOverlap(
+        *_connected_moments(
+            key, num_draws, frequencies, detectors, factors, normalize, chunk_size
+        )
+    )
+
+
+def _connected_moments(
+    key: jax.Array,
+    num_draws: int,
+    frequencies: ArrayLike,
+    detectors: Sequence[Detector],
+    factors: np.ndarray,
+    normalize: bool,
+    chunk_size: int,
+) -> list[jax.Array]:
+    """The sky and polarization average of each inclination factor, ``(G, P, F, P, F)``.
+
+    ``factors`` is ``(G, 4, 4)``; each response chunk is evaluated once and
+    reduced against every factor.
+    """
     frequencies = np.asarray(frequencies, dtype=float)
     detectors = list(detectors)
     chunk_size = min(chunk_size, num_draws)
@@ -254,7 +362,7 @@ def connected_overlap(
     counted = (jnp.arange(num_chunks * chunk_size) < num_draws).reshape(
         num_chunks, chunk_size
     )
-    factor = jnp.asarray(_inclination_moment_factor())
+    factor = jnp.asarray(factors)
     unit_stokes = jnp.eye(4)[:, :, None, None]
 
     def responses(chunk_angles: list[jax.Array]) -> jax.Array:
@@ -286,16 +394,21 @@ def connected_overlap(
         total: jax.Array, chunk: tuple[jax.Array, ...]
     ) -> tuple[jax.Array, None]:
         *chunk_angles, weight = chunk
-        weighted = jnp.einsum("mk,mlpf->klpf", factor, responses(chunk_angles))
-        flat = jnp.reshape(weighted * weight[None, :, None, None], (4 * chunk_size, -1))
-        return total + flat.T @ flat, None
+        weighted = jnp.einsum("gmk,mlpf->gklpf", factor, responses(chunk_angles))
+        flat = jnp.reshape(
+            weighted * weight[None, None, :, None, None],
+            (factor.shape[0], 4 * chunk_size, -1),
+        )
+        return total + jnp.einsum("gni,gnj->gij", flat, flat), None
 
     shape = (len(detectors) * (len(detectors) - 1) // 2, frequencies.size)
     size = shape[0] * shape[1]
     total, _ = jax.lax.scan(
-        accumulate, jnp.zeros((size, size)), (*angles, counted.astype(float))
+        accumulate,
+        jnp.zeros((factor.shape[0], size, size)),
+        (*angles, counted.astype(float)),
     )
     prefactor = _NORMALIZED_PREFACTOR if normalize else _PAPER_PREFACTOR
     # Symmetric to round-off only; made exact for the Cholesky downstream.
-    moment = prefactor * 0.5 * (total + total.T) / num_draws
-    return jnp.reshape(moment, (*shape, *shape))
+    moments = prefactor * 0.5 * (total + jnp.swapaxes(total, -1, -2)) / num_draws
+    return [jnp.reshape(moment, (*shape, *shape)) for moment in moments]

@@ -23,7 +23,7 @@ class NetworkSpectra(TypedDict):
     """One network's draws, stacked along the leading draw axis.
 
     ``frequencies`` ``(F,)``; ``pair_spectral_density`` ``(D, P, F)``, which
-    :func:`~astrogwb.background.simulation.combine_pair_spectra` weights into a network
+    :func:`~astrogwb.statistics.combine_pair_spectra` weights into a network
     spectrum ``(D, F)``; ``n_events`` ``(D,)``, the number of events each draw
     selected.
     """

@@ -417,6 +417,7 @@ class CatalogModel:
             self._spectral_density(shared),
             self._intensity_second_moment(shared) if shot_noise else None,
             extras,
+            shared.total_rate,
         )
 
 

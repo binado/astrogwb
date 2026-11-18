@@ -311,21 +311,25 @@ Rough cost: with D2a the prediction is negligible, and the four networks'
 Cholesky factors total about 6 Gflop per point, so a $10^4$-point grid takes on
 the order of half an hour on CPU and minutes on GPU.
 
-### D7. Diagnostics, not likelihoods
+### D7. The amplitude statistic
 
-The paper reports quantities derived from the dense covariance. They live in
-`inference/diagnostics.py`, each a function of the likelihood and a parameter
-point (typically the fiducials); none needs data:
+The paper's amplitude statistic lives in `astrogwb.statistics.amplitude`, each
+function taking the likelihood and the template's parameters (typically the
+fiducials):
 
-- $\sigma_{\rm shot}^2 = \mathbf c^T \mathcal C^{\rm Pois} \mathbf c / \rho^4$
-  with $\mathbf c = \Sigma^{-1}\boldsymbol\mu$ (`shot_noise_variance`).
-- The amplitude-shape correction $\delta$ of App. `fisher-amplitude`, and the
-  eigenvalues of the whitened covariance, projected orthogonal to the mean
-  (`shape_correction`, `whitened_catalog_covariance`).
-- The skewness of the amplitude estimator $\hat a$, from per-source response
-  draws folded into templates (`response_templates`) and the catalog's
-  projected cumulants: `astrogwb.background.importance.diagnostics.amplitude_cumulants`,
-  which needs the catalog itself.
+- The weights $\mathbf w = \Sigma^{-1}\boldsymbol\mu_0 /
+  \boldsymbol\mu_0^T\Sigma^{-1}\boldsymbol\mu_0$ (`amplitude_weights`) and the
+  estimate $\hat x = \mathbf w^T \bar{\mathbf C}$ of each realization
+  (`amplitude`).
+- The relative variance $1 / \boldsymbol\mu_0^T\Sigma^{-1}\boldsymbol\mu_0$
+  (`amplitude_variance`), $\rho^{-2}$ without shot noise.
+- The variance budget $\mathbf w^T\Sigma^X\mathbf w$ of each covariance term
+  (`amplitude_variance_budget`). It needs a likelihood built with
+  `stokes_components=True`, whose `covariance_components` splits $\Sigma$
+  into detector noise, count, intensity, linear and circular polarization.
+  The count term needs the model's `merger_rate`; the Stokes split comes from
+  `astrogwb.detector.connected_overlap_components`, which drops the
+  zero-mean $\langle IQ'\rangle$ sampling noise.
 
 ### D8. Deleted
 

@@ -28,7 +28,9 @@ from .overlap import (
 )
 from .psd import resolve_psd_path
 from .response import (
+    ConnectedOverlap,
     connected_overlap,
+    connected_overlap_components,
     pair_names,
     pair_response,
     sample_pair_response,
@@ -41,6 +43,7 @@ from .sensitivity import (
 
 __all__ = [
     "DETECTOR_DEFAULT_PATHS",
+    "ConnectedOverlap",
     "Detector",
     "DetectorConfig",
     "DetectorGeometry",
@@ -50,6 +53,7 @@ __all__ = [
     "Sensitivity",
     "align_detector",
     "connected_overlap",
+    "connected_overlap_components",
     "effective_psd",
     "gaussian_bin_scale",
     "isotropic_overlap_reduction_function",
