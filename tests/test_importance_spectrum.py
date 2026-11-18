@@ -26,13 +26,9 @@ from astrogwb_mock_population import (
 )
 from numpyro import handlers
 
-from astrogwb.background.simulation import realization_key
-from astrogwb.constants import SECONDS_PER_YEAR
-from astrogwb.cosmology import log_gw_em_ratio, luminosity_distance
-from astrogwb.distributions.mass import MaxOfTwoUniformsDistribution
-from astrogwb.importance.catalog import ReferenceCatalog, intensity_data
-from astrogwb.importance.model import CatalogModel
-from astrogwb.importance.spectrum import (
+from astrogwb.background.importance.catalog import ReferenceCatalog, intensity_data
+from astrogwb.background.importance.model import CatalogModel
+from astrogwb.background.importance.spectrum import (
     INCLINATION_MEAN,
     INCLINATION_RAW_SECOND_MOMENT,
     REFERENCE_INCLINATION,
@@ -40,6 +36,10 @@ from astrogwb.importance.spectrum import (
     redshift_quadrature,
     reference_catalog,
 )
+from astrogwb.background.simulation import realization_key
+from astrogwb.constants import SECONDS_PER_YEAR
+from astrogwb.cosmology import log_gw_em_ratio, luminosity_distance
+from astrogwb.distributions.mass import MaxOfTwoUniformsDistribution
 from astrogwb.rates import differential_merger_rate, madau_dickinson_rate
 from astrogwb.utils import gauss_legendre_nodes_weights
 from astrogwb.utils.numpyro import Sampling, sample_and_logprob

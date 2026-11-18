@@ -28,9 +28,9 @@ pip install astrogwb[io]
   calculations. `astrogwb.background.analytic` evaluates the inspiral-only
   background in closed form, truncated on the same dimensionless `alpha` as
   `astrogwb.waveform`.
-- `astrogwb.populations` and `astrogwb.importance` provide BNS reference
+- `astrogwb.populations` and `astrogwb.background.importance` provide BNS reference
   catalog generation, including scrambled Sobol draws.
-- `astrogwb.importance.model.CatalogModel` predicts the spectral density and
+- `astrogwb.background.importance.model.CatalogModel` predicts the spectral density and
   the intensity second moment from an explicit reference catalog, intrinsic
   density and merger rate.
 - `astrogwb.inference` provides the dense Gaussian detector-network likelihood
@@ -65,7 +65,7 @@ import jax
 import numpy as np
 from numpyro import handlers
 
-from astrogwb.importance.spectrum import REFERENCE_INCLINATION, reference_catalog
+from astrogwb.background.importance.spectrum import REFERENCE_INCLINATION, reference_catalog
 from astrogwb.populations import coba
 from astrogwb.utils.numpyro import sample_model
 from astrogwb.waveform import WaveformMetadata, waveform_generator
@@ -117,7 +117,7 @@ densities cancel and only the ordered mass pair enters the ratio.
 import jax.numpy as jnp
 import numpy as np
 
-from astrogwb.importance.model import CatalogModel
+from astrogwb.background.importance.model import CatalogModel
 from astrogwb.rates import madau_dickinson_rate
 
 

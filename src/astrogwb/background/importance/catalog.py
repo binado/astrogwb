@@ -2,7 +2,7 @@
 
 :func:`intensity_data` turns a generator and source columns into
 :class:`IntensityData`, one intensity column per source.
-:func:`~astrogwb.importance.spectrum.reference_catalog` places caller-drawn
+:func:`~astrogwb.background.importance.spectrum.reference_catalog` places caller-drawn
 intrinsic sources at a reference redshift and returns a
 :class:`ReferenceCatalog`.
 """

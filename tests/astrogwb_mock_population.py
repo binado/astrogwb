@@ -22,12 +22,15 @@ import numpyro.distributions as dist
 from jax.typing import ArrayLike
 from numpyro import handlers
 
+from astrogwb.background.importance.catalog import IntensityData, ReferenceCatalog
+from astrogwb.background.importance.model import CatalogModel
+from astrogwb.background.importance.spectrum import (
+    REFERENCE_INCLINATION,
+    reference_catalog,
+)
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.distributions.orientation import UniformCosineDistribution
 from astrogwb.distributions.redshift.base import RedshiftDistribution
-from astrogwb.importance.catalog import IntensityData, ReferenceCatalog
-from astrogwb.importance.model import CatalogModel
-from astrogwb.importance.spectrum import REFERENCE_INCLINATION, reference_catalog
 from astrogwb.populations import coba
 from astrogwb.populations._types import SourceModel
 from astrogwb.rates import madau_dickinson_rate

@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from astrogwb.importance.diagnostics import relative_ess
+from astrogwb.background.importance.diagnostics import relative_ess
 
 
 def test_relative_ess_matches_the_direct_kish_expression() -> None:

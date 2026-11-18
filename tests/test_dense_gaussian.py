@@ -26,6 +26,12 @@ from jax.scipy.linalg import solve_triangular
 from jax.tree_util import Partial
 from jax.typing import ArrayLike
 
+from astrogwb.background.importance.diagnostics import amplitude_cumulants
+from astrogwb.background.importance.model import CatalogModel, interpolation_weights
+from astrogwb.background.importance.spectrum import (
+    INCLINATION_MEAN,
+    INCLINATION_RAW_SECOND_MOMENT,
+)
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.detector import (
     connected_overlap,
@@ -34,12 +40,6 @@ from astrogwb.detector import (
     pair_response,
 )
 from astrogwb.detector.response import _isotropic_angles
-from astrogwb.importance.diagnostics import amplitude_cumulants
-from astrogwb.importance.model import CatalogModel, interpolation_weights
-from astrogwb.importance.spectrum import (
-    INCLINATION_MEAN,
-    INCLINATION_RAW_SECOND_MOMENT,
-)
 from astrogwb.inference import (
     DenseGaussianLikelihood,
     SpectralDensityPrediction,
