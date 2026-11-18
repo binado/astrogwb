@@ -34,8 +34,7 @@ from astrogwb.background import spectral_snr_squared
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.detector import effective_psd, gaussian_bin_scale, load_detector
 from astrogwb.frequency import frequency_mask
-from astrogwb.importance.catalog import IntensityData
-from astrogwb.inference import ReferenceCatalog
+from astrogwb.importance.catalog import IntensityData, ReferenceCatalog
 
 #: Reference resolution, and the band the refinement study runs over.
 FINE_DF = 0.25
@@ -165,7 +164,7 @@ def resolutions(
             merger_rate=mock_merger_rate,
             frequencies=run["frequencies"],
         )
-        run["observed"] = run["estimator"].spectrum(FIDUCIALS)
+        run["observed"] = run["estimator"].spectral_density(FIDUCIALS)
         run["snr_squared"] = float(
             spectral_snr_squared(
                 run["observed"],
@@ -181,7 +180,7 @@ def resolutions(
 
 def _log_likelihood(run: dict[str, Any], hubble_constant: float) -> float:
     """Gaussian log-density of the injection under the H0-shifted template."""
-    model = run["estimator"].spectrum({**FIDUCIALS, "H0": hubble_constant})
+    model = run["estimator"].spectral_density({**FIDUCIALS, "H0": hubble_constant})
     log_prob = dist.Normal(model, run["noise_scale"]).log_prob(run["observed"])
     return float(jnp.sum(jnp.where(run["mask"], log_prob, 0.0)))
 

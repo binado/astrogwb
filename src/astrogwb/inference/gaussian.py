@@ -2,19 +2,19 @@ r"""The dense Gaussian likelihood of the stacked per-pair cross powers.
 
 The data are the cross powers :math:`d_{ab,k}` of every distinct detector pair
 and frequency bin a network measures, flattened pair-major and restricted to
-the entries it counts, ``(D,)``. Their mean is :math:`\gamma_{ab}(f_k) S(f_k)`
-and their covariance
+the entries it counts, ``(D,)``. Their mean is :math:`\gamma_{ab}(f_k) S_h(f_k)`
+and their covariance (the paper's segment-averaged covariance) is
 
 .. math::
 
     C_{ab,k;\,cd,l} = \delta_{ab,cd}\,\delta_{kl}\,\sigma_{ab,k}^2
-        + M_{kl}\, R_{ab,k;\,cd,l},
+        + \frac{1}{T}\left[4\mathcal R\langle I_k I_l\rangle\right]
+        \Gamma^c_{ab,k;\,cd,l},
 
-with :math:`M` the power moment of a :class:`~astrogwb.inference.model.CatalogModel`,
-which depends on the parameters, and :math:`R` the network's response moment
-:math:`\langle \gamma_{ab}(\hat n, \psi, \iota; f_k)\,
-\gamma_{cd}(\hat n, \psi, \iota; f_l) \rangle`
-(:func:`~astrogwb.detector.response.pair_response_moment`), which does not.
+with :math:`4\mathcal R\langle I_k I_l\rangle` the intensity second moment of a
+:class:`~astrogwb.inference.model.SpectralDensityModel`, which depends on the
+parameters, and :math:`\Gamma^c` the network's connected overlap
+(:func:`~astrogwb.detector.response.connected_overlap`), which does not.
 Without shot noise :math:`C` is the diagonal detector noise.
 
 A :class:`DenseGaussianLikelihood` is one network. Its ``log_likelihood``
@@ -25,9 +25,9 @@ against the one factor.
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import NamedTuple, Self
+from typing import Any, NamedTuple, Self
 
 import jax
 import jax.numpy as jnp
@@ -35,22 +35,57 @@ import numpy as np
 from jax.scipy.linalg import solve_triangular
 from jax.typing import ArrayLike
 
-from .model import CatalogModel, Prediction
+from astrogwb.constants import SECONDS_PER_YEAR
+from astrogwb.detector import (
+    Detector,
+    connected_overlap,
+    load_network,
+    pair_bin_scale,
+    pair_names,
+    pair_terms,
+)
+
+from .model import SpectralDensityModel, SpectralDensityPrediction
 
 __all__ = [
     "DenseGaussianLikelihood",
     "Evaluation",
     "GaussianFactor",
-    "Network",
-    "catalog_covariance",
-    "expected_data",
 ]
 
 _LOG_TWO_PI = math.log(2.0 * math.pi)
 
+type PairName = tuple[str, str]
+
+
+def _stack_pairs(
+    values: Mapping[PairName, ArrayLike], pairs: Sequence[PairName], num_bins: int
+) -> jax.Array:
+    """Pair-keyed ``(..., F)`` arrays stacked in ``pairs`` order, ``(..., P, F)``.
+
+    Raises
+    ------
+    ValueError
+        If the keys are not exactly ``pairs``, or the arrays do not share a
+        shape ending in ``num_bins``.
+    """
+    if set(values) != set(pairs):
+        raise ValueError(
+            f"expected one array per sorted detector pair {list(pairs)}, "
+            f"got {sorted(values)}"
+        )
+    arrays = [jnp.asarray(values[pair]) for pair in pairs]
+    shapes = {array.shape for array in arrays}
+    if len(shapes) != 1 or arrays[0].shape[-1:] != (num_bins,):
+        raise ValueError(
+            f"per-pair arrays must share a shape (..., {num_bins}), "
+            f"got {sorted(shapes)}"
+        )
+    return jnp.stack(arrays, axis=-2)
+
 
 @dataclass(frozen=True)
-class Network:
+class _Network:
     r"""One detector network, on the entries it counts.
 
     Attributes
@@ -63,82 +98,104 @@ class Network:
     scale
         Detector-noise standard deviation :math:`\sigma_{ab,k}`, ``(D,)``.
     pair_overlap
-        Isotropic ORF :math:`\gamma_{ab}(f_k)`, the gain from the spectrum to
-        each entry's mean, ``(D,)``.
-    response_moment
-        The response moment :math:`R` on the counted entries, ``(D, D)``, or
-        ``None`` for detector noise alone.
+        Isotropic ORF :math:`\gamma_{ab}(f_k)`, the gain from the spectral
+        density to each entry's mean, ``(D,)``.
+    observation_time
+        Observation time :math:`T` in years, ``()``.
+    connected_overlap
+        The connected overlap :math:`\Gamma^c` on the counted entries,
+        ``(D, D)``, or ``None`` for detector noise alone.
+    pairs
+        The sorted name pair of every pair, in the data's order.
+    num_bins
+        The frequency grid size :math:`F`.
     """
 
     keep: jax.Array
     bins: jax.Array
     scale: jax.Array
     pair_overlap: jax.Array
-    response_moment: jax.Array | None = None
+    observation_time: jax.Array
+    connected_overlap: jax.Array | None
+    pairs: tuple[PairName, ...]
+    num_bins: int
 
     @classmethod
-    def from_pairs(
+    def from_leaves(
         cls,
+        *,
         scale: ArrayLike,
         pair_overlap: ArrayLike,
+        observation_time: float,
+        pairs: Sequence[PairName],
         mask: ArrayLike | None = None,
-        response_moment: ArrayLike | None = None,
+        connected_overlap: ArrayLike | None = None,
     ) -> Self:
-        """A network from its ``(P, F)`` leaves, keeping the entries ``mask`` counts.
+        """A network from its ``(P, F)`` leaves, keeping the finite, unmasked entries.
 
         Call outside JAX transformations: the kept set fixes the shapes.
 
         Parameters
         ----------
         scale
-            Detector-noise standard deviation, ``(P, F)``
-            (:func:`~astrogwb.detector.pair_bin_scale`). May be infinite where
-            ``mask`` is false.
+            Detector-noise standard deviation, ``(P, F)``, infinite out of band.
         pair_overlap
             Isotropic ORF of every pair, ``(P, F)``.
+        observation_time
+            Observation time in years.
+        pairs
+            The sorted name pair of every pair, ``(P,)``.
         mask
-            Boolean, ``(P, F)``, of the counted entries; ``None`` counts all.
-        response_moment
-            :func:`~astrogwb.detector.response.pair_response_moment`,
-            ``(P, F, P, F)``, or ``None``.
+            Boolean, ``(P, F)``, of the entries to count; ``None`` counts all
+            with finite noise.
+        connected_overlap
+            The connected overlap, ``(P, F, P, F)``, or ``None``.
         """
         scale = np.asarray(scale, dtype=np.float64)
         num_pairs, num_bins = scale.shape
-        counted = (
-            np.ones(scale.shape, dtype=bool)
-            if mask is None
-            else np.asarray(mask, dtype=bool)
-        )
+        counted = np.isfinite(scale)
+        if mask is not None:
+            counted &= np.asarray(mask, dtype=bool)
         keep = np.flatnonzero(counted)
-        moment = None
-        if response_moment is not None:
-            flat = np.reshape(np.asarray(response_moment), (num_pairs * num_bins,) * 2)
-            moment = jnp.asarray(flat[np.ix_(keep, keep)])
+        overlap = None
+        if connected_overlap is not None:
+            flat = np.reshape(
+                np.asarray(connected_overlap), (num_pairs * num_bins,) * 2
+            )
+            overlap = jnp.asarray(flat[np.ix_(keep, keep)])
         return cls(
             keep=jnp.asarray(keep),
             bins=jnp.asarray(keep % num_bins),
             scale=jnp.asarray(scale.reshape(-1)[keep]),
             pair_overlap=jnp.asarray(np.asarray(pair_overlap).reshape(-1)[keep]),
-            response_moment=moment,
+            observation_time=jnp.asarray(observation_time, dtype=float),
+            connected_overlap=overlap,
+            pairs=tuple(pairs),
+            num_bins=num_bins,
         )
 
     def compress(self, values: ArrayLike) -> jax.Array:
-        """``(..., P, F)`` per-pair values on the counted entries, ``(..., D)``.
-
-        Parameters
-        ----------
-        values
-            Per-pair values, such as the observed cross powers.
-        """
+        """``(..., P, F)`` per-pair values on the counted entries, ``(..., D)``."""
         values = jnp.asarray(values)
         flat = jnp.reshape(values, (*values.shape[:-2], -1))
         return flat[..., self.keep]
 
+    def stack(self, values: Mapping[PairName, ArrayLike]) -> jax.Array:
+        """Pair-keyed ``(..., F)`` arrays in the data's pair order, ``(..., P, F)``."""
+        return _stack_pairs(values, self.pairs, self.num_bins)
+
 
 jax.tree_util.register_dataclass(
-    Network,
-    data_fields=["keep", "bins", "scale", "pair_overlap", "response_moment"],
-    meta_fields=[],
+    _Network,
+    data_fields=[
+        "keep",
+        "bins",
+        "scale",
+        "pair_overlap",
+        "observation_time",
+        "connected_overlap",
+    ],
+    meta_fields=["pairs", "num_bins"],
 )
 
 
@@ -164,54 +221,55 @@ class GaussianFactor(NamedTuple):
 class Evaluation(NamedTuple):
     """A likelihood's prediction and factor at one parameter point."""
 
-    prediction: Prediction
+    prediction: SpectralDensityPrediction
     factor: GaussianFactor
 
 
-def expected_data(prediction: Prediction, network: Network) -> jax.Array:
-    r"""The mean :math:`\gamma_{ab}(f_k) S(f_k)` on the counted entries, ``(D,)``.
-
-    Parameters
-    ----------
-    prediction
-        The model's prediction.
-    network
-        The detector network.
-    """
-    return network.pair_overlap * prediction.mean[network.bins]
-
-
-def catalog_covariance(prediction: Prediction, network: Network) -> jax.Array:
-    r"""The shot-noise covariance :math:`M_{kl} R_{ab,k;\,cd,l}`, ``(D, D)``.
-
-    Parameters
-    ----------
-    prediction
-        The model's prediction, with a power moment.
-    network
-        The detector network, with a response moment.
-
-    Raises
-    ------
-    ValueError
-        If either the power moment or the response moment is missing.
-    """
-    if prediction.power_moment is None or network.response_moment is None:
+def _expected_data(
+    prediction: SpectralDensityPrediction, network: _Network
+) -> jax.Array:
+    r"""The mean :math:`\gamma_{ab}(f_k) S_h(f_k)` on the counted entries, ``(D,)``."""
+    if prediction.spectral_density.shape != (network.num_bins,):
         raise ValueError(
-            "the catalog covariance needs a power moment and network.response_moment"
+            f"the spectral density has shape {prediction.spectral_density.shape}, "
+            f"not the likelihood's frequency grid ({network.num_bins},)"
         )
-    return (
-        prediction.power_moment[network.bins][:, network.bins] * network.response_moment
+    return network.pair_overlap * prediction.spectral_density[network.bins]
+
+
+def _catalog_covariance(
+    prediction: SpectralDensityPrediction, network: _Network
+) -> jax.Array:
+    r"""The connected covariance :math:`[4\mathcal R\langle I_k I_l\rangle]\,\Gamma^c / T`, ``(D, D)``."""
+    moment = prediction.intensity_second_moment
+    if moment is None or network.connected_overlap is None:
+        raise ValueError(
+            "the catalog covariance needs an intensity second moment and a "
+            "connected overlap; build the likelihood with shot_noise=True"
+        )
+    if moment.shape != (network.num_bins,) * 2:
+        raise ValueError(
+            f"the intensity second moment has shape {moment.shape}, not "
+            f"{(network.num_bins,) * 2}"
+        )
+    covariance = (
+        moment[network.bins][:, network.bins]
+        * network.connected_overlap
+        / (network.observation_time * SECONDS_PER_YEAR)
     )
+    # Symmetric to round-off only; made exact for the Cholesky downstream.
+    return 0.5 * (covariance + covariance.T)
 
 
-def _factorize(prediction: Prediction, network: Network) -> GaussianFactor:
-    mean = expected_data(prediction, network)
-    if prediction.power_moment is None:
+def _factorize(
+    prediction: SpectralDensityPrediction, network: _Network, shot_noise: bool
+) -> GaussianFactor:
+    mean = _expected_data(prediction, network)
+    if not shot_noise:
         return GaussianFactor(
             mean, network.scale, 2.0 * jnp.sum(jnp.log(network.scale))
         )
-    covariance = catalog_covariance(prediction, network) + jnp.diag(network.scale**2)
+    covariance = _catalog_covariance(prediction, network) + jnp.diag(network.scale**2)
     cholesky = jnp.linalg.cholesky(covariance)
     return GaussianFactor(mean, cholesky, 2.0 * jnp.sum(jnp.log(jnp.diag(cholesky))))
 
@@ -232,31 +290,146 @@ def _log_density(factor: GaussianFactor, observed: jax.Array) -> jax.Array:
     return jnp.reshape(value, batch)
 
 
-@dataclass(frozen=True)
-class DenseGaussianLikelihood:
+@jax.tree_util.register_pytree_node_class
+class DenseGaussianLikelihood[M: SpectralDensityModel]:
     """The dense Gaussian likelihood of one network's observed cross powers.
 
-    A pytree: ``model``, ``network`` and ``observed`` are traced, so one
-    compilation serves every catalog and data set of the same shapes;
-    ``shot_noise`` is static.
+    A pytree: the model, the network's arrays and the data are traced, so one
+    compilation serves every model, network and data set of the same
+    structure and shapes; ``shot_noise`` is static. Building one is the
+    expensive part, done once outside JAX transformations.
+
+    Parameters
+    ----------
+    model
+        The background model, on ``frequencies``.
+    network
+        A registered network name (:func:`~astrogwb.detector.load_network`)
+        or its detectors.
+    frequencies
+        Frequency grid in Hz, ``(F,)``.
+    observation_time
+        Observation time :math:`T` in years.
+    observed
+        Observed cross powers keyed by the sorted detector-name pair
+        (:func:`~astrogwb.detector.pair_names`), each ``(..., F)``; leading
+        axes are independent realizations. ``None`` builds a likelihood for
+        diagnostics only.
+    mask
+        Boolean ``(F,)`` per sorted pair, of the entries to count; entries
+        with infinite detector noise are never counted.
+    shot_noise
+        Whether the covariance includes the catalog's shot noise.
+    key
+        Random key of the connected overlap's sky draws; a fixed key by
+        default.
+    num_draws
+        Number of sky draws of the connected overlap.
 
     Attributes
     ----------
     model
-        The spectrum and power moment.
-    network
-        The detector network.
+        The background model.
     observed
-        Observed cross powers on the network's counted entries, ``(..., D)``
-        (:meth:`Network.compress`); leading axes are independent realizations.
+        Observed cross powers on the counted entries, ``(..., D)``, or ``None``.
     shot_noise
         Whether the covariance includes the catalog's shot noise.
     """
 
-    model: CatalogModel
-    network: Network
-    observed: jax.Array
-    shot_noise: bool = True
+    model: M
+    observed: jax.Array | None
+    shot_noise: bool
+    _network: _Network
+
+    def __init__(
+        self,
+        model: M,
+        network: str | Sequence[Detector],
+        *,
+        frequencies: ArrayLike,
+        observation_time: float,
+        observed: Mapping[PairName, ArrayLike] | None = None,
+        mask: Mapping[PairName, ArrayLike] | None = None,
+        shot_noise: bool = True,
+        key: jax.Array | None = None,
+        num_draws: int = 2**15,
+    ) -> None:
+        detectors = (
+            load_network(network) if isinstance(network, str) else tuple(network)
+        )
+        frequencies = np.asarray(frequencies, dtype=float)
+        pairs = pair_names(detectors)
+        overlap = None
+        if shot_noise:
+            overlap = connected_overlap(
+                jax.random.key(0) if key is None else key,
+                num_draws,
+                frequencies,
+                detectors,
+            )
+        resolved = _Network.from_leaves(
+            scale=pair_bin_scale(frequencies, detectors, observation_time),
+            pair_overlap=np.stack(
+                [term.overlap for term in pair_terms(frequencies, detectors)]
+            ),
+            observation_time=observation_time,
+            pairs=pairs,
+            mask=(
+                None
+                if mask is None
+                else np.asarray(_stack_pairs(mask, pairs, frequencies.size), dtype=bool)
+            ),
+            connected_overlap=overlap,
+        )
+        self._assign(
+            model,
+            resolved,
+            None if observed is None else resolved.compress(resolved.stack(observed)),
+            shot_noise,
+        )
+
+    def _assign(
+        self,
+        model: M,
+        network: _Network,
+        observed: jax.Array | None,
+        shot_noise: bool,
+    ) -> None:
+        self.model = model
+        self._network = network
+        self.observed = observed
+        self.shot_noise = shot_noise
+
+    @classmethod
+    def _from_network(
+        cls,
+        model: M,
+        network: _Network,
+        observed: jax.Array | None,
+        *,
+        shot_noise: bool = True,
+    ) -> DenseGaussianLikelihood[M]:
+        """A likelihood on a prebuilt network, with data already on its entries."""
+        likelihood = object.__new__(cls)
+        likelihood._assign(model, network, observed, shot_noise)
+        return likelihood
+
+    def tree_flatten(self) -> tuple[tuple[Any, ...], bool]:
+        return (self.model, self._network, self.observed), self.shot_noise
+
+    @classmethod
+    def tree_unflatten(
+        cls, shot_noise: bool, children: tuple[Any, ...]
+    ) -> DenseGaussianLikelihood[M]:
+        # Rebuilt without __init__: tracing must not reload the network or
+        # redraw the connected overlap.
+        model, network, observed = children
+        return cls._from_network(model, network, observed, shot_noise=shot_noise)
+
+    @property
+    def observation_time(self) -> jax.Array:
+        """Observation time :math:`T` in years, ``()``."""
+        return self._network.observation_time
 
     def evaluate(self, params: Mapping[str, ArrayLike]) -> Evaluation:
         """The prediction and the factorized covariance at ``params``.
@@ -266,8 +439,10 @@ class DenseGaussianLikelihood:
         params
             Model parameter values.
         """
-        prediction = self.model.predict(params, shot_noise=self.shot_noise)
-        return Evaluation(prediction, _factorize(prediction, self.network))
+        prediction = self.model(params, shot_noise=self.shot_noise)
+        return Evaluation(
+            prediction, _factorize(prediction, self._network, self.shot_noise)
+        )
 
     def log_likelihood(
         self, params: Mapping[str, ArrayLike]
@@ -278,7 +453,14 @@ class DenseGaussianLikelihood:
         ----------
         params
             Model parameter values.
+
+        Raises
+        ------
+        ValueError
+            If the likelihood holds no data.
         """
+        if self.observed is None:
+            raise ValueError("the likelihood was built without observed data")
         prediction, factor = self.evaluate(params)
         return _log_density(factor, self.observed), prediction.extras
 
@@ -286,10 +468,3 @@ class DenseGaussianLikelihood:
         self, params: Mapping[str, ArrayLike]
     ) -> tuple[jax.Array, Mapping[str, jax.Array]]:
         return self.log_likelihood(params)
-
-
-jax.tree_util.register_dataclass(
-    DenseGaussianLikelihood,
-    data_fields=["model", "network", "observed"],
-    meta_fields=["shot_noise"],
-)

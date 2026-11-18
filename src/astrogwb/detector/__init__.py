@@ -28,8 +28,9 @@ from .overlap import (
 )
 from .psd import resolve_psd_path
 from .response import (
+    connected_overlap,
+    pair_names,
     pair_response,
-    pair_response_moment,
     sample_pair_response,
 )
 from .sensitivity import (
@@ -48,6 +49,7 @@ __all__ = [
     "PairTerms",
     "Sensitivity",
     "align_detector",
+    "connected_overlap",
     "effective_psd",
     "gaussian_bin_scale",
     "isotropic_overlap_reduction_function",
@@ -58,8 +60,8 @@ __all__ = [
     "log_frequency_noise_scale",
     "overlap_reduction_function",
     "pair_bin_scale",
+    "pair_names",
     "pair_response",
-    "pair_response_moment",
     "pair_terms",
     "pairwise_overlap_reduction_function",
     "register_detector",

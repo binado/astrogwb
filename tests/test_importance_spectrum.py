@@ -30,7 +30,8 @@ from astrogwb.background.simulation import realization_key
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import log_gw_em_ratio, luminosity_distance
 from astrogwb.distributions.mass import MaxOfTwoUniformsDistribution
-from astrogwb.importance.catalog import intensity_data
+from astrogwb.importance.catalog import ReferenceCatalog, intensity_data
+from astrogwb.importance.model import CatalogModel
 from astrogwb.importance.spectrum import (
     INCLINATION_MEAN,
     INCLINATION_RAW_SECOND_MOMENT,
@@ -38,10 +39,6 @@ from astrogwb.importance.spectrum import (
     phinney_kernel,
     redshift_quadrature,
     reference_catalog,
-)
-from astrogwb.inference import (
-    CatalogModel,
-    ReferenceCatalog,
 )
 from astrogwb.rates import differential_merger_rate, madau_dickinson_rate
 from astrogwb.utils import gauss_legendre_nodes_weights
@@ -68,9 +65,15 @@ NUM_NODES = 3
 OBSERVATION_TIME = 1.0
 
 
+def _covariance(model: CatalogModel, params: dict[str, Any]) -> np.ndarray:
+    """The physical covariance of a realization over :data:`OBSERVATION_TIME`, ``(F, F)``."""
+    seconds = OBSERVATION_TIME * SECONDS_PER_YEAR
+    return np.asarray(model.intensity_second_moment(params)) / seconds
+
+
 def _bin_variance(model: CatalogModel, params: dict[str, Any]) -> np.ndarray:
-    """The per-bin shot-noise variance under the sky-averaged response, ``(F,)``."""
-    return INCLINATION_SECOND_MOMENT * np.diag(np.asarray(model.power_moment(params)))
+    """The per-bin shot-noise variance, ``(F,)``."""
+    return np.diag(_covariance(model, params))
 
 
 @dataclass(frozen=True)
@@ -167,7 +170,6 @@ def _spectrum(
         "frequencies", np.asarray(waveform_generator(OBSERVED_WAVEFORM).frequencies)
     )
     settings.setdefault("num_redshift_nodes", NUM_NODES)
-    settings.setdefault("observation_time", OBSERVATION_TIME)
     return build_reference_spectrum(
         catalog,
         merger_rate=mock_merger_rate,
@@ -197,7 +199,7 @@ def test_importance_path_does_not_construct_a_redshift_distribution(
     )
     catalog = _catalog(reference_setup, realization_key(41, 0))
     model = _spectrum(catalog, reference_setup, reweight_masses=False)
-    assert np.all(np.isfinite(model.spectrum(reference_setup.fiducials)))
+    assert np.all(np.isfinite(model.spectral_density(reference_setup.fiducials)))
 
 
 def test_inclination_second_moment_is_the_isotropic_ratio_of_moments() -> None:
@@ -399,7 +401,7 @@ def _rescaled_and_brute_force(
     key = realization_key(41, 0)
     model = _spectrum(_catalog(setup, key), setup, reweight_masses=bool(density_sites))
     rescaled = [
-        np.asarray(_bin_variance(model, p) if variance else model.spectrum(p))
+        np.asarray(_bin_variance(model, p) if variance else model.spectral_density(p))
         for p in points
     ]
     brute_force = [
@@ -455,7 +457,6 @@ def test_explicit_bns_weights_at_proposal_and_shifted_support(
     settings: dict[str, Any] = {
         "frequencies": frequencies,
         "num_redshift_nodes": NUM_NODES,
-        "observation_seconds": OBSERVATION_TIME * SECONDS_PER_YEAR,
         "minimum_redshift": reference_setup.minimum_redshift,
         "maximum_redshift": reference_setup.maximum_redshift,
         "merger_rate": mock_merger_rate,
@@ -466,9 +467,13 @@ def test_explicit_bns_weights_at_proposal_and_shifted_support(
     cached = CatalogModel.from_catalog(
         reference, target_matches_proposal=True, **settings
     )
-    predict = jax.jit(CatalogModel.predict)
+    predict = jax.jit(CatalogModel.__call__)
     weights = jax.jit(CatalogModel.log_weights)
-    cumulants = jax.jit(CatalogModel.projected_cumulants)
+    cumulants = jax.jit(
+        lambda model, params, projectors: model.projected_cumulants(
+            params, projectors, observation_time=OBSERVATION_TIME
+        )
+    )
     projectors = jnp.ones((1, frequencies.size))
     narrow = {**fiducials, "mass_width": 1.0}
     assert cached.node_moments is not None
@@ -508,30 +513,21 @@ def test_explicit_bns_weights_at_proposal_and_shifted_support(
 
 
 @pytest.fixture
-def shot_noise_builder(reference_setup: ReferenceSetup) -> Any:
-    """``observation_time -> likelihood`` on one reference catalog."""
+def shot_noise_model(reference_setup: ReferenceSetup) -> CatalogModel:
+    """One reference catalog bound to its own proposal."""
     catalog = _catalog(reference_setup, realization_key(41, 0))
-
-    def build(observation_time: float) -> CatalogModel:
-        return _spectrum(
-            catalog,
-            reference_setup,
-            observation_time=observation_time,
-            reweight_masses=False,
-        )
-
-    return build
+    return _spectrum(catalog, reference_setup, reweight_masses=False)
 
 
 @pytest.mark.integration
 def test_rescaled_shot_noise_grows_linearly_with_the_hubble_constant(
     reference_setup: ReferenceSetup,
-    shot_noise_builder: Any,
+    shot_noise_model: CatalogModel,
 ) -> None:
     """The squared kernel goes as :math:`D_H / \\chi^2 \\propto H_0`."""
     hubble_constant = 90.0
     fiducials = reference_setup.fiducials
-    model = shot_noise_builder(OBSERVATION_TIME)
+    model = shot_noise_model
     shifted = np.asarray(_bin_variance(model, {**fiducials, "H0": hubble_constant}))
     ratio = shifted / np.asarray(_bin_variance(model, fiducials))
 
@@ -575,7 +571,7 @@ def test_spectrum_scales_as_a_power_of_h0_and_the_local_merger_rate(
     """``S ~ 1/H0`` and ``S ~ R0``: the exponents the cosmology and kernel imply."""
     spectrum = build_reference_spectrum(
         build_reference_catalog(num_sources=16), merger_rate=mock_merger_rate
-    ).spectrum
+    ).spectral_density
     fiducial = FIDUCIALS[parameter]
     factor = 1.3
 
@@ -598,7 +594,7 @@ def _bound_predictions(
         catalog, setup, minimum_redshift=minimum_redshift, reweight_masses=False
     )
     return (
-        np.asarray(model.spectrum(setup.fiducials)),
+        np.asarray(model.spectral_density(setup.fiducials)),
         np.asarray(_bin_variance(model, setup.fiducials)),
     )
 
@@ -726,7 +722,7 @@ def test_dense_covariance_matches_physical_inclination_quadrature(
     # The reference power uses log-frequency interpolation; the oracle generates
     # each waveform at its actual redshift. This bound covers that grid error.
     np.testing.assert_allclose(
-        INCLINATION_SECOND_MOMENT * model.power_moment(params),
+        _covariance(model, params),
         expected,
         rtol=1e-5,
         atol=0,
@@ -760,5 +756,4 @@ def test_catalog_model_rejects_invalid_integration_bounds(
             minimum_redshift=minimum,
             maximum_redshift=maximum,
             target_matches_proposal=True,
-            observation_seconds=SECONDS_PER_YEAR,
         )
