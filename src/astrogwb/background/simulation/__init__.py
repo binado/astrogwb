@@ -17,7 +17,6 @@ from astrogwb.background.simulation.ensemble import (
     network_spectra_ensemble,
 )
 from astrogwb.background.simulation.pool import read_event_pool
-from astrogwb.populations.sampling import simulate_sources
 
 __all__ = [
     "BackgroundDraw",
@@ -32,6 +31,5 @@ __all__ = [
     "read_event_pool",
     "realization_key",
     "simulate_background",
-    "simulate_sources",
     "write_background",
 ]

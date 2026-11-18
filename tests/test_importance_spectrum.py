@@ -43,10 +43,9 @@ from astrogwb.inference import (
     CatalogModel,
     ReferenceCatalog,
 )
-from astrogwb.populations.sampling import Sampling
 from astrogwb.rates import differential_merger_rate, madau_dickinson_rate
 from astrogwb.utils import gauss_legendre_nodes_weights
-from astrogwb.utils.numpyro import sample_and_logprob
+from astrogwb.utils.numpyro import Sampling, sample_and_logprob
 from astrogwb.waveform import WaveformMetadata, inclination_factor, waveform_generator
 
 #: Relative second moment <P^2>/<P>^2 for unit-mean inclination response draws.

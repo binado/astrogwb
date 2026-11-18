@@ -22,11 +22,11 @@ import numpy as np
 import numpyro
 from jax.typing import ArrayLike
 
-from astrogwb.background.simulation import simulate_sources
 from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.populations import coba
 from astrogwb.rates import madau_dickinson_rate
 from astrogwb.utils import years_to_seconds
+from astrogwb.utils.numpyro import sample_model
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from astrogwb_mock_population import distance_model, extrinsic_priors
@@ -97,7 +97,7 @@ def main() -> None:
         for name, prior in extrinsic_priors((-seconds / 2, seconds / 2)).items():
             numpyro.sample(name, prior)
 
-    samples = simulate_sources(source, source_key, count)
+    samples = sample_model(source, source_key, count)
     events = {name: np.asarray(samples[name], dtype=float).tolist() for name in COLUMNS}
     payload = {
         "population": "bns_coba, uniform masses",
