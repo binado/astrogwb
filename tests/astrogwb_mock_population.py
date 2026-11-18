@@ -30,9 +30,13 @@ from astrogwb.importance.spectrum import REFERENCE_INCLINATION, reference_catalo
 from astrogwb.inference import CatalogModel, ReferenceCatalog
 from astrogwb.populations import coba
 from astrogwb.populations._types import SourceModel
-from astrogwb.populations.sampling import Sampling, simulate_sources
 from astrogwb.rates import madau_dickinson_rate
-from astrogwb.utils.numpyro import sample_and_logprob, sample_sources_qmc
+from astrogwb.utils.numpyro import (
+    Sampling,
+    sample_and_logprob,
+    sample_model,
+    sample_sources_qmc,
+)
 from astrogwb.waveform import (
     AnalyticInspiralGenerator,
     WaveformGenerator,
@@ -334,7 +338,8 @@ def draw_bns_sources(
     model = handlers.condition(
         uniform_source_model(parameters), data={"inclination": REFERENCE_INCLINATION}
     )
-    return simulate_sources(model, key, num_samples, sampling=sampling)
+    samples = sample_model(model, key, num_samples, sampling=sampling)
+    return {name: np.asarray(values) for name, values in samples.items()}
 
 
 def bns_reference_catalog(

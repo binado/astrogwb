@@ -65,7 +65,7 @@ from numpyro import handlers
 
 from astrogwb.importance.spectrum import REFERENCE_INCLINATION, reference_catalog
 from astrogwb.populations import coba
-from astrogwb.populations.sampling import simulate_sources
+from astrogwb.utils.numpyro import sample_model
 from astrogwb.waveform import WaveformMetadata, waveform_generator
 
 params = {
@@ -91,7 +91,7 @@ model = handlers.condition(
     coba.source_model(params, mass_model="uniform"),
     data={"inclination": REFERENCE_INCLINATION},
 )
-samples = simulate_sources(model, jax.random.key(42), 1024)
+samples = sample_model(model, jax.random.key(42), 1024)
 catalog = reference_catalog(
     waveform_generator(waveform),
     samples,

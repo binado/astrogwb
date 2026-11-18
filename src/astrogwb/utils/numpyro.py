@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import operator
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any
+from typing import Any, Literal
 
 import jax
 import jax.numpy as jnp
@@ -15,7 +15,16 @@ from numpyro.distributions.util import is_identically_one
 from numpyro.primitives import Messenger
 from scipy.stats import qmc
 
-__all__ = ["InverseCDF", "sample_and_logprob", "sample_sources_qmc"]
+__all__ = [
+    "InverseCDF",
+    "Sampling",
+    "sample_and_logprob",
+    "sample_model",
+    "sample_sources_qmc",
+]
+
+#: How sources are drawn: i.i.d., or on a scrambled Sobol net.
+type Sampling = Literal["random", "sobol"]
 
 
 class InverseCDF(Messenger):
@@ -250,3 +259,34 @@ def sample_sources_qmc(
         trace = handlers.trace(InverseCDF(model, points=points)).get_trace()
     outputs, _ = _outputs_and_logprob(trace, num_samples, ())
     return outputs
+
+
+def sample_model(
+    model: Callable[[], None],
+    key: jax.Array,
+    num_samples: int,
+    *,
+    sampling: Sampling = "random",
+) -> dict[str, jax.Array]:
+    """Draw ``num_samples`` of ``model``, one ``(num_samples,)`` column per site.
+
+    ``"sobol"`` draws on a scrambled Sobol net (:func:`sample_sources_qmc`)
+    and needs a power-of-two ``num_samples``.
+
+    Parameters
+    ----------
+    model
+        No-argument NumPyro model declaring the sample sites.
+    key
+        JAX random key.
+    num_samples
+        Number of samples.
+    sampling
+        ``"random"`` or ``"sobol"``.
+    """
+    if sampling == "sobol":
+        return sample_sources_qmc(model, key, num_samples=num_samples)
+    samples, _ = sample_and_logprob(
+        model, key, num_samples=num_samples, density_sites=()
+    )
+    return samples
