@@ -8,7 +8,7 @@ Validating settings leaves the XLA backend uninitialized.
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Set as AbstractSet
 from functools import cache
 from itertools import combinations
 from pathlib import Path
@@ -29,6 +29,7 @@ DETECTOR_DEFAULT_PATHS = tuple(
 
 _STRICT = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 logger = logging.getLogger(__name__)
+_Name = Annotated[str, Field(min_length=1, pattern=r"\S")]
 
 
 @cache
@@ -46,18 +47,16 @@ class DetectorConfig(BaseModel):
     psd_reference: Annotated[str, Field(min_length=1, pattern=r"\S")]
     label: Annotated[str, Field(min_length=1)] | None = None
 
-    @model_validator(mode="after")
-    def _validate_reference(self) -> DetectorConfig:
-
+    @field_validator("psd_reference")
+    @classmethod
+    def _validate_reference(cls, reference: str) -> str:
         try:
-            resolved = resolve_psd_path(self.psd_reference)
+            resolved = resolve_psd_path(reference)
             if isinstance(resolved, Path) and not resolved.is_file():
-                raise ValueError(
-                    f"PSD reference must be a file: {self.psd_reference!r}"
-                )
+                raise ValueError(f"PSD reference must be a file: {reference!r}")
         except FileNotFoundError as error:
             raise ValueError(str(error)) from error
-        return self
+        return reference
 
     @property
     def sensitivity(self) -> Sensitivity:
@@ -79,146 +78,167 @@ class DetectorConfig(BaseModel):
         return Detector(name, self.geometry, self.sensitivity)
 
 
-class DetectorRegistry(BaseModel):
-    """A complete resolved registry, trusted and fixed for a dataset's lifetime.
+class DetectorNetworkConfig(BaseModel):
+    """One named network with its resolved detector definitions.
 
-    Network members keep their declared order; :meth:`pairs` and
-    :meth:`build_network` sort them, so pair axes line up with a simulated
-    background's. Do not mutate ``detectors`` or ``networks``.
+    The keys of ``detectors`` are the members. Runtime detectors and pairs
+    follow sorted detector names, independent of declaration order.
     """
 
     model_config = _STRICT
 
-    detectors: dict[str, DetectorConfig]
-    networks: dict[str, tuple[str, ...]] = Field(default_factory=dict)
+    name: _Name
+    detectors: Annotated[dict[_Name, DetectorConfig], Field(min_length=1)]
 
-    @field_validator("detectors")
     @classmethod
-    def _validate_names(
-        cls, detectors: dict[str, DetectorConfig]
-    ) -> dict[str, DetectorConfig]:
-        for name in detectors:
-            if not name.strip():
-                raise ValueError("detector names must be non-empty")
-        return detectors
+    def from_network(cls, name: str) -> DetectorNetworkConfig:
+        """Snapshot a registered network without retaining a catalog reference.
+
+        Parameters
+        ----------
+        name
+            Name of a registered network.
+        """
+        members = _NETWORKS[name]
+        catalog = _detector_catalog()
+        return cls(
+            name=name,
+            detectors={member: catalog[member] for member in sorted(members)},
+        )
+
+    @classmethod
+    def from_files(cls, *paths: Path, network: str) -> DetectorNetworkConfig:
+        """Select one network from ordered TOML layers, independent of the catalog.
+
+        Parameters
+        ----------
+        paths
+            Layers applied after the packaged detector definitions.
+        network
+            Name of a network in the merged document.
+        """
+        return _DetectorConfigDocument.from_files(*paths).select_network(network, cls)
+
+    def build_detectors(self) -> tuple[Detector, ...]:
+        """Build runtime detectors in canonical sorted order."""
+        return tuple(
+            self.detectors[name].to_detector(name) for name in sorted(self.detectors)
+        )
+
+    def pairs(self) -> tuple[tuple[str, str], ...]:
+        """Return the canonical pair axis, with the earlier name first in each pair."""
+        return tuple(combinations(sorted(self.detectors), 2))
+
+
+class _DetectorConfigDocument(BaseModel):
+    """Shared detector definitions and named memberships in TOML and metadata."""
+
+    model_config = _STRICT
+
+    detectors: dict[_Name, DetectorConfig]
+    networks: dict[_Name, tuple[str, ...]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _validate_networks(self) -> DetectorRegistry:
-        """Require each network to be distinct, defined detectors."""
+    def _validate_networks(self) -> _DetectorConfigDocument:
         for name, members in self.networks.items():
             if not members or len(set(members)) != len(members):
                 raise ValueError(
                     f"network {name!r} must contain distinct detectors and be non-empty"
                 )
-            missing = [member for member in members if member not in self.detectors]
+            missing = sorted(set(members) - self.detectors.keys())
             if missing:
                 raise ValueError(
                     f"network {name!r} contains undefined detectors: {missing}"
                 )
         return self
 
-    def select(self, names: Sequence[str]) -> DetectorRegistry:
-        """The registry of the networks ``names`` and the detectors they use.
+    @classmethod
+    def from_files(cls, *paths: Path) -> _DetectorConfigDocument:
+        from astrogwb.config import merge_layers
 
-        Members are sorted and labels dropped, so the result serializes alike
-        for any presentation.
-
-        Parameters
-        ----------
-        names
-            Names to select.
-        """
-        networks = {name: tuple(sorted(self.networks[name])) for name in sorted(names)}
-        used = sorted(
-            {detector for members in networks.values() for detector in members}
+        layers = (*DETECTOR_DEFAULT_PATHS, *paths)
+        logger.info(
+            "Detector config layers (merge order): %s", " -> ".join(map(str, layers))
         )
-        return DetectorRegistry(
+        return cls.model_validate(merge_layers(layers))
+
+    def select_network(
+        self, name: str, model: type[DetectorNetworkConfig] = DetectorNetworkConfig
+    ) -> DetectorNetworkConfig:
+        return model(
+            name=name,
             detectors={
-                name: self.detectors[name].model_copy(update={"label": None})
-                for name in used
+                member: self.detectors[member] for member in sorted(self.networks[name])
             },
-            networks=networks,
         )
 
-    def build_detectors(self, names: Sequence[str]) -> tuple[Detector, ...]:
-        """Build owned detectors in the supplied order.
 
-        Parameters
-        ----------
-        names
-            Names to select.
-        """
-        return tuple(self.detectors[name].to_detector(name) for name in names)
-
-    def build_network(self, name: str) -> tuple[Detector, ...]:
-        """Build a named network in canonical sorted order.
-
-        Parameters
-        ----------
-        name
-            Name to look up.
-        """
-        return self.build_detectors(sorted(self.networks[name]))
-
-    def pairs(self, network_name: str) -> list[tuple[str, str]]:
-        """Return the canonical sorted detector pairs of a named network.
-
-        Parameters
-        ----------
-        network_name
-            A network of the registry.
-
-        Returns
-        -------
-        list of tuple of str
-            Each pair of members, ``(a, b)`` with ``a`` before ``b``.
-        """
-        return list(combinations(sorted(self.networks[network_name]), 2))
+_NETWORKS: dict[str, frozenset[str]] = {}
 
 
-def load_detector_config(paths: Sequence[Path]) -> DetectorRegistry:
-    """Merge packaged detector definitions and ordered TOML registry layers.
+@cache
+def _detector_catalog() -> dict[str, DetectorConfig]:
+    return _DetectorConfigDocument.from_files().detectors
 
-    Later layers override earlier geometry, sensitivities and network
-    membership. References and ``extends`` resolve within this merge alone.
-    An empty layer list loads packaged detectors without named networks.
-    Only ``[detectors]`` and ``[networks]`` are accepted in the resolved config.
-    Validation checks that each PSD reference resolves to a file; the curve
-    itself is read on first use.
+
+def register_detector(name: str, config: DetectorConfig) -> None:
+    """Add a detector to the process catalog; existing names cannot be replaced.
 
     Parameters
     ----------
-    paths
-        Existing TOML files, merged in order after the packaged defaults.
-
-    Returns
-    -------
-    DetectorRegistry
-        The validated registry.
-
-    Raises
-    ------
-    ValueError
-        If a path is not a TOML file, or the merged config is not a valid
-        registry.
+    name
+        Non-blank detector name.
+    config
+        The resolved detector definition.
     """
-    logger.info(
-        "Detector config layers (merge order): %s",
-        " -> ".join(str(path) for path in (*DETECTOR_DEFAULT_PATHS, *paths)),
-    )
-    from astrogwb.config import merge_layers
+    catalog = _detector_catalog()
+    if not name.strip():
+        raise ValueError("detector names must be non-empty")
+    if name in catalog:
+        raise ValueError(f"detector {name!r} is already registered")
+    catalog[name] = config
 
-    merged = merge_layers([*DETECTOR_DEFAULT_PATHS, *paths])
-    return DetectorRegistry.model_validate(merged)
+
+def register_network(name: str, members: AbstractSet[str]) -> None:
+    """Register a non-empty set of detector names without replacing an existing network.
+
+    Parameters
+    ----------
+    name
+        Non-blank network name.
+    members
+        Names of already registered detectors.
+    """
+    if not name.strip():
+        raise ValueError("network names must be non-empty")
+    if name in _NETWORKS:
+        raise ValueError(f"network {name!r} is already registered")
+    if not members:
+        raise ValueError(f"network {name!r} must be non-empty")
+    missing = sorted(members - _detector_catalog().keys())
+    if missing:
+        raise ValueError(f"network {name!r} contains undefined detectors: {missing}")
+    _NETWORKS[name] = frozenset(members)
 
 
 @cache
 def load_detector(name: str) -> Detector:
-    """Load packaged geometry and sensitivity without reading the PSD curve.
+    """Load a registered detector without reading its PSD curve.
 
     Parameters
     ----------
     name
         Name to look up.
     """
-    return load_detector_config([]).detectors[name].to_detector(name)
+    return _detector_catalog()[name].to_detector(name)
+
+
+def load_network(name: str) -> tuple[Detector, ...]:
+    """Load the detectors of a registered network in canonical sorted order.
+
+    Parameters
+    ----------
+    name
+        Name of a registered network.
+    """
+    return tuple(load_detector(member) for member in sorted(_NETWORKS[name]))

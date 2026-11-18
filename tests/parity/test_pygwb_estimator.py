@@ -14,7 +14,7 @@ from collections.abc import Mapping
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from conftest import EXACT_NETWORK, PYGWB_POWER_FRACTION
+from conftest import PYGWB_POWER_FRACTION
 from numpy.typing import NDArray
 
 from astrogwb.background.simulation import combine_pair_spectra
@@ -24,7 +24,7 @@ from astrogwb.background.spectral import (
 )
 from astrogwb.detector import (
     Detector,
-    DetectorRegistry,
+    DetectorNetworkConfig,
     effective_psd,
     gaussian_bin_scale,
     pair_bin_scale,
@@ -79,16 +79,12 @@ def test_network_spectrum_matches_pygwb_combined_point_estimate(
     pygwb_reference: Mapping[str, NDArray[np.float64]],
     frequencies: NDArray[np.float64],
     hubble_constant: float,
-    exact_registry: DetectorRegistry,
+    exact_network: DetectorNetworkConfig,
 ) -> None:
     pair_spectra = pygwb_reference["csd"] / PYGWB_POWER_FRACTION
 
     omega = omega_gw_from_spectral_density(
-        jnp.asarray(
-            combine_pair_spectra(
-                pair_spectra, frequencies, exact_registry, EXACT_NETWORK
-            )
-        ),
+        jnp.asarray(combine_pair_spectra(pair_spectra, frequencies, exact_network)),
         jnp.asarray(frequencies),
         hubble_constant=hubble_constant,
     )
