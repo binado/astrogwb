@@ -12,8 +12,8 @@ import tomli_w
 from astrogwb_tiny_pipeline import WAVEFORM, write_population_csv
 from typer.testing import CliRunner
 
+from astrogwb.background.simulation import read_background
 from astrogwb.cli import app
-from astrogwb.simulators import read_background
 from astrogwb.utils import years_to_seconds
 
 

@@ -33,7 +33,7 @@ pip install astrogwb[io]
 - `astrogwb.inference.CatalogModel` predicts spectra and shot-noise moments
   using an explicit reference catalog, intrinsic density and merger rate.
   The inference module also provides detector-network likelihoods.
-- `astrogwb.simulators.simulate_background` draws segmented detector-pair spectra
+- `astrogwb.background.simulation.simulate_background` draws segmented detector-pair spectra
   from a supplied physical event pool and observer-frame rate, and
   `astrogwb simulate` runs it on a gwmock-pop population catalogue. See the
   [simulation API, command and normalization](docs/simulator-pipeline.md).

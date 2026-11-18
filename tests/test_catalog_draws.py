@@ -12,13 +12,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from astrogwb.background.simulation import realization_key
 from astrogwb.importance.catalog import (
     CatalogMetadata,
     read_catalog,
 )
 from astrogwb.importance.spectrum import reference_catalog
 from astrogwb.populations import BNSCobaPopulation
-from astrogwb.simulators import realization_key
 from astrogwb.utils.io import Arrays, write
 from astrogwb.waveform import WaveformMetadata
 

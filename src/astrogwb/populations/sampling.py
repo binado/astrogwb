@@ -1,4 +1,4 @@
-"""Random and scrambled Sobol draws for reference catalog preparation."""
+"""Random and scrambled Sobol draws of sources from a population model."""
 
 from __future__ import annotations
 

@@ -7,7 +7,7 @@ or selection cuts to both the pool and its rate. The pool size only controls
 how many distinct mergers are available.
 
 ```python
-from astrogwb.simulators import simulate_background
+from astrogwb.background.simulation import simulate_background
 
 draw = simulate_background(
     key, sources, waveform, detectors,

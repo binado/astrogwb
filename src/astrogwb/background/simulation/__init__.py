@@ -1,7 +1,13 @@
-"""Simulation and projection of physical event pools."""
+"""Simulation of detector-pair background spectra from physical event pools."""
 
-from astrogwb.simulators._keys import realization_key
-from astrogwb.simulators.background import (
+from astrogwb.background.simulation._keys import realization_key
+from astrogwb.background.simulation.config import SimulationConfig
+from astrogwb.background.simulation.ensemble import (
+    NetworkSpectra,
+    network_spectra_ensemble,
+)
+from astrogwb.background.simulation.pool import read_event_pool
+from astrogwb.background.simulation.simulate import (
     BackgroundDraw,
     NetworkNoise,
     combine_pair_spectra,
@@ -11,10 +17,7 @@ from astrogwb.simulators.background import (
     simulate_background,
     write_background,
 )
-from astrogwb.simulators.config import SimulationConfig
-from astrogwb.simulators.ensemble import NetworkSpectra, network_spectra_ensemble
-from astrogwb.simulators.pool import read_event_pool
-from astrogwb.simulators.sources import simulate_sources
+from astrogwb.populations.sampling import simulate_sources
 
 __all__ = [
     "BackgroundDraw",

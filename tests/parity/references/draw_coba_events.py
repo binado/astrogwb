@@ -20,9 +20,9 @@ import jax
 import numpy as np
 import numpyro
 
+from astrogwb.background.simulation import simulate_sources
 from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.populations import BNSCobaPopulation
-from astrogwb.simulators import simulate_sources
 from astrogwb.utils import years_to_seconds
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))

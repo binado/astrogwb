@@ -1,8 +1,8 @@
 """Read an ensemble of simulated backgrounds back, stacked per network.
 
 ``astrogwb simulate`` writes one file per draw, ``<root>/<seed>-<index>.h5``,
-each a :class:`~astrogwb.simulators.BackgroundDraw` stored by
-:func:`~astrogwb.simulators.write_background`.
+each a :class:`~astrogwb.background.simulation.BackgroundDraw` stored by
+:func:`~astrogwb.background.simulation.write_background`.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import TypedDict
 import numpy as np
 from numpy.typing import NDArray
 
-from astrogwb.simulators.background import BackgroundDraw, read_background
+from astrogwb.background.simulation.simulate import BackgroundDraw, read_background
 
 __all__ = ["NetworkSpectra", "network_spectra_ensemble"]
 
@@ -23,7 +23,7 @@ class NetworkSpectra(TypedDict):
     """One network's draws, stacked along the leading draw axis.
 
     ``frequencies`` ``(F,)``; ``pair_spectral_density`` ``(D, P, F)``, which
-    :func:`~astrogwb.simulators.combine_pair_spectra` weights into a network
+    :func:`~astrogwb.background.simulation.combine_pair_spectra` weights into a network
     spectrum ``(D, F)``; ``n_events`` ``(D,)``, the number of events each draw
     selected.
     """

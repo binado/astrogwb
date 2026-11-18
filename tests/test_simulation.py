@@ -15,7 +15,7 @@ from astrogwb_tiny_pipeline import (
     write_population_csv,
 )
 
-from astrogwb.simulators import (
+from astrogwb.background.simulation import (
     BackgroundDraw,
     SimulationConfig,
     network_noise,

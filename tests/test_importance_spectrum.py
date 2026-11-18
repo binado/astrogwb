@@ -24,6 +24,7 @@ from astrogwb_mock_population import (
 from jax.typing import ArrayLike
 from numpyro import handlers
 
+from astrogwb.background.simulation import realization_key
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import luminosity_distance
 from astrogwb.distributions.mass import MaxOfTwoUniformsDistribution
@@ -46,7 +47,6 @@ from astrogwb.inference import (
 )
 from astrogwb.populations import BNSCobaPopulation
 from astrogwb.rates import differential_merger_rate, madau_dickinson_rate
-from astrogwb.simulators import realization_key
 from astrogwb.utils import gauss_legendre_nodes_weights
 from astrogwb.utils.io import write
 from astrogwb.utils.numpyro import sample_and_logprob

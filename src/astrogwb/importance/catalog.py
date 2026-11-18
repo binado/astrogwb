@@ -27,7 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from astrogwb import __version__
 from astrogwb.populations.metadata import AnyPopulation
-from astrogwb.simulators.sources import Sampling
+from astrogwb.populations.sampling import Sampling
 from astrogwb.utils.io import load
 from astrogwb.waveform.base import WaveformGenerator
 from astrogwb.waveform.metadata import WaveformMetadata

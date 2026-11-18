@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
-from astrogwb.simulators.background import SKY_COLUMNS
+from astrogwb.background.simulation.simulate import SKY_COLUMNS
 
 __all__ = ["read_event_pool"]
 

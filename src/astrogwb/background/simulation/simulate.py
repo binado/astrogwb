@@ -64,7 +64,7 @@ delays once. Signals remain complete within their assigned segment, without
 window truncation or boundary crossing.
 
 A background is stored with :func:`write_background` together with the
-:class:`~astrogwb.simulators.SimulationConfig` it was simulated with.
+:class:`~astrogwb.background.simulation.SimulationConfig` it was simulated with.
 """
 
 from __future__ import annotations
@@ -82,6 +82,8 @@ from jax.typing import ArrayLike
 from numpy.typing import NDArray
 
 from astrogwb import __version__
+from astrogwb.background.simulation._chunks import iter_rows, pad_rows
+from astrogwb.background.simulation.config import SimulationConfig
 from astrogwb.detector import (
     effective_psd,
     gaussian_bin_scale,
@@ -91,8 +93,6 @@ from astrogwb.detector import (
 from astrogwb.detector.config import DetectorRegistry
 from astrogwb.detector.projection import project_polarizations_fd
 from astrogwb.frequency import bin_widths
-from astrogwb.simulators._chunks import iter_rows, pad_rows
-from astrogwb.simulators.config import SimulationConfig
 from astrogwb.utils import years_to_seconds
 from astrogwb.utils.io import atomic_h5, h5py
 from astrogwb.waveform.base import WaveformGenerator

@@ -48,12 +48,12 @@ def model_catalog(
         Number of CPU threads.
     """
     _apply_runtime(platform, cpu_threads)
+    from astrogwb.background.simulation import realization_key
     from astrogwb.config import merge_config
     from astrogwb.importance.catalog import CatalogMetadata
     from astrogwb.importance.spectrum import (
         reference_catalog as draw_reference_catalog,
     )
-    from astrogwb.simulators import realization_key
     from astrogwb.utils.io import write
 
     metadata = CatalogMetadata.model_validate(

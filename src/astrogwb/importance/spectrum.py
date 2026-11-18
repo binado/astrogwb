@@ -97,8 +97,8 @@ from astrogwb.importance.catalog import (
     intensity_data,
 )
 from astrogwb.populations._types import Parameters
+from astrogwb.populations.sampling import simulate_sources
 from astrogwb.rates import differential_merger_rate
-from astrogwb.simulators.sources import simulate_sources
 from astrogwb.utils import gauss_legendre_nodes_weights, require_current_version
 from astrogwb.waveform.factory import waveform_generator
 

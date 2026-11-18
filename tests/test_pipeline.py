@@ -15,19 +15,19 @@ import pytest
 from astrogwb_tiny_pipeline import NETWORKS, WAVEFORM, event_pool
 from numpy.typing import NDArray
 
+from astrogwb.background.simulation import (
+    BackgroundDraw,
+    combine_pair_spectra,
+    project_background,
+    simulate_background,
+)
+from astrogwb.background.simulation import simulate as background_module
 from astrogwb.detector import (
     DetectorRegistry,
     isotropic_overlap_reduction_function,
     pair_bin_scale,
 )
 from astrogwb.detector.projection import project_polarizations_fd
-from astrogwb.simulators import (
-    BackgroundDraw,
-    combine_pair_spectra,
-    project_background,
-    simulate_background,
-)
-from astrogwb.simulators import background as background_module
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import WaveformMetadata, intensity, waveform_generator
 

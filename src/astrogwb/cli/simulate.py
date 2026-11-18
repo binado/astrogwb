@@ -107,15 +107,15 @@ def simulate(
         Number of CPU threads.
     """
     _apply_runtime(platform, cpu_threads)
-    from astrogwb.config import merge_layers
-    from astrogwb.detector.config import load_detector_config
-    from astrogwb.simulators import (
+    from astrogwb.background.simulation import (
         SimulationConfig,
         read_event_pool,
         realization_key,
         simulate_background,
         write_background,
     )
+    from astrogwb.config import merge_layers
+    from astrogwb.detector.config import load_detector_config
     from astrogwb.utils import years_to_seconds
     from astrogwb.waveform import WaveformMetadata
 
