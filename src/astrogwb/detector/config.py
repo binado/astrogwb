@@ -73,7 +73,7 @@ class DetectorConfig(BaseModel):
         Parameters
         ----------
         name
-            Name to look up.
+            Name given to the built detector.
         """
         return Detector(name, self.geometry, self.sensitivity)
 
@@ -92,7 +92,10 @@ class DetectorNetworkConfig(BaseModel):
 
     @classmethod
     def from_network(cls, name: str) -> DetectorNetworkConfig:
-        """Snapshot a registered network without retaining a catalog reference.
+        """Snapshot a registered network.
+
+        The result is unaffected by later registrations, because the detector
+        definitions are immutable.
 
         Parameters
         ----------

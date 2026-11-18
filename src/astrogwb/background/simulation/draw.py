@@ -28,8 +28,8 @@ reduction function of the native geometry. For an isotropic, unpolarized
 population this gives :math:`E[Y_{ab}] = \gamma_{ab} S_h`. The sum is never
 divided by the realized count.
 
-Every pair of the union of the networks' detectors is projected once per chunk
-in one fused kernel, and each network keeps its own rows, ``(P_n, F)``.
+Each pair requested by at least one network is projected once per chunk in
+one fused kernel, and each network keeps its own rows, ``(P_n, F)``.
 :func:`combine_pair_spectra` weights them into a network spectrum ``(F,)`` on
 demand.
 
@@ -91,7 +91,6 @@ from astrogwb.detector import (
     pair_bin_scale,
     pair_terms,
 )
-from astrogwb.detector.config import _DetectorConfigDocument
 from astrogwb.detector.projection import project_polarizations_fd
 from astrogwb.frequency import bin_widths
 from astrogwb.utils import years_to_seconds
@@ -329,17 +328,8 @@ def write_background(
     pathlib.Path
         The file written.
     """
-    document = _DetectorConfigDocument(
-        detectors=_network_detectors(config.networks),
-        networks={
-            network.name: tuple(sorted(network.detectors))
-            for network in config.networks
-        },
-    )
-    metadata = config.model_dump(mode="json", exclude={"networks"})
-    metadata["detectors"] = document.model_dump(mode="json")
     with atomic_h5(path) as file:
-        file.attrs["metadata"] = json.dumps(metadata)
+        file.attrs["metadata"] = json.dumps(config.to_metadata())
         file.attrs["version"] = __version__
         file.create_dataset("frequencies", data=draw.frequencies)
         file.create_dataset("segment_counts", data=draw.segment_counts)
@@ -377,16 +367,7 @@ def read_background(path: str | Path) -> tuple[BackgroundDraw, SimulationConfig]
                 f"{path} was written by astrogwb {version}, but {__version__} "
                 "is installed; regenerate the background"
             )
-        metadata = json.loads(file.attrs["metadata"])
-        document = _DetectorConfigDocument.model_validate(metadata.pop("detectors"))
-        config = SimulationConfig.model_validate(
-            {
-                **metadata,
-                "networks": tuple(
-                    document.select_network(name) for name in document.networks
-                ),
-            }
-        )
+        config = SimulationConfig.from_metadata(json.loads(file.attrs["metadata"]))
         stored = file["networks"]
         draw = BackgroundDraw(
             np.asarray(file["frequencies"][()], dtype=np.float64),
