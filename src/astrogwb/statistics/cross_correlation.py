@@ -2,7 +2,7 @@ r"""The optimally weighted cross-correlation statistic of a detector network.
 
 Each pair :math:`(a, b)` measures a cross-power spectrum :math:`Y_{ab}` with
 mean :math:`\gamma_{ab} S_h` for an isotropic, unpolarized background.
-:func:`combine_pair_spectra` combines a network's pairs into one spectrum with
+:func:`cross_correlation_estimator` combines a network's pairs into one spectrum with
 mean :math:`S_h`, weighting each pair by its inverse noise variance.
 """
 
@@ -14,7 +14,7 @@ from numpy.typing import NDArray
 
 from astrogwb.detector import DetectorNetworkConfig, pair_terms
 
-__all__ = ["combine_pair_spectra"]
+__all__ = ["cross_correlation_estimator"]
 
 
 def _combine(
@@ -25,7 +25,7 @@ def _combine(
     return np.where(usable, numerator / np.where(usable, denominator, 1.0), 0.0)
 
 
-def combine_pair_spectra(
+def cross_correlation_estimator(
     pair_spectral_density: ArrayLike,
     frequencies: ArrayLike,
     network: DetectorNetworkConfig,

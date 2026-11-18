@@ -30,7 +30,7 @@ divided by the realized count.
 
 Each pair requested by at least one network is projected once per chunk in
 one fused kernel, and each network keeps its own rows, ``(P_n, F)``.
-:func:`~astrogwb.statistics.combine_pair_spectra` weights them into a network
+:func:`~astrogwb.statistics.cross_correlation_estimator` weights them into a network
 spectrum ``(F,)`` on demand.
 
 The simulator draws independent Poisson counts in segments of exactly

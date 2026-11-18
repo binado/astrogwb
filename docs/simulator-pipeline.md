@@ -86,7 +86,7 @@ $$
 
 Each noisy bin must contain a positive whole number of segment Fourier modes.
 For an isotropic unpolarized population, $E[Y_{ab}]=\gamma_{ab} S_h$.
-`astrogwb.statistics.combine_pair_spectra` combines a network's rows using
+`astrogwb.statistics.cross_correlation_estimator` combines a network's rows using
 its overlap functions and PSDs.
 
 Use `incoherent=True` for a Poisson realization of the individual event
