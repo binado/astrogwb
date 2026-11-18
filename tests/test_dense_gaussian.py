@@ -47,11 +47,10 @@ from astrogwb.inference import (
 )
 from astrogwb.inference.gaussian import _Network
 from astrogwb.statistics import (
-    amplitude,
-    amplitude_variance,
-    amplitude_variance_budget,
+    background_amplitude_estimate,
+    background_amplitude_variance,
+    background_amplitude_weights,
 )
-from astrogwb.statistics.amplitude import amplitude_weights
 from astrogwb.utils import gauss_legendre_nodes_weights
 from astrogwb.waveform.intensity import QUADRUPOLE_STOKES_WEIGHTS, StokesPair
 
@@ -708,7 +707,7 @@ def split_likelihood(
 def test_amplitude_weights_have_unit_response_to_the_template(
     likelihood: DenseGaussianLikelihood[CatalogModel],
 ) -> None:
-    weights = amplitude_weights(likelihood, OFF_FIDUCIAL)
+    weights = background_amplitude_weights(likelihood, OFF_FIDUCIAL)
 
     assert float(weights @ likelihood.mean(OFF_FIDUCIAL)) == pytest.approx(
         1.0, rel=1e-12
@@ -719,18 +718,12 @@ def test_amplitude_of_a_rescaled_template_is_the_scale(
     model: CatalogModel, network: _Network
 ) -> None:
     template = DenseGaussianLikelihood._from_network(model, network, None)
-    scaled = DenseGaussianLikelihood._from_network(
-        model, network, jnp.array([0.5, 1.3])[:, None] * template.mean(OFF_FIDUCIAL)
+    weights = background_amplitude_weights(template, OFF_FIDUCIAL)
+    observed = jnp.array([0.5, 1.3])[:, None] * template.mean(OFF_FIDUCIAL)
+
+    np.testing.assert_allclose(
+        background_amplitude_estimate(weights, observed), [0.5, 1.3], rtol=1e-12
     )
-
-    np.testing.assert_allclose(amplitude(scaled, OFF_FIDUCIAL), [0.5, 1.3], rtol=1e-12)
-
-
-def test_amplitude_without_data_raises(model: CatalogModel, network: _Network) -> None:
-    likelihood = DenseGaussianLikelihood._from_network(model, network, None)
-
-    with pytest.raises(ValueError, match="without observed data"):
-        amplitude(likelihood, OFF_FIDUCIAL)
 
 
 def test_amplitude_variance_without_shot_noise_is_the_inverse_squared_snr(
@@ -740,9 +733,22 @@ def test_amplitude_variance_without_shot_noise_is_the_inverse_squared_snr(
         likelihood.model, network, None, shot_noise=False
     )
     squared_snr = jnp.sum((likelihood.mean(OFF_FIDUCIAL) / network.scale) ** 2)
+    weights = background_amplitude_weights(diagonal, OFF_FIDUCIAL)
 
-    assert float(amplitude_variance(diagonal, OFF_FIDUCIAL)) == pytest.approx(
-        float(1.0 / squared_snr), rel=1e-12
+    assert float(
+        background_amplitude_variance(weights, diagonal.covariance(OFF_FIDUCIAL))
+    ) == pytest.approx(float(1.0 / squared_snr), rel=1e-12)
+
+
+def test_amplitude_variance_is_the_inverse_fisher_information(
+    likelihood: DenseGaussianLikelihood[CatalogModel],
+) -> None:
+    mean = likelihood.mean(OFF_FIDUCIAL)
+    weights = background_amplitude_weights(likelihood, OFF_FIDUCIAL)
+    covariance = likelihood.covariance(OFF_FIDUCIAL)
+
+    assert float(background_amplitude_variance(weights, covariance)) == pytest.approx(
+        float(1.0 / (mean @ jnp.linalg.solve(covariance, mean))), rel=1e-8
     )
 
 
@@ -753,27 +759,47 @@ def test_amplitude_variance_grows_with_shot_noise(
         likelihood.model, network, None, shot_noise=False
     )
 
-    assert float(amplitude_variance(likelihood, OFF_FIDUCIAL)) > float(
-        amplitude_variance(diagonal, OFF_FIDUCIAL)
-    )
+    def variance(candidate: DenseGaussianLikelihood[CatalogModel]) -> float:
+        weights = background_amplitude_weights(candidate, OFF_FIDUCIAL)
+        return float(
+            background_amplitude_variance(weights, candidate.covariance(OFF_FIDUCIAL))
+        )
+
+    assert variance(likelihood) > variance(diagonal)
 
 
-def test_amplitude_variance_budget_sums_to_the_amplitude_variance(
+def test_amplitude_variance_of_the_components_sums_to_the_total(
     split_likelihood: DenseGaussianLikelihood[CatalogModel],
 ) -> None:
-    budget = amplitude_variance_budget(split_likelihood, OFF_FIDUCIAL)
+    weights = background_amplitude_weights(split_likelihood, OFF_FIDUCIAL)
+    components = split_likelihood.covariance_components(OFF_FIDUCIAL)
+    budget = {
+        name: background_amplitude_variance(weights, covariance)
+        for name, covariance in components.items()
+    }
 
     assert set(budget) == {"detector", "count", "intensity", "linear", "circular"}
     assert float(sum(budget.values())) == pytest.approx(
-        float(amplitude_variance(split_likelihood, OFF_FIDUCIAL)), rel=1e-10
+        float(
+            background_amplitude_variance(
+                weights, split_likelihood.covariance(OFF_FIDUCIAL)
+            )
+        ),
+        rel=1e-10,
     )
 
 
-def test_amplitude_variance_budget_without_generalized_orfs_raises(
-    likelihood: DenseGaussianLikelihood[CatalogModel],
+def test_covariance_is_the_sum_of_its_components(
+    split_likelihood: DenseGaussianLikelihood[CatalogModel],
 ) -> None:
-    with pytest.raises(ValueError, match="keep_generalized_orfs"):
-        amplitude_variance_budget(likelihood, OFF_FIDUCIAL)
+    components = split_likelihood.covariance_components(OFF_FIDUCIAL)
+
+    np.testing.assert_allclose(
+        split_likelihood.covariance(OFF_FIDUCIAL),
+        sum(components.values()),
+        rtol=1e-8,
+        atol=1e-8 * float(jnp.max(jnp.abs(split_likelihood.covariance(OFF_FIDUCIAL)))),
+    )
 
 
 def test_covariance_count_term_is_the_template_over_the_expected_count(

@@ -279,6 +279,12 @@ class GaussianFactor(NamedTuple):
     cholesky: jax.Array
     log_det: jax.Array
 
+    def covariance(self) -> jax.Array:
+        r"""The covariance :math:`C = L L^\top`, ``(D, D)``."""
+        if self.cholesky.ndim == 1:
+            return jnp.diag(self.cholesky**2)
+        return self.cholesky @ self.cholesky.T
+
     def whiten(self, values: ArrayLike) -> jax.Array:
         r""":math:`L^{-1} \mathbf x` for ``values`` ``(..., D)``, ``(..., D)``."""
         values = jnp.asarray(values)
@@ -535,6 +541,19 @@ class DenseGaussianLikelihood[M: SpectralDensityModel]:
             Model parameter values.
         """
         return _expected_data(self.model(params, shot_noise=False), self._network)
+
+    def covariance(self, params: Mapping[str, ArrayLike]) -> jax.Array:
+        r"""The total covariance :math:`C` at ``params``, ``(D, D)``.
+
+        Needs neither ``keep_generalized_orfs`` nor data. Without shot noise
+        it is the diagonal detector noise.
+
+        Parameters
+        ----------
+        params
+            Model parameter values.
+        """
+        return self.evaluate(params).factor.covariance()
 
     def covariance_components(
         self, params: Mapping[str, ArrayLike]

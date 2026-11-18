@@ -9,23 +9,26 @@ likelihood gives the estimator
 
     \hat x = \mathbf w^\top \bar{\mathbf C}, \qquad
     \mathbf w = \frac{\Sigma^{-1}\boldsymbol\mu_0}
-        {\boldsymbol\mu_0^\top\Sigma^{-1}\boldsymbol\mu_0},
+        {\boldsymbol\mu_0^\top\Sigma^{-1}\boldsymbol\mu_0}.
 
-unbiased, :math:`\langle\hat x\rangle = x`, with relative variance
+It is unbiased for any weights with :math:`\mathbf w^\top\boldsymbol\mu_0 = 1`,
+:math:`\langle\hat x\rangle = x`, and under a covariance :math:`\Sigma'` its
+relative variance is :math:`\mathbf w^\top\Sigma'\mathbf w`. With
+:math:`\Sigma' = \Sigma` this is
 
 .. math::
 
     \frac{\mathrm{Var}[\hat x]}{x^2}
-        = \frac{1}{\boldsymbol\mu_0^\top\Sigma^{-1}\boldsymbol\mu_0}.
+        = \frac{1}{\boldsymbol\mu_0^\top\Sigma^{-1}\boldsymbol\mu_0},
 
-Without shot noise :math:`\Sigma` is the detector noise and the variance is
-:math:`\rho^{-2}`, the inverse squared SNR. Each term :math:`\Sigma^X` of the
-covariance contributes :math:`\mathbf w^\top\Sigma^X\mathbf w`, and these sum
-to the variance (:func:`amplitude_variance_budget`).
+the inverse squared SNR :math:`\rho^{-2}` without shot noise. The variance is
+linear in :math:`\Sigma'`, so each term :math:`\Sigma^X` of
+:meth:`~astrogwb.inference.DenseGaussianLikelihood.covariance_components`
+contributes :math:`\mathbf w^\top\Sigma^X\mathbf w`, and these sum to the
+variance.
 
-Every function takes a :class:`~astrogwb.inference.DenseGaussianLikelihood`,
-which holds the model and the network's covariance, and the template's
-parameters ``params`` (typically the fiducials).
+Only :func:`background_amplitude_weights` takes the likelihood; the estimate
+and the variance take arrays.
 """
 
 from __future__ import annotations
@@ -33,18 +36,19 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 import jax
+import jax.numpy as jnp
 from jax.typing import ArrayLike
 
 from astrogwb.inference import DenseGaussianLikelihood, SpectralDensityModel
 
 __all__ = [
-    "amplitude",
-    "amplitude_variance",
-    "amplitude_variance_budget",
+    "background_amplitude_estimate",
+    "background_amplitude_variance",
+    "background_amplitude_weights",
 ]
 
 
-def amplitude_weights[M: SpectralDensityModel](
+def background_amplitude_weights[M: SpectralDensityModel](
     likelihood: DenseGaussianLikelihood[M], params: Mapping[str, ArrayLike]
 ) -> jax.Array:
     r"""The weights :math:`\mathbf w = \Sigma^{-1}\boldsymbol\mu_0 / \boldsymbol\mu_0^\top\Sigma^{-1}\boldsymbol\mu_0`, ``(D,)``.
@@ -54,72 +58,46 @@ def amplitude_weights[M: SpectralDensityModel](
     likelihood
         The likelihood; needs no data.
     params
-        The template's parameter values.
+        The template's parameter values, typically the fiducials.
     """
     _, factor = likelihood.evaluate(params)
     projected = factor.solve(factor.mean)
     return projected / (projected @ factor.mean)
 
 
-def amplitude_variance[M: SpectralDensityModel](
-    likelihood: DenseGaussianLikelihood[M], params: Mapping[str, ArrayLike]
-) -> jax.Array:
-    r"""The relative variance :math:`1 / \boldsymbol\mu_0^\top\Sigma^{-1}\boldsymbol\mu_0` of :math:`\hat x`, ``()``.
-
-    Parameters
-    ----------
-    likelihood
-        The likelihood; needs no data.
-    params
-        The template's parameter values.
-    """
-    _, factor = likelihood.evaluate(params)
-    whitened = factor.whiten(factor.mean)
-    return 1.0 / (whitened @ whitened)
-
-
-def amplitude[M: SpectralDensityModel](
-    likelihood: DenseGaussianLikelihood[M], params: Mapping[str, ArrayLike]
-) -> jax.Array:
+def background_amplitude_estimate(weights: ArrayLike, observed: ArrayLike) -> jax.Array:
     r"""The estimate :math:`\hat x = \mathbf w^\top \bar{\mathbf C}` of each realization, ``(...)``.
 
     Parameters
     ----------
-    likelihood
-        The likelihood, with its observed data ``(..., D)``.
-    params
-        The template's parameter values.
-
-    Raises
-    ------
-    ValueError
-        If the likelihood holds no data.
+    weights
+        The weights, ``(D,)``, from :func:`background_amplitude_weights`.
+    observed
+        The observed data, ``(..., D)``, on the same entries as ``weights``.
     """
-    if likelihood.observed is None:
-        raise ValueError("the likelihood was built without observed data")
-    return likelihood.observed @ amplitude_weights(likelihood, params)
+    return jnp.asarray(observed) @ jnp.asarray(weights)
 
 
-def amplitude_variance_budget[M: SpectralDensityModel](
-    likelihood: DenseGaussianLikelihood[M], params: Mapping[str, ArrayLike]
-) -> dict[str, jax.Array]:
-    r"""The variance :math:`\mathbf w^\top\Sigma^X\mathbf w` of each covariance term, ``()`` each.
+def background_amplitude_variance(
+    weights: ArrayLike, covariance: ArrayLike
+) -> jax.Array:
+    r"""The relative variance :math:`\mathbf w^\top\Sigma'\mathbf w` of the estimator, ``()``.
 
-    Keyed as :meth:`~astrogwb.inference.DenseGaussianLikelihood.covariance_components`;
-    the terms sum to :func:`amplitude_variance`. Each term's share of the sum
-    is also the fractional change in the variance per fractional change in
-    that term.
+    This is the variance of the unbiased estimator with these ``weights``
+    when the data have covariance ``covariance``. It equals
+    :math:`1 / \boldsymbol\mu_0^\top\Sigma^{-1}\boldsymbol\mu_0` when the
+    weights were built from that same covariance.
 
     Parameters
     ----------
-    likelihood
-        The likelihood, built with ``shot_noise`` and ``keep_generalized_orfs``;
-        needs no data.
-    params
-        The template's parameter values.
+    weights
+        The weights, ``(D,)``, from :func:`background_amplitude_weights`.
+    covariance
+        The data's covariance, ``(D, D)``: the likelihood's
+        :meth:`~astrogwb.inference.DenseGaussianLikelihood.covariance`, or one
+        of its
+        :meth:`~astrogwb.inference.DenseGaussianLikelihood.covariance_components`
+        for that term's contribution.
     """
-    weights = amplitude_weights(likelihood, params)
-    return {
-        name: weights @ covariance @ weights
-        for name, covariance in likelihood.covariance_components(params).items()
-    }
+    weights = jnp.asarray(weights)
+    return weights @ jnp.asarray(covariance) @ weights

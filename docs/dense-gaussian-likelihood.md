@@ -321,24 +321,28 @@ the order of half an hour on CPU and minutes on GPU.
 
 ### D7. The amplitude statistic
 
-The paper's amplitude statistic lives in `astrogwb.statistics.amplitude`, each
-function taking the likelihood and the template's parameters (typically the
-fiducials):
+The paper's amplitude statistic lives in `astrogwb.statistics.amplitude`. Only
+the weights take the likelihood; the estimate and the variance take arrays:
 
 - The weights $\mathbf w = \Sigma^{-1}\boldsymbol\mu_0 /
-  \boldsymbol\mu_0^T\Sigma^{-1}\boldsymbol\mu_0$ (`amplitude_weights`) and the
-  estimate $\hat x = \mathbf w^T \bar{\mathbf C}$ of each realization
-  (`amplitude`).
-- The relative variance $1 / \boldsymbol\mu_0^T\Sigma^{-1}\boldsymbol\mu_0$
-  (`amplitude_variance`), $\rho^{-2}$ without shot noise.
-- The variance budget $\mathbf w^T\Sigma^X\mathbf w$ of each covariance term
-  (`amplitude_variance_budget`). It needs a likelihood built with
-  `keep_generalized_orfs=True`, whose `covariance_components` splits $\Sigma$
-  into detector noise, count ($\Gamma^{II}$, needs the model's
-  `merger_rate`), intensity ($\Gamma^{II}$ less the count), linear
-  ($\Gamma^{QQ}$, $\Gamma^{UU}$) and circular polarization ($\Gamma^{VV}$, and
-  $\Gamma^{IV}$, $\Gamma^{VI}$ when kept). Keeping the ORFs changes memory,
-  not the covariance.
+  \boldsymbol\mu_0^T\Sigma^{-1}\boldsymbol\mu_0$
+  (`background_amplitude_weights(likelihood, params)`, needs no data), with
+  `params` the template's parameters, typically the fiducials.
+- The estimate $\hat x = \mathbf w^T \bar{\mathbf C}$ of each realization
+  (`background_amplitude_estimate(weights, observed)`).
+- The relative variance $\mathbf w^T\Sigma'\mathbf w$ of the estimator under a
+  covariance $\Sigma'$ (`background_amplitude_variance(weights, covariance)`).
+  With the likelihood's `covariance(params)` it is
+  $1 / \boldsymbol\mu_0^T\Sigma^{-1}\boldsymbol\mu_0$, $\rho^{-2}$ without
+  shot noise.
+- A variance budget is the same call mapped over `covariance_components`,
+  each term contributing $\mathbf w^T\Sigma^X\mathbf w$; the terms sum to the
+  variance. It needs a likelihood built with `keep_generalized_orfs=True`,
+  whose `covariance_components` splits $\Sigma$ into detector noise, count
+  ($\Gamma^{II}$, needs the model's `merger_rate`), intensity ($\Gamma^{II}$
+  less the count), linear ($\Gamma^{QQ}$, $\Gamma^{UU}$) and circular
+  polarization ($\Gamma^{VV}$, and $\Gamma^{IV}$, $\Gamma^{VI}$ when kept).
+  Keeping the ORFs changes memory, not the covariance.
 
 ### D8. Deleted
 
