@@ -157,7 +157,7 @@ connected overlap once, outside JAX transformations: one compilation per
 structure and shape serves every model and data set.
 
 The model is any pytree implementing the protocol: `CatalogModel`
-(`astrogwb.importance.model`), or a `jax.tree_util.Partial` of a module-level
+(`astrogwb.background.importance.model`), or a `jax.tree_util.Partial` of a module-level
 function. `extras` keeps what the notebooks already plot.
 
 Realizations share the factor without any `vmap`: the score is one triangular
@@ -324,7 +324,7 @@ point (typically the fiducials); none needs data:
   (`shape_correction`, `whitened_catalog_covariance`).
 - The skewness of the amplitude estimator $\hat a$, from per-source response
   draws folded into templates (`response_templates`) and the catalog's
-  projected cumulants: `astrogwb.importance.diagnostics.amplitude_cumulants`,
+  projected cumulants: `astrogwb.background.importance.diagnostics.amplitude_cumulants`,
   which needs the catalog itself.
 
 ### D8. Deleted
@@ -354,7 +354,7 @@ inference/
     gaussian.py      # DenseGaussianLikelihood, GaussianFactor, Evaluation, private network
     grid.py          # grid_log_likelihood, grid_log_prior
     diagnostics.py   # sigma_shot, delta, whitened spectrum, response templates
-importance/
+background/importance/
     model.py         # CatalogModel, sparse node moments
     diagnostics.py   # relative ESS, amplitude cumulants
 detector/response.py # connected_overlap, pair_names

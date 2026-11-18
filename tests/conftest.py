@@ -32,7 +32,7 @@ from astrogwb_mock_population import (
     load_mock_population,
 )
 
-from astrogwb.importance.catalog import IntensityData
+from astrogwb.background.importance.catalog import IntensityData
 
 
 @pytest.fixture

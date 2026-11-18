@@ -93,7 +93,7 @@ def amplitude_cumulants(
     The draws are folded into templates on the frequency grid
     (:func:`~astrogwb.inference.response_templates`) and projected on the
     catalog
-    (:meth:`~astrogwb.importance.model.CatalogModel.projected_cumulants`).
+    (:meth:`~astrogwb.background.importance.model.CatalogModel.projected_cumulants`).
     The shot variance equals :func:`~astrogwb.inference.shot_noise_variance`
     when the draws sample the same inclination, sky and polarization
     distribution as the connected overlap. Costs ``L`` catalog contractions.

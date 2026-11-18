@@ -35,7 +35,7 @@ intensity of a draw generated at the reference redshift :math:`z_{\mathrm{ref}}`
 with :math:`d^{\mathrm{ref}} = d_L(z_{\mathrm{ref}})` at the fiducials. One
 catalog serves every window whose lower edge is at or above
 :math:`z_{\mathrm{ref}}`. :func:`reference_catalog` generates one waveform per
-caller-drawn intrinsic sample, and :class:`~astrogwb.importance.model.CatalogModel` rescales their
+caller-drawn intrinsic sample, and :class:`~astrogwb.background.importance.model.CatalogModel` rescales their
 weighted mean to the nodes, interpolating in :math:`\ln f`; the node count is
 the model's, not the catalog's.
 
@@ -81,16 +81,16 @@ import numpy as np
 from jax.typing import ArrayLike
 from numpy.typing import NDArray
 
+from astrogwb.background.importance.catalog import (
+    ReferenceCatalog,
+    intensity_data,
+)
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import (
     gw_distance_ratio,
     hubble_distance,
     luminosity_distance,
     normalized_hubble_parameter,
-)
-from astrogwb.importance.catalog import (
-    ReferenceCatalog,
-    intensity_data,
 )
 from astrogwb.populations._types import Parameters
 from astrogwb.rates import differential_merger_rate

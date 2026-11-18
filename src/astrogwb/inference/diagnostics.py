@@ -28,7 +28,7 @@ K\mathbf u`. The amplitude information is reduced from its template value by
 Every function takes the likelihood and a parameter point; the network is the
 likelihood's. :func:`response_templates` folds per-source response draws into
 templates on the frequency grid, for a model's projected cumulants
-(:func:`~astrogwb.importance.diagnostics.amplitude_cumulants`).
+(:func:`~astrogwb.background.importance.diagnostics.amplitude_cumulants`).
 """
 
 from __future__ import annotations

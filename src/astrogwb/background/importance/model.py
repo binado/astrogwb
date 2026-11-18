@@ -1,11 +1,11 @@
 r"""The spectral density and intensity second moment of a reference catalog.
 
 A :class:`CatalogModel` binds a
-:class:`~astrogwb.importance.catalog.ReferenceCatalog` to a target population
+:class:`~astrogwb.background.importance.catalog.ReferenceCatalog` to a target population
 on the observed grid. It implements
 :class:`~astrogwb.inference.model.SpectralDensityModel`: at every parameter
 point it predicts the spectral density :math:`S_h(f_k) = 2\mathcal R\langle
-I(f_k)\rangle` of :mod:`astrogwb.importance.spectrum`, and the raw intensity
+I(f_k)\rangle` of :mod:`astrogwb.background.importance.spectrum`, and the raw intensity
 second moment of the connected covariance,
 
 .. math::
@@ -19,7 +19,7 @@ with :math:`\kappa_z` the spectrum's kernel times
 node's intensity rescaling, :math:`W_z` its linear interpolation in
 :math:`\ln f` from the reference grid, and :math:`G` the importance-weighted
 Gram matrix of the face-on catalog intensity. The factor :math:`c_\iota`
-(:data:`~astrogwb.importance.spectrum.INCLINATION_RAW_SECOND_MOMENT`) is the
+(:data:`~astrogwb.background.importance.spectrum.INCLINATION_RAW_SECOND_MOMENT`) is the
 isotropic inclination average of the face-on intensity product; the sky and
 polarization scatter is the network's connected overlap
 (:func:`~astrogwb.detector.response.connected_overlap`).
@@ -134,7 +134,7 @@ class CatalogModel:
         (:func:`interpolation_weights`), ``(Z, F)`` and ``(Z, F, 2)``.
     intrinsic, proposal_log_prob, log_reference_frequencies, query_log_frequencies,
     amplitude, redshift, redshift_weights, reference_distance
-        The arrays of :func:`~astrogwb.importance.spectrum._rescaling_arrays`.
+        The arrays of :func:`~astrogwb.background.importance.spectrum._rescaling_arrays`.
     merger_rate, log_prob
         The source-frame merger rate density and joint intrinsic log density
         of the target. If the target matches the proposal, ``log_prob`` is ``None``.
@@ -296,7 +296,7 @@ class CatalogModel:
         into :math:`\beta`. Along constant rows :math:`\mathbf v` the second
         cumulant is :math:`(2/5)^2 / c_\iota` times :math:`\mathbf v^T X
         \mathbf v / T`, with :math:`X` the intensity second moment and
-        :math:`c_\iota` = :data:`~astrogwb.importance.spectrum.INCLINATION_RAW_SECOND_MOMENT`:
+        :math:`c_\iota` = :data:`~astrogwb.background.importance.spectrum.INCLINATION_RAW_SECOND_MOMENT`:
         a constant template carries no inclination scatter. Costs
         :math:`L Z F_{\rm ref} N`.
 
