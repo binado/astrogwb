@@ -30,9 +30,11 @@ pip install astrogwb[io]
   `astrogwb.waveform`.
 - `astrogwb.populations` and `astrogwb.importance` provide BNS reference
   catalog generation, including scrambled Sobol draws.
-- `astrogwb.inference.CatalogModel` predicts spectra and shot-noise moments
-  using an explicit reference catalog, intrinsic density and merger rate.
-  The inference module also provides detector-network likelihoods.
+- `astrogwb.importance.model.CatalogModel` predicts the spectral density and
+  the intensity second moment from an explicit reference catalog, intrinsic
+  density and merger rate.
+- `astrogwb.inference` provides the dense Gaussian detector-network likelihood
+  of any model implementing its `SpectralDensityModel` protocol.
 - `astrogwb.background.simulation.simulate_background` draws segmented detector-pair spectra
   from a supplied physical event pool and observer-frame rate, and
   `astrogwb simulate` runs it on a gwmock-pop population catalogue. See the
@@ -115,8 +117,7 @@ densities cancel and only the ordered mass pair enters the ratio.
 import jax.numpy as jnp
 import numpy as np
 
-from astrogwb.constants import SECONDS_PER_YEAR
-from astrogwb.inference import CatalogModel
+from astrogwb.importance.model import CatalogModel
 from astrogwb.rates import madau_dickinson_rate
 
 
@@ -145,38 +146,45 @@ model = CatalogModel.from_catalog(
     num_redshift_nodes=32,
     minimum_redshift=0.01,
     maximum_redshift=20.0,
-    observation_seconds=SECONDS_PER_YEAR,
 )
-spectrum, power_moment, extras = model.predict(
-    {**params, "mass_width": 1.2, "H0": 70.0, "xi_0": 1.2, "xi_n": 1.91}
+prediction = model(
+    {**params, "mass_width": 1.2, "H0": 70.0, "xi_0": 1.2, "xi_n": 1.91},
+    shot_noise=True,
 )
 ```
 
 When the target intrinsic density matches the proposal throughout the analysis,
 pass `target_matches_proposal=True` in place of `log_prob` to cache the
-unit-weight mean and power moments.
+unit-weight moments.
 
-`spectrum` is the background's mean and `power_moment` the shot-noise moment of
-a Poisson catalog over the observation time. A detector network's likelihood of
-its per-pair cross powers is the dense Gaussian with covariance
-`Sigma + power_moment * R` (elementwise), with `Sigma` the detector noise and
-`R` the network's response moment:
+`prediction.spectral_density` is the background's mean, $S_h = 2\mathcal R\langle I\rangle$,
+and `prediction.intensity_second_moment` is $4\mathcal R\langle I I'\rangle$, the
+raw second moment that sets the shot noise of a Poisson catalog. A detector
+network's likelihood of its per-pair cross powers is the dense Gaussian with
+covariance `Sigma + intensity_second_moment * connected_overlap / T`
+(elementwise), with `Sigma` the detector noise, `connected_overlap` the
+network's sky and polarization average
+(`astrogwb.detector.connected_overlap`) and `T` the observation time. The
+likelihood builds the network from the detectors; the data are keyed by the
+sorted detector-name pair:
 
 ```python
-from astrogwb.detector import pair_response_moment
-from astrogwb.inference import DenseGaussianLikelihood, Network
+from astrogwb.detector import load_detector
+from astrogwb.inference import DenseGaussianLikelihood
 
-network = Network.from_pairs(
-    scale,  # (P, F) per-pair detector noise, pair_bin_scale
-    pair_overlap,  # (P, F) isotropic ORFs
-    mask,  # (P, F) usable entries
-    response_moment=pair_response_moment(
-        jax.random.key(0), 32_768, frequencies, detectors
-    ),
+likelihood = DenseGaussianLikelihood(
+    model,
+    [load_detector(name) for name in ("E1", "E2", "E3")],  # or a network name
+    frequencies=frequencies,
+    observation_time=1.0,  # years
+    observed={("E1", "E2"): c_12, ("E1", "E3"): c_13, ("E2", "E3"): c_23},
 )
-likelihood = DenseGaussianLikelihood(model, network, network.compress(observed))
 log_likelihood, extras = likelihood.log_likelihood(params)
 ```
+
+Any pytree implementing `SpectralDensityModel` works in place of a catalog
+model, for example a `jax.tree_util.Partial` of a module-level function
+returning a `SpectralDensityPrediction`.
 
 ## Experiments
 

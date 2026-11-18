@@ -22,12 +22,12 @@ import numpyro.distributions as dist
 from jax.typing import ArrayLike
 from numpyro import handlers
 
-from astrogwb.constants import ISCO_ALPHA, SECONDS_PER_YEAR
+from astrogwb.constants import ISCO_ALPHA
 from astrogwb.distributions.orientation import UniformCosineDistribution
 from astrogwb.distributions.redshift.base import RedshiftDistribution
-from astrogwb.importance.catalog import IntensityData
+from astrogwb.importance.catalog import IntensityData, ReferenceCatalog
+from astrogwb.importance.model import CatalogModel
 from astrogwb.importance.spectrum import REFERENCE_INCLINATION, reference_catalog
-from astrogwb.inference import CatalogModel, ReferenceCatalog
 from astrogwb.populations import coba
 from astrogwb.populations._types import SourceModel
 from astrogwb.rates import madau_dickinson_rate
@@ -389,7 +389,6 @@ def build_reference_spectrum(
     merger_rate: MergerRate,
     frequencies: ArrayLike | None = None,
     reweight_masses: bool = True,
-    observation_time: float = 1.0,
     num_redshift_nodes: int = NUM_REDSHIFT_NODES,
     minimum_redshift: float = Z_MIN,
     maximum_redshift: float = Z_MAX,
@@ -402,7 +401,6 @@ def build_reference_spectrum(
         num_redshift_nodes=num_redshift_nodes,
         minimum_redshift=minimum_redshift,
         maximum_redshift=maximum_redshift,
-        observation_seconds=observation_time * SECONDS_PER_YEAR,
         log_prob=uniform_bns_log_prob if reweight_masses else None,
         target_matches_proposal=not reweight_masses,
     )

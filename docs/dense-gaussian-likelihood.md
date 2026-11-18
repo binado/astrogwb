@@ -1,7 +1,9 @@
 # Design: the dense Gaussian likelihood
 
-Status: implemented. Supersedes the likelihood parts of the stacked-pair
-design (#382), whose per-pair data layout and simulator output are kept.
+Status: implemented; the model interface was later reorganized behind the
+`SpectralDensityModel` protocol and the paper's connected overlap. Supersedes
+the likelihood parts of the stacked-pair design (#382), whose per-pair data
+layout and simulator output are kept.
 Paper-side paths named below (`paper/posteriors.py`,
 `scripts/shot_noise_budget.py`) now live in `experiments-astrogwb`.
 
@@ -27,27 +29,32 @@ $$
 $$
 
 $\Sigma = {\rm diag}(\sigma^2_{ab,k})$ is the weak-signal detector-noise
-covariance. The connected term factorizes (`eq:catalog-covariance-factorized`)
-into a moment of the source power and a moment of the network response,
+covariance. For the dominant quadrupole the connected term factorizes
+(`eq:cross-correlation-statistic-covariance-connected-quadrupole`) into a
+moment of the source intensity and an average over the network geometry,
 
 $$
-\mathcal C^{\rm Pois}_{ab,k;\,cd,l} = M_{kl}(\Lambda)\, R_{ab,k;\,cd,l},
+\mathcal C^{\rm Pois}_{ab,k;\,cd,l} = \frac{1}{T}\,X_{kl}(\Lambda)\,
+    \Gamma^c_{ab,k;\,cd,l},
 \qquad
-M_{kl} = \frac{\mathcal R}{T} \langle \bar P_k \bar P_l \rangle_{\theta|\Lambda},
+X_{kl} = 4\mathcal R \langle I_k I_l \rangle_{\theta,\iota|\Lambda},
 \qquad
-R_{ab,k;\,cd,l} = \langle g \rangle^2 \gamma_{ab,k}\gamma_{cd,l}
-    \langle r_{ab,k}\, r_{cd,l} \rangle .
+\Gamma^c = \Gamma^{II} + \frac{\Gamma^{QQ} + \Gamma^{UU}}{71}
+    + \frac{69}{71}\Gamma^{VV}.
 $$
 
-$M$ is `(F, F)` and depends on $\Lambda$ but not on the network. $R$ is
-`(D, D)` and depends on the network but not on $\Lambda$. Every design decision
-below follows from that split.
+$X$ is the raw intensity second moment, `(F, F)`, per unit time; it depends on
+$\Lambda$ but not on the network, and carries the inclination average. The
+connected overlap $\Gamma^c$ is `(D, D)` and depends on the network but not on
+$\Lambda$: the sky and polarization average of the pair responses to each
+Stokes parameter. Every design decision below follows from that split.
 
 Units are those of the stacked-pair design: unnormalized cross powers
 with mean $\mu_{ab,k} = \gamma_{ab}(f_k) S_h(f_k|\Lambda)$, which differ from
 the paper's normalized $\bar C_{ab}$ by a fixed per-entry rescaling and give
-the same posterior. The $\langle g \rangle^2 \gamma\gamma$ in $R$ is that
-rescaling applied to the paper's normalized response moment.
+the same posterior. The connected overlap is in the units of the normalized
+isotropic ORF $\gamma_{ab}$; `normalize=False` gives the paper's
+$\Gamma^{\mu\nu}$.
 
 With $\mathcal C^{\rm Pois} = 0$ this is the detector-noise-only likelihood of
 Sec. 2.6.
@@ -112,10 +119,14 @@ whose results are returned, never stored on the instance (a field holding a
 `params`-dependent value goes stale silently under `jit`).
 
 ```python
-class Prediction(NamedTuple):
-    mean: jax.Array                  # (F,)
-    power_moment: jax.Array | None   # (F, F); None without shot noise
-    extras: Mapping[str, jax.Array]  # total_merger_rate, importance_relative_ess
+class SpectralDensityPrediction(NamedTuple):
+    spectral_density: jax.Array                  # (F,), S_h = 2 R <I>
+    intensity_second_moment: jax.Array | None    # (F, F), 4 R <I I'>; None without shot noise
+    extras: Mapping[str, jax.Array]              # fixed keys of scalar diagnostics
+
+
+class SpectralDensityModel(Protocol):            # a pytree
+    def __call__(self, params, *, shot_noise: bool) -> SpectralDensityPrediction: ...
 
 
 class GaussianFactor(NamedTuple):
@@ -124,51 +135,37 @@ class GaussianFactor(NamedTuple):
     log_det: jax.Array               # ()
 
 
-class Evaluation(NamedTuple):        # what the diagnostics read (D7)
-    prediction: Prediction
+class Evaluation(NamedTuple):
+    prediction: SpectralDensityPrediction
     factor: GaussianFactor
 
 
-@dataclass(frozen=True)
-class CatalogModel:                  # was ImportanceGaussianLikelihood, minus data and network
-    @classmethod
-    def from_catalog(cls, catalog, *, frequencies, num_redshift_nodes, merger_rate,
-                     minimum_redshift, maximum_redshift, observation_seconds,
-                     log_prob=None, target_matches_proposal=False) -> Self: ...
-    def spectrum(self, params) -> jax.Array: ...          # (F,)
-    def power_moment(self, params) -> jax.Array: ...      # (F, F)
-    def predict(self, params, *, shot_noise: bool = True) -> Prediction: ...
-
-
-@dataclass(frozen=True)
-class DenseGaussianLikelihood:
-    model: CatalogModel              # data field
-    network: Network                 # data field
-    observed: jax.Array              # data field, (..., D) on the kept entries
-    shot_noise: bool = True          # meta field
-
+class DenseGaussianLikelihood[M: SpectralDensityModel]:   # registered pytree
+    def __init__(self, model: M, network: str | Sequence[Detector], *,
+                 frequencies, observation_time,           # years
+                 observed: Mapping[tuple[str, str], ArrayLike] | None = None,
+                 mask=None, shot_noise=True, key=None, num_draws=2**15): ...
     def log_likelihood(self, params) -> tuple[jax.Array, Mapping[str, jax.Array]]:
         """log L of shape (...), one per realization, and the prediction's extras."""
     def evaluate(self, params) -> Evaluation: ...
-    def _factorize(self, prediction: Prediction) -> GaussianFactor: ...
-    def _score(self, factor: GaussianFactor) -> jax.Array: ...
 ```
 
-Every class is a registered pytree, so a likelihood is a `jit` argument with
-its arrays traced: one compilation per network shape serves every catalog and
-data set of that shape.
+The likelihood's children are the model, its private network and the data;
+`shot_noise` is static. JAX rebuilds it without calling `__init__`, which
+resolves the detectors, builds the noise scale and ORFs and draws the
+connected overlap once, outside JAX transformations: one compilation per
+structure and shape serves every model and data set.
 
-`power_moment` is $M = T^{-1} \sum_z \kappa_z s_z^4 W_z G W_z^T$, today's
-`_fold_node_moments` summed with the variance kernel, computed sparsely (D2a).
-`extras` keeps what the notebooks already plot.
+The model is any pytree implementing the protocol: `CatalogModel`
+(`astrogwb.importance.model`), or a `jax.tree_util.Partial` of a module-level
+function. `extras` keeps what the notebooks already plot.
 
-Realizations share the factor without any `vmap`: `_score` is one triangular
+Realizations share the factor without any `vmap`: the score is one triangular
 solve against `observed` reshaped to `(R, D)`, with $R$ right-hand sides. For
 `shot_noise_coverage` that turns 1000 Cholesky factorizations per grid point
-into one. (A `vmap` over `observed` would give the same: values that do not
-depend on the batched argument stay unbatched.)
+into one.
 
-### D2a. The power moment from sparse interpolation
+### D2a. The intensity second moment from sparse interpolation
 
 With one likelihood per network the prediction is recomputed per network, so it
 must be cheap. Today it is not: `_fold_node_moments` forms each node's
@@ -203,7 +200,7 @@ below it clamp to the first reference value, matching `jnp.interp`'s default.
 
 With `target_matches_proposal=True`, $G$ is constant too, so the node
 moments $s_z^8 W_z G W_z^T$, `(Z, F, F)` (41 MB at $Z = 32$, $F = 400$), are
-formed once in `from_catalog`, and the power moment at each point is one
+formed once in `from_catalog`, and the second moment at each point is one
 contraction with the $\Lambda$-dependent kernel, $Z F^2 \simeq 5$ Mflop. The gather
 above runs per point only when the importance weights vary.
 
@@ -212,33 +209,27 @@ by reference: the catalog arrays and the Gram matrix $G$ on `CatalogModel`
 (every network's likelihood holds the same model, so the device buffers are not
 copied), and the response draws when every network is sampled from one key.
 
-### D3. Response moment: Monte Carlo, once per network
+### D3. Connected overlap: sky Monte Carlo, once per network
 
-$R$ is estimated from isotropic draws of $(\hat n, \psi, \cos\iota)$ with the
-existing `sample_pair_response`, reduced once:
+$\Gamma^c$ is estimated from isotropic draws of $(\hat n, \psi)$; the
+inclination is averaged exactly through the quadrupole's Stokes moments
+$\langle s s^T\rangle_\iota / \langle s_I^2\rangle_\iota$, and the paper's
+$1/71$ and $69/71$ emerge from the polarization average:
 
 ```python
-def pair_response_moment(key, num_draws, frequencies, detectors, *,
-                         chunk_size=4096) -> jax.Array:
-    """(2/5)^2 <r r^T> over the draws, (P, F, P, F)."""
+def connected_overlap(key, num_draws, frequencies, detectors, *,
+                      normalize=True, chunk_size=4096) -> jax.Array:  # (P, F, P, F)
 ```
 
-It accumulates `flat.T @ flat` over chunks of draws with `lax.map`, so the
-`(L, P, F)` draws never sit in memory together, and $L$ is limited only by
-time: $10^6$ draws at $D = 2400$ is about $6 \times 10^{12}$ flops, once.
-
-A sample second moment is positive semidefinite, so $C$ stays positive definite
-and the Cholesky cannot fail because of $R$.
+It accumulates `flat.T @ flat` over chunks of draws with `lax.scan`, so the
+draws never sit in memory together. A sum of outer products is positive
+semidefinite; with a positive semidefinite $X$, the Schur product
+$X \circ \Gamma^c$ is too, so the Cholesky cannot fail because of either.
 
 The Monte Carlo error is the same at every $\Lambda$, a fixed bias in $C$
-rather than noise that averages out. #380 saw the moment still converging at
-$2.6 \times 10^5$ draws for ET-2L-mis + CE. The convergence check is cheap:
-compare the log-likelihood at the fiducials under two independent halves of the
-draws, per network, and report it with the forecasts. The analytic evaluation
-of App. B can replace the estimator later without touching the likelihood.
-
-The likelihood never sees draws: `Network.response` and
-`Network.response_moments` go.
+rather than noise that averages out. The convergence check is cheap: compare
+the log-likelihood at the fiducials under two keys, per network. The analytic
+evaluation can replace the estimator later without touching the likelihood.
 
 ### D4. Build structured, solve flat on the kept entries
 
@@ -256,29 +247,16 @@ dense Cholesky cost. Two things do matter:
   pair has its own usable band near ORF zeros and PSD cutoffs), which only a
   flat vector represents.
 
-```python
-@dataclass(frozen=True)
-class Network:
-    keep: np.ndarray                 # (D,) pair-major indices into (P, F)
-    bins: np.ndarray                 # (D,) frequency index of each kept entry
-    scale: jax.Array                 # (D,) sigma_ab,k
-    pair_overlap: jax.Array          # (D,) gamma_ab(f_k)
-    response_moment: jax.Array | None  # (D, D)
-
-    @classmethod
-    def from_pairs(cls, scale, pair_overlap, mask, response_moment=None) -> Self:
-        """From (P, F) leaves and a (P, F, P, F) moment."""
-
-    def compress(self, values: ArrayLike) -> jax.Array:
-        """(..., P, F) -> (..., D)."""
-```
-
-Then factorize is a gather, a product and a Cholesky, with no tiling:
+The network is private to the likelihood: its kept indices, the frequency
+bin of every entry, the noise scale, the ORF, the observation time and the
+connected overlap on the kept entries. The constructor counts the entries with
+finite noise, optionally masked per pair, and maps the pair-keyed data onto
+them. Then factorize is a gather, a product and a Cholesky, with no tiling:
 
 ```python
-mean = network.pair_overlap * prediction.mean[network.bins]
-cov = prediction.power_moment[network.bins][:, network.bins] * network.response_moment
-cov = cov + jnp.diag(network.scale**2)
+mean = network.pair_overlap * prediction.spectral_density[network.bins]
+cov = prediction.intensity_second_moment[network.bins][:, network.bins]
+cov = cov * network.connected_overlap / seconds + jnp.diag(network.scale**2)
 ```
 
 ### D5. No stacking, no padding
@@ -312,13 +290,17 @@ reads:
 model = CatalogModel.from_catalog(...)
 log_prior = grid_log_prior(priors, grids)
 posteriors = {
-    name: grid_log_likelihood(DenseGaussianLikelihood(model, network, data[name]), grids)
+    name: grid_log_likelihood(
+        DenseGaussianLikelihood(model, detectors, frequencies=frequencies,
+                                observation_time=1.0, observed=data[name]),
+        grids,
+    )
     + log_prior
-    for name, network in networks.items()
+    for name, detectors in networks.items()
 }
 ```
 
-Peak memory per point is one $M$ (1.3 MB at $F = 400$) plus one $C$ (46 MB at
+Peak memory per point is one $X$ (1.3 MB at $F = 400$) plus one $C$ (46 MB at
 $D = 2400$).
 
 Without gradients or NumPyro, the `LogLikelihood` protocol,
@@ -331,19 +313,19 @@ the order of half an hour on CPU and minutes on GPU.
 
 ### D7. Diagnostics, not likelihoods
 
-The paper reports quantities derived from the dense covariance. They move to
-`inference/diagnostics.py`, each a function of an `Evaluation` and its
-`Network` (`likelihood.evaluate(params)`, typically at the fiducials):
+The paper reports quantities derived from the dense covariance. They live in
+`inference/diagnostics.py`, each a function of the likelihood and a parameter
+point (typically the fiducials); none needs data:
 
 - $\sigma_{\rm shot}^2 = \mathbf c^T \mathcal C^{\rm Pois} \mathbf c / \rho^4$
-  with $\mathbf c = \Sigma^{-1}\boldsymbol\mu$ (Sec. 4.3; today
-  `relative_variance`).
+  with $\mathbf c = \Sigma^{-1}\boldsymbol\mu$ (`shot_noise_variance`).
 - The amplitude-shape correction $\delta$ of App. `fisher-amplitude`, and the
   eigenvalues of the whitened covariance, projected orthogonal to the mean
-  (Sec. 4.4 and its figure).
-- The skewness of the amplitude estimator $\hat a$ (Sec. 4.4,
-  App. `catalog-statistics`), from `compound_poisson.cumulants` and the point
-  set. The saddlepoint and Gauss-Hermite densities go.
+  (`shape_correction`, `whitened_catalog_covariance`).
+- The skewness of the amplitude estimator $\hat a$, from per-source response
+  draws folded into templates (`response_templates`) and the catalog's
+  projected cumulants: `astrogwb.importance.diagnostics.amplitude_cumulants`,
+  which needs the catalog itself.
 
 ### D8. Deleted
 
@@ -364,65 +346,28 @@ The paper reports quantities derived from the dense covariance. They move to
 - `scripts/shot_noise_modes_grids.py`; `scripts/common_shape_response.py` if its
   sky-averaged check is no longer cited.
 
-## Module layout after the change
+## Module layout
 
 ```
 inference/
-    gaussian.py      # Network, GaussianFactor, Evaluation, DenseGaussianLikelihood
-    model.py         # CatalogModel, Prediction, sparse node moments
+    model.py         # SpectralDensityModel, SpectralDensityPrediction
+    gaussian.py      # DenseGaussianLikelihood, GaussianFactor, Evaluation, private network
     grid.py          # grid_log_likelihood, grid_log_prior
-    diagnostics.py   # sigma_shot, delta, whitened spectrum, amplitude cumulants
-detector/response.py # + pair_response_moment
+    diagnostics.py   # sigma_shot, delta, whitened spectrum, response templates
+importance/
+    model.py         # CatalogModel, sparse node moments
+    diagnostics.py   # relative ESS, amplitude cumulants
+detector/response.py # connected_overlap, pair_names
 ```
-
-New modules let phase 1 land beside `likelihood.py` without name clashes; phase
-4 deletes `likelihood.py`, `shot_noise.py`, `compound_poisson.py`,
-`density.py` and `protocol.py`.
-
-## Tests
-
-- **T1 dense Gaussian.** `log_likelihood` of a small random factor equals
-  `scipy.stats.multivariate_normal.logpdf`; a diagonal factor equals the sum of
-  univariate log densities.
-- **T2 compression.** The log-likelihood does not depend on the data, scale or
-  response at masked entries, including infinite scales.
-- **T3 realizations.** Scoring `(R, D)` at once equals scoring each realization.
-- **T4 regression.** At the fiducials, `factorize` gives the same covariance as
-  today's `catalog_covariance` under the same response draws (two code paths,
-  kept until phase 4).
-- **T5 chunking.** `pair_response_moment` is independent of `chunk_size` for a
-  fixed key.
-- **T6 grid driver.** `grid_log_likelihood` equals `log_likelihood` at each
-  point; one compilation per likelihood structure, shared by two catalogs or
-  data sets of one shape.
-- **T8 sparse moment.** The gathered `power_moment` equals the dense
-  interpolation path, including queries above and below the reference grid.
-- **T7 limit.** `shot_noise=False` gives the diagonal Gaussian.
-- **Integration.** `shot_noise_coverage` on the dense likelihood: 68% and 95%
-  coverage of $H_0$ per network (`@pytest.mark.integration`).
-
-## Phases (one PR each)
-
-1. **Dense likelihood beside the old one.** `pair_response_moment`,
-   `inference/gaussian.py`, `model.py` with the sparse power moment, `grid.py`;
-   T1-T8.
-2. **Diagnostics.** `diagnostics.py`; port
-   `scripts/shot_noise_budget.py` and the covariance-spectrum figure.
-3. **Paper application.** `paper/posteriors.py` builds compressed `Network`s;
-   the grid, coverage, Madau-Dickinson, ensemble and importance-convergence
-   notebooks switch over; re-run and regenerate the figures and tables.
-4. **Delete.** Everything in D8, the old tests
-   (`test_likelihood.py`, `test_shot_noise.py`, `test_compound_poisson.py`,
-   `test_inference_density.py` in their current form) and the stale
-   `stacked-pair-likelihood.md` sections.
 
 ## Paper impact
 
 - Sec. 3.3 says the forecasts use NUTS; they use grids. It should describe the
   grid evaluation.
-- Sec. 3.3 says the response moment is "computed once following Appendix"; it
-  becomes a Monte Carlo estimate over $L$ isotropic draws, with the split-half
-  convergence check of D3.
+- Sec. 3.3 says the angular part is computed "by averaging the products of the
+  per-source pair responses" over sky, polarization and inclination draws; it
+  is the connected overlap, a Monte Carlo over sky and polarization with the
+  inclination averaged exactly (D3).
 
 ## Open questions
 

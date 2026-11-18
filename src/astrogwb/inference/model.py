@@ -1,455 +1,88 @@
-r"""The mean and the power moment of a background predicted from a reference catalog.
+r"""What the dense Gaussian likelihood needs from a background model.
 
-A :class:`CatalogModel` binds a
-:class:`~astrogwb.importance.catalog.ReferenceCatalog` to a target population
-on the observed grid. At every parameter point it predicts the two
-network-independent ingredients of the dense Gaussian likelihood
-(:mod:`astrogwb.inference.gaussian`): the spectrum :math:`S(f_k)` of
-:mod:`astrogwb.importance.spectrum`, and the power moment of a Poisson catalog
-realization over an observation time :math:`T`,
+For the dominant quadrupole, the likelihood of the stacked cross-correlation
+data depends on the population through two moments of the source intensity
+:math:`I(f)`: the spectral density, which sets the mean,
 
 .. math::
 
-    M_{kl} = \frac{(2/5)^2}{T} \sum_z \kappa_z\, s_z^8
-        \left[W_z G W_z^T\right]_{kl}, \qquad
-    G = \frac{1}{N} \sum_i w_i\, \mathbf P_i \mathbf P_i^T,
+    S_h(f) = 2\mathcal R\,\langle I(f)\rangle,
 
-with :math:`\kappa_z` the spectrum's kernel times
-:math:`(d^{\mathrm{ref}}/d_{GW})^2` at node :math:`z`, :math:`s_z^4` the
-node's intensity rescaling, :math:`W_z` its linear interpolation in
-:math:`\ln f` from the reference grid, and :math:`G` the importance-weighted
-Gram matrix of the face-on catalog intensity. The factor :math:`(2/5)^2`
-converts the face-on intensity product to the isotropic one; the inclination,
-sky and polarization scatter is the network's response moment, which
-multiplies :math:`M` elementwise.
+and the raw intensity second moment, which sets the connected (shot-noise)
+covariance of a catalog realization over :math:`T = N_{\rm seg}\tau`,
 
-The redshift nodes and the reference redshift are fixed, so the query
-frequencies, and with them :math:`W_z`, do not depend on the parameters. Each
-row of :math:`W_z` has at most two nonzero weights, held as indices and
-weights, ``(Z, F)`` and ``(Z, F, 2)``. When the target matches the proposal,
-the weights :math:`w_i` are one and the node moments :math:`s_z^8 W_z G W_z^T`,
-``(Z, F, F)``, are formed once; otherwise :math:`G` is weighted per point and
-each node gathers four ``(F, F)`` slices of it.
+.. math::
+
+    \frac{1}{N_{\rm seg}}\Sigma^c_{ab,cd}(f, f') = \frac{1}{T}
+        \left[4\mathcal R\,\langle I(f)\, I(f')\rangle\right]
+        \Gamma^c_{ab,cd}(f, f'),
+
+with :math:`\mathcal R` the total observer-frame merger rate and
+:math:`\Gamma^c` the network's connected overlap
+(:func:`~astrogwb.detector.response.connected_overlap`). The averages run over
+inclination, polarization, phase, intrinsic parameters and redshift. A model
+implements :class:`SpectralDensityModel`; the likelihood supplies the network
+and :math:`T`.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
-from typing import NamedTuple, Self
+from typing import NamedTuple, Protocol
 
 import jax
-import jax.numpy as jnp
 from jax.typing import ArrayLike
 
-from astrogwb.cosmology import luminosity_distance
-from astrogwb.importance.catalog import ReferenceCatalog
-from astrogwb.importance.diagnostics import relative_ess
-from astrogwb.importance.spectrum import (
-    INCLINATION_MEAN,
-    IntrinsicLogProb,
-    MergerRate,
-    _node_intensity,
-    _rescaling_arrays,
-    _shared_terms,
-    _SharedTerms,
-    _weighted_mean_intensity,
-)
-
-__all__ = ["CatalogModel", "Prediction", "interpolation_weights"]
+__all__ = ["SpectralDensityModel", "SpectralDensityPrediction"]
 
 
-class Prediction(NamedTuple):
-    """What a :class:`CatalogModel` predicts at one parameter point.
+class SpectralDensityPrediction(NamedTuple):
+    r"""A background model's moments at one parameter point.
 
     Attributes
     ----------
-    mean
-        The spectrum, ``(F,)``.
-    power_moment
-        The power moment :math:`M`, ``(F, F)``, or ``None`` when shot noise is
-        not predicted.
+    spectral_density
+        :math:`S_h(f_k) = 2\mathcal R\langle I(f_k)\rangle`, ``(F,)``.
+    intensity_second_moment
+        :math:`4\mathcal R\langle I(f_k)\, I(f_l)\rangle`, ``(F, F)``, or
+        ``None`` when shot noise is not predicted. A raw moment, not a
+        covariance: it includes the count fluctuations. Per unit time, in
+        :math:`S_h^2` seconds, and symmetric positive semidefinite up to
+        round-off.
     extras
-        ``total_merger_rate`` (observer frame, mergers per second) and
-        ``importance_relative_ess``, both ``()``.
+        Scalar diagnostics, with the same keys at every parameter point.
     """
 
-    mean: jax.Array
-    power_moment: jax.Array | None
+    spectral_density: jax.Array
+    intensity_second_moment: jax.Array | None
     extras: Mapping[str, jax.Array]
 
 
-def interpolation_weights(
-    query: ArrayLike, reference: ArrayLike
-) -> tuple[jax.Array, jax.Array]:
-    r"""Linear interpolation from ``reference`` to ``query`` as two weights per row.
+class SpectralDensityModel(Protocol):
+    """A quadrupole background model for the dense Gaussian likelihood.
 
-    Returns the lower reference index :math:`i_k`, ``(F,)``, and the weights
-    :math:`(1 - t_k, t_k)` of entries :math:`i_k` and :math:`i_k + 1`,
-    ``(F, 2)``, such that :math:`\sum_a w_{k,a} v_{i_k + a}` equals
-    ``jnp.interp(query, reference, v, right=0.0)`` for any ``v``: queries
-    below ``reference`` take its first value, queries above it zero.
+    Implementations are JAX pytrees whose arrays are leaves, either a
+    registered dataclass or a :class:`jax.tree_util.Partial` of a module-level
+    function, so that the likelihood traces them and one compilation serves
+    every model of the same structure and shapes. Their moments are on the
+    frequency grid the likelihood is built on.
 
-    Parameters
-    ----------
-    query
-        Points to interpolate at, ``(F,)``.
-    reference
-        Increasing reference points, ``(F_ref,)``, at least two.
-    """
-    query = jnp.asarray(query)
-    reference = jnp.asarray(reference)
-    index = jnp.clip(
-        jnp.searchsorted(reference, query, side="right") - 1,
-        0,
-        reference.shape[0] - 2,
-    )
-    lower, upper = reference[index], reference[index + 1]
-    fraction = jnp.clip((query - lower) / (upper - lower), 0.0, 1.0)
-    weights = jnp.stack([1.0 - fraction, fraction], axis=-1)
-    return index, jnp.where((query > reference[-1])[:, None], 0.0, weights)
-
-
-def _node_moment(index: jax.Array, weights: jax.Array, gram: jax.Array) -> jax.Array:
-    """:math:`W G W^T` for one node's interpolation, from four gathered slices, ``(F, F)``."""
-    rows = jnp.stack([index, index + 1], axis=1)
-    block = gram[rows[:, :, None, None], rows[None, None, :, :]]
-    return jnp.einsum("ka,kalb,lb->kl", weights, block, weights)
-
-
-def _node_moments(
-    index: jax.Array, weights: jax.Array, gram: jax.Array, amplitude: jax.Array
-) -> jax.Array:
-    r""":math:`s_z^8 W_z G W_z^T` at every node, ``(Z, F, F)``."""
-    moments = jax.lax.map(
-        lambda inputs: _node_moment(inputs[0], inputs[1], gram), (index, weights)
-    )
-    return amplitude[:, None, None] ** 2 * moments
-
-
-@dataclass(frozen=True)
-class CatalogModel:
-    r"""The spectrum and power moment of a rescaled reference catalog.
-
-    Every array is a data field, so one compilation serves every catalog of
-    the same shape and callables. The callables are static. Build
-    with :meth:`from_catalog`; every method is traceable.
-
-    Attributes
-    ----------
-    intensity
-        Literal face-on reference-catalog intensity, ``(F_ref, N)``.
-    mean_intensity
-        Its mean over draws, ``(F_ref,)``, cached when the target matches the proposal.
-    node_moments
-        :math:`s_z^8 W_z G W_z^T`, ``(Z, F, F)``, cached with the mean intensity.
-    interpolation_index, interpolation_weight
-        The two-weight form of every node's :math:`W_z`
-        (:func:`interpolation_weights`), ``(Z, F)`` and ``(Z, F, 2)``.
-    intrinsic, proposal_log_prob, log_reference_frequencies, query_log_frequencies,
-    amplitude, redshift, redshift_weights, reference_distance
-        The arrays of :func:`~astrogwb.importance.spectrum._rescaling_arrays`.
-    observation_seconds
-        Observation time :math:`T` in seconds, ``()``.
-    merger_rate, log_prob
-        The source-frame merger rate density and joint intrinsic log density
-        of the target. If the target matches the proposal, ``log_prob`` is ``None``.
+    Flags such as ``shot_noise`` are passed at call time, never bound into a
+    ``Partial``: bound values are traced, and a traced flag cannot select a
+    branch. A closure or lambda is a new static function at every
+    construction and compiles anew each time.
     """
 
-    intensity: jax.Array
-    mean_intensity: jax.Array | None
-    node_moments: jax.Array | None
-    interpolation_index: jax.Array
-    interpolation_weight: jax.Array
-    intrinsic: Mapping[str, jax.Array]
-    proposal_log_prob: jax.Array
-    log_reference_frequencies: jax.Array
-    query_log_frequencies: jax.Array
-    amplitude: jax.Array
-    redshift: jax.Array
-    redshift_weights: jax.Array
-    reference_distance: jax.Array
-    observation_seconds: jax.Array
-    merger_rate: MergerRate
-    log_prob: IntrinsicLogProb | None
-
-    @classmethod
-    def from_catalog(
-        cls,
-        catalog: ReferenceCatalog,
-        *,
-        frequencies: ArrayLike,
-        num_redshift_nodes: int,
-        merger_rate: MergerRate,
-        minimum_redshift: float,
-        maximum_redshift: float,
-        observation_seconds: float,
-        log_prob: IntrinsicLogProb | None = None,
-        target_matches_proposal: bool = False,
-    ) -> Self:
-        """Bind a reference catalog to a target on the observed ``frequencies``.
-
-        Redshift is integrated over the specified window. Call outside JAX
-        transformations. Pass hashable, JAX-traceable callables and supply
-        catalog-sized arrays through the reference catalog.
-
-        Parameters
-        ----------
-        catalog
-            Reference intensities, intrinsic draws, proposal density and geometry.
-        frequencies
-            Observed frequency grid in Hz, ``(F,)``.
-        num_redshift_nodes
-            Number of redshift quadrature nodes.
-        merger_rate
-            Source-frame merger rate density in Gpc^-3 yr^-1, evaluated as
-            ``merger_rate(redshift, params)``.
-        log_prob
-            Target joint intrinsic log density, evaluated as
-            ``log_prob(intrinsic, params)`` with shape ``(N,)``. Use negative
-            infinity outside target support. The absolute weights are
-            ``exp(log_prob - proposal_log_prob)``; the proposal must cover the
-            target's support.
-        minimum_redshift, maximum_redshift
-            Increasing integration bounds with the lower bound at or above
-            the reference redshift.
-        observation_seconds
-            Positive observation time in seconds.
-        target_matches_proposal
-            Set to true in place of ``log_prob`` when both intrinsic densities
-            are identical throughout the calculation. Caches the unit-weight moments.
-        """
-        if target_matches_proposal != (log_prob is None):
-            raise TypeError("pass either log_prob or target_matches_proposal=True")
-        arrays = _rescaling_arrays(
-            catalog,
-            frequencies,
-            num_redshift_nodes,
-            minimum_redshift,
-            maximum_redshift,
-        )
-        intensity = jnp.asarray(catalog.intensity, dtype=jnp.float64)
-        index, weight = jax.vmap(interpolation_weights, in_axes=(1, None))(
-            arrays["query_log_frequencies"], arrays["log_reference_frequencies"]
-        )
-        constant = log_prob is None
-        return cls(
-            intensity=intensity,
-            mean_intensity=jnp.mean(intensity, axis=1) if constant else None,
-            node_moments=(
-                _node_moments(
-                    index,
-                    weight,
-                    intensity @ intensity.T / intensity.shape[1],
-                    arrays["amplitude"],
-                )
-                if constant
-                else None
-            ),
-            interpolation_index=index,
-            interpolation_weight=weight,
-            observation_seconds=jnp.asarray(observation_seconds),
-            merger_rate=merger_rate,
-            log_prob=log_prob,
-            **arrays,
-        )
-
-    def _shared(self, params: Mapping[str, ArrayLike]) -> _SharedTerms:
-        return _shared_terms(
-            params,
-            merger_rate=self.merger_rate,
-            log_prob=self.log_prob,
-            intrinsic=self.intrinsic,
-            proposal_log_prob=self.proposal_log_prob,
-            redshift=self.redshift,
-            redshift_weights=self.redshift_weights,
-            reference_distance=self.reference_distance,
-        )
-
-    def _variance_kernel(self, shared: _SharedTerms) -> jax.Array:
-        r""":math:`\kappa_z`: the kernel times :math:`(d^{\mathrm{ref}}/d_{GW})^2`, ``(Z,)``.
-
-        A second moment of the intensity carries the distance rescaling twice.
-        """
-        return shared.kernel * self._squared_distance_ratio(shared)
-
-    def _squared_distance_ratio(self, shared: _SharedTerms) -> jax.Array:
-        r""":math:`(d^{\mathrm{ref}}/d_{GW})^2` at each redshift node, ``(Z,)``."""
-        gw_distance = shared.distance_ratio * luminosity_distance(
-            self.redshift, shared.hubble_constant, shared.omega_m
-        )
-        return (self.reference_distance / gw_distance) ** 2
-
-    def _pullback(self, projector: jax.Array) -> jax.Array:
-        r""":math:`W_z^T \mathbf v` at every node, ``(Z, F_ref)``, for ``projector`` ``(F,)``."""
-
-        def node(index: jax.Array, weight: jax.Array) -> jax.Array:
-            reference = jnp.zeros(self.log_reference_frequencies.shape[0])
-            reference = reference.at[index].add(weight[:, 0] * projector)
-            return reference.at[index + 1].add(weight[:, 1] * projector)
-
-        return jax.vmap(node)(self.interpolation_index, self.interpolation_weight)
-
-    def projected_cumulants(
-        self,
-        params: Mapping[str, ArrayLike],
-        projectors: ArrayLike,
-        orders: tuple[int, ...] = (2, 3),
-    ) -> jax.Array:
-        r"""Cumulants of a catalog realization projected on a per-source random template.
-
-        A realization over :math:`T` is the compound-Poisson sum
-        :math:`\sum_i \beta_i` over its sources, with
-        :math:`\beta_i = (2/5)\, \mathbf v_{l_i}^T \mathbf P_i / T`, source
-        :math:`i`'s face-on intensity on the observed grid projected on
-        ``projectors[l_i]``, its row drawn uniformly per source (a response draw
-        folded into the template). Its :math:`n`-th cumulant is the expected
-        count times the raw moment,
-
-        .. math::
-
-            \kappa_n = \sum_{z, j} a_{zj}\, \frac{1}{L} \sum_l \beta_{zjl}^n,
-            \qquad a_{zj} = \frac{T \kappa^{\rm mean}_z}{q_z} \frac{w_j}{N},
-
-        with :math:`q_z = (d^{\mathrm{ref}}/d_{GW})^2` moved from the counts
-        into :math:`\beta`. The second cumulant along constant rows
-        :math:`\mathbf v` is :math:`\mathbf v^T M \mathbf v`. Costs
-        :math:`L Z F_{\rm ref} N`.
-
-        Parameters
-        ----------
-        params
-            Model parameter values.
-        projectors
-            Per-draw templates :math:`\mathbf v_l` on the observed grid, ``(L, F)``.
-        orders
-            Cumulant orders, each at least one; static.
-
-        Returns
-        -------
-        jax.Array
-            :math:`\kappa_n` for each of ``orders``, ``(len(orders),)``.
-        """
-        shared = self._shared(params)
-        ratio = self._squared_distance_ratio(shared)
-        weights = jnp.exp(shared.log_weights) / shared.log_weights.shape[0]
-        counts = (self.observation_seconds * shared.kernel / ratio)[:, None] * weights
-        scale = (INCLINATION_MEAN * ratio * self.amplitude / self.observation_seconds)[
-            :, None
-        ]
-
-        def per_draw(projector: jax.Array) -> jax.Array:
-            contributions = scale * (self._pullback(projector) @ self.intensity)
-            return jnp.stack(
-                [jnp.sum(counts * contributions**order) for order in orders]
-            )
-
-        return jnp.mean(jax.lax.map(per_draw, jnp.asarray(projectors)), axis=0)
-
-    def _mean(self, shared: _SharedTerms) -> jax.Array:
-        mean_intensity = self.mean_intensity
-        if mean_intensity is None:
-            mean_intensity = _weighted_mean_intensity(
-                self.intensity, shared.log_weights
-            )
-        node_intensity = _node_intensity(
-            mean_intensity,
-            self.log_reference_frequencies,
-            self.query_log_frequencies,
-            self.amplitude,
-        )
-        return INCLINATION_MEAN * (node_intensity @ shared.kernel)
-
-    def _power_moment(self, shared: _SharedTerms) -> jax.Array:
-        moments = self.node_moments
-        if moments is None:
-            weights = jnp.exp(shared.log_weights) / shared.log_weights.shape[0]
-            gram = (self.intensity * weights) @ self.intensity.T
-            moments = _node_moments(
-                self.interpolation_index,
-                self.interpolation_weight,
-                gram,
-                self.amplitude,
-            )
-        moment = (
-            INCLINATION_MEAN**2
-            * jnp.einsum("z,zkl->kl", self._variance_kernel(shared), moments)
-            / self.observation_seconds
-        )
-        # Symmetric to round-off only; made exact for the Cholesky downstream.
-        return 0.5 * (moment + moment.T)
-
-    def spectrum(self, params: Mapping[str, ArrayLike]) -> jax.Array:
-        """The spectrum at ``params``, ``(F,)``.
-
-        Parameters
-        ----------
-        params
-            Model parameter values.
-        """
-        return self._mean(self._shared(params))
-
-    def power_moment(self, params: Mapping[str, ArrayLike]) -> jax.Array:
-        """The power moment :math:`M` at ``params``, ``(F, F)``.
-
-        Parameters
-        ----------
-        params
-            Model parameter values.
-        """
-        return self._power_moment(self._shared(params))
-
-    def log_weights(self, params: Mapping[str, ArrayLike]) -> jax.Array:
-        """Per-draw intrinsic log importance weights at ``params``, ``(N,)``.
-
-        Parameters
-        ----------
-        params
-            Model parameter values.
-        """
-        return self._shared(params).log_weights
-
-    def predict(
-        self, params: Mapping[str, ArrayLike], *, shot_noise: bool = True
-    ) -> Prediction:
-        """The spectrum, the power moment and the extras at ``params``.
+    def __call__(
+        self, params: Mapping[str, ArrayLike], *, shot_noise: bool
+    ) -> SpectralDensityPrediction:
+        """The moments at ``params``.
 
         Parameters
         ----------
         params
             Model parameter values.
         shot_noise
-            Whether to predict the power moment; static.
+            Whether to predict the intensity second moment; static.
         """
-        shared = self._shared(params)
-        extras = {
-            "total_merger_rate": shared.total_rate,
-            "importance_relative_ess": relative_ess(shared.log_weights),
-        }
-        return Prediction(
-            self._mean(shared),
-            self._power_moment(shared) if shot_noise else None,
-            extras,
-        )
-
-
-jax.tree_util.register_dataclass(
-    CatalogModel,
-    data_fields=[
-        "intensity",
-        "mean_intensity",
-        "node_moments",
-        "interpolation_index",
-        "interpolation_weight",
-        "intrinsic",
-        "proposal_log_prob",
-        "log_reference_frequencies",
-        "query_log_frequencies",
-        "amplitude",
-        "redshift",
-        "redshift_weights",
-        "reference_distance",
-        "observation_seconds",
-    ],
-    meta_fields=["merger_rate", "log_prob"],
-)
+        ...

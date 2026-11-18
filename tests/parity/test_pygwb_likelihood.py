@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import cast
 
 import jax
 import jax.numpy as jnp
@@ -22,30 +21,37 @@ from jax.typing import ArrayLike
 from numpy.typing import NDArray
 
 from astrogwb.background.spectral import spectral_density_from_omega_gw
-from astrogwb.detector import Detector, pair_bin_scale, pair_terms
-from astrogwb.inference import DenseGaussianLikelihood, Network
-from astrogwb.inference.model import CatalogModel, Prediction
+from astrogwb.detector import Detector, pair_names
+from astrogwb.inference import DenseGaussianLikelihood, SpectralDensityPrediction
 
 
 @dataclass(frozen=True)
 class PowerLawSpectrum:
-    """A power-law energy spectrum, standing in for a catalog model."""
+    """A power-law energy spectrum, a spectral-density model without shot noise."""
 
     frequencies: jax.Array
     reference_frequency: float
     hubble_constant: float
 
-    def predict(
+    def __call__(
         self, params: Mapping[str, ArrayLike], *, shot_noise: bool
-    ) -> Prediction:
-        del shot_noise
+    ) -> SpectralDensityPrediction:
+        if shot_noise:
+            raise ValueError("a power law has no shot noise")
         omega = jnp.asarray(params["omega_ref"]) * (
             self.frequencies / self.reference_frequency
         ) ** jnp.asarray(params["alpha"])
-        mean = spectral_density_from_omega_gw(
+        density = spectral_density_from_omega_gw(
             omega, self.frequencies, hubble_constant=self.hubble_constant
         )
-        return Prediction(mean=mean, power_moment=None, extras={})
+        return SpectralDensityPrediction(density, None, {})
+
+
+jax.tree_util.register_dataclass(
+    PowerLawSpectrum,
+    data_fields=["frequencies"],
+    meta_fields=["reference_frequency", "hubble_constant"],
+)
 
 
 @pytest.fixture
@@ -55,27 +61,26 @@ def likelihood(
     hubble_constant: float,
     observation_years: float,
     exact_detectors: tuple[Detector, ...],
-) -> DenseGaussianLikelihood:
-    network = Network.from_pairs(
-        pair_bin_scale(frequencies, exact_detectors, observation_years),
-        np.stack([term.overlap for term in pair_terms(frequencies, exact_detectors)]),
-    )
+) -> DenseGaussianLikelihood[PowerLawSpectrum]:
     model = PowerLawSpectrum(
         jnp.asarray(frequencies),
         float(pygwb_reference["reference_frequency"]),
         hubble_constant,
     )
+    csd = pygwb_reference["csd"] / PYGWB_POWER_FRACTION
     return DenseGaussianLikelihood(
-        model=cast(CatalogModel, model),
-        network=network,
-        observed=network.compress(pygwb_reference["csd"] / PYGWB_POWER_FRACTION),
+        model,
+        exact_detectors,
+        frequencies=frequencies,
+        observation_time=observation_years,
+        observed=dict(zip(pair_names(exact_detectors), csd, strict=True)),
         shot_noise=False,
     )
 
 
 def test_log_likelihood_differences_match_pygwb(
     pygwb_reference: Mapping[str, NDArray[np.float64]],
-    likelihood: DenseGaussianLikelihood,
+    likelihood: DenseGaussianLikelihood[PowerLawSpectrum],
 ) -> None:
     values = jnp.stack(
         [
