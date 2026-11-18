@@ -21,7 +21,7 @@ from astrogwb.background.simulation import (
     project_background,
     simulate_background,
 )
-from astrogwb.background.simulation import simulate as background_module
+from astrogwb.background.simulation import draw as background_module
 from astrogwb.detector import (
     DetectorRegistry,
     isotropic_overlap_reduction_function,

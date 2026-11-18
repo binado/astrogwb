@@ -14,7 +14,7 @@ from typing import TypedDict
 import numpy as np
 from numpy.typing import NDArray
 
-from astrogwb.background.simulation.simulate import BackgroundDraw, read_background
+from astrogwb.background.simulation.draw import BackgroundDraw, read_background
 
 __all__ = ["NetworkSpectra", "network_spectra_ensemble"]
 

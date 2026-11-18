@@ -2,12 +2,7 @@
 
 from astrogwb.background.simulation._keys import realization_key
 from astrogwb.background.simulation.config import SimulationConfig
-from astrogwb.background.simulation.ensemble import (
-    NetworkSpectra,
-    network_spectra_ensemble,
-)
-from astrogwb.background.simulation.pool import read_event_pool
-from astrogwb.background.simulation.simulate import (
+from astrogwb.background.simulation.draw import (
     BackgroundDraw,
     NetworkNoise,
     combine_pair_spectra,
@@ -17,6 +12,11 @@ from astrogwb.background.simulation.simulate import (
     simulate_background,
     write_background,
 )
+from astrogwb.background.simulation.ensemble import (
+    NetworkSpectra,
+    network_spectra_ensemble,
+)
+from astrogwb.background.simulation.pool import read_event_pool
 from astrogwb.populations.sampling import simulate_sources
 
 __all__ = [

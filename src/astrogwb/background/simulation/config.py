@@ -20,7 +20,7 @@ class SimulationConfig(BaseModel):
     population the event pool represents. The observation is ``num_segments``
     segments of ``segment_seconds`` each. With ``incoherent`` the spectra are
     the noiseless sums of event powers; otherwise each segment adds coherent
-    strain and detector noise (see :mod:`astrogwb.background.simulation.simulate`).
+    strain and detector noise (see :mod:`astrogwb.background.simulation.draw`).
 
     ``population``, ``seed`` and ``index`` record where the pool came from and
     the key the draw was made at. They are provenance: they do not change how
