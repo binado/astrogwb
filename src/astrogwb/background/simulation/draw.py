@@ -28,8 +28,8 @@ reduction function of the native geometry. For an isotropic, unpolarized
 population this gives :math:`E[Y_{ab}] = \gamma_{ab} S_h`. The sum is never
 divided by the realized count.
 
-Every pair of the union of the networks' detectors is projected once per chunk
-in one fused kernel, and each network keeps its own rows, ``(P_n, F)``.
+Each pair requested by at least one network is projected once per chunk in
+one fused kernel, and each network keeps its own rows, ``(P_n, F)``.
 :func:`combine_pair_spectra` weights them into a network spectrum ``(F,)`` on
 demand.
 
@@ -69,9 +69,9 @@ A background is stored with :func:`write_background` together with the
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping, Sequence
 from functools import cache
-from itertools import combinations
 from pathlib import Path
 from typing import NamedTuple
 
@@ -83,14 +83,14 @@ from numpy.typing import NDArray
 
 from astrogwb import __version__
 from astrogwb.background.simulation._chunks import iter_rows, pad_rows
-from astrogwb.background.simulation.config import SimulationConfig
+from astrogwb.background.simulation.config import SimulationConfig, _network_detectors
 from astrogwb.detector import (
+    DetectorNetworkConfig,
     effective_psd,
     gaussian_bin_scale,
     pair_bin_scale,
     pair_terms,
 )
-from astrogwb.detector.config import DetectorRegistry
 from astrogwb.detector.projection import project_polarizations_fd
 from astrogwb.frequency import bin_widths
 from astrogwb.utils import years_to_seconds
@@ -106,7 +106,6 @@ __all__ = [
     "network_noise",
     "project_background",
     "read_background",
-    "select_networks",
     "simulate_background",
     "write_background",
 ]
@@ -132,7 +131,7 @@ class NetworkNoise(NamedTuple):
     :func:`~astrogwb.detector.pair_bin_scale`, ``(P_n, F)``; ``effective_psd``
     the network's :func:`~astrogwb.detector.effective_psd`, ``(F,)``; ``scale``
     its :func:`~astrogwb.detector.gaussian_bin_scale`, ``(F,)``. The pairs are
-    in the order of :meth:`DetectorRegistry.pairs`.
+    in the order of :meth:`DetectorNetworkConfig.pairs`.
     """
 
     pair_overlap: NDArray[np.float64]
@@ -141,58 +140,13 @@ class NetworkNoise(NamedTuple):
     scale: NDArray[np.float64]
 
 
-def select_networks(
-    registry: DetectorRegistry, names: Sequence[str] | None = None
-) -> tuple[str, ...]:
-    """The sorted network names ``names`` (default all) of ``registry``.
-
-    A network needs at least two detectors to have a pair.
-
-    Parameters
-    ----------
-    registry
-        Detector registry.
-    names
-        Names to select.
-
-    Raises
-    ------
-    ValueError
-        If the registry defines no networks, or a selected network has fewer
-        than two detectors.
-    """
-    selected = tuple(sorted(registry.networks if names is None else names))
-    if not selected:
-        raise ValueError(
-            "a background needs at least one network; the registry has none"
-        )
-    for name in selected:
-        members = registry.networks[name]
-        if len(members) < 2:
-            raise ValueError(f"network {name!r} must contain at least two detectors")
-    return selected
-
-
-def used_detectors(registry: DetectorRegistry, names: Sequence[str]) -> tuple[str, ...]:
-    """The sorted detectors that appear in the networks ``names`` of ``registry``.
-
-    Parameters
-    ----------
-    registry
-        Detector registry.
-    names
-        Names to select.
-    """
-    return tuple(sorted(registry.select(names).detectors))
-
-
 class _Geometry(NamedTuple):
-    """The detectors of a registry's networks, as the kernels consume them.
+    """The joint detector and pair axes, as the kernels consume them.
 
     ``tensors`` ``(D, 3, 3)``, ``locations`` ``(D, 3)`` and ``psds`` ``(D, F)``
-    cover the union of the networks' detectors; ``pairs`` indexes every pair
-    of them, and ``rows[name]`` the rows of ``pairs`` network ``name`` keeps,
-    in the order of :meth:`DetectorRegistry.pairs`.
+    cover the union of the networks' detectors. ``pairs`` indexes only pairs
+    requested by a network; ``rows[name]`` selects the rows for network ``name``
+    in the order of :meth:`DetectorNetworkConfig.pairs`.
     """
 
     tensors: NDArray[np.float64]
@@ -203,19 +157,30 @@ class _Geometry(NamedTuple):
 
 
 def _network_geometry(
-    registry: DetectorRegistry, frequencies: NDArray[np.float64]
+    networks: Sequence[DetectorNetworkConfig], frequencies: NDArray[np.float64]
 ) -> _Geometry:
-    """The :class:`_Geometry` of every network of ``registry``."""
-    networks = select_networks(registry)
-    names = used_detectors(registry, networks)
-    rows = {pair: row for row, pair in enumerate(combinations(names, 2))}
-    detectors = registry.build_detectors(names)
+    """Index the requested pairs over the shared detector axis."""
+    definitions = _network_detectors(networks)
+    names = sorted(definitions)
+    detector_index = {name: index for index, name in enumerate(names)}
+    detectors = tuple(definitions[name].to_detector(name) for name in names)
+    network_pairs = {
+        network.name: network.pairs()
+        for network in sorted(networks, key=lambda network: network.name)
+    }
+    pairs = sorted({pair for members in network_pairs.values() for pair in members})
+    rows = {pair: row for row, pair in enumerate(pairs)}
     return _Geometry(
         tensors=np.stack([det.geometry.response_tensor for det in detectors]),
         locations=np.stack([det.geometry.location for det in detectors]),
         psds=np.stack([np.asarray(det.sensitivity(frequencies)) for det in detectors]),
-        pairs=tuple(combinations(range(len(detectors)), 2)),
-        rows={name: [rows[pair] for pair in registry.pairs(name)] for name in networks},
+        pairs=tuple(
+            (detector_index[first], detector_index[second]) for first, second in pairs
+        ),
+        rows={
+            name: [rows[pair] for pair in members]
+            for name, members in network_pairs.items()
+        },
     )
 
 
@@ -318,7 +283,7 @@ def _kernels(
 
 
 class BackgroundDraw(NamedTuple):
-    """The realized background of the networks of a registry.
+    """One realized background projected onto the requested networks.
 
     Attributes
     ----------
@@ -327,7 +292,7 @@ class BackgroundDraw(NamedTuple):
     spectra
         Each network's pair spectra :math:`Y_{ab}` in :math:`\\mathrm{Hz}^{-1}`,
         ``(P_n, F)``, keyed by network name. The pair axis follows
-        :meth:`~astrogwb.detector.config.DetectorRegistry.pairs`.
+        :meth:`~astrogwb.detector.config.DetectorNetworkConfig.pairs`.
     segment_counts
         The number of events in each segment, ``(num_segments,)``. The
         projection of :func:`project_background` has one entry for the whole
@@ -364,7 +329,7 @@ def write_background(
         The file written.
     """
     with atomic_h5(path) as file:
-        file.attrs["metadata"] = config.model_dump_json()
+        file.attrs["metadata"] = json.dumps(config.to_metadata())
         file.attrs["version"] = __version__
         file.create_dataset("frequencies", data=draw.frequencies)
         file.create_dataset("segment_counts", data=draw.segment_counts)
@@ -402,7 +367,7 @@ def read_background(path: str | Path) -> tuple[BackgroundDraw, SimulationConfig]
                 f"{path} was written by astrogwb {version}, but {__version__} "
                 "is installed; regenerate the background"
             )
-        config = SimulationConfig.model_validate_json(file.attrs["metadata"])
+        config = SimulationConfig.from_metadata(json.loads(file.attrs["metadata"]))
         stored = file["networks"]
         draw = BackgroundDraw(
             np.asarray(file["frequencies"][()], dtype=np.float64),
@@ -431,14 +396,13 @@ def network_noise(
     frequencies
         The background's frequency grid in Hz, ``(F,)``.
     """
-    registry = config.detectors
     grid = np.asarray(frequencies, dtype=np.float64)
     years = config.observation_seconds / years_to_seconds(1.0)
     noise = {}
-    for name in select_networks(registry):
-        detectors = registry.build_network(name)
+    for network in sorted(config.networks, key=lambda network: network.name):
+        detectors = network.build_detectors()
         psd = effective_psd(grid, detectors)
-        noise[name] = NetworkNoise(
+        noise[network.name] = NetworkNoise(
             pair_overlap=np.stack(
                 [term.overlap for term in pair_terms(grid, detectors)]
             ),
@@ -477,18 +441,18 @@ def _event_columns(
 
 
 def _projection(
-    waveform: WaveformMetadata, detectors: DetectorRegistry
+    waveform: WaveformMetadata, networks: Sequence[DetectorNetworkConfig]
 ) -> tuple[jax.Array, _Geometry, _Kernels]:
     jax.config.update("jax_enable_x64", True)
     frequencies = np.asarray(waveform_generator(waveform).frequencies)
-    geometry = _network_geometry(detectors, frequencies)
+    geometry = _network_geometry(networks, frequencies)
     return jnp.asarray(frequencies), geometry, _kernels(waveform, geometry.pairs)
 
 
 def project_background(
     sources: Mapping[str, ArrayLike],
     waveform: WaveformMetadata,
-    detectors: DetectorRegistry,
+    networks: Sequence[DetectorNetworkConfig],
     *,
     observation_seconds: float,
     chunk_size: int = 1024,
@@ -506,8 +470,8 @@ def project_background(
         one-dimensional and of the same length.
     waveform
         Waveform generator settings.
-    detectors
-        Detector registry; every network is projected.
+    networks
+        Resolved networks to project together.
     observation_seconds
         The normalization, in seconds.
     chunk_size
@@ -528,7 +492,7 @@ def project_background(
         raise ValueError("observation_seconds must be positive")
     if chunk_size < 1:
         raise ValueError("chunk_size must be positive")
-    grid, geometry, kernels = _projection(waveform, detectors)
+    grid, geometry, kernels = _projection(waveform, networks)
     columns = _event_columns(sources)
     count = len(columns["right_ascension"])
     if count:
@@ -583,7 +547,7 @@ def simulate_background(
     key: jax.Array,
     sources: Mapping[str, ArrayLike],
     waveform: WaveformMetadata,
-    detectors: DetectorRegistry,
+    networks: Sequence[DetectorNetworkConfig],
     *,
     observer_rate_hz: float,
     num_segments: int,
@@ -603,7 +567,7 @@ def simulate_background(
     With ``incoherent=True``, it sums individual event powers over the same
     observation: the noiseless expected-signal spectrum of the same selection,
     with no segment interference and no whole-mode requirement on the grid.
-    Each network has one row per detector pair in registry order. The same key
+    Each network has one row per detector pair in canonical order. The same key
     gives the same draw.
 
     Parameters
@@ -614,8 +578,8 @@ def simulate_background(
         The event pool; see :func:`project_background` for its columns.
     waveform
         Waveform generator settings.
-    detectors
-        Detector registry; every network is projected.
+    networks
+        Resolved networks that share one event and detector-noise realization.
     observer_rate_hz
         Rate in events per second of the population the pool represents.
     num_segments
@@ -657,12 +621,12 @@ def simulate_background(
         result = project_background(
             columns,
             waveform,
-            detectors,
+            networks,
             observation_seconds=num_segments * segment_seconds,
             chunk_size=chunk_size,
         )
         return result._replace(segment_counts=counts)
-    grid, geometry, kernels = _projection(waveform, detectors)
+    grid, geometry, kernels = _projection(waveform, networks)
     if counts.any():
         kernels.generator.check_sources(columns)
     union = _segmented(
@@ -801,15 +765,14 @@ def _combine(
 def combine_pair_spectra(
     pair_spectral_density: ArrayLike,
     frequencies: ArrayLike,
-    registry: DetectorRegistry,
-    network_name: str,
+    network: DetectorNetworkConfig,
 ) -> NDArray[np.float64]:
     r"""The network spectrum of per-pair spectra ``(..., P, F)``, ``(..., F)``.
 
     :math:`\sum_{a<b} w_{ab} Y_{ab} / \sum_{a<b} w_{ab} \gamma_{ab}` with the
     optimal weights :math:`w_{ab} = \gamma_{ab} / (S_a S_b)` of
     :func:`~astrogwb.detector.pair_terms`, the pairs in the order of
-    :meth:`DetectorRegistry.pairs`; its mean is :math:`S_h` for an
+    :meth:`DetectorNetworkConfig.pairs`; its mean is :math:`S_h` for an
     isotropic, unpolarized population. Bins where no pair has a finite weight
     return zero.
 
@@ -819,17 +782,15 @@ def combine_pair_spectra(
         The pair spectra :math:`Y_{ab}`, ``(..., P, F)``.
     frequencies
         The frequency grid in Hz, ``(F,)``.
-    registry
-        The detector registry.
-    network_name
-        The network of ``registry`` the pairs belong to.
+    network
+        The resolved network the pairs belong to.
 
     Returns
     -------
     numpy.ndarray
         The network spectrum, ``(..., F)``.
     """
-    detectors = registry.build_network(network_name)
+    detectors = network.build_detectors()
     terms = pair_terms(np.asarray(frequencies), detectors)
     weights = np.stack([term.weight for term in terms])
     denominator = np.sum([term.weight * term.overlap for term in terms], axis=0)

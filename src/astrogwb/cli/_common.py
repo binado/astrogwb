@@ -8,7 +8,7 @@ DETECTOR_CONFIG_OPTION = typer.Option(
     "--detector-config",
     exists=True,
     dir_okay=False,
-    help="Detector registry TOML layer; repeat to merge.",
+    help="Detector configuration TOML layer; repeat to merge.",
 )
 
 

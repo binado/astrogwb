@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 import h5py
@@ -10,6 +12,8 @@ import numpy as np
 import pytest
 from astrogwb_tiny_pipeline import (
     NETWORKS,
+    PAIR,
+    TRIANGLE,
     WAVEFORM,
     event_pool,
     write_population_csv,
@@ -20,12 +24,14 @@ from astrogwb.background.simulation import (
     SimulationConfig,
     network_noise,
     network_spectra_ensemble,
+    project_background,
     read_background,
     read_event_pool,
     realization_key,
     simulate_background,
     write_background,
 )
+from astrogwb.detector import DetectorNetworkConfig
 
 SEED = 41
 CHUNK = 8
@@ -36,7 +42,7 @@ RATE_HZ = 8.0
 def _config(index: int = 0, *, incoherent: bool = True) -> SimulationConfig:
     return SimulationConfig(
         waveform=WAVEFORM,
-        detectors=NETWORKS,
+        networks=NETWORKS,
         observer_rate_hz=RATE_HZ,
         num_segments=2,
         segment_seconds=SEGMENT_SECONDS,
@@ -52,7 +58,7 @@ def _simulate(config: SimulationConfig) -> BackgroundDraw:
         realization_key(config.seed, config.index),
         event_pool(),
         config.waveform,
-        config.detectors,
+        config.networks,
         observer_rate_hz=config.observer_rate_hz,
         num_segments=config.num_segments,
         segment_seconds=config.segment_seconds,
@@ -88,6 +94,25 @@ def test_a_file_round_trips_the_draw_and_its_config(
         np.testing.assert_array_equal(reopened.spectra[name], spectrum)
 
 
+def test_file_keeps_the_legacy_hdf5_and_detector_metadata_layout(written: Path) -> None:
+    with h5py.File(written, "r") as file:
+        assert set(file) == {"frequencies", "segment_counts", "networks"}
+        assert "version" in file.attrs
+        assert set(file["networks"]) == {"triangle", "pair"}
+        assert set(file["networks/triangle"]) == {"pair_spectral_density"}
+        assert set(file["networks/pair"]) == {"pair_spectral_density"}
+        metadata = json.loads(file.attrs["metadata"])
+
+    assert "networks" not in metadata
+    assert metadata["detectors"] == {
+        "detectors": {
+            name: detector.model_dump(mode="json")
+            for name, detector in TRIANGLE.detectors.items()
+        },
+        "networks": {"triangle": ["C1", "R1", "S1"], "pair": ["C1", "S1"]},
+    }
+
+
 def test_a_file_of_another_version_is_refused(written: Path, tmp_path: Path) -> None:
     stale = tmp_path / "stale.h5"
     stale.write_bytes(written.read_bytes())
@@ -109,6 +134,17 @@ def test_network_noise_has_one_row_per_pair_of_the_draw(draw: BackgroundDraw) ->
     for name, spectrum in draw.spectra.items():
         assert noise[name].pair_scale.shape == spectrum.shape
         assert noise[name].pair_overlap.shape == spectrum.shape
+
+
+def test_coherent_joint_draw_reuses_the_shared_baseline() -> None:
+    draw = _simulate(_config(incoherent=False))
+
+    (shared,) = PAIR.pairs()
+    pair = draw.spectra[PAIR.name][0]
+    assert np.any(pair)
+    np.testing.assert_array_equal(
+        pair, draw.spectra[TRIANGLE.name][TRIANGLE.pairs().index(shared)]
+    )
 
 
 @pytest.fixture(scope="module")
@@ -162,6 +198,56 @@ def test_config_rejects_a_nonphysical_observation(field: str, value: float) -> N
 
     with pytest.raises(ValueError, match=field):
         SimulationConfig.model_validate(fields)
+
+
+@pytest.mark.parametrize(
+    ("issue", "message"),
+    [
+        ("duplicate", "duplicate network name.*pair"),
+        ("singleton", "at least two detectors"),
+        ("geometry", "conflicting definitions.*C1"),
+        ("psd_reference", "conflicting definitions.*C1"),
+    ],
+)
+def test_background_boundaries_reject_invalid_networks(
+    issue: str, message: str
+) -> None:
+    detector = PAIR.detectors["C1"]
+    if issue == "duplicate":
+        networks = (PAIR, PAIR)
+    elif issue == "singleton":
+        singleton = DetectorNetworkConfig(name="singleton", detectors={"C1": detector})
+        assert singleton.pairs() == ()
+        networks = (singleton,)
+    else:
+        update = (
+            {"geometry": replace(detector.geometry, elevation_m=1234.0)}
+            if issue == "geometry"
+            else {"psd_reference": TRIANGLE.detectors["R1"].psd_reference}
+        )
+        conflicting = DetectorNetworkConfig(
+            name="conflicting",
+            detectors={**PAIR.detectors, "C1": detector.model_copy(update=update)},
+        )
+        networks = (TRIANGLE, conflicting)
+
+    fields = {**_config().model_dump(exclude={"networks"}), "networks": networks}
+    with pytest.raises(ValueError, match=message):
+        SimulationConfig.model_validate(fields)
+    with pytest.raises(ValueError, match=message):
+        project_background(
+            event_pool(0), WAVEFORM, networks=list(networks), observation_seconds=1.0
+        )
+    with pytest.raises(ValueError, match=message):
+        simulate_background(
+            realization_key(SEED, 0),
+            event_pool(0),
+            WAVEFORM,
+            networks=networks,
+            observer_rate_hz=0.0,
+            num_segments=1,
+            segment_seconds=1.0,
+        )
 
 
 @pytest.fixture

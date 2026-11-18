@@ -32,16 +32,13 @@ from astrogwb.detector import (
     Detector,
     DetectorConfig,
     DetectorGeometry,
-    DetectorRegistry,
+    DetectorNetworkConfig,
 )
 
 REFERENCES = Path(__file__).parent / "references"
 
 #: pygwb's strain power per unit of this library's spectral density.
 PYGWB_POWER_FRACTION = 2.0 / 5.0
-
-#: The network of the archive's exact sites.
-EXACT_NETWORK = "exact"
 
 
 def geometry_from_bilby_convention(
@@ -103,10 +100,10 @@ def observation_years(pygwb_reference: Mapping[str, NDArray[np.float64]]) -> flo
 
 
 @pytest.fixture(scope="session")
-def exact_registry(
+def exact_network(
     pygwb_reference: Mapping[str, NDArray[np.float64]],
     tmp_path_factory: pytest.TempPathFactory,
-) -> DetectorRegistry:
+) -> DetectorNetworkConfig:
     """The archive's exact sites with its noise curves, as one network.
 
     The curves are written on the archive's own grid, so the library
@@ -124,10 +121,10 @@ def exact_registry(
             geometry=geometry_from_bilby_convention(*coordinates[index]),
             psd_reference=str(path),
         )
-    return DetectorRegistry(detectors=detectors, networks={EXACT_NETWORK: tuple(names)})
+    return DetectorNetworkConfig(name="exact", detectors=detectors)
 
 
 @pytest.fixture(scope="session")
-def exact_detectors(exact_registry: DetectorRegistry) -> tuple[Detector, ...]:
+def exact_detectors(exact_network: DetectorNetworkConfig) -> tuple[Detector, ...]:
     """The exact network's detectors, in the pair order of the archive."""
-    return exact_registry.build_network(EXACT_NETWORK)
+    return exact_network.build_detectors()

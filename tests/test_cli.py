@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
 
+import h5py
 import numpy as np
 import pytest
 import tomli_w
@@ -85,13 +87,18 @@ def test_a_simulate_run_writes_one_file_with_its_config(
     _simulate(output, inputs)
 
     draw, config = read_background(output)
-    assert config.detectors.pairs("ET") == [("R1", "S1")]
+    (network,) = config.networks
+    assert network.name == "ET"
+    assert network.pairs() == (("R1", "S1"),)
     assert config.population == str(inputs["population"])
     assert (config.seed, config.index, config.incoherent) == (41, 0, False)
     assert config.observer_rate_hz == pytest.approx(8.0)
     assert draw.segment_counts.shape == (2,)
     assert draw.segment_counts.sum() > 0
     assert np.any(draw.spectra["ET"])
+    with h5py.File(output, "r") as file:
+        metadata = json.loads(file.attrs["metadata"])
+    assert set(metadata["detectors"]["detectors"]) == {"R1", "S1"}
     assert [path.name for path in tmp_path.glob("*.h5")] == ["41-0.h5"]
 
 

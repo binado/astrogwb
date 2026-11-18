@@ -115,26 +115,34 @@ def simulate(
         write_background,
     )
     from astrogwb.config import merge_layers
-    from astrogwb.detector.config import load_detector_config
+    from astrogwb.detector.config import _DetectorConfigDocument
     from astrogwb.utils import years_to_seconds
     from astrogwb.waveform import WaveformMetadata
 
-    config = SimulationConfig(
-        waveform=WaveformMetadata.model_validate(merge_layers([waveform_config])),
-        detectors=load_detector_config(detector_config),
-        observer_rate_hz=rate_per_year / years_to_seconds(1.0),
-        num_segments=num_segments,
-        segment_seconds=segment_seconds,
-        incoherent=incoherent,
-        population=str(population),
-        seed=seed,
-        index=index,
-    )
+    try:
+        document = _DetectorConfigDocument.from_files(*detector_config)
+        networks = tuple(document.select_network(name) for name in document.networks)
+    except ValueError as error:
+        raise typer.BadParameter(str(error), param_hint="--detector-config") from error
+    try:
+        config = SimulationConfig(
+            waveform=WaveformMetadata.model_validate(merge_layers([waveform_config])),
+            networks=networks,
+            observer_rate_hz=rate_per_year / years_to_seconds(1.0),
+            num_segments=num_segments,
+            segment_seconds=segment_seconds,
+            incoherent=incoherent,
+            population=str(population),
+            seed=seed,
+            index=index,
+        )
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
     draw = simulate_background(
         realization_key(seed, index),
         read_event_pool(population),
         config.waveform,
-        config.detectors,
+        config.networks,
         observer_rate_hz=config.observer_rate_hz,
         num_segments=num_segments,
         segment_seconds=segment_seconds,
