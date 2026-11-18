@@ -16,11 +16,10 @@ owns the normalization, the log density, and the inverse-transform draw.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 
 import jax
 import jax.numpy as jnp
-import numpyro
 from jax.typing import ArrayLike
 
 from astrogwb.constants import SECONDS_PER_YEAR
@@ -175,35 +174,6 @@ class RedshiftDistribution(InterpolatedDistribution):
             Redshift.
         """
         return gw_distance_ratio(redshift, self.params)
-
-    def gw_luminosity_distance(self, redshift: ArrayLike) -> jax.Array:
-        r"""Gravitational-wave luminosity distance in Mpc at redshift(s).
-
-        The electromagnetic distance, times :meth:`distance_ratio`.
-
-        Parameters
-        ----------
-        redshift
-            Redshift.
-        """
-        return self.luminosity_distance(redshift) * self.distance_ratio(redshift)
-
-    def distance_model(self) -> Callable[[], None]:
-        """A no-argument NumPyro model of the source's redshift and GW distance.
-
-        Samples ``redshift`` from this distribution and registers
-        ``luminosity_distance`` (:meth:`gw_luminosity_distance`) as a
-        deterministic. A population composes it with an intrinsic source model
-        that never sees redshift.
-        """
-
-        def model() -> None:
-            redshift = jnp.asarray(numpyro.sample("redshift", self))
-            numpyro.deterministic(
-                "luminosity_distance", self.gw_luminosity_distance(redshift)
-            )
-
-        return model
 
     def differential_comoving_volume(self, redshift: ArrayLike) -> jax.Array:
         r"""All-sky :math:`\mathrm{d}V_c/\mathrm{d}z` in :math:`\mathrm{Mpc}^3`.

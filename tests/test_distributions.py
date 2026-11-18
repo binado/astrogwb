@@ -14,7 +14,6 @@ from typing import cast
 import jax
 import jax.numpy as jnp
 import numpy as np
-import numpyro
 import numpyro.distributions as dist
 import pytest
 
@@ -26,7 +25,7 @@ from astrogwb_mock_population import (
     Z_MAX,
     Z_MIN,
     make_redshift_grid,
-    mock_population,
+    mock_merger_rate,
 )
 from reference_population import reference_merger_rate_distance_and_logprob
 
@@ -46,7 +45,7 @@ SAMPLE_REDSHIFTS = jnp.array([0.5, 1.234, 3.7, 12.0, 19.5])
 def _distribution(**overrides: float) -> RedshiftDistribution:
     """The Madau-Dickinson specimen at the mock fiducials, on the mock grid."""
     return RedshiftDistribution(
-        source_frame_distribution=mock_population().merger_rate,
+        source_frame_distribution=mock_merger_rate,
         params={**FIDUCIALS, **overrides},
         minimum_redshift=Z_MIN,
         maximum_redshift=Z_MAX,
@@ -418,24 +417,6 @@ def test_total_merger_rate_by_quadrature_matches_the_distribution() -> None:
     # The distribution's own normalization is a trapezoid rule on the mock
     # grid; the nodes are the more accurate side, so this bounds that error.
     np.testing.assert_allclose(quadrature, distribution.total_merger_rate(), rtol=1e-3)
-
-
-# --------------------------------------------------------------------------- #
-# GW distance and the model that samples it
-# --------------------------------------------------------------------------- #
-def test_distance_model_samples_redshift_and_registers_the_gw_distance() -> None:
-    distribution = _distribution(xi_0=1.2, xi_n=1.91)
-    trace = numpyro.handlers.trace(
-        numpyro.handlers.seed(distribution.distance_model(), 0)
-    ).get_trace()
-
-    assert set(trace) == {"redshift", "luminosity_distance"}
-    assert trace["redshift"]["type"] == "sample"
-    assert trace["luminosity_distance"]["type"] == "deterministic"
-    np.testing.assert_array_equal(
-        np.asarray(trace["luminosity_distance"]["value"]),
-        np.asarray(distribution.gw_luminosity_distance(trace["redshift"]["value"])),
-    )
 
 
 # --------------------------------------------------------------------------- #

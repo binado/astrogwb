@@ -1,11 +1,4 @@
-"""Fixed-size source draws from a population model, shared by every simulation.
-
-:func:`simulate_sources` is the one place a population model becomes source
-columns: a Poisson realization
-(:func:`~astrogwb.simulators.simulate_population`) and a reference catalog
-(:func:`~astrogwb.importance.spectrum.reference_catalog`) differ only in the model
-they hand it and how many sources they ask for.
-"""
+"""Random and scrambled Sobol draws of sources from a population model."""
 
 from __future__ import annotations
 

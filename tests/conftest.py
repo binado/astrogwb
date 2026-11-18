@@ -32,10 +32,7 @@ from astrogwb_mock_population import (
     load_mock_population,
 )
 
-from astrogwb.importance.catalog import (
-    CatalogMetadata,
-    IntensityData,
-)
+from astrogwb.importance.catalog import IntensityData
 
 
 @pytest.fixture
@@ -52,8 +49,8 @@ def mock_population() -> dict[str, np.ndarray]:
 @pytest.fixture(scope="session")
 def mock_catalog_factory(
     mock_population: dict[str, np.ndarray],
-) -> Callable[..., tuple[IntensityData, CatalogMetadata]]:
-    """Build a ``(data, metadata)`` pair from the mock population draw, once per worker."""
+) -> Callable[..., IntensityData]:
+    """Build an intensity catalog from the mock population draw, once per worker."""
 
     # `partial` keeps build_mock_catalog's signature for type checkers.
     return partial(build_mock_catalog, mock_population)

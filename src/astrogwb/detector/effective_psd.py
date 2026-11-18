@@ -158,7 +158,7 @@ def pair_bin_scale(
             \sqrt{2 T \Delta f_i}},
 
     the scale of a pair's cross-power whose mean is :math:`\gamma_{ab} S_h`
-    (the pair spectra of :class:`~astrogwb.simulators.BackgroundArtifact`),
+    (the pair spectra of :class:`~astrogwb.background.simulation.BackgroundArtifact`),
     pairs in the order of :func:`pair_terms`. It is not divided by
     :math:`\gamma_{ab}`, so it stays finite at the ORF's zeros, and the pairs
     combine to the network: :math:`\sum_{a<b} \gamma_{ab,i}^2 /

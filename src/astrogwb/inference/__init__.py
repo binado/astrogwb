@@ -1,3 +1,5 @@
+from astrogwb.importance.catalog import ReferenceCatalog
+
 from .diagnostics import (
     AmplitudeCumulants,
     amplitude_cumulants,
@@ -25,6 +27,7 @@ __all__ = [
     "GaussianFactor",
     "Network",
     "Prediction",
+    "ReferenceCatalog",
     "amplitude_cumulants",
     "amplitude_template",
     "catalog_covariance",

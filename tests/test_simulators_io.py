@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 from pydantic import BaseModel
 
-from astrogwb.simulators import realization_key
+from astrogwb.background.simulation import realization_key
 from astrogwb.utils.io import atomic_h5, load, write
 
 

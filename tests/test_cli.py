@@ -1,4 +1,4 @@
-"""The ``astrogwb simulate`` command line."""
+"""CLI runtime initialization."""
 
 from __future__ import annotations
 
@@ -9,13 +9,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 import tomli_w
-from astrogwb_tiny_pipeline import WAVEFORM, population_metadata
+from astrogwb_tiny_pipeline import WAVEFORM, write_population_csv
 from typer.testing import CliRunner
 
+from astrogwb.background.simulation import read_background
 from astrogwb.cli import app
-from astrogwb.simulators import BackgroundArtifact
-
-POPULATION = population_metadata()
+from astrogwb.utils import years_to_seconds
 
 
 def test_importing_the_cli_leaves_the_xla_backend_uninitialized() -> None:
@@ -41,68 +40,68 @@ assert jax.device_count() == 2, f"backend initialized early: {{jax.devices()}}"
 
 
 @pytest.fixture
-def metadata_files(tmp_path: Path) -> dict[str, Path]:
-    """A config directory naming the tiny ensemble, and a two-detector network."""
-    ensemble = {
-        "realization": POPULATION.model_dump(
-            mode="json", exclude={"version"}, exclude_none=True
-        ),
-        "waveform": WAVEFORM.model_dump(mode="json", exclude_none=True),
-    }
-    config_dir = tmp_path / "config"
-    config_dir.mkdir()
-    (config_dir / "ensembles.toml").write_bytes(
-        tomli_w.dumps({"ensembles": {"tiny": ensemble}}).encode()
+def inputs(tmp_path: Path) -> dict[str, Path]:
+    """A gwmock-pop catalogue, the waveform settings and a two-detector network."""
+    waveform = tmp_path / "waveform.toml"
+    waveform.write_bytes(
+        tomli_w.dumps(WAVEFORM.model_dump(mode="json", exclude_none=True)).encode()
     )
     detector = tmp_path / "detector.toml"
     detector.write_bytes(tomli_w.dumps({"networks": {"ET": ["S1", "R1"]}}).encode())
-    return {"config": config_dir, "detector": detector}
+    return {
+        "population": write_population_csv(tmp_path / "events.csv"),
+        "waveform": waveform,
+        "detector": detector,
+    }
 
 
-def _simulate(output: Path, *options: str) -> None:
+def _simulate(output: Path, inputs: dict[str, Path], *options: str) -> None:
     result = CliRunner().invoke(
-        app, ["simulate", str(output), "--chunk-size", "8", *options]
+        app,
+        [
+            "simulate",
+            str(output),
+            str(inputs["population"]),
+            *("--waveform-config", str(inputs["waveform"])),
+            *("--detector-config", str(inputs["detector"])),
+            *("--rate-per-year", str(8.0 * years_to_seconds(1.0))),
+            *("--num-segments", "2"),
+            *("--segment-seconds", "1"),
+            *("--seed", "41"),
+            *("--chunk-size", "8"),
+            *options,
+        ],
     )
     assert result.exit_code == 0, result.output
 
 
-@pytest.fixture
-def required(metadata_files: dict[str, Path]) -> list[str]:
-    """Every required option of ``simulate``, but the output."""
-    return [
-        *("--ensemble", "tiny"),
-        *("--config-dir", str(metadata_files["config"])),
-        *("--detector-config", str(metadata_files["detector"])),
-        *("--seed", "41"),
-    ]
-
-
-def test_a_simulate_run_writes_one_file(tmp_path: Path, required: list[str]) -> None:
-    output = tmp_path / "41-0.h5"
-
-    _simulate(output, *required)
-
-    background = BackgroundArtifact.open(output)
-    assert background.pairs == {"ET": (("R1", "S1"),)}
-    assert background.count > 0
-    assert background.segment_duration is None
-    assert np.any(background.spectra["ET"])
-    assert [path.name for path in tmp_path.glob("*.h5")] == ["41-0.h5"]
-    assert sorted(path.name for path in tmp_path.iterdir()) == [
-        "41-0.h5",
-        "config",
-        "detector.toml",
-    ]
-
-
-def test_segment_duration_is_recorded_with_the_noise(
-    tmp_path: Path, required: list[str]
+@pytest.mark.integration
+def test_a_simulate_run_writes_one_file_with_its_config(
+    tmp_path: Path, inputs: dict[str, Path]
 ) -> None:
+    pytest.importorskip("gwmock_pop")
     output = tmp_path / "41-0.h5"
 
-    _simulate(output, *required, "--segment-duration", "600")
+    _simulate(output, inputs)
 
-    background = BackgroundArtifact.open(output)
-    assert background.segment_duration == 600.0
-    noise = background.noise()
-    assert noise["ET"].pair_scale.shape == (1, background.frequencies.size)
+    draw, config = read_background(output)
+    assert config.detectors.pairs("ET") == [("R1", "S1")]
+    assert config.population == str(inputs["population"])
+    assert (config.seed, config.index, config.incoherent) == (41, 0, False)
+    assert config.observer_rate_hz == pytest.approx(8.0)
+    assert draw.segment_counts.shape == (2,)
+    assert draw.segment_counts.sum() > 0
+    assert np.any(draw.spectra["ET"])
+    assert [path.name for path in tmp_path.glob("*.h5")] == ["41-0.h5"]
+
+
+@pytest.mark.integration
+def test_a_simulate_run_with_incoherent_records_the_mode(
+    tmp_path: Path, inputs: dict[str, Path]
+) -> None:
+    pytest.importorskip("gwmock_pop")
+    output = tmp_path / "41-0.h5"
+
+    _simulate(output, inputs, "--incoherent")
+
+    assert read_background(output)[1].incoherent

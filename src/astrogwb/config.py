@@ -1,4 +1,4 @@
-"""Layered TOML configuration for external simulation and catalog inputs.
+"""Layered TOML configuration for external simulation inputs.
 
 Layers are TOML files merged left to right with ``knf``, the engine behind the
 ``knf`` CLI, so the shell and Python spell one merge rule.
@@ -12,11 +12,8 @@ from typing import Any
 
 import knf
 
-from astrogwb.detector.config import DETECTOR_DEFAULT_PATHS
-
 __all__ = [
     "MERGE_KEY",
-    "merge_config",
     "merge_layers",
     "require_toml",
 ]
@@ -63,35 +60,3 @@ def merge_layers(
     for path in paths:
         require_toml(path)
     return knf.load(paths, interpolate=True, shallow=shallow, merge_key=MERGE_KEY)
-
-
-def merge_config(
-    config_dir: Path = Path("config"),
-    *,
-    overrides: Sequence[Path] = (),
-    shallow: str | None = "priors.*",
-) -> dict[str, Any]:
-    """Merge the shared configuration and optional overrides, unvalidated.
-
-    The detector defaults, then every ``*.toml`` in ``config_dir`` in name
-    order, then ``overrides``. A caller validates the tables it reads, e.g.
-    ``CatalogMetadata.model_validate(merged["catalogs"][name])``.
-
-    Parameters
-    ----------
-    config_dir
-        Directory containing the base TOML files.
-    overrides
-        Additional TOML layers, in merge order.
-    shallow
-        Key-path glob for shallow merging.
-
-    Raises
-    ------
-    ValueError
-        If ``config_dir`` holds no TOML file.
-    """
-    paths = sorted(config_dir.glob("*.toml"))
-    if not paths:
-        raise ValueError(f"no config TOML files found in {config_dir}")
-    return merge_layers([*DETECTOR_DEFAULT_PATHS, *paths, *overrides], shallow=shallow)

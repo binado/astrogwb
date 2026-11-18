@@ -1,7 +1,7 @@
 r"""The mean and the power moment of a background predicted from a reference catalog.
 
 A :class:`CatalogModel` binds a
-:func:`~astrogwb.importance.spectrum.reference_catalog` to a target population
+:class:`~astrogwb.importance.catalog.ReferenceCatalog` to a target population
 on the observed grid. At every parameter point it predicts the two
 network-independent ingredients of the dense Gaussian likelihood
 (:mod:`astrogwb.inference.gaussian`): the spectrum :math:`S(f_k)` of
@@ -26,36 +26,35 @@ multiplies :math:`M` elementwise.
 The redshift nodes and the reference redshift are fixed, so the query
 frequencies, and with them :math:`W_z`, do not depend on the parameters. Each
 row of :math:`W_z` has at most two nonzero weights, held as indices and
-weights, ``(Z, F)`` and ``(Z, F, 2)``. Without ``density_sites`` the weights
-:math:`w_i` are one and the node moments :math:`s_z^8 W_z G W_z^T`,
+weights, ``(Z, F)`` and ``(Z, F, 2)``. When the target matches the proposal,
+the weights :math:`w_i` are one and the node moments :math:`s_z^8 W_z G W_z^T`,
 ``(Z, F, F)``, are formed once; otherwise :math:`G` is weighted per point and
 each node gathers four ``(F, F)`` slices of it.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import NamedTuple, Self
 
 import jax
 import jax.numpy as jnp
-import numpy as np
 from jax.typing import ArrayLike
 
-from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import luminosity_distance
-from astrogwb.importance.catalog import CatalogMetadata, IntensityData
+from astrogwb.importance.catalog import ReferenceCatalog
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.importance.spectrum import (
     INCLINATION_MEAN,
+    IntrinsicLogProb,
+    MergerRate,
     _node_intensity,
     _rescaling_arrays,
     _shared_terms,
     _SharedTerms,
     _weighted_mean_intensity,
 )
-from astrogwb.populations._types import Population
 
 __all__ = ["CatalogModel", "Prediction", "interpolation_weights"]
 
@@ -133,7 +132,7 @@ class CatalogModel:
     r"""The spectrum and power moment of a rescaled reference catalog.
 
     Every array is a data field, so one compilation serves every catalog of
-    the same shape; ``population`` and ``density_sites`` are static. Build
+    the same shape and callables. The callables are static. Build
     with :meth:`from_catalog`; every method is traceable.
 
     Attributes
@@ -141,10 +140,9 @@ class CatalogModel:
     intensity
         Literal face-on reference-catalog intensity, ``(F_ref, N)``.
     mean_intensity
-        Its mean over draws, ``(F_ref,)``, held only without ``density_sites``.
+        Its mean over draws, ``(F_ref,)``, cached when the target matches the proposal.
     node_moments
-        :math:`s_z^8 W_z G W_z^T`, ``(Z, F, F)``, held only without
-        ``density_sites``.
+        :math:`s_z^8 W_z G W_z^T`, ``(Z, F, F)``, cached with the mean intensity.
     interpolation_index, interpolation_weight
         The two-weight form of every node's :math:`W_z`
         (:func:`interpolation_weights`), ``(Z, F)`` and ``(Z, F, 2)``.
@@ -153,10 +151,9 @@ class CatalogModel:
         The arrays of :func:`~astrogwb.importance.spectrum._rescaling_arrays`.
     observation_seconds
         Observation time :math:`T` in seconds, ``()``.
-    population
-        The target's bound :class:`~astrogwb.populations.Population`.
-    density_sites
-        The intrinsic factors the importance weights include.
+    merger_rate, log_prob
+        The source-frame merger rate density and joint intrinsic log density
+        of the target. If the target matches the proposal, ``log_prob`` is ``None``.
     """
 
     intensity: jax.Array
@@ -173,63 +170,69 @@ class CatalogModel:
     redshift_weights: jax.Array
     reference_distance: jax.Array
     observation_seconds: jax.Array
-    population: Population
-    density_sites: tuple[str, ...]
+    merger_rate: MergerRate
+    log_prob: IntrinsicLogProb | None
 
     @classmethod
     def from_catalog(
         cls,
-        data: IntensityData,
-        metadata: CatalogMetadata,
+        catalog: ReferenceCatalog,
         *,
-        population: Population,
         frequencies: ArrayLike,
         num_redshift_nodes: int,
-        observation_time: float,
-        density_sites: Sequence[str] = (),
-        minimum_redshift: float | None = None,
+        merger_rate: MergerRate,
+        minimum_redshift: float,
+        maximum_redshift: float,
+        observation_seconds: float,
+        log_prob: IntrinsicLogProb | None = None,
+        target_matches_proposal: bool = False,
     ) -> Self:
         """Bind a reference catalog to a target on the observed ``frequencies``.
 
-        Redshift is integrated on ``num_redshift_nodes`` nodes of
-        :func:`~astrogwb.importance.spectrum.redshift_quadrature` over the
-        population's window, with lower edge ``minimum_redshift`` (default the
-        population's). Leave ``density_sites`` empty when no intrinsic
-        hyperparameter varies: the node moments are then formed here, once.
-        Call outside JAX transformations.
+        Redshift is integrated over the specified window. Call outside JAX
+        transformations. Pass hashable, JAX-traceable callables and supply
+        catalog-sized arrays through the reference catalog.
 
         Parameters
         ----------
-        data
-            Reference catalog intensity data.
-        metadata
-            Metadata describing the catalog.
-        population
-            Target population model.
+        catalog
+            Reference intensities, intrinsic draws, proposal density and geometry.
         frequencies
             Observed frequency grid in Hz, ``(F,)``.
         num_redshift_nodes
             Number of redshift quadrature nodes.
-        observation_time
-            Observation time in years.
-        density_sites
-            Intrinsic sites the importance weights include.
-        minimum_redshift
-            Lower redshift bound.
+        merger_rate
+            Source-frame merger rate density in Gpc^-3 yr^-1, evaluated as
+            ``merger_rate(redshift, params)``.
+        log_prob
+            Target joint intrinsic log density, evaluated as
+            ``log_prob(intrinsic, params)`` with shape ``(N,)``. Use negative
+            infinity outside target support. The absolute weights are
+            ``exp(log_prob - proposal_log_prob)``; the proposal must cover the
+            target's support.
+        minimum_redshift, maximum_redshift
+            Increasing integration bounds with the lower bound at or above
+            the reference redshift.
+        observation_seconds
+            Positive observation time in seconds.
+        target_matches_proposal
+            Set to true in place of ``log_prob`` when both intrinsic densities
+            are identical throughout the calculation. Caches the unit-weight moments.
         """
+        if target_matches_proposal != (log_prob is None):
+            raise TypeError("pass either log_prob or target_matches_proposal=True")
         arrays = _rescaling_arrays(
-            data,
-            metadata,
+            catalog,
             frequencies,
             num_redshift_nodes,
-            density_sites,
             minimum_redshift,
+            maximum_redshift,
         )
-        intensity = jnp.asarray(np.asarray(data["intensity"], dtype=np.float64))
+        intensity = jnp.asarray(catalog.intensity, dtype=jnp.float64)
         index, weight = jax.vmap(interpolation_weights, in_axes=(1, None))(
             arrays["query_log_frequencies"], arrays["log_reference_frequencies"]
         )
-        constant = not density_sites
+        constant = log_prob is None
         return cls(
             intensity=intensity,
             mean_intensity=jnp.mean(intensity, axis=1) if constant else None,
@@ -245,19 +248,19 @@ class CatalogModel:
             ),
             interpolation_index=index,
             interpolation_weight=weight,
-            observation_seconds=jnp.asarray(observation_time * SECONDS_PER_YEAR),
-            population=population,
-            density_sites=tuple(density_sites),
+            observation_seconds=jnp.asarray(observation_seconds),
+            merger_rate=merger_rate,
+            log_prob=log_prob,
             **arrays,
         )
 
     def _shared(self, params: Mapping[str, ArrayLike]) -> _SharedTerms:
         return _shared_terms(
             params,
-            population=self.population,
+            merger_rate=self.merger_rate,
+            log_prob=self.log_prob,
             intrinsic=self.intrinsic,
             proposal_log_prob=self.proposal_log_prob,
-            density_sites=self.density_sites,
             redshift=self.redshift,
             redshift_weights=self.redshift_weights,
             reference_distance=self.reference_distance,
@@ -448,5 +451,5 @@ jax.tree_util.register_dataclass(
         "reference_distance",
         "observation_seconds",
     ],
-    meta_fields=["population", "density_sites"],
+    meta_fields=["merger_rate", "log_prob"],
 )

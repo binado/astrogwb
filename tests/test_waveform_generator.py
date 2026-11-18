@@ -10,6 +10,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+import ripplegw
 from pydantic import ValidationError
 
 from astrogwb.constants import ISCO_ALPHA
@@ -19,12 +20,15 @@ from astrogwb.waveform import (
     WaveformMetadata,
 )
 from astrogwb.waveform._ripple import (
-    PRECESSING_MODELS,
     SUPPORTED_APPROXIMANTS,
-    TIDAL_MODELS,
     next_smooth_even,
     ripple_parameters,
 )
+
+
+def _fd_cbc_models(**filters: bool) -> set[str]:
+    """Frequency-domain CBC approximants ripple lists under ``filters``."""
+    return set(ripplegw.list_waveforms(domain="FD", source_type="cbc", **filters))
 
 
 def _ripple_sources() -> dict[str, np.ndarray]:
@@ -410,12 +414,12 @@ def _parity_sources(approximant: str) -> dict[str, np.ndarray]:
         "spin_1z": np.array([0.05, -0.01]),
         "spin_2z": np.array([-0.02, 0.03]),
     }
-    if approximant in TIDAL_MODELS:
+    if approximant in _fd_cbc_models(is_tidal=True):
         sources |= {
             "lambda_1": np.array([300.0, 120.0]),
             "lambda_2": np.array([400.0, 210.0]),
         }
-    if approximant in PRECESSING_MODELS:
+    if approximant in _fd_cbc_models(is_precessing=True):
         sources |= {
             "detector_frame_mass_1": np.array([32.0, 28.0]),
             "detector_frame_mass_2": np.array([25.0, 20.0]),

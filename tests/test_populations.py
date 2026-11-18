@@ -22,12 +22,11 @@ import pytest
 from astrogwb_mock_population import (
     FIDUCIALS,
     INTRINSIC_DENSITY_SITES,
-    N_GRID,
     POPULATION_PARAMS,
-    Z_MAX,
-    Z_MIN,
+    MockPopulation,
     derived_columns,
     make_redshift_grid,
+    mock_merger_rate,
     mock_population,
     population_models,
     source_draw_model,
@@ -37,10 +36,7 @@ from numpyro import handlers
 from reference_population import reference_merger_rate_distance_and_logprob
 
 from astrogwb.cosmology import log_gw_em_ratio
-from astrogwb.populations import (
-    BNSCobaPopulation,
-    Population,
-)
+from astrogwb.populations import SourceModel, coba
 from astrogwb.utils.numpyro import sample_and_logprob
 
 #: The deterministic output governing waveform amplitude.
@@ -107,7 +103,7 @@ def sample_values(redshift: jax.Array = SAMPLE_REDSHIFTS) -> dict[str, jax.Array
 
 
 def evaluate(
-    population: Population,
+    population: MockPopulation,
     params: Mapping[str, ArrayLike],
     values: Mapping[str, ArrayLike],
     density_sites: Sequence[str] = INTRINSIC_DENSITY_SITES,
@@ -120,7 +116,9 @@ def evaluate(
     return log_prob, outputs[LUMINOSITY_DISTANCE_SITE]
 
 
-def merger_rate(population: Population, params: Mapping[str, ArrayLike]) -> jax.Array:
+def merger_rate(
+    population: MockPopulation, params: Mapping[str, ArrayLike]
+) -> jax.Array:
     """The observer-frame rate, from the same call that builds the model."""
     redshift_distribution, _ = population_models(population, params)
     return redshift_distribution.total_merger_rate()
@@ -138,18 +136,19 @@ GAUSSIAN_PARAMS: dict[str, float] = {
 MASS_SITES = ("source_frame_mass_1", "source_frame_mass_2")
 
 
-def _gaussian_population() -> Population:
-    return BNSCobaPopulation(
-        mass_model="gaussian",
-        minimum_redshift=Z_MIN,
-        maximum_redshift=Z_MAX,
-        n_grid=N_GRID,
-    ).build()
+def _gaussian_source_model(params: Mapping[str, ArrayLike]) -> SourceModel:
+    return coba.source_model(params, mass_model="gaussian")
+
+
+def _gaussian_population() -> MockPopulation:
+    return mock_merger_rate, _gaussian_source_model
 
 
 #: The generating populations whose draw path runs through the plated replay:
 #: the ordered-uniform triangle and the data-dependent truncated Gaussian.
-GENERATING_POPULATIONS: dict[str, tuple[Callable[[], Population], dict[str, float]]] = {
+GENERATING_POPULATIONS: dict[
+    str, tuple[Callable[[], MockPopulation], dict[str, float]]
+] = {
     "uniform_mass": (mock_population, POPULATION_PARAMS),
     "gaussian_mass": (_gaussian_population, GAUSSIAN_PARAMS),
 }
@@ -163,11 +162,6 @@ def reference(params: dict[str, float]) -> tuple[jax.Array, jax.Array, jax.Array
         source_frame_mass_1=sample_values()["source_frame_mass_1"],
         source_frame_mass_2=sample_values()["source_frame_mass_2"],
     )
-
-
-# --------------------------------------------------------------------------- #
-# Population records
-# --------------------------------------------------------------------------- #
 
 
 # --------------------------------------------------------------------------- #
@@ -240,7 +234,7 @@ def test_one_execution_supplies_per_sample_density_distance_and_scalar_rate() ->
 
 
 def test_source_model_never_sees_redshift() -> None:
-    source_model = mock_population().source_model(POPULATION_PARAMS)
+    source_model = mock_population()[1](POPULATION_PARAMS)
     trace = handlers.trace(handlers.seed(source_model, 0)).get_trace()
 
     assert not {"redshift", LUMINOSITY_DISTANCE_SITE} & set(trace)
@@ -354,7 +348,7 @@ def test_outer_density_and_gradient_match_a_direct_calculation() -> None:
 # Generation
 # --------------------------------------------------------------------------- #
 def draw(
-    population: Population,
+    population: MockPopulation,
     params: Mapping[str, ArrayLike],
     key: jax.Array,
     num_samples: int,

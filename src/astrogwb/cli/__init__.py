@@ -1,23 +1,19 @@
-"""The astrogwb command line simulates one background into one HDF5 file.
+"""The astrogwb command line.
 
-astrogwb simulate OUTPUT.h5 reads the [ensembles.<name>] table of the shared
-config (--config-dir, default ``config``) and a detector registry, draws the
-population at (--seed, --index) and writes the background of its networks, in
-one pass. Repeat --detector-config PATH to merge detector registry layers in
-argument order. For example::
+``astrogwb simulate OUTPUT.h5 POPULATION`` simulates the background of a
+physical event pool, a gwmock-pop population catalogue (HDF5 or CSV), into one
+HDF5 file. ``--waveform-config`` names a TOML file of waveform settings and
+``--detector-config`` a detector registry layer, repeated to merge in argument
+order. For example::
 
-    astrogwb simulate ensemble/41-0.h5 --ensemble fiducial \\
-        --seed 41 --index 0 --detector-config path/to/detectors.toml
+    astrogwb simulate ensemble/41-0.h5 events.h5 \\
+        --waveform-config waveform.toml --detector-config detectors.toml \\
+        --rate-per-year 1e5 --num-segments 16 --segment-seconds 2048 --seed 41
 
 The registry contains [detectors.<name>] definitions and [networks]
-memberships. The file carries its configuration as JSON in its ``metadata``
-attribute, with the astrogwb ``version`` that wrote it. --segment-duration
-SECONDS assigns sources to segments of that length and adds fresh per-segment
-detector noise.
-
-Importance-integration catalogs read a [catalogs.<name>] table the same way::
-
-    astrogwb model-catalog reference.h5 --catalog reference-fiducial
+memberships. The file carries the configuration as JSON in its ``metadata``
+attribute, with the astrogwb ``version`` that wrote it. ``--incoherent`` sums
+the events' powers without detector noise.
 
 A reader refuses a file written by another astrogwb version. Runtime settings
 (--platform, --cpu-threads) are applied before the JAX backend initializes.
@@ -25,7 +21,6 @@ A reader refuses a file written by another astrogwb version. Runtime settings
 
 import typer
 
-from .model_catalog import model_catalog
 from .simulate import simulate
 
 __all__ = ["app"]
@@ -39,5 +34,3 @@ def _main() -> None:
 
 
 app.command()(simulate)
-
-app.command()(model_catalog)

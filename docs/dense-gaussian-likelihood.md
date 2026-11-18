@@ -58,8 +58,8 @@ Sec. 2.6.
   `shot_noise_coverage`) evaluates on a 1-2 dimensional grid. None uses NUTS or
   gradients.
 - `shot_noise_coverage` scores 1000 injections at every grid point.
-- Every caller passes `density_sites=()`, so the importance weights are one and
-  the catalog Gram matrix is a constant.
+- The paper notebooks set `target_matches_proposal=True`, so the importance
+  weights are one and the catalog Gram matrix is constant.
 - Fiducial grid: $F = 199$ bins, 1 Hz from 2 to 200 Hz (`[ensembles.fiducial]`,
   i.e. `[waveforms.default]`); the estimates below were made at the earlier
   $F \simeq 400$ to 2048 Hz. Pairs per network: ET-triangle 3, ET-triangle +
@@ -132,9 +132,9 @@ class Evaluation(NamedTuple):        # what the diagnostics read (D7)
 @dataclass(frozen=True)
 class CatalogModel:                  # was ImportanceGaussianLikelihood, minus data and network
     @classmethod
-    def from_catalog(cls, data, metadata, *, population, frequencies,
-                     num_redshift_nodes, observation_time, density_sites=(),
-                     minimum_redshift=None) -> Self: ...
+    def from_catalog(cls, catalog, *, frequencies, num_redshift_nodes, merger_rate,
+                     minimum_redshift, maximum_redshift, observation_seconds,
+                     log_prob=None, target_matches_proposal=False) -> Self: ...
     def spectrum(self, params) -> jax.Array: ...          # (F,)
     def power_moment(self, params) -> jax.Array: ...      # (F, F)
     def predict(self, params, *, shot_noise: bool = True) -> Prediction: ...
@@ -201,7 +201,7 @@ $\Lambda$: they are formed once (`interpolation_weights`). Queries above the
 reference grid get zero weights, matching `jnp.interp(..., right=0.0)`; queries
 below it clamp to the first reference value, matching `jnp.interp`'s default.
 
-Without `density_sites` (every caller today) $G$ is constant too, so the node
+With `target_matches_proposal=True`, $G$ is constant too, so the node
 moments $s_z^8 W_z G W_z^T$, `(Z, F, F)` (41 MB at $Z = 32$, $F = 400$), are
 formed once in `from_catalog`, and the power moment at each point is one
 contraction with the $\Lambda$-dependent kernel, $Z F^2 \simeq 5$ Mflop. The gather
@@ -426,10 +426,6 @@ New modules let phase 1 land beside `likelihood.py` without name clashes; phase
 
 ## Open questions
 
-- **Importance weights.** Keep `density_sites` in `CatalogModel`? The paper
-  fixes the intrinsic distribution ($w_i = 1$), and dropping it would make the
-  Gram matrix always constant. Keeping it costs one weighted Gram product per
-  point, paid only when sites are given.
 - **Draw count.** Fix $L$ per network from the split-half check, or one $L$ for
   all networks?
 - **Dense cost on CPU.** If the half-hour estimate holds, decide between GPU

@@ -14,11 +14,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from astrogwb.constants import (
-    FACE_ON_INCLINATION_FACTOR,
-    ISCO_ALPHA,
-    MEAN_INCLINATION_FACTOR,
-)
+from astrogwb.constants import ISCO_ALPHA
 from astrogwb.waveform import (
     inclination_factor,
     inspiral_intensity,
@@ -70,22 +66,6 @@ def bns_cutoff(bns: dict[str, jax.Array]) -> Callable[..., float]:
     return _cutoff
 
 
-def test_mean_inclination_factor_is_the_analytic_inclination_constant() -> None:
-    """``MEAN_INCLINATION_FACTOR`` is the isotropic average of ``inclination_factor``.
-
-    The average is over ``cos iota`` uniform on ``[-1, 1]``, so integrating
-    ``inclination_factor`` over the angle picks up a ``sin iota`` Jacobian and
-    a normalization of ``int_0^pi sin iota diota = 2``.
-    """
-    iota = jnp.linspace(0.0, math.pi, 200_001)
-    mean_g = jnp.trapezoid(inclination_factor(iota) * jnp.sin(iota), iota) / 2.0
-
-    np.testing.assert_allclose(mean_g, MEAN_INCLINATION_FACTOR, rtol=1e-9)
-    np.testing.assert_allclose(
-        MEAN_INCLINATION_FACTOR / inclination_factor(0.0), 0.4, rtol=1e-12
-    )
-
-
 def test_scales_as_inverse_distance_squared(
     bns: dict[str, jax.Array], bns_intensity: Callable[..., jax.Array]
 ) -> None:
@@ -135,7 +115,7 @@ def test_scales_with_inclination_factor(
     edge_on = bns_intensity(frequencies, inclination=jnp.array([math.pi / 2.0]))
 
     np.testing.assert_allclose(
-        edge_on, face_on * 0.25 / FACE_ON_INCLINATION_FACTOR, rtol=1e-12
+        edge_on, face_on * 0.25 / inclination_factor(0.0), rtol=1e-12
     )
 
 

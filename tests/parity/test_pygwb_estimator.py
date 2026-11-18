@@ -17,6 +17,7 @@ import pytest
 from conftest import EXACT_NETWORK, PYGWB_POWER_FRACTION
 from numpy.typing import NDArray
 
+from astrogwb.background.simulation import combine_pair_spectra
 from astrogwb.background.spectral import (
     omega_gw_from_spectral_density,
     spectral_density_from_omega_gw,
@@ -28,7 +29,6 @@ from astrogwb.detector import (
     gaussian_bin_scale,
     pair_bin_scale,
 )
-from astrogwb.simulators import combine_pair_spectra
 
 
 @pytest.mark.parametrize("pair", range(3), ids=["A-B", "A-C", "B-C"])

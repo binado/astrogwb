@@ -1,17 +1,17 @@
 """The tiny closed-form setup the simulator tests share.
 
-A BNS population of a few tens of sources at ``observation_time=1e-4`` years,
-the closed-form inspiral on a four-bin grid and two networks, a three-detector
-one and a pair it contains: every stage runs for real in well under a second.
+An event pool of a few tens of BNS sources, the closed-form inspiral on a
+four-bin grid and two networks, a three-detector one and a pair it contains:
+every stage runs for real in well under a second.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 
 from astrogwb.detector.config import DetectorRegistry, load_detector_config
-from astrogwb.populations import BNSCobaPopulation
-from astrogwb.simulators import BackgroundArtifact, RealizationMetadata
 from astrogwb.waveform import WaveformMetadata
 
 WAVEFORM = WaveformMetadata(
@@ -30,33 +30,37 @@ NETWORKS = DetectorRegistry(
 DETECTORS = NETWORKS
 
 
-def assert_same_spectra(
-    actual: BackgroundArtifact, expected: BackgroundArtifact
-) -> None:
-    """Every network's pair spectra are equal, bit for bit."""
-    assert actual.spectra.keys() == expected.spectra.keys()
-    for name, spectrum in expected.spectra.items():
-        np.testing.assert_array_equal(actual.spectra[name], spectrum)
+def event_pool(size: int = 64, *, seed: int = 41) -> dict[str, np.ndarray]:
+    """An isotropic sample with physical waveform inputs and unique sky positions."""
+    rng = np.random.default_rng(seed)
+    masses = np.sort(rng.uniform(1, 2.5, (2, size)), axis=0)
+    return {
+        "source_frame_mass_1": masses[1],
+        "source_frame_mass_2": masses[0],
+        "spin_1z": np.zeros(size),
+        "spin_2z": np.zeros(size),
+        "lambda_1": np.full(size, 400.0),
+        "lambda_2": np.full(size, 400.0),
+        "redshift": np.full(size, 0.1),
+        "luminosity_distance": np.full(size, 450.0),
+        "inclination": np.arccos(rng.uniform(-1, 1, size)),
+        "declination": np.arcsin(rng.uniform(-1, 1, size)),
+        "right_ascension": rng.uniform(0, 2 * np.pi, size),
+        "polarization_angle": rng.uniform(0, np.pi, size),
+        "coa_phase": rng.uniform(0, 2 * np.pi, size),
+    }
 
 
-def population_metadata(observation_time: float = 1e-4) -> RealizationMetadata:
-    """The BNS population observed for ``observation_time`` years."""
-    return RealizationMetadata(
-        population=BNSCobaPopulation(
-            mass_model="uniform",
-            minimum_redshift=0.0,
-            maximum_redshift=5.0,
-            n_grid=64,
-        ),
-        hyperparameters={
-            "H0": 67.66,
-            "Omega_m": 0.3096,
-            "gamma": 1.42,
-            "kappa": 4.62,
-            "z_peak": 1.84,
-            "minimum_mass": 1.0,
-            "mass_width": 1.5,
-            "local_merger_rate": 750.0,
-        },
-        observation_time=observation_time,
+def write_population_csv(path: Path, size: int = 64, *, seed: int = 41) -> Path:
+    """The event pool as a gwmock-pop catalogue: the luminosity distance is ``distance``."""
+    pool = event_pool(size, seed=seed)
+    pool["distance"] = pool.pop("luminosity_distance")
+    names = list(pool)
+    np.savetxt(
+        path,
+        np.column_stack([pool[name] for name in names]),
+        delimiter=",",
+        header=",".join(names),
+        comments="",
     )
+    return path

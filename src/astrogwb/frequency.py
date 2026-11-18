@@ -9,13 +9,11 @@ from numpy.typing import ArrayLike
 
 __all__ = [
     "FrequencySpacing",
-    "apply_frequency_mask",
     "bin_widths",
     "broadcast_along_axis",
     "frequency_grid",
     "frequency_mask",
     "log_frequency_grid",
-    "noise_weighted_inner_product",
     "uniform_frequency_grid",
     "validate_frequency_grid",
 ]
@@ -238,62 +236,3 @@ def frequency_mask(
     if fmax is not None:
         mask = mask & (frequencies <= fmax)
     return mask
-
-
-def apply_frequency_mask(
-    mask: jax.Array,
-    *arrays: jax.Array,
-    axis: int = 0,
-) -> tuple[jax.Array, ...]:
-    """Apply a boolean frequency mask along ``axis`` of every array.
-
-    Compress only after grid-dependent quantities such as :func:`bin_widths`
-    have been computed on the full axis.
-
-    Parameters
-    ----------
-    mask
-        Boolean mask of entries to include.
-    axis
-        Frequency-axis index.
-    *arrays
-        Arrays to mask.
-    """
-    return tuple(jnp.compress(mask, array, axis=axis) for array in arrays)
-
-
-def noise_weighted_inner_product(
-    a: jax.Array,
-    b: jax.Array,
-    psd: jax.Array,
-    frequencies: ArrayLike,
-    *,
-    axis: int = -1,
-) -> jax.Array:
-    r"""Discrete noise-weighted inner product for a diagonal Gaussian noise model.
-
-    .. math::
-
-        (a|b) = \sum_i \Delta f_i \frac{a_i^* b_i}{S_i^2},
-
-    with the bin widths :math:`\Delta f_i` of the frequency grid. The
-    observation time enters separately, in
-    :func:`astrogwb.background.spectral_snr_squared`.
-
-    Parameters
-    ----------
-    a, b
-        Arrays whose ``axis`` runs over frequency bins; ``a`` is conjugated.
-    psd
-        Power spectral density :math:`S_i`, broadcastable against ``a`` and
-        ``b``.
-    frequencies
-        The grid ``axis`` runs over, in Hz, one entry per bin. Widths come from
-        :func:`bin_widths`.
-    axis
-        Axis to contract over. Defaults to the trailing axis, so leading batch
-        dimensions broadcast.
-    """
-    terms = jnp.conj(a) * b / psd**2
-    widths = broadcast_along_axis(bin_widths(frequencies), terms.ndim, axis)
-    return jnp.sum(widths * terms, axis=axis)
