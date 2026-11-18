@@ -19,7 +19,8 @@ covariance of a catalog realization over :math:`T = N_{\rm seg}\tau`,
 
 with :math:`\mathcal R` the total observer-frame merger rate and
 :math:`\Gamma^c` the network's connected overlap
-(:func:`~astrogwb.detector.response.connected_overlap`). The averages run over
+(the quadrupole's combination of
+:func:`~astrogwb.detector.generalized_overlap_reduction_function`). The averages run over
 inclination, polarization, phase, intrinsic parameters and redshift. A model
 implements :class:`SpectralDensityModel`; the likelihood supplies the network
 and :math:`T`.

@@ -32,9 +32,8 @@ from astrogwb.background.importance.spectrum import (
 )
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.detector import (
-    ConnectedOverlap,
-    connected_overlap,
-    connected_overlap_components,
+    NORMALIZED_ORF_SCALE,
+    generalized_overlap_reduction_function,
     load_detector,
     pair_names,
     pair_response,
@@ -54,6 +53,7 @@ from astrogwb.statistics import (
     amplitude_weights,
 )
 from astrogwb.utils import gauss_legendre_nodes_weights
+from astrogwb.waveform.intensity import QUADRUPOLE_STOKES_WEIGHTS, StokesPair
 
 NUM_PAIRS = 2
 NUM_BINS = 12
@@ -205,6 +205,19 @@ def test_network_from_leaves_keeps_only_the_counted_entries(
     assert network.scale.shape == (int(pair_leaves["mask"].sum()),)
     assert isinstance(network.connected_overlap, jax.Array)
     assert network.connected_overlap.shape == (network.scale.size,) * 2
+
+
+def test_network_from_leaves_with_both_overlap_forms_raises(
+    pair_leaves: dict[str, Any],
+) -> None:
+    overlap = np.zeros((NUM_PAIRS, NUM_BINS) * 2)
+
+    with pytest.raises(ValueError, match="not both"):
+        _Network.from_leaves(
+            **pair_leaves,
+            connected_overlap=overlap,
+            generalized_orfs={"II": overlap},
+        )
 
 
 def test_network_from_leaves_drops_entries_with_infinite_noise(
@@ -437,7 +450,28 @@ def test_constructor_with_shot_noise_gives_a_finite_log_likelihood(
     assert bool(jnp.isfinite(likelihood.log_likelihood(OFF_FIDUCIAL)[0]))
 
 
-def test_constructor_with_stokes_components_splits_its_covariance(
+def test_constructor_covariance_does_not_depend_on_keeping_the_generalized_orfs(
+    model: CatalogModel,
+    frequencies: np.ndarray,
+    triangle: list[Any],
+) -> None:
+    combined, kept = (
+        _triangle_likelihood(
+            model,
+            triangle,
+            frequencies,
+            None,
+            shot_noise=True,
+            num_draws=256,
+            keep_generalized_orfs=keep,
+        ).evaluate(OFF_FIDUCIAL)[1]
+        for keep in (False, True)
+    )
+
+    np.testing.assert_allclose(kept.cholesky, combined.cholesky, rtol=1e-12)
+
+
+def test_constructor_keeping_generalized_orfs_splits_its_covariance(
     model: CatalogModel,
     frequencies: np.ndarray,
     triangle: list[Any],
@@ -449,7 +483,7 @@ def test_constructor_with_stokes_components_splits_its_covariance(
         None,
         shot_noise=True,
         num_draws=256,
-        stokes_components=True,
+        keep_generalized_orfs=True,
     )
     _, factor = likelihood.evaluate(OFF_FIDUCIAL)
     components = likelihood.covariance_components(OFF_FIDUCIAL)
@@ -460,44 +494,75 @@ def test_constructor_with_stokes_components_splits_its_covariance(
 
 
 # --------------------------------------------------------------------------- #
-# connected_overlap
+# generalized_overlap_reduction_function
 # --------------------------------------------------------------------------- #
 RESPONSE_FREQUENCIES = np.array([5.0, 30.0, 300.0])
 
+#: Uniform polarization angles on [0, pi), exact for the products of two pair
+#: responses, whose harmonics stop at 8 psi.
+NUM_POLARIZATION_NODES = 8
 
-def test_connected_overlap_does_not_depend_on_the_chunk_size(
+
+def test_generalized_orfs_do_not_depend_on_the_chunk_size(
     triangle: list[Any],
 ) -> None:
     key = jax.random.key(4)
-    whole = connected_overlap(key, 50, RESPONSE_FREQUENCIES, triangle, chunk_size=64)
-    chunked = connected_overlap(key, 50, RESPONSE_FREQUENCIES, triangle, chunk_size=7)
+    whole = generalized_overlap_reduction_function(
+        key, 50, RESPONSE_FREQUENCIES, triangle, chunk_size=64
+    )
+    chunked = generalized_overlap_reduction_function(
+        key, 50, RESPONSE_FREQUENCIES, triangle, chunk_size=7
+    )
 
-    np.testing.assert_allclose(chunked, whole, rtol=1e-12, atol=1e-15)
+    for pair, values in whole.items():
+        np.testing.assert_allclose(chunked[pair], values, rtol=1e-12, atol=1e-15)
 
 
-def test_connected_overlap_is_symmetric_positive_semidefinite(
-    triangle: list[Any],
+@pytest.mark.parametrize("pair", ["II", "QQ", "UU", "VV"])
+def test_generalized_orf_diagonal_component_is_symmetric_positive_semidefinite(
+    triangle: list[Any], pair: StokesPair
 ) -> None:
-    overlap = connected_overlap(jax.random.key(5), 200, RESPONSE_FREQUENCIES, triangle)
-    matrix = np.reshape(np.asarray(overlap), (3 * RESPONSE_FREQUENCIES.size,) * 2)
+    orfs = generalized_overlap_reduction_function(
+        jax.random.key(5), 200, RESPONSE_FREQUENCIES, triangle
+    )
+    matrix = np.reshape(np.asarray(orfs[pair]), (3 * RESPONSE_FREQUENCIES.size,) * 2)
     eigenvalues = np.linalg.eigvalsh(matrix)
 
-    assert overlap.shape == (3, RESPONSE_FREQUENCIES.size) * 2
+    assert orfs[pair].shape == (3, RESPONSE_FREQUENCIES.size) * 2
     np.testing.assert_array_equal(matrix, matrix.T)
     assert eigenvalues.min() >= -1e-12 * eigenvalues.max()
 
 
-def test_connected_overlap_is_the_inclination_averaged_response_moment(
+def test_generalized_orf_vi_is_iv_with_the_pairs_swapped(
     triangle: list[Any],
 ) -> None:
-    """The per-source ORF moment, inclination integrated at the same sky draws.
+    orfs = generalized_overlap_reduction_function(
+        jax.random.key(6), 50, RESPONSE_FREQUENCIES, triangle, components=("IV", "VI")
+    )
 
-    The inclination scatter :math:`c_\\iota / (2/5)^2` the moment carries is
-    the second moment's, so it is divided out.
+    np.testing.assert_array_equal(orfs["VI"], jnp.transpose(orfs["IV"], (2, 3, 0, 1)))
+
+
+def test_quadrupole_combination_is_the_source_averaged_response_moment(
+    triangle: list[Any],
+) -> None:
+    r"""The per-source ORF moment, inclination and polarization integrated exactly.
+
+    At the same sky draws, the quadrupole's combination of the generalized
+    ORFs is the second moment of the per-source ORF over a uniform
+    :math:`\cos\iota` and polarization angle; the inclination scatter
+    :math:`c_\iota / (2/5)^2` the moment carries is the intensity second
+    moment's, so it is divided out.
     """
-    key, num_draws = jax.random.key(6), 40
-    right_ascension, declination, polarization, _ = _isotropic_angles(key, num_draws)
+    key, num_draws = jax.random.key(7), 40
+    right_ascension, declination, _, _ = _isotropic_angles(key, num_draws)
     nodes, weights = gauss_legendre_nodes_weights(-1.0, 1.0, 8)
+    polarization = (
+        jnp.arange(NUM_POLARIZATION_NODES)[:, None]
+        * jnp.pi
+        / NUM_POLARIZATION_NODES
+        * jnp.ones(num_draws)
+    )
     responses = jax.vmap(
         lambda cosine: pair_response(
             RESPONSE_FREQUENCIES,
@@ -508,30 +573,19 @@ def test_connected_overlap_is_the_inclination_averaged_response_moment(
             cosine,
         )
     )(jnp.asarray(nodes))
-    flat = jnp.reshape(responses, (len(nodes), num_draws, -1))
+    flat = jnp.reshape(responses, (len(nodes), -1, 3 * RESPONSE_FREQUENCIES.size))
     moment = jnp.einsum("n,nli,nlj->ij", jnp.asarray(weights) / 2.0, flat, flat)
+    orfs = generalized_overlap_reduction_function(
+        key, num_draws, RESPONSE_FREQUENCIES, triangle
+    )
+    combined = sum(QUADRUPOLE_STOKES_WEIGHTS[pair] * orfs[pair] for pair in orfs)
 
     np.testing.assert_allclose(
-        np.reshape(
-            np.asarray(
-                connected_overlap(key, num_draws, RESPONSE_FREQUENCIES, triangle)
-            ),
-            moment.shape,
-        ),
-        RESPONSE_TO_CONNECTED * moment / num_draws,
+        NORMALIZED_ORF_SCALE**2 * np.reshape(np.asarray(combined), moment.shape),
+        RESPONSE_TO_CONNECTED * moment / (num_draws * NUM_POLARIZATION_NODES),
         rtol=1e-10,
         atol=1e-14,
     )
-
-
-def test_connected_overlap_paper_normalization_is_four_twenty_fifths(
-    triangle: list[Any],
-) -> None:
-    key = jax.random.key(7)
-    normalized = connected_overlap(key, 30, RESPONSE_FREQUENCIES, triangle)
-    paper = connected_overlap(key, 30, RESPONSE_FREQUENCIES, triangle, normalize=False)
-
-    np.testing.assert_allclose(paper, 4.0 / 25.0 * normalized, rtol=1e-14)
 
 
 # --------------------------------------------------------------------------- #
@@ -633,17 +687,15 @@ def test_grid_log_prior_outside_the_support_is_negative_infinite() -> None:
 # --------------------------------------------------------------------------- #
 @pytest.fixture(scope="module")
 def split_network(pair_leaves: dict[str, Any], response_draws: jax.Array) -> _Network:
-    """Three Stokes components, each the moment of a disjoint third of the draws."""
+    """Four generalized ORFs, each the moment of a disjoint quarter of the draws."""
     flat = np.reshape(np.asarray(response_draws), (NUM_DRAWS, -1))
-    parts = np.array_split(flat, 3)
-    moments = [
-        RESPONSE_TO_CONNECTED
+    pairs: tuple[StokesPair, ...] = ("II", "QQ", "UU", "VV")
+    orfs: dict[StokesPair, np.ndarray] = {
+        pair: RESPONSE_TO_CONNECTED
         * (part.T @ part / NUM_DRAWS).reshape((NUM_PAIRS, NUM_BINS) * 2)
-        for part in parts
-    ]
-    return _Network.from_leaves(
-        **pair_leaves, connected_overlap=ConnectedOverlap(*moments)
-    )
+        for pair, part in zip(pairs, np.array_split(flat, 4), strict=True)
+    }
+    return _Network.from_leaves(**pair_leaves, generalized_orfs=orfs)
 
 
 @pytest.fixture(scope="module")
@@ -717,10 +769,10 @@ def test_amplitude_variance_budget_sums_to_the_amplitude_variance(
     )
 
 
-def test_amplitude_variance_budget_without_stokes_components_raises(
+def test_amplitude_variance_budget_without_generalized_orfs_raises(
     likelihood: DenseGaussianLikelihood[CatalogModel],
 ) -> None:
-    with pytest.raises(ValueError, match="stokes_components"):
+    with pytest.raises(ValueError, match="keep_generalized_orfs"):
         amplitude_variance_budget(likelihood, OFF_FIDUCIAL)
 
 
@@ -738,36 +790,3 @@ def test_covariance_count_term_is_the_template_over_the_expected_count(
         1.0 / expected_count, rel=1e-10
     )
     assert int(jnp.linalg.matrix_rank(count)) == 1
-
-
-# --------------------------------------------------------------------------- #
-# connected_overlap_components
-# --------------------------------------------------------------------------- #
-@pytest.mark.parametrize("name", ConnectedOverlap._fields)
-def test_connected_overlap_component_is_symmetric_positive_semidefinite(
-    triangle: list[Any], name: str
-) -> None:
-    components = connected_overlap_components(
-        jax.random.key(8), 200, RESPONSE_FREQUENCIES, triangle
-    )
-    matrix = np.reshape(
-        np.asarray(getattr(components, name)), (3 * RESPONSE_FREQUENCIES.size,) * 2
-    )
-    eigenvalues = np.linalg.eigvalsh(matrix)
-
-    np.testing.assert_array_equal(matrix, matrix.T)
-    assert eigenvalues.min() >= -1e-12 * eigenvalues.max()
-
-
-def test_connected_overlap_components_sum_to_the_overlap_up_to_the_cross_term_noise(
-    triangle: list[Any],
-) -> None:
-    r"""The dropped :math:`\langle IQ'\rangle` term averages out over the draws."""
-    key, num_draws = jax.random.key(9), 4096
-    total = connected_overlap(key, num_draws, RESPONSE_FREQUENCIES, triangle)
-    components = connected_overlap_components(
-        key, num_draws, RESPONSE_FREQUENCIES, triangle
-    )
-
-    residual = np.abs(np.asarray(components.total - total)).max()
-    assert residual < 0.05 * np.abs(np.asarray(total)).max()

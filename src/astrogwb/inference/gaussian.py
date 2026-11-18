@@ -10,16 +10,22 @@ and their covariance (the paper's segment-averaged covariance) is
     C_{ab,k;\,cd,l} = \delta_{ab,cd}\,\delta_{kl}\,\sigma_{ab,k}^2
         + \frac{1}{T}\left[4\mathcal R\langle I_k I_l\rangle\right]
         \Gamma^c_{ab,k;\,cd,l},
+    \qquad
+    \Gamma^c = \Gamma^{II} + \frac{\Gamma^{QQ} + \Gamma^{UU}}{71}
+        + \frac{69}{71}\Gamma^{VV},
 
 with :math:`4\mathcal R\langle I_k I_l\rangle` the intensity second moment of a
 :class:`~astrogwb.inference.model.SpectralDensityModel`, which depends on the
-parameters, and :math:`\Gamma^c` the network's connected overlap
-(:func:`~astrogwb.detector.response.connected_overlap`), which does not.
-Without shot noise :math:`C` is the diagonal detector noise.
+parameters, and :math:`\Gamma^c` the quadrupole's combination
+(:data:`~astrogwb.waveform.intensity.QUADRUPOLE_STOKES_WEIGHTS`) of the
+network's generalized ORFs
+(:func:`~astrogwb.detector.generalized_overlap_reduction_function`) in the
+units of the normalized isotropic ORF, which does not. Without shot noise
+:math:`C` is the diagonal detector noise.
 
 A :class:`DenseGaussianLikelihood` is one network. Its ``log_likelihood``
 predicts, factorizes :math:`C` once and scores every data realization it holds
-against the one factor. Built with ``stokes_components``, its
+against the one factor. Built with ``keep_generalized_orfs``, its
 :meth:`~DenseGaussianLikelihood.covariance_components` splits :math:`C` into
 the paper's detector-noise, count, intensity, linear- and
 circular-polarization terms.
@@ -40,15 +46,15 @@ from jax.typing import ArrayLike
 
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.detector import (
-    ConnectedOverlap,
+    NORMALIZED_ORF_SCALE,
     Detector,
-    connected_overlap,
-    connected_overlap_components,
+    generalized_overlap_reduction_function,
     load_network,
     pair_bin_scale,
     pair_names,
     pair_terms,
 )
+from astrogwb.waveform.intensity import QUADRUPOLE_STOKES_WEIGHTS, StokesPair
 
 from .model import SpectralDensityModel, SpectralDensityPrediction
 
@@ -61,6 +67,30 @@ __all__ = [
 _LOG_TWO_PI = math.log(2.0 * math.pi)
 
 type PairName = tuple[str, str]
+
+#: The generalized ORFs behind each Stokes term of the connected covariance.
+_INTENSITY_PAIRS: tuple[StokesPair, ...] = ("II",)
+_LINEAR_PAIRS: tuple[StokesPair, ...] = ("QQ", "UU")
+_CIRCULAR_PAIRS: tuple[StokesPair, ...] = ("IV", "VI", "VV")
+
+
+def _stokes_sum(
+    orfs: Mapping[StokesPair, jax.Array], pairs: Sequence[StokesPair] | None = None
+) -> jax.Array:
+    r""":math:`\sum_{\mu\nu} w_{\mu\nu} \Gamma^{\mu\nu}` with the quadrupole's weights.
+
+    Over ``pairs``, or every pair of ``orfs``; pairs the quadrupole does not
+    weight contribute nothing.
+    """
+    selected = orfs if pairs is None else [pair for pair in pairs if pair in orfs]
+    terms = [
+        QUADRUPOLE_STOKES_WEIGHTS[pair] * orfs[pair]
+        for pair in selected
+        if pair in QUADRUPOLE_STOKES_WEIGHTS
+    ]
+    if not terms:
+        raise ValueError(f"no weighted generalized ORF among {list(selected)}")
+    return jnp.sum(jnp.stack(terms), axis=0)
 
 
 def _stack_pairs(
@@ -109,8 +139,11 @@ class _Network:
         Observation time :math:`T` in years, ``()``.
     connected_overlap
         The connected overlap :math:`\Gamma^c` on the counted entries,
-        ``(D, D)``, its Stokes components, or ``None`` for detector noise
-        alone.
+        ``(D, D)``, or ``None`` for detector noise alone.
+    generalized_orfs
+        The generalized ORFs :math:`\Gamma^{\mu\nu}` on the counted entries,
+        each ``(D, D)``, in the units of :math:`\Gamma^c`, or ``None`` when not
+        kept.
     pairs
         The sorted name pair of every pair, in the data's order.
     num_bins
@@ -122,7 +155,8 @@ class _Network:
     scale: jax.Array
     pair_overlap: jax.Array
     observation_time: jax.Array
-    connected_overlap: jax.Array | ConnectedOverlap | None
+    connected_overlap: jax.Array | None
+    generalized_orfs: dict[StokesPair, jax.Array] | None
     pairs: tuple[PairName, ...]
     num_bins: int
 
@@ -135,7 +169,8 @@ class _Network:
         observation_time: float,
         pairs: Sequence[PairName],
         mask: ArrayLike | None = None,
-        connected_overlap: ArrayLike | ConnectedOverlap | None = None,
+        connected_overlap: ArrayLike | None = None,
+        generalized_orfs: Mapping[StokesPair, ArrayLike] | None = None,
     ) -> Self:
         """A network from its ``(P, F)`` leaves, keeping the finite, unmasked entries.
 
@@ -155,9 +190,21 @@ class _Network:
             Boolean, ``(P, F)``, of the entries to count; ``None`` counts all
             with finite noise.
         connected_overlap
-            The connected overlap, ``(P, F, P, F)``, its Stokes components,
-            or ``None``.
+            The connected overlap, ``(P, F, P, F)``, or ``None``.
+        generalized_orfs
+            The generalized ORFs, each ``(P, F, P, F)``, kept and combined into
+            the connected overlap; exclusive with ``connected_overlap``.
+
+        Raises
+        ------
+        ValueError
+            If both ``connected_overlap`` and ``generalized_orfs`` are given.
         """
+        if connected_overlap is not None and generalized_orfs is not None:
+            raise ValueError(
+                "pass the connected overlap or the generalized ORFs it combines, "
+                "not both"
+            )
         scale = np.asarray(scale, dtype=np.float64)
         num_pairs, num_bins = scale.shape
         counted = np.isfinite(scale)
@@ -169,9 +216,11 @@ class _Network:
             flat = np.reshape(np.asarray(values), (num_pairs * num_bins,) * 2)
             return jnp.asarray(flat[np.ix_(keep, keep)])
 
+        orfs = None
         overlap = None
-        if isinstance(connected_overlap, ConnectedOverlap):
-            overlap = ConnectedOverlap(*map(restrict, connected_overlap))
+        if generalized_orfs is not None:
+            orfs = {pair: restrict(values) for pair, values in generalized_orfs.items()}
+            overlap = _stokes_sum(orfs)
         elif connected_overlap is not None:
             overlap = restrict(connected_overlap)
         return cls(
@@ -181,6 +230,7 @@ class _Network:
             pair_overlap=jnp.asarray(np.asarray(pair_overlap).reshape(-1)[keep]),
             observation_time=jnp.asarray(observation_time, dtype=float),
             connected_overlap=overlap,
+            generalized_orfs=orfs,
             pairs=tuple(pairs),
             num_bins=num_bins,
         )
@@ -205,6 +255,7 @@ jax.tree_util.register_dataclass(
         "pair_overlap",
         "observation_time",
         "connected_overlap",
+        "generalized_orfs",
     ],
     meta_fields=["pairs", "num_bins"],
 )
@@ -274,8 +325,8 @@ def _catalog_covariance(
 ) -> jax.Array:
     r"""The connected covariance :math:`[4\mathcal R\langle I_k I_l\rangle]\,\Gamma^c / T`, ``(D, D)``.
 
-    ``overlap`` replaces the network's :math:`\Gamma^c`, for one of its
-    Stokes components.
+    ``overlap`` replaces the network's :math:`\Gamma^c`, for one Stokes
+    term of it.
     """
     moment = prediction.intensity_second_moment
     if moment is None or network.connected_overlap is None:
@@ -289,11 +340,7 @@ def _catalog_covariance(
             f"{(network.num_bins,) * 2}"
         )
     if overlap is None:
-        overlap = (
-            network.connected_overlap.total
-            if isinstance(network.connected_overlap, ConnectedOverlap)
-            else network.connected_overlap
-        )
+        overlap = network.connected_overlap
     covariance = (
         moment[network.bins][:, network.bins]
         * overlap
@@ -355,17 +402,15 @@ class DenseGaussianLikelihood[M: SpectralDensityModel]:
     shot_noise
         Whether the covariance includes the catalog's shot noise.
     key
-        Random key of the connected overlap's sky draws; a fixed key by
+        Random key of the generalized ORFs' sky draws; a fixed key by
         default.
     num_draws
-        Number of sky draws of the connected overlap.
-    stokes_components
-        Whether to keep the connected overlap's Stokes components
-        (:func:`~astrogwb.detector.connected_overlap_components`) for
-        :meth:`covariance_components`, at three times the memory. The
-        covariance is then their sum, which drops the zero-mean
-        :math:`\\langle IQ'\\rangle` sampling noise of
-        :func:`~astrogwb.detector.connected_overlap`.
+        Number of sky draws of the generalized ORFs.
+    keep_generalized_orfs
+        Whether to keep the generalized ORFs
+        (:func:`~astrogwb.detector.generalized_overlap_reduction_function`)
+        for :meth:`covariance_components`, at four times the memory of their
+        combination. The covariance is the same either way.
 
     Attributes
     ----------
@@ -394,23 +439,28 @@ class DenseGaussianLikelihood[M: SpectralDensityModel]:
         shot_noise: bool = True,
         key: jax.Array | None = None,
         num_draws: int = 2**15,
-        stokes_components: bool = False,
+        keep_generalized_orfs: bool = False,
     ) -> None:
         detectors = (
             load_network(network) if isinstance(network, str) else tuple(network)
         )
         frequencies = np.asarray(frequencies, dtype=float)
         pairs = pair_names(detectors)
-        overlap = None
+        overlaps: dict[str, Any] = {}
         if shot_noise:
-            build = (
-                connected_overlap_components if stokes_components else connected_overlap
-            )
-            overlap = build(
-                jax.random.key(0) if key is None else key,
-                num_draws,
-                frequencies,
-                detectors,
+            orfs = {
+                pair: NORMALIZED_ORF_SCALE**2 * values
+                for pair, values in generalized_overlap_reduction_function(
+                    jax.random.key(0) if key is None else key,
+                    num_draws,
+                    frequencies,
+                    detectors,
+                ).items()
+            }
+            overlaps = (
+                {"generalized_orfs": orfs}
+                if keep_generalized_orfs
+                else {"connected_overlap": _stokes_sum(orfs)}
             )
         resolved = _Network.from_leaves(
             scale=pair_bin_scale(frequencies, detectors, observation_time),
@@ -424,7 +474,7 @@ class DenseGaussianLikelihood[M: SpectralDensityModel]:
                 if mask is None
                 else np.asarray(_stack_pairs(mask, pairs, frequencies.size), dtype=bool)
             ),
-            connected_overlap=overlap,
+            **overlaps,
         )
         self._assign(
             model,
@@ -467,7 +517,7 @@ class DenseGaussianLikelihood[M: SpectralDensityModel]:
         cls, shot_noise: bool, children: tuple[Any, ...]
     ) -> DenseGaussianLikelihood[M]:
         # Rebuilt without __init__: tracing must not reload the network or
-        # redraw the connected overlap.
+        # redraw the generalized ORFs.
         model, network, observed = children
         return cls._from_network(model, network, observed, shot_noise=shot_noise)
 
@@ -517,14 +567,14 @@ class DenseGaussianLikelihood[M: SpectralDensityModel]:
         ------
         ValueError
             If the likelihood was built without shot noise or without
-            ``stokes_components``, or the model does not predict its merger
-            rate.
+            ``keep_generalized_orfs``, or the model does not predict its
+            merger rate.
         """
-        overlap = self._network.connected_overlap
-        if not self.shot_noise or not isinstance(overlap, ConnectedOverlap):
+        orfs = self._network.generalized_orfs
+        if not self.shot_noise or orfs is None:
             raise ValueError(
                 "the covariance components need a likelihood built with "
-                "shot_noise=True and stokes_components=True"
+                "shot_noise=True and keep_generalized_orfs=True"
             )
         prediction = self.model(params, shot_noise=True)
         if prediction.merger_rate is None:
@@ -534,17 +584,18 @@ class DenseGaussianLikelihood[M: SpectralDensityModel]:
         mean = _expected_data(prediction, self._network)
         seconds = self._network.observation_time * SECONDS_PER_YEAR
         count = jnp.outer(mean, mean) / (prediction.merger_rate * seconds)
+
+        def term(pairs: Sequence[StokesPair]) -> jax.Array:
+            return _catalog_covariance(
+                prediction, self._network, _stokes_sum(orfs, pairs)
+            )
+
         return {
             "detector": jnp.diag(self._network.scale**2),
             "count": count,
-            "intensity": _catalog_covariance(
-                prediction, self._network, overlap.intensity
-            )
-            - count,
-            "linear": _catalog_covariance(prediction, self._network, overlap.linear),
-            "circular": _catalog_covariance(
-                prediction, self._network, overlap.circular
-            ),
+            "intensity": term(_INTENSITY_PAIRS) - count,
+            "linear": term(_LINEAR_PAIRS),
+            "circular": term(_CIRCULAR_PAIRS),
         }
 
     def evaluate(self, params: Mapping[str, ArrayLike]) -> Evaluation:

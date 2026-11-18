@@ -22,7 +22,8 @@ Gram matrix of the face-on catalog intensity. The factor :math:`c_\iota`
 (:data:`~astrogwb.background.importance.spectrum.INCLINATION_RAW_SECOND_MOMENT`) is the
 isotropic inclination average of the face-on intensity product; the sky and
 polarization scatter is the network's connected overlap
-(:func:`~astrogwb.detector.response.connected_overlap`).
+(the quadrupole's combination of
+:func:`~astrogwb.detector.generalized_overlap_reduction_function`).
 
 The redshift nodes and the reference redshift are fixed, so the query
 frequencies, and with them :math:`W_z`, do not depend on the parameters. Each

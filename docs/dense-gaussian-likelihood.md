@@ -209,22 +209,30 @@ by reference: the catalog arrays and the Gram matrix $G$ on `CatalogModel`
 (every network's likelihood holds the same model, so the device buffers are not
 copied), and the response draws when every network is sampled from one key.
 
-### D3. Connected overlap: sky Monte Carlo, once per network
+### D3. Generalized ORFs: sky Monte Carlo, once per network
 
-$\Gamma^c$ is estimated from isotropic draws of $(\hat n, \psi)$; the
-inclination is averaged exactly through the quadrupole's Stokes moments
-$\langle s s^T\rangle_\iota / \langle s_I^2\rangle_\iota$, and the paper's
-$1/71$ and $69/71$ emerge from the polarization average:
+The paper's generalized ORFs
+$\Gamma^{\mu\nu}_{ab,cd} = 4\int d^2\hat n/4\pi\, F^\mu_{(ab)} F^\nu_{(cd)}$
+are estimated from isotropic sky draws at zero polarization angle; the
+polarization angle and the inclination belong to the source moments. The
+likelihood combines them with the quadrupole's
+$\langle \mu\nu'\rangle / \langle II'\rangle$
+(`waveform.intensity.QUADRUPOLE_STOKES_WEIGHTS`),
+$\Gamma^c = \Gamma^{II} + (\Gamma^{QQ} + \Gamma^{UU})/71 + \tfrac{69}{71}\Gamma^{VV}$,
+in the units of the normalized isotropic ORF ($\gamma_{ab} = \tfrac52\Gamma_{ab}$,
+`detector.NORMALIZED_ORF_SCALE`):
 
 ```python
-def connected_overlap(key, num_draws, frequencies, detectors, *,
-                      normalize=True, chunk_size=4096) -> jax.Array:  # (P, F, P, F)
+def generalized_overlap_reduction_function(
+    key, num_draws, frequencies, detectors, *,
+    components=("II", "QQ", "UU", "VV"), chunk_size=4096,
+) -> dict[StokesPair, jax.Array]:  # each (P, F, P, F)
 ```
 
 It accumulates `flat.T @ flat` over chunks of draws with `lax.scan`, so the
-draws never sit in memory together. A sum of outer products is positive
-semidefinite; with a positive semidefinite $X$, the Schur product
-$X \circ \Gamma^c$ is too, so the Cholesky cannot fail because of either.
+draws never sit in memory together. Each $\Gamma^{\mu\mu}$ is a sum of outer
+products, positive semidefinite, and so is their positive combination; with a
+positive semidefinite $X$, the Schur product $X \circ \Gamma^c$ is too, so the Cholesky cannot fail because of either.
 
 The Monte Carlo error is the same at every $\Lambda$, a fixed bias in $C$
 rather than noise that averages out. The convergence check is cheap: compare
@@ -325,11 +333,12 @@ fiducials):
   (`amplitude_variance`), $\rho^{-2}$ without shot noise.
 - The variance budget $\mathbf w^T\Sigma^X\mathbf w$ of each covariance term
   (`amplitude_variance_budget`). It needs a likelihood built with
-  `stokes_components=True`, whose `covariance_components` splits $\Sigma$
-  into detector noise, count, intensity, linear and circular polarization.
-  The count term needs the model's `merger_rate`; the Stokes split comes from
-  `astrogwb.detector.connected_overlap_components`, which drops the
-  zero-mean $\langle IQ'\rangle$ sampling noise.
+  `keep_generalized_orfs=True`, whose `covariance_components` splits $\Sigma$
+  into detector noise, count ($\Gamma^{II}$, needs the model's
+  `merger_rate`), intensity ($\Gamma^{II}$ less the count), linear
+  ($\Gamma^{QQ}$, $\Gamma^{UU}$) and circular polarization ($\Gamma^{VV}$, and
+  $\Gamma^{IV}$, $\Gamma^{VI}$ when kept). Keeping the ORFs changes memory,
+  not the covariance.
 
 ### D8. Deleted
 
@@ -361,7 +370,7 @@ inference/
 background/importance/
     model.py         # CatalogModel, sparse node moments
     diagnostics.py   # relative ESS, amplitude cumulants
-detector/response.py # connected_overlap, pair_names
+detector/response.py # generalized_overlap_reduction_function, pair_names
 ```
 
 ## Paper impact

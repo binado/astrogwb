@@ -114,7 +114,7 @@ def amplitude_variance_budget[M: SpectralDensityModel](
     Parameters
     ----------
     likelihood
-        The likelihood, built with ``shot_noise`` and ``stokes_components``;
+        The likelihood, built with ``shot_noise`` and ``keep_generalized_orfs``;
         needs no data.
     params
         The template's parameter values.
