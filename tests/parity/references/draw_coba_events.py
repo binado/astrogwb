@@ -14,15 +14,18 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 import jax
 import numpy as np
 import numpyro
+from jax.typing import ArrayLike
 
 from astrogwb.background.simulation import simulate_sources
 from astrogwb.distributions.redshift.base import RedshiftDistribution
-from astrogwb.populations import BNSCobaPopulation
+from astrogwb.populations import coba
+from astrogwb.rates import madau_dickinson_rate
 from astrogwb.utils import years_to_seconds
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -57,19 +60,32 @@ HYPERPARAMETERS: dict[str, float] = {
 }
 
 
+#: The redshift window and grid of the drawn population.
+MINIMUM_REDSHIFT = 0.05
+MAXIMUM_REDSHIFT = 10.0
+N_GRID = 1000
+
+
+def merger_rate(redshift: ArrayLike, parameters: Mapping[str, ArrayLike]) -> jax.Array:
+    """The Madau-Dickinson rate in ``Gpc^-3 yr^-1``."""
+    return madau_dickinson_rate(
+        redshift,
+        parameters["gamma"],
+        parameters["kappa"],
+        parameters["z_peak"],
+        parameters["local_merger_rate"],
+    )
+
+
 def main() -> None:
     """Draw the events and write them as JSON."""
     jax.config.update("jax_enable_x64", True)
-    population = BNSCobaPopulation(
-        mass_model="uniform", minimum_redshift=0.05, maximum_redshift=10.0
-    )
-    model = population.build()
     redshift = RedshiftDistribution(
         params=HYPERPARAMETERS,
-        source_frame_distribution=model.merger_rate,
-        minimum_redshift=population.minimum_redshift,
-        maximum_redshift=population.maximum_redshift,
-        n_grid=population.n_grid,
+        source_frame_distribution=merger_rate,
+        minimum_redshift=MINIMUM_REDSHIFT,
+        maximum_redshift=MAXIMUM_REDSHIFT,
+        n_grid=N_GRID,
     )
     seconds = years_to_seconds(OBSERVATION_TIME)
     _, count_key, source_key = jax.random.split(jax.random.key(SEED), 3)
@@ -77,7 +93,7 @@ def main() -> None:
 
     def source() -> None:
         distance_model(redshift)()
-        model.source_model(HYPERPARAMETERS)()
+        coba.source_model(HYPERPARAMETERS, mass_model="uniform")()
         for name, prior in extrinsic_priors((-seconds / 2, seconds / 2)).items():
             numpyro.sample(name, prior)
 

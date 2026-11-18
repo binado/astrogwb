@@ -62,7 +62,7 @@ def test_catalog_contraction_matches_the_analytic_spectrum(
         )
         for num_sources in catalog_sizes
     }
-    frequencies = jnp.asarray(catalogs[LARGE_CATALOG_SIZE][0]["frequencies"])
+    frequencies = jnp.asarray(catalogs[LARGE_CATALOG_SIZE]["frequencies"])
     mass_moments = uniform_prior_mass_moments(
         frequencies,
         minimum_redshift=Z_MIN,
@@ -82,7 +82,7 @@ def test_catalog_contraction_matches_the_analytic_spectrum(
     )
 
     ratios: dict[int, np.ndarray] = {}
-    for num_sources, (data, _) in catalogs.items():
+    for num_sources, data in catalogs.items():
         intensity = jnp.asarray(data["intensity"])
         samples = catalog_samples(data)
         total_merger_rate, _, _ = reference_merger_rate_distance_and_logprob(

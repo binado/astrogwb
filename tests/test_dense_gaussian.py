@@ -19,6 +19,7 @@ from astrogwb_mock_population import (
     FIDUCIALS,
     build_reference_catalog,
     build_reference_spectrum,
+    mock_merger_rate,
 )
 from jax.scipy.linalg import solve_triangular
 
@@ -55,14 +56,15 @@ def catalog() -> Any:
 
 @pytest.fixture(scope="module")
 def frequencies(catalog: Any) -> np.ndarray:
-    return np.asarray(catalog[0]["frequencies"][::4][:NUM_BINS])
+    return np.asarray(catalog.frequencies)[::4][:NUM_BINS]
 
 
 @pytest.fixture(scope="module")
 def model_factory(catalog: Any, frequencies: np.ndarray) -> Callable[..., CatalogModel]:
     def build(reweight_masses: bool = False) -> CatalogModel:
         return build_reference_spectrum(
-            *catalog,
+            catalog,
+            merger_rate=mock_merger_rate,
             frequencies=frequencies,
             observation_time=OBSERVATION_TIME,
             reweight_masses=reweight_masses,

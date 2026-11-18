@@ -1,13 +1,10 @@
 """Importance-integration reference catalogs: per-source intensity.
 
-:class:`CatalogMetadata` is the record a catalog is drawn from.
 :func:`intensity_data` turns a generator and source columns into
 :class:`IntensityData`, one intensity column per source.
-:func:`~astrogwb.importance.spectrum.reference_catalog` draws at a reference
-redshift. :func:`read_catalog` reads back what
-:func:`~astrogwb.utils.io.write` stored.
-
-Reference generation uses fixed-size intrinsic draws.
+:func:`~astrogwb.importance.spectrum.reference_catalog` places caller-drawn
+intrinsic sources at a reference redshift and returns a
+:class:`ReferenceCatalog`.
 """
 
 from __future__ import annotations
@@ -16,74 +13,22 @@ import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import partial
-from pathlib import Path
-from typing import Annotated, Any, Self, TypedDict, cast
+from typing import Any, TypedDict
 
 import jax
 import numpy as np
 from jax.typing import ArrayLike as JaxArrayLike
 from numpy.typing import ArrayLike, NDArray
-from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from astrogwb import __version__
-from astrogwb.populations.metadata import AnyPopulation
-from astrogwb.populations.sampling import Sampling
-from astrogwb.utils.io import load
 from astrogwb.waveform.base import WaveformGenerator
-from astrogwb.waveform.metadata import WaveformMetadata
 
 __all__ = [
-    "CatalogMetadata",
     "IntensityData",
     "ReferenceCatalog",
     "intensity_data",
-    "read_catalog",
 ]
 
 logger = logging.getLogger(__name__)
-
-
-class CatalogMetadata(BaseModel):
-    """Everything that determines an intensity catalog's contents.
-
-    Both the request and the provenance: :func:`~astrogwb.importance.spectrum.reference_catalog`
-    draws from it, and :func:`~astrogwb.utils.io.write` stores it beside the
-    catalog. The seed is not part of it.
-
-    ``sampling`` is how a reference catalog
-    (:func:`~astrogwb.importance.spectrum.reference_catalog`) draws its intrinsic
-    parameters: ``"random"`` i.i.d., or ``"sobol"`` on a scrambled Sobol net
-    (:func:`~astrogwb.utils.numpyro.sample_sources_qmc`), which needs a
-    power-of-two ``num_samples``.
-
-    ``reference_redshift`` is the redshift a reference catalog's waveforms are
-    generated at; ``None`` means the population's ``minimum_redshift``, the
-    window's lower edge. Set it below the edge to let one catalog serve every
-    window that starts at or above it
-    (:func:`~astrogwb.importance.spectrum.reference_redshift`).
-    ``reference_inclination`` records the reference-only face-on convention.
-    Intensity always means the literal sum of squared polarization amplitudes.
-    """
-
-    model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
-
-    waveform: WaveformMetadata
-    population: AnyPopulation
-    fiducials: dict[str, float]
-    num_samples: Annotated[int, Field(gt=0)]
-    sampling: Sampling = "random"
-    reference_redshift: Annotated[float, Field(ge=0.0)] | None = None
-    reference_inclination: Annotated[float, Field(ge=0.0, le=0.0)] = 0.0
-    version: str = __version__
-
-    @model_validator(mode="after")
-    def _sobol_needs_a_power_of_two(self) -> Self:
-        if self.sampling == "sobol" and self.num_samples & (self.num_samples - 1):
-            raise ValueError(
-                "sampling='sobol' needs a power-of-two num_samples, "
-                f"got {self.num_samples}"
-            )
-        return self
 
 
 class IntensityData(TypedDict):
@@ -172,26 +117,3 @@ def intensity_data(
         "intensity": np.asarray(generate(columns)),
         "source_parameters": columns,
     }
-
-
-def read_catalog(
-    path: str | Path,
-) -> tuple[IntensityData, CatalogMetadata, int]:
-    """The catalog at ``path``, its record and the seed it was drawn at.
-
-    ``astrogwb model-catalog`` writes it; nothing here draws.
-
-    Parameters
-    ----------
-    path
-        File path.
-
-    Raises
-    ------
-    FileNotFoundError
-        If ``path`` does not exist.
-    """
-    if not Path(path).is_file():
-        raise FileNotFoundError(f"no catalog at {path}")
-    data, metadata, attrs = load(path, CatalogMetadata)
-    return cast(IntensityData, data), metadata, int(attrs["seed"])

@@ -25,7 +25,7 @@ from astrogwb_mock_population import (
     Z_MAX,
     Z_MIN,
     make_redshift_grid,
-    mock_population,
+    mock_merger_rate,
 )
 from reference_population import reference_merger_rate_distance_and_logprob
 
@@ -45,7 +45,7 @@ SAMPLE_REDSHIFTS = jnp.array([0.5, 1.234, 3.7, 12.0, 19.5])
 def _distribution(**overrides: float) -> RedshiftDistribution:
     """The Madau-Dickinson specimen at the mock fiducials, on the mock grid."""
     return RedshiftDistribution(
-        source_frame_distribution=mock_population().merger_rate,
+        source_frame_distribution=mock_merger_rate,
         params={**FIDUCIALS, **overrides},
         minimum_redshift=Z_MIN,
         maximum_redshift=Z_MAX,

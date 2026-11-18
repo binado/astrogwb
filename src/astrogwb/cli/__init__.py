@@ -15,18 +15,12 @@ memberships. The file carries the configuration as JSON in its ``metadata``
 attribute, with the astrogwb ``version`` that wrote it. ``--incoherent`` sums
 the events' powers without detector noise.
 
-Importance-integration catalogs read a [catalogs.<name>] table of the shared
-config (--config-dir, default ``config``)::
-
-    astrogwb model-catalog reference.h5 --catalog reference-fiducial
-
 A reader refuses a file written by another astrogwb version. Runtime settings
 (--platform, --cpu-threads) are applied before the JAX backend initializes.
 """
 
 import typer
 
-from .model_catalog import model_catalog
 from .simulate import simulate
 
 __all__ = ["app"]
@@ -40,5 +34,3 @@ def _main() -> None:
 
 
 app.command()(simulate)
-
-app.command()(model_catalog)

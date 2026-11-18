@@ -54,23 +54,20 @@ hanford = load_detector("H1")
 sensitivity = load_sensitivity("H1")
 ```
 
-A reference catalog draws intrinsic sources, computes their intensities, and
-stores them together with the declaration that produced them:
+A reference catalog places caller-drawn intrinsic sources at one reference
+redshift, face-on, and generates their intensities. The caller supplies the
+source model, the proposal log density of the draws and the reference redshift:
 
 ```python
 import jax
+import numpy as np
+from numpyro import handlers
 
-from astrogwb.importance.catalog import CatalogMetadata
-from astrogwb.importance.spectrum import reference_catalog
-from astrogwb.populations import BNSCobaPopulation
-from astrogwb.utils.io import write
-from astrogwb.waveform import WaveformMetadata
+from astrogwb.importance.spectrum import REFERENCE_INCLINATION, reference_catalog
+from astrogwb.populations import coba
+from astrogwb.populations.sampling import simulate_sources
+from astrogwb.waveform import WaveformMetadata, waveform_generator
 
-# A population record's fields are its construction settings; build() returns
-# the source-frame merger rate and intrinsic source model.
-population = BNSCobaPopulation(
-    mass_model="uniform", minimum_redshift=0.01, maximum_redshift=20.0, n_grid=4096
-)
 params = {
     "H0": 67.66,
     "Omega_m": 0.3096,
@@ -89,11 +86,21 @@ waveform = WaveformMetadata(
     sampling_frequency=4096.0,
     frequency_resolution=1.0,
 )
-metadata = CatalogMetadata(
-    waveform=waveform, population=population, fiducials=params, num_samples=1024
+mass_sites = ("source_frame_mass_1", "source_frame_mass_2")
+model = handlers.condition(
+    coba.source_model(params, mass_model="uniform"),
+    data={"inclination": REFERENCE_INCLINATION},
 )
-reference = reference_catalog(metadata, jax.random.key(42))
-write("catalog.h5", reference, metadata, seed=42)
+samples = simulate_sources(model, jax.random.key(42), 1024)
+catalog = reference_catalog(
+    waveform_generator(waveform),
+    samples,
+    intrinsic_sites=mass_sites,
+    # Joint density of the ordered uniform mass pair.
+    proposal_log_prob=np.full(1024, np.log(2.0) - 2.0 * np.log(params["mass_width"])),
+    reference_redshift=0.01,
+    parameters=params,
+)
 ```
 
 A spectrum prediction uses the reference catalog, with every source placed at
@@ -109,20 +116,8 @@ import jax.numpy as jnp
 import numpy as np
 
 from astrogwb.constants import SECONDS_PER_YEAR
-from astrogwb.inference import CatalogModel, ReferenceCatalog
-
-mass_sites = ("source_frame_mass_1", "source_frame_mass_2")
-source = reference["source_parameters"]
-catalog = ReferenceCatalog(
-    frequencies=reference["frequencies"],
-    intensity=reference["intensity"],
-    intrinsic={name: source[name] for name in mass_sites},
-    proposal_log_prob=np.full(
-        metadata.num_samples, np.log(2.0) - 2.0 * np.log(params["mass_width"])
-    ),
-    reference_redshift=float(source["redshift"][0]),
-    reference_distance=float(source["luminosity_distance"][0]),
-)
+from astrogwb.inference import CatalogModel
+from astrogwb.rates import madau_dickinson_rate
 
 
 def ordered_mass_log_prob(intrinsic, target):
@@ -132,9 +127,19 @@ def ordered_mass_log_prob(intrinsic, target):
     return jnp.where(support, jnp.log(2.0) - 2.0 * jnp.log(width), -jnp.inf)
 
 
+def merger_rate(redshift, target):
+    return madau_dickinson_rate(
+        redshift,
+        target["gamma"],
+        target["kappa"],
+        target["z_peak"],
+        target["local_merger_rate"],
+    )
+
+
 model = CatalogModel.from_catalog(
     catalog,
-    merger_rate=population.build().merger_rate,
+    merger_rate=merger_rate,
     log_prob=ordered_mass_log_prob,
     frequencies=np.arange(10.0, 1000.0, 1.0),
     num_redshift_nodes=32,
@@ -179,5 +184,4 @@ Paper notebooks, run configurations, plotting, and cluster workflows live in
 the private [`experiments-astrogwb`](https://github.com/binado/experiments-astrogwb) repository. This distribution
 contains the scientific library and the `astrogwb` CLI (`pip install
 "astrogwb[cli]"`). `astrogwb simulate` takes waveform settings via
-`--waveform-config` and detector layers via `--detector-config`;
-`astrogwb model-catalog` reads shared run configuration from `--config-dir`.
+`--waveform-config` and detector layers via `--detector-config`.

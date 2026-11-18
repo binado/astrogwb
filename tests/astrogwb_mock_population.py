@@ -20,25 +20,31 @@ import numpy as np
 import numpyro
 import numpyro.distributions as dist
 from jax.typing import ArrayLike
+from numpyro import handlers
 
 from astrogwb.constants import ISCO_ALPHA, SECONDS_PER_YEAR
 from astrogwb.distributions.orientation import UniformCosineDistribution
 from astrogwb.distributions.redshift.base import RedshiftDistribution
-from astrogwb.importance.catalog import (
-    CatalogMetadata,
-    IntensityData,
-)
-from astrogwb.importance.spectrum import (
-    reference_catalog,
-)
+from astrogwb.importance.catalog import IntensityData
+from astrogwb.importance.spectrum import REFERENCE_INCLINATION, reference_catalog
 from astrogwb.inference import CatalogModel, ReferenceCatalog
-from astrogwb.populations import (
-    BNSCobaPopulation,
-    Population,
-)
+from astrogwb.populations import coba
 from astrogwb.populations._types import SourceModel
+from astrogwb.populations.sampling import Sampling, simulate_sources
+from astrogwb.rates import madau_dickinson_rate
 from astrogwb.utils.numpyro import sample_and_logprob, sample_sources_qmc
-from astrogwb.waveform import AnalyticInspiralGenerator, WaveformMetadata
+from astrogwb.waveform import (
+    AnalyticInspiralGenerator,
+    WaveformGenerator,
+    WaveformMetadata,
+)
+
+type MergerRate = Callable[[ArrayLike, Mapping[str, ArrayLike]], jax.Array]
+type SourceModelFactory = Callable[[Mapping[str, ArrayLike]], SourceModel]
+
+#: A source-frame merger rate and an intrinsic source model, both taking one
+#: hyperparameter mapping.
+type MockPopulation = tuple[MergerRate, SourceModelFactory]
 
 #: The extrinsic sites of a physical source.
 EXTRINSIC_SITES = (
@@ -104,7 +110,7 @@ def source_draw_model(
 
 
 def population_models(
-    population: Population,
+    population: MockPopulation,
     params: Mapping[str, ArrayLike],
     *,
     minimum_redshift: float = 0.3,
@@ -112,20 +118,21 @@ def population_models(
     n_grid: int = 256,
 ) -> tuple[RedshiftDistribution, SourceModel]:
     """Build the redshift sampler and source model for replay tests."""
+    merger_rate, source_model = population
     return (
         RedshiftDistribution(
             params=params,
-            source_frame_distribution=population.merger_rate,
+            source_frame_distribution=merger_rate,
             minimum_redshift=minimum_redshift,
             maximum_redshift=maximum_redshift,
             n_grid=n_grid,
         ),
-        population.source_model(params),
+        source_model(params),
     )
 
 
 def derived_columns(
-    population: Population,
+    population: MockPopulation,
     params: Mapping[str, ArrayLike],
     sources: Mapping[str, ArrayLike],
 ) -> dict[str, jax.Array]:
@@ -186,19 +193,33 @@ def make_redshift_grid(n_grid: int = N_GRID) -> jax.Array:
     return jnp.linspace(Z_MIN, Z_MAX, n_grid)
 
 
-def mock_population(n_grid: int = N_GRID) -> Population:
+def mock_merger_rate(redshift: ArrayLike, params: Mapping[str, ArrayLike]) -> jax.Array:
+    """The Madau-Dickinson rate in ``Gpc^-3 yr^-1`` at ``params``.
+
+    Dimensionless shape when ``local_merger_rate`` is absent.
+    """
+    return madau_dickinson_rate(
+        redshift,
+        params["gamma"],
+        params["kappa"],
+        params["z_peak"],
+        params.get("local_merger_rate", 1.0),
+    )
+
+
+def uniform_source_model(params: Mapping[str, ArrayLike]) -> SourceModel:
+    """The COBA BNS intrinsic model with ordered uniform masses."""
+    return coba.source_model(params, mass_model="uniform")
+
+
+def mock_population() -> MockPopulation:
     """The mock BNS population: Madau-Dickinson, uniform masses.
 
     The generating population and the reweighting target are the same
-    registered model; they differ only in whether ``xi_0`` is among the
-    hyperparameters it is called with.
+    model; they differ only in whether ``xi_0`` is among the hyperparameters
+    it is called with.
     """
-    return BNSCobaPopulation(
-        mass_model="uniform",
-        minimum_redshift=Z_MIN,
-        maximum_redshift=Z_MAX,
-        n_grid=n_grid,
-    ).build()
+    return mock_merger_rate, uniform_source_model
 
 
 def load_mock_population(num_sources: int = 1024) -> dict[str, np.ndarray]:
@@ -212,32 +233,37 @@ def load_mock_population(num_sources: int = 1024) -> dict[str, np.ndarray]:
     return {name: np.asarray(values) for name, values in samples.items()}
 
 
+def analytic_generator(
+    f_min: float, f_max: float, frequency_resolution: float
+) -> AnalyticInspiralGenerator:
+    """The closed-form inspiral generator on a linear grid."""
+    return AnalyticInspiralGenerator(
+        WaveformMetadata(
+            alpha=ISCO_ALPHA,
+            approximant="AnalyticInspiral",
+            minimum_frequency=f_min,
+            maximum_frequency=f_max,
+            reference_frequency=f_min,
+            sampling_frequency=2.0 * f_max,
+            frequency_resolution=frequency_resolution,
+        )
+    )
+
+
 def mock_catalog(
     source_parameters: dict[str, np.ndarray],
     *,
     generator: AnalyticInspiralGenerator,
-) -> tuple[IntensityData, CatalogMetadata]:
-    """Pair a mock draw with the metadata of the population that produced it."""
+) -> IntensityData:
+    """The intensity of a mock draw, one column per source."""
     power = np.asarray(jax.jit(generator.generate_batch)(source_parameters))
-    data = IntensityData(
+    return IntensityData(
         frequencies=np.asarray(generator.frequencies),
         intensity=power,
         source_parameters={
             name: np.asarray(values) for name, values in source_parameters.items()
         },
     )
-    metadata = CatalogMetadata(
-        waveform=generator.metadata,
-        population=BNSCobaPopulation(
-            mass_model="uniform",
-            minimum_redshift=Z_MIN,
-            maximum_redshift=Z_MAX,
-            n_grid=N_GRID,
-        ),
-        fiducials={name: float(value) for name, value in POPULATION_PARAMS.items()},
-        num_samples=int(power.shape[-1]),
-    )
-    return data, metadata
 
 
 def build_mock_catalog(
@@ -247,11 +273,10 @@ def build_mock_catalog(
     f_min: float = 2.0,
     f_max: float = 4096.0,
     frequency_resolution: float = 8.0,
-) -> tuple[IntensityData, CatalogMetadata]:
-    """Build a ``(data, metadata)`` pair from the mock population draw.
+) -> IntensityData:
+    """The intensity of the first ``num_sources`` draws of the mock population.
 
     The power comes from :class:`~astrogwb.waveform.AnalyticInspiralGenerator`.
-
     """
     available_sources = min(values.shape[0] for values in population.values())
     if num_sources > available_sources:
@@ -263,18 +288,7 @@ def build_mock_catalog(
     # A prefix, not a random subsample, so catalog construction is deterministic.
     parameters = {name: values[:num_sources] for name, values in population.items()}
     return mock_catalog(
-        parameters,
-        generator=AnalyticInspiralGenerator(
-            WaveformMetadata(
-                alpha=ISCO_ALPHA,
-                approximant="AnalyticInspiral",
-                minimum_frequency=f_min,
-                maximum_frequency=f_max,
-                reference_frequency=f_min,
-                sampling_frequency=2.0 * f_max,
-                frequency_resolution=frequency_resolution,
-            )
-        ),
+        parameters, generator=analytic_generator(f_min, f_max, frequency_resolution)
     )
 
 
@@ -296,47 +310,6 @@ INTRINSIC_DENSITY_SITES: tuple[str, ...] = (
 NUM_REDSHIFT_NODES = 24
 
 
-def build_reference_catalog(
-    num_sources: int = 256,
-    *,
-    f_min: float = 2.0,
-    f_max: float = 4096.0,
-    frequency_resolution: float = 8.0,
-) -> tuple[IntensityData, CatalogMetadata]:
-    """A closed-form reference catalog of the mock population.
-
-    Every draw sits at the window's lower edge, as
-    :func:`~astrogwb.importance.spectrum.reference_catalog` places them; the power
-    comes from :class:`~astrogwb.waveform.AnalyticInspiralGenerator`.
-    """
-    generator = AnalyticInspiralGenerator(
-        WaveformMetadata(
-            alpha=ISCO_ALPHA,
-            approximant="AnalyticInspiral",
-            minimum_frequency=f_min,
-            maximum_frequency=f_max,
-            reference_frequency=f_min,
-            sampling_frequency=2.0 * f_max,
-            frequency_resolution=frequency_resolution,
-        )
-    )
-    metadata = CatalogMetadata(
-        waveform=generator.metadata,
-        population=BNSCobaPopulation(
-            mass_model="uniform",
-            minimum_redshift=Z_MIN,
-            maximum_redshift=Z_MAX,
-            n_grid=N_GRID,
-        ),
-        fiducials={name: float(value) for name, value in POPULATION_PARAMS.items()},
-        num_samples=num_sources,
-    )
-    return (
-        reference_catalog(metadata, jax.random.PRNGKey(MOCK_POPULATION_SEED)),
-        metadata,
-    )
-
-
 def uniform_bns_log_prob(
     intrinsic: Mapping[str, jax.Array], params: Mapping[str, ArrayLike]
 ) -> jax.Array:
@@ -347,44 +320,83 @@ def uniform_bns_log_prob(
     return jnp.where(support, jnp.log(2.0) - 2.0 * jnp.log(width), -jnp.inf)
 
 
+def draw_bns_sources(
+    parameters: Mapping[str, ArrayLike],
+    key: jax.Array,
+    num_samples: int,
+    *,
+    sampling: Sampling = "random",
+) -> dict[str, np.ndarray]:
+    """Intrinsic draws of the mock BNS model, with inclination pinned face-on.
+
+    The pinned site takes no Sobol coordinate.
+    """
+    model = handlers.condition(
+        uniform_source_model(parameters), data={"inclination": REFERENCE_INCLINATION}
+    )
+    return simulate_sources(model, key, num_samples, sampling=sampling)
+
+
 def bns_reference_catalog(
-    data: IntensityData, proposal: Mapping[str, ArrayLike]
+    generator: WaveformGenerator,
+    samples: Mapping[str, ArrayLike],
+    parameters: Mapping[str, ArrayLike],
+    *,
+    reference_redshift: float = Z_MIN,
 ) -> ReferenceCatalog:
-    """Bind the ordered mass draws and their joint proposal log density."""
-    columns = data["source_parameters"]
-    intrinsic = {name: jnp.asarray(columns[name]) for name in INTRINSIC_DENSITY_SITES}
-    return ReferenceCatalog(
-        frequencies=data["frequencies"],
-        intensity=data["intensity"],
-        intrinsic=intrinsic,
-        proposal_log_prob=uniform_bns_log_prob(intrinsic, proposal),
-        reference_redshift=float(columns["redshift"][0]),
-        reference_distance=float(columns["luminosity_distance"][0]),
+    """The reference catalog of ``samples``, weighted on the ordered mass pair."""
+    intrinsic = {name: jnp.asarray(samples[name]) for name in INTRINSIC_DENSITY_SITES}
+    return reference_catalog(
+        generator,
+        samples,
+        intrinsic_sites=INTRINSIC_DENSITY_SITES,
+        proposal_log_prob=uniform_bns_log_prob(intrinsic, parameters),
+        reference_redshift=reference_redshift,
+        parameters=parameters,
+    )
+
+
+def build_reference_catalog(
+    num_sources: int = 256,
+    *,
+    f_min: float = 2.0,
+    f_max: float = 4096.0,
+    frequency_resolution: float = 8.0,
+) -> ReferenceCatalog:
+    """A closed-form reference catalog of the mock population.
+
+    Every draw sits at the window's lower edge; the power comes from
+    :class:`~astrogwb.waveform.AnalyticInspiralGenerator`.
+    """
+    samples = draw_bns_sources(
+        POPULATION_PARAMS, jax.random.PRNGKey(MOCK_POPULATION_SEED), num_sources
+    )
+    return bns_reference_catalog(
+        analytic_generator(f_min, f_max, frequency_resolution),
+        samples,
+        POPULATION_PARAMS,
     )
 
 
 def build_reference_spectrum(
-    data: IntensityData,
-    metadata: CatalogMetadata,
+    catalog: ReferenceCatalog,
     *,
+    merger_rate: MergerRate,
     frequencies: ArrayLike | None = None,
     reweight_masses: bool = True,
     observation_time: float = 1.0,
     num_redshift_nodes: int = NUM_REDSHIFT_NODES,
-    minimum_redshift: float | None = None,
+    minimum_redshift: float = Z_MIN,
+    maximum_redshift: float = Z_MAX,
 ) -> CatalogModel:
     """The mock reference catalog bound to its ordered uniform BNS target."""
     return CatalogModel.from_catalog(
-        bns_reference_catalog(data, metadata.fiducials),
-        merger_rate=metadata.population.build().merger_rate,
-        frequencies=data["frequencies"] if frequencies is None else frequencies,
+        catalog,
+        merger_rate=merger_rate,
+        frequencies=catalog.frequencies if frequencies is None else frequencies,
         num_redshift_nodes=num_redshift_nodes,
-        minimum_redshift=(
-            metadata.population.minimum_redshift
-            if minimum_redshift is None
-            else minimum_redshift
-        ),
-        maximum_redshift=metadata.population.maximum_redshift,
+        minimum_redshift=minimum_redshift,
+        maximum_redshift=maximum_redshift,
         observation_seconds=observation_time * SECONDS_PER_YEAR,
         log_prob=uniform_bns_log_prob if reweight_masses else None,
         target_matches_proposal=not reweight_masses,

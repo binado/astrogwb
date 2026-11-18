@@ -27,16 +27,15 @@ from astrogwb_mock_population import (
     build_mock_catalog,
     build_reference_catalog,
     build_reference_spectrum,
+    mock_merger_rate,
 )
 
 from astrogwb.background import spectral_snr_squared
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.detector import effective_psd, gaussian_bin_scale, load_detector
 from astrogwb.frequency import frequency_mask
-from astrogwb.importance.catalog import (
-    CatalogMetadata,
-    IntensityData,
-)
+from astrogwb.importance.catalog import IntensityData
+from astrogwb.inference import ReferenceCatalog
 
 #: Reference resolution, and the band the refinement study runs over.
 FINE_DF = 0.25
@@ -69,7 +68,7 @@ FIRST_STEP_TOLERANCE = 5e-3
 @pytest.fixture(scope="module")
 def fine_catalog(
     mock_population: dict[str, np.ndarray],
-) -> tuple[IntensityData, CatalogMetadata]:
+) -> IntensityData:
     """The reference catalog every coarser grid is subsampled from."""
     return build_mock_catalog(
         mock_population,
@@ -82,18 +81,18 @@ def fine_catalog(
 
 def test_subsampling_a_fine_catalog_matches_a_coarse_one(
     mock_population: dict[str, np.ndarray],
-    fine_catalog: tuple[IntensityData, CatalogMetadata],
+    fine_catalog: IntensityData,
 ) -> None:
     """``[::k]`` of a fine catalog *is* the catalog built at ``k * df``.
 
     The premise of every other test in this module.
     """
-    fine_data, _ = fine_catalog
+    fine_data = fine_catalog
     fine_frequencies = np.asarray(fine_data["frequencies"])
     fine_intensity = np.asarray(fine_data["intensity"])
 
     for factor in SUBSAMPLE_FACTORS:
-        coarse, _ = build_mock_catalog(
+        coarse = build_mock_catalog(
             mock_population,
             num_sources=NUM_SOURCES,
             f_min=F_MIN,
@@ -133,7 +132,7 @@ def _analysis_at(frequencies: jax.Array) -> dict[str, Any]:
 
 
 @pytest.fixture(scope="module")
-def reference() -> tuple[IntensityData, CatalogMetadata]:
+def reference() -> ReferenceCatalog:
     """One reference catalog every observed grid is predicted from.
 
     It reaches past the detector-frame merger frequency at the window's lower
@@ -149,11 +148,10 @@ def reference() -> tuple[IntensityData, CatalogMetadata]:
 
 @pytest.fixture(scope="module")
 def resolutions(
-    reference: tuple[IntensityData, CatalogMetadata],
+    reference: ReferenceCatalog,
 ) -> dict[int, dict[str, Any]]:
     """Masked analysis inputs, mock observations, and SNR^2 at each resolution."""
-    data, _ = reference
-    fine_frequencies = jnp.asarray(data["frequencies"])
+    fine_frequencies = jnp.asarray(reference.frequencies)
     fine_frequencies = fine_frequencies[fine_frequencies <= F_MAX]
 
     runs: dict[int, dict[str, Any]] = {}
@@ -163,7 +161,9 @@ def resolutions(
         # sources. The injection is its own fiducial prediction, so the
         # chi^2 term vanishes at the fiducials and every log-weight is zero.
         run["estimator"] = build_reference_spectrum(
-            *reference, frequencies=run["frequencies"]
+            reference,
+            merger_rate=mock_merger_rate,
+            frequencies=run["frequencies"],
         )
         run["observed"] = run["estimator"].spectrum(FIDUCIALS)
         run["snr_squared"] = float(
