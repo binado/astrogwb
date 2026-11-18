@@ -50,8 +50,8 @@ from astrogwb.statistics import (
     amplitude,
     amplitude_variance,
     amplitude_variance_budget,
-    amplitude_weights,
 )
+from astrogwb.statistics.amplitude import amplitude_weights
 from astrogwb.utils import gauss_legendre_nodes_weights
 from astrogwb.waveform.intensity import QUADRUPOLE_STOKES_WEIGHTS, StokesPair
 

@@ -41,7 +41,6 @@ __all__ = [
     "amplitude",
     "amplitude_variance",
     "amplitude_variance_budget",
-    "amplitude_weights",
 ]
 
 
