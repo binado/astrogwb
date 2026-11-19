@@ -11,6 +11,11 @@ import numpy as np
 import pytest
 from pydantic import BaseModel
 
+from astrogwb.background.importance.catalog import (
+    ReferenceCatalog,
+    read_reference_catalog,
+    write_reference_catalog,
+)
 from astrogwb.background.simulation import realization_key
 from astrogwb.utils.io import atomic_h5, load, write
 
@@ -82,3 +87,52 @@ def test_a_failed_atomic_h5_leaves_the_previous_file(tmp_path: Path) -> None:
     assert [path.name for path in tmp_path.iterdir()] == ["product.h5"]
     with h5py.File(target, "r") as file:
         np.testing.assert_array_equal(file["values"][()], np.arange(3))
+
+
+def _catalog() -> ReferenceCatalog:
+    return ReferenceCatalog(
+        frequencies=np.linspace(10.0, 20.0, 4),
+        intensity=np.arange(20.0).reshape(4, 5),
+        intrinsic={"mass_1": np.arange(5.0), "mass_2": np.arange(5.0) / 2},
+        proposal_log_prob=np.linspace(-1.0, -2.0, 5),
+        reference_redshift=0.5,
+        reference_distance=2800.0,
+    )
+
+
+def test_reference_catalog_round_trips_with_its_metadata(tmp_path: Path) -> None:
+    catalog = _catalog()
+    record = Record(name="ref", size=5)
+    path = write_reference_catalog(tmp_path / "c" / "ref.h5", catalog, record, seed=3)
+
+    reopened, metadata = read_reference_catalog(path, Record)
+
+    assert metadata == record
+    np.testing.assert_array_equal(reopened.frequencies, catalog.frequencies)
+    np.testing.assert_array_equal(reopened.intensity, catalog.intensity)
+    assert reopened.intrinsic.keys() == catalog.intrinsic.keys()
+    for name, column in catalog.intrinsic.items():
+        np.testing.assert_array_equal(reopened.intrinsic[name], column)
+    np.testing.assert_array_equal(reopened.proposal_log_prob, catalog.proposal_log_prob)
+    assert reopened.reference_redshift == 0.5
+    assert reopened.reference_distance == 2800.0
+
+
+def test_take_keeps_the_first_draws_of_every_per_draw_array() -> None:
+    catalog = _catalog()
+
+    head = catalog.take(3)
+
+    np.testing.assert_array_equal(head.intensity, np.arange(20.0).reshape(4, 5)[:, :3])
+    np.testing.assert_array_equal(head.intrinsic["mass_2"], np.arange(3.0) / 2)
+    np.testing.assert_array_equal(
+        head.proposal_log_prob, np.linspace(-1.0, -2.0, 5)[:3]
+    )
+    np.testing.assert_array_equal(head.frequencies, catalog.frequencies)
+    assert head.reference_distance == catalog.reference_distance
+
+
+@pytest.mark.parametrize("n", [-1, 6])
+def test_take_rejects_a_count_outside_the_catalog(n: int) -> None:
+    with pytest.raises(ValueError, match="cannot take"):
+        _catalog().take(n)

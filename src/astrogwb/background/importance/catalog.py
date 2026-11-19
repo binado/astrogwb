@@ -11,14 +11,17 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
+from pathlib import Path
 from typing import Any, TypedDict
 
 import jax
+import jax.numpy as jnp
 import numpy as np
 from jax.typing import ArrayLike as JaxArrayLike
 from numpy.typing import ArrayLike, NDArray
+from pydantic import BaseModel
 
 from astrogwb.waveform.base import WaveformGenerator
 
@@ -26,6 +29,8 @@ __all__ = [
     "IntensityData",
     "ReferenceCatalog",
     "intensity_data",
+    "read_reference_catalog",
+    "write_reference_catalog",
 ]
 
 logger = logging.getLogger(__name__)
@@ -76,6 +81,113 @@ class ReferenceCatalog:
     proposal_log_prob: JaxArrayLike
     reference_redshift: float
     reference_distance: float
+
+    def take(self, n: int) -> ReferenceCatalog:
+        """The first ``n`` draws, as a catalog.
+
+        Parameters
+        ----------
+        n
+            Number of draws to keep, at most the catalog's.
+
+        Returns
+        -------
+        ReferenceCatalog
+            A catalog whose per-draw arrays (``intensity``, ``intrinsic`` and
+            ``proposal_log_prob``) are cut to ``n`` draws.
+
+        Raises
+        ------
+        ValueError
+            If ``n`` is negative or exceeds the number of draws.
+        """
+        size = int(np.shape(self.proposal_log_prob)[0])
+        if not 0 <= n <= size:
+            raise ValueError(f"cannot take {n} draws from a catalog of {size}")
+        return replace(
+            self,
+            intensity=jnp.asarray(self.intensity)[:, :n],
+            intrinsic={
+                name: jnp.asarray(column)[:n] for name, column in self.intrinsic.items()
+            },
+            proposal_log_prob=jnp.asarray(self.proposal_log_prob)[:n],
+        )
+
+
+def write_reference_catalog(
+    path: str | Path,
+    catalog: ReferenceCatalog,
+    metadata: BaseModel,
+    **io_kwargs: Any,
+) -> Path:
+    """Write a reference catalog and the metadata that produced it, atomically.
+
+    A thin wrapper of :func:`astrogwb.utils.io.write`, which needs the ``io``
+    extra.
+
+    Parameters
+    ----------
+    path
+        File path.
+    catalog
+        The catalog.
+    metadata
+        Metadata describing how the catalog was made.
+    **io_kwargs
+        Passed to :func:`astrogwb.utils.io.write` (``seed``, ``batch_size``).
+
+    Returns
+    -------
+    pathlib.Path
+        The file written.
+    """
+    from astrogwb.utils.io import write
+
+    tree = {
+        "frequencies": np.asarray(catalog.frequencies),
+        "intensity": np.asarray(catalog.intensity),
+        "intrinsic": {
+            name: np.asarray(column) for name, column in catalog.intrinsic.items()
+        },
+        "proposal_log_prob": np.asarray(catalog.proposal_log_prob),
+        "reference_redshift": np.float64(catalog.reference_redshift),
+        "reference_distance": np.float64(catalog.reference_distance),
+    }
+    return write(path, tree, metadata, **io_kwargs)
+
+
+def read_reference_catalog[M: BaseModel](
+    path: str | Path, metadata_type: type[M]
+) -> tuple[ReferenceCatalog, M]:
+    """Read a catalog written by :func:`write_reference_catalog`.
+
+    Parameters
+    ----------
+    path
+        File path.
+    metadata_type
+        Pydantic model that validates the recorded metadata.
+
+    Returns
+    -------
+    ReferenceCatalog
+        The catalog, with NumPy array fields.
+    M
+        The metadata it was written with.
+    """
+    from astrogwb.utils.io import load
+
+    tree, metadata, _ = load(path, metadata_type)
+    data: dict[str, Any] = dict(tree)
+    catalog = ReferenceCatalog(
+        frequencies=data["frequencies"],
+        intensity=data["intensity"],
+        intrinsic=dict(data["intrinsic"]),
+        proposal_log_prob=data["proposal_log_prob"],
+        reference_redshift=float(data["reference_redshift"]),
+        reference_distance=float(data["reference_distance"]),
+    )
+    return catalog, metadata
 
 
 def intensity_data(
