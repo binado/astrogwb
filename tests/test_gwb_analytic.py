@@ -10,7 +10,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from numpyro.distributions import TruncatedNormal
-from tolerances import assert_close
+from tolerances import assert_close, assert_converges
 
 from astrogwb.background import (
     JointMassFunction,
@@ -293,18 +293,22 @@ def test_uniform_shortcut_matches_generic_pipeline(
         maximum_redshift=bounds["maximum_redshift"],
         redshift_quadrature_order=order,
     )
-    generic = analytic_spectral_density(
-        frequencies,
-        hyperparameters,
-        merger_rate_fn,
-        joint_mass_priors["uniform"],
-        **bounds,
-        alpha=equivalence_alpha,
-        quadrature_order=order,
-        n_interp_grid=interpolation_grid_sizes[-1],
-    )
+    generic = [
+        analytic_spectral_density(
+            frequencies,
+            hyperparameters,
+            merger_rate_fn,
+            joint_mass_priors["uniform"],
+            **bounds,
+            alpha=equivalence_alpha,
+            quadrature_order=order,
+            n_interp_grid=size,
+        )
+        for size in interpolation_grid_sizes
+    ]
+    spacings = [1.0 / (size - 1) for size in interpolation_grid_sizes]
 
-    assert_close(generic, shortcut)
+    assert_converges(generic, shortcut, spacings=spacings, order=2.0)
 
 
 @pytest.mark.parametrize("function_name", ["precompute", "contract", "combined"])
@@ -383,12 +387,11 @@ def test_spectrum_converges_with_interpolation_grid_size(
         )
         for size in interpolation_grid_sizes
     ]
-    coarse_residual, fine_residual = _successive_fractional_rms(values)
-
-    # Doubling N - 1 halves the spacing; second-order convergence gives
-    # roughly a quarter-sized residual, with room for interpolation phase.
-    assert coarse_residual > 0.0
-    assert 0.15 < fine_residual / coarse_residual < 0.35
+    assert_converges(
+        values,
+        spacings=[1.0 / (size - 1) for size in interpolation_grid_sizes],
+        order=2.0,
+    )
 
 
 @pytest.mark.parametrize("branch", ["uniform_shortcut", "uniform", "gaussian"])

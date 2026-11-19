@@ -25,7 +25,7 @@ from astrogwb_mock_population import (
     uniform_source_model,
 )
 from numpyro import handlers
-from tolerances import assert_close
+from tolerances import assert_close, assert_converges
 
 from astrogwb.background.importance.catalog import ReferenceCatalog, intensity_data
 from astrogwb.background.importance.model import CatalogModel
@@ -65,6 +65,9 @@ NUM_NODES = 3
 #: Observation time of the shot-noise comparisons, in years.
 OBSERVATION_TIME = 1.0
 
+#: Log-grid resolutions stepped across for second-order convergence checks.
+CONVERGENCE_RESOLUTIONS: tuple[float, ...] = (0.4, 0.2, 0.1, 0.05)
+
 
 def _covariance(model: CatalogModel, params: dict[str, Any]) -> np.ndarray:
     """The physical covariance of a realization over :data:`OBSERVATION_TIME`, ``(F, F)``."""
@@ -87,6 +90,24 @@ class ReferenceSetup:
     minimum_redshift: float
     maximum_redshift: float
     n_grid: int
+
+
+def _with_resolution(setup: ReferenceSetup, resolution: float) -> ReferenceSetup:
+    """Return ``setup`` with its reference waveform resolution set to ``resolution``."""
+    return ReferenceSetup(
+        waveform=setup.waveform.model_copy(update={"frequency_resolution": resolution}),
+        fiducials=setup.fiducials,
+        num_samples=setup.num_samples,
+        minimum_redshift=setup.minimum_redshift,
+        maximum_redshift=setup.maximum_redshift,
+        n_grid=setup.n_grid,
+    )
+
+
+def _log_grid_step(waveform: WaveformMetadata) -> float:
+    """Return the uniform step size ``Delta ln f`` of a logarithmic grid."""
+    frequencies = np.asarray(waveform_generator(waveform).frequencies)
+    return float(np.log(frequencies[-1] / frequencies[0]) / (frequencies.size - 1))
 
 
 @pytest.fixture
@@ -391,24 +412,42 @@ def _spectrum_on_nodes(
     return spectrum, variance
 
 
-def _rescaled_and_brute_force(
+def _rescaled_ladder_and_oracle(
     setup: ReferenceSetup,
     density_sites: tuple[str, ...],
     points: list[dict[str, float]],
     *,
     variance: bool = False,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Rescaled and brute-force spectra, or variances, on the same draws and nodes."""
+) -> tuple[list[np.ndarray], np.ndarray, list[float]]:
+    """Rescaled predictions across ``CONVERGENCE_RESOLUTIONS``, brute-force oracle, and steps."""
     key = realization_key(41, 0)
-    model = _spectrum(_catalog(setup, key), setup, reweight_masses=bool(density_sites))
-    rescaled = [
-        np.asarray(_bin_variance(model, p) if variance else model.spectral_density(p))
-        for p in points
-    ]
-    brute_force = [
-        _spectrum_on_nodes(setup, key, p, density_sites)[int(variance)] for p in points
-    ]
-    return np.stack(rescaled), np.stack(brute_force)
+    oracle = np.stack(
+        [
+            _spectrum_on_nodes(setup, key, p, density_sites)[int(variance)]
+            for p in points
+        ]
+    )
+    estimates: list[np.ndarray] = []
+    spacings: list[float] = []
+    for resolution in CONVERGENCE_RESOLUTIONS:
+        refined = _with_resolution(setup, resolution)
+        model = _spectrum(
+            _catalog(refined, key), refined, reweight_masses=bool(density_sites)
+        )
+        estimates.append(
+            np.stack(
+                [
+                    np.asarray(
+                        _bin_variance(model, p)
+                        if variance
+                        else model.spectral_density(p)
+                    )
+                    for p in points
+                ]
+            )
+        )
+        spacings.append(_log_grid_step(refined.waveform))
+    return estimates, oracle, spacings
 
 
 @pytest.mark.integration
@@ -422,12 +461,13 @@ def test_rescaled_prediction_matches_waveforms_generated_at_every_node(
         {**fiducials, "H0": 60.0},
         {**fiducials, "xi_0": 1.2, "xi_n": 2.0},
     ]
-    rescaled, brute_force = _rescaled_and_brute_force(
+    estimates, oracle, spacings = _rescaled_ladder_and_oracle(
         reference_setup, (), points, variance=variance
     )
 
-    # Linear interpolation of an f^(-7/3) power law on a 0.1% log grid.
-    assert_close(rescaled, brute_force)
+    # Linear interpolation of an f^(-7/3) power law converges at second
+    # order in the log-frequency grid spacing.
+    assert_converges(estimates, oracle, spacings=spacings, order=2.0)
 
 
 @pytest.mark.integration
@@ -437,11 +477,13 @@ def test_rescaled_prediction_reweights_like_waveforms_generated_at_every_node(
 ) -> None:
     sites = ("source_frame_mass_1", "source_frame_mass_2")
     points = [{**reference_setup.fiducials, "minimum_mass": 0.9, "mass_width": 1.6}]
-    rescaled, brute_force = _rescaled_and_brute_force(
+    estimates, oracle, spacings = _rescaled_ladder_and_oracle(
         reference_setup, sites, points, variance=variance
     )
 
-    assert_close(rescaled, brute_force)
+    # Linear interpolation converges at second order in the log-frequency
+    # grid spacing while reweighting intrinsic mass parameters.
+    assert_converges(estimates, oracle, spacings=spacings, order=2.0)
 
 
 @pytest.mark.integration
@@ -602,18 +644,38 @@ def test_low_reference_catalog_matches_one_generated_at_the_window_edge(
 ) -> None:
     """Same key, hence same intrinsic draws: only the interpolation differs."""
     key = realization_key(41, 0)
-    low = _catalog(reference_setup, key)
-    direct = _catalog(reference_setup, key, reference_redshift=window_edge)
-    for name in INTRINSIC_DENSITY_SITES:
-        np.testing.assert_array_equal(low.intrinsic[name], direct.intrinsic[name])
+    spectrum_ratios: list[np.ndarray] = []
+    variance_ratios: list[np.ndarray] = []
+    spacings: list[float] = []
+    for index, resolution in enumerate(CONVERGENCE_RESOLUTIONS):
+        refined = _with_resolution(reference_setup, resolution)
+        low = _catalog(refined, key)
+        direct = _catalog(refined, key, reference_redshift=window_edge)
+        if index == 0:
+            for name in INTRINSIC_DENSITY_SITES:
+                np.testing.assert_array_equal(
+                    low.intrinsic[name], direct.intrinsic[name]
+                )
+        rescaled = _bound_predictions(low, refined, minimum_redshift=window_edge)
+        expected = _bound_predictions(direct, refined, minimum_redshift=window_edge)
+        spectrum_ratios.append(rescaled[0] / expected[0])
+        variance_ratios.append(rescaled[1] / expected[1])
+        spacings.append(_log_grid_step(refined.waveform))
 
-    rescaled = _bound_predictions(low, reference_setup, minimum_redshift=window_edge)
-    expected = _bound_predictions(direct, reference_setup, minimum_redshift=window_edge)
-
-    # Linear interpolation of an f^(-7/3) power law on a 0.1% log grid, as in
-    # the comparisons against waveforms generated at every node.
-    assert_close(rescaled[0], expected[0])
-    assert_close(rescaled[1], expected[1])
+    # Linear interpolation of an f^(-7/3) power law on a log grid converges
+    # at second order in the log-frequency grid spacing.
+    assert_converges(
+        spectrum_ratios,
+        np.ones_like(spectrum_ratios[0]),
+        spacings=spacings,
+        order=2.0,
+    )
+    assert_converges(
+        variance_ratios,
+        np.ones_like(variance_ratios[0]),
+        spacings=spacings,
+        order=2.0,
+    )
 
 
 @pytest.mark.integration
@@ -706,17 +768,25 @@ def test_dense_covariance_matches_physical_inclination_quadrature(
 ) -> None:
     key = realization_key(41, 0)
     params = {**reference_setup.fiducials, "minimum_mass": 0.9, "mass_width": 1.6}
-    model = _spectrum(
-        _catalog(reference_setup, key),
-        reference_setup,
-        reweight_masses=bool(density_sites),
-    )
     _, expected = _spectrum_on_nodes(
         reference_setup, key, params, density_sites, covariance=True
     )
-    # The reference power uses log-frequency interpolation; the oracle generates
-    # each waveform at its actual redshift. This bound covers that grid error.
-    assert_close(_covariance(model, params), expected)
+    estimates: list[np.ndarray] = []
+    spacings: list[float] = []
+    for resolution in CONVERGENCE_RESOLUTIONS:
+        refined = _with_resolution(reference_setup, resolution)
+        model = _spectrum(
+            _catalog(refined, key),
+            refined,
+            reweight_masses=bool(density_sites),
+        )
+        estimates.append(_covariance(model, params))
+        spacings.append(_log_grid_step(refined.waveform))
+
+    # The reference power uses log-frequency interpolation while the oracle
+    # generates each waveform directly, so the residual shrinks at second order
+    # in the log-frequency grid spacing.
+    assert_converges(estimates, expected, spacings=spacings, order=2.0)
 
 
 @pytest.mark.parametrize(

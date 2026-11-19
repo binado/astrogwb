@@ -6,5 +6,5 @@
 - Add core tests for scientific interfaces.
 - Use pytest fixtures and `pytest.mark.parametrize`.
 - Avoid tests which re-implement functions.
-- Use `assert_close` from `tolerances` for approximate array comparisons, relying on its dtype-aware defaults instead of hand-picked `atol` and `rtol`.
+- Use `assert_close` from `tolerances` for approximate array comparisons, relying on its dtype-aware defaults instead of hand-picked `atol` and `rtol`, and `assert_converges` for grid/discretization comparisons that converge with refinement.
 - Mark dependency-heavy tests with `@pytest.mark.integration`.

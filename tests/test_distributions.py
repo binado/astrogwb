@@ -28,7 +28,7 @@ from astrogwb_mock_population import (
     mock_merger_rate,
 )
 from reference_population import reference_merger_rate_distance_and_logprob
-from tolerances import assert_close
+from tolerances import assert_close, assert_converges
 
 from astrogwb.distributions.interpolated import InterpolatedDistribution
 from astrogwb.distributions.mass import (
@@ -369,17 +369,32 @@ def test_merger_rate_is_pointwise_and_keeps_the_shape_of_its_input() -> None:
 
 def test_total_merger_rate_by_quadrature_matches_the_distribution() -> None:
     """The quadrature rate and the table-based one integrate the same function."""
-    distribution = _distribution()
+    grid_sizes = (129, 257, 513)
+    distributions = [
+        RedshiftDistribution(
+            source_frame_distribution=mock_merger_rate,
+            params=FIDUCIALS,
+            minimum_redshift=Z_MIN,
+            maximum_redshift=Z_MAX,
+            n_grid=n,
+        )
+        for n in grid_sizes
+    ]
     quadrature = total_merger_rate(
         Z_MIN,
         Z_MAX,
-        distribution.merger_rate,
+        distributions[-1].merger_rate,
         FIDUCIALS["H0"],
         FIDUCIALS["Omega_m"],
     )
-    # The distribution's own normalization is a trapezoid rule on the mock
-    # grid; the nodes are the more accurate side, so this bounds that error.
-    assert_close(quadrature, distribution.total_merger_rate())
+    # The distribution's own normalization uses a trapezoid rule on the grid,
+    # so it converges at second order to the Gauss-Legendre quadrature rate.
+    assert_converges(
+        [distribution.total_merger_rate() for distribution in distributions],
+        quadrature,
+        spacings=[1.0 / (n - 1) for n in grid_sizes],
+        order=2.0,
+    )
 
 
 # --------------------------------------------------------------------------- #
