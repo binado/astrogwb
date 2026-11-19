@@ -25,7 +25,6 @@ from numpy.typing import NDArray
 
 from astrogwb.background.simulation import (
     BackgroundDraw,
-    combine_pair_spectra,
     project_background,
     simulate_background,
 )
@@ -36,6 +35,7 @@ from astrogwb.detector import (
     pair_bin_scale,
 )
 from astrogwb.detector.projection import project_polarizations_fd
+from astrogwb.statistics import cross_correlation_estimator
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import WaveformMetadata, intensity, waveform_generator
 
@@ -276,7 +276,9 @@ def test_combining_pair_spectra_of_a_pure_signal_recovers_its_spectrum(
         ]
     )
 
-    combined = combine_pair_spectra(overlap * spectrum, projected.frequencies, network)
+    combined = cross_correlation_estimator(
+        overlap * spectrum, projected.frequencies, network
+    )
 
     np.testing.assert_allclose(combined / spectrum, 1.0)
 
@@ -322,8 +324,12 @@ def test_psd_override_preserves_pair_spectra_and_changes_combination(
     )
     frequencies = baseline.frequencies
     assert not np.array_equal(
-        combine_pair_spectra(baseline.spectra[TRIANGLE.name], frequencies, TRIANGLE),
-        combine_pair_spectra(overridden.spectra[TRIANGLE.name], frequencies, changed),
+        cross_correlation_estimator(
+            baseline.spectra[TRIANGLE.name], frequencies, TRIANGLE
+        ),
+        cross_correlation_estimator(
+            overridden.spectra[TRIANGLE.name], frequencies, changed
+        ),
     )
 
 

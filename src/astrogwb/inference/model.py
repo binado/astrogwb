@@ -19,7 +19,8 @@ covariance of a catalog realization over :math:`T = N_{\rm seg}\tau`,
 
 with :math:`\mathcal R` the total observer-frame merger rate and
 :math:`\Gamma^c` the network's connected overlap
-(:func:`~astrogwb.detector.response.connected_overlap`). The averages run over
+(the quadrupole's combination of
+:func:`~astrogwb.detector.generalized_overlap_reduction_function`). The averages run over
 inclination, polarization, phase, intrinsic parameters and redshift. A model
 implements :class:`SpectralDensityModel`; the likelihood supplies the network
 and :math:`T`.
@@ -51,11 +52,16 @@ class SpectralDensityPrediction(NamedTuple):
         round-off.
     extras
         Scalar diagnostics, with the same keys at every parameter point.
+    merger_rate
+        The observer-frame merger rate :math:`\mathcal R` in mergers per
+        second, ``()``, or ``None`` when the model does not predict it. It
+        separates the count fluctuations from the intensity second moment.
     """
 
     spectral_density: jax.Array
     intensity_second_moment: jax.Array | None
     extras: Mapping[str, jax.Array]
+    merger_rate: jax.Array | None = None
 
 
 class SpectralDensityModel(Protocol):

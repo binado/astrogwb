@@ -17,7 +17,6 @@ import pytest
 from conftest import PYGWB_POWER_FRACTION
 from numpy.typing import NDArray
 
-from astrogwb.background.simulation import combine_pair_spectra
 from astrogwb.background.spectral import (
     omega_gw_from_spectral_density,
     spectral_density_from_omega_gw,
@@ -29,6 +28,7 @@ from astrogwb.detector import (
     gaussian_bin_scale,
     pair_bin_scale,
 )
+from astrogwb.statistics import cross_correlation_estimator
 
 
 @pytest.mark.parametrize("pair", range(3), ids=["A-B", "A-C", "B-C"])
@@ -84,7 +84,9 @@ def test_network_spectrum_matches_pygwb_combined_point_estimate(
     pair_spectra = pygwb_reference["csd"] / PYGWB_POWER_FRACTION
 
     omega = omega_gw_from_spectral_density(
-        jnp.asarray(combine_pair_spectra(pair_spectra, frequencies, exact_network)),
+        jnp.asarray(
+            cross_correlation_estimator(pair_spectra, frequencies, exact_network)
+        ),
         jnp.asarray(frequencies),
         hubble_constant=hubble_constant,
     )

@@ -10,12 +10,13 @@ the isotropic ORF :math:`\gamma_{ab}(f)`. Its scatter adds to the shot noise.
 :func:`pair_response` stacks the per-source ORF of every pair, unnormalized:
 it is the response of the stacked per-pair data, whose mean is
 :math:`\gamma_{ab} S_h`, and does not divide by :math:`\gamma_{ab}`, which
-crosses zero. The connected covariance of the data factorizes into the
-intensity second moment of the population and the network's connected
-overlap, :func:`connected_overlap`: the sky and polarization average of the
-pair responses to each Stokes parameter, weighted by the quadrupole's
-inclination moments. The inclination scatter belongs to the intensity second
-moment, not to the overlap.
+crosses zero. The connected covariance of the data is a sum over Stokes
+pairs :math:`\mu\nu` of the population's source moments
+:math:`\langle \mu \nu' \rangle` times the network's generalized ORFs
+:math:`\Gamma^{\mu\nu}` (:func:`generalized_overlap_reduction_function`):
+the sky average of the pair responses to each Stokes parameter. The
+polarization angle and the inclination belong to the source moments, not to
+the ORFs.
 """
 
 from __future__ import annotations
@@ -27,26 +28,20 @@ import jax.numpy as jnp
 import numpy as np
 from jax.typing import ArrayLike
 
-from astrogwb.waveform.intensity import quadrupolar_stokes_factors
+from astrogwb.waveform.intensity import StokesPair
 
 from .geometry import Detector
 from .overlap import overlap_reduction_function, stokes_cross_power
 
 __all__ = [
-    "connected_overlap",
+    "generalized_overlap_reduction_function",
     "pair_names",
     "pair_response",
     "sample_pair_response",
 ]
 
-#: Gauss-Legendre nodes in cos(inclination); the Stokes products are
-#: polynomials of degree eight, integrated exactly.
-_INCLINATION_NODES = 8
-
-#: The prefactor 4 of the generalized ORFs, and 25 for the normalized isotropic
-#: ORF: the response to unit intensity has isotropic mean gamma / 5.
-_PAPER_PREFACTOR = 4.0
-_NORMALIZED_PREFACTOR = 25.0
+#: The prefactor of the generalized ORFs.
+_GENERALIZED_ORF_PREFACTOR = 4.0
 
 
 def pair_names(detectors: Sequence[Detector]) -> tuple[tuple[str, str], ...]:
@@ -171,131 +166,129 @@ def sample_pair_response(
     return pair_response(frequencies, detectors, *_isotropic_angles(key, num_draws))
 
 
-def _inclination_moment_factor() -> np.ndarray:
-    r""":math:`L` with :math:`L L^T = \langle s s^T\rangle_\iota / \langle s_I^2\rangle_\iota`, ``(4, 4)``.
-
-    :math:`s` the quadrupolar Stokes factors over a uniform :math:`\cos\iota`.
-    """
-    nodes, weights = np.polynomial.legendre.leggauss(_INCLINATION_NODES)
-    stokes = np.asarray(quadrupolar_stokes_factors(nodes), dtype=float)
-    moment = (stokes * weights) @ stokes.T
-    moment /= moment[0, 0]
-    values, vectors = np.linalg.eigh(moment)
-    return vectors * np.sqrt(np.clip(values, 0.0, None))
+#: Unit radiation-frame Stokes vectors (I, Q, U, V).
+_UNIT_STOKES = {name: np.eye(4)[index] for index, name in enumerate("IQUV")}
 
 
-def connected_overlap(
+def generalized_overlap_reduction_function(
     key: jax.Array,
     num_draws: int,
     frequencies: ArrayLike,
     detectors: Sequence[Detector],
     *,
-    normalize: bool = True,
+    components: Sequence[StokesPair] = ("II", "QQ", "UU", "VV"),
     chunk_size: int = 4096,
-) -> jax.Array:
-    r"""The quadrupole's connected overlap :math:`\Gamma^c_{ab,cd}(f_k, f_l)`, ``(P, F, P, F)``.
+) -> dict[StokesPair, jax.Array]:
+    r"""The generalized ORFs :math:`\Gamma^{\mu\nu}_{ab,cd}(f_k, f_l)`, each ``(P, F, P, F)``.
 
     .. math::
 
-        \Gamma^c_{ab,cd} = \Gamma^{II}_{ab,cd}
-            + \frac{\Gamma^{QQ}_{ab,cd} + \Gamma^{UU}_{ab,cd}}{71}
-            + \frac{69}{71}\Gamma^{VV}_{ab,cd},
+        \Gamma^{\mu\nu}_{ab,cd}(f, f') = 4 \int \frac{d^2\hat n}{4\pi}
+            F^\mu_{(ab)}(f, \hat n)\, F^\nu_{(cd)}(f', \hat n),
 
-    the generalized ORFs :math:`\Gamma^{\mu\nu}_{ab,cd} = 4\langle
-    F^\mu_{ab} F^\nu_{cd}\rangle` of each Stokes parameter, weighted by the
-    quadrupole's inclination moments relative to :math:`\langle II'\rangle`.
-    The pair response :math:`F^\mu_{ab}` to unit Stokes parameter :math:`\mu`
-    is :func:`~astrogwb.detector.overlap.stokes_cross_power`. The average runs
-    over ``num_draws`` isotropic directions and uniform polarization angles
-    from ``key``; the inclination is averaged exactly, and the coefficients
-    above emerge from the polarization average. A sum of outer products, the
-    result is symmetric positive semidefinite, and does not depend on
-    ``chunk_size``.
+    with :math:`F^\mu_{(ab)}` the response of pair :math:`ab` to unit Stokes
+    parameter :math:`\mu` (:func:`~astrogwb.detector.overlap.stokes_cross_power`)
+    at zero polarization angle; the polarization angle and the inclination
+    belong to the source moments :math:`\langle \mu \nu' \rangle` they
+    multiply. The sky average runs over ``num_draws`` isotropic directions
+    from ``key``. Each diagonal component :math:`\Gamma^{\mu\mu}` is a sum of
+    outer products, symmetric positive semidefinite, and none depends on
+    ``chunk_size``; :math:`\Gamma^{VI}` is :math:`\Gamma^{IV}` with
+    :math:`(ab, f)` and :math:`(cd, f')` swapped.
 
-    Multiplied elementwise by :math:`4\mathcal R\langle I_k I_l\rangle / T`, it
-    is the connected covariance of the per-pair data.
+    Multiply by :data:`~astrogwb.detector.overlap.NORMALIZED_ORF_SCALE` squared
+    for the units of the per-pair data, whose mean carries the normalized
+    isotropic ORF.
 
     Parameters
     ----------
     key
         JAX random key.
     num_draws
-        Number of isotropic draws.
+        Number of isotropic directions.
     frequencies
         Frequency grid in Hz, ``(F,)``.
     detectors
         Detectors in the network.
-    normalize
-        If true, in the units of the normalized isotropic ORF
-        (:func:`~astrogwb.detector.overlap.isotropic_overlap_reduction_function`,
-        one for co-located, aligned, orthogonal arms), the ORF the per-pair
-        data's mean carries. If false, the paper's :math:`\Gamma^{\mu\nu}`.
+    components
+        The Stokes pairs :math:`\mu\nu` to compute.
     chunk_size
-        Draws reduced at once, bounding peak memory at ``4 * chunk_size * P * F``.
+        Directions reduced at once, bounding peak memory at
+        ``S * chunk_size * P * F`` for ``S`` distinct Stokes parameters.
 
     Returns
     -------
-    jax.Array
-        Shape ``(P, F, P, F)``, pairs in the order of :func:`pair_response`.
+    dict
+        :math:`\Gamma^{\mu\nu}` keyed by ``components``, pairs in the order of
+        :func:`pair_response`.
     """
     frequencies = np.asarray(frequencies, dtype=float)
     detectors = list(detectors)
+    components = tuple(dict.fromkeys(components))
+    stokes = sorted({name for pair in components for name in pair}, key="IQUV".index)
+    index = {name: position for position, name in enumerate(stokes)}
     chunk_size = min(chunk_size, num_draws)
     num_chunks = -(-num_draws // chunk_size)
     padding = num_chunks * chunk_size - num_draws
-    right_ascension, declination, polarization_angle, _ = _isotropic_angles(
-        key, num_draws
-    )
+    right_ascension, declination, _, _ = _isotropic_angles(key, num_draws)
     angles = [
         jnp.pad(angle, (0, padding)).reshape(num_chunks, chunk_size)
-        for angle in (right_ascension, declination, polarization_angle)
+        for angle in (right_ascension, declination)
     ]
     # Padded draws are zero-weighted, so they add nothing to the sum.
     counted = (jnp.arange(num_chunks * chunk_size) < num_draws).reshape(
         num_chunks, chunk_size
     )
-    factor = jnp.asarray(_inclination_moment_factor())
-    unit_stokes = jnp.eye(4)[:, :, None, None]
+    unit_stokes = jnp.asarray(np.stack([_UNIT_STOKES[name] for name in stokes]))
+    first, second = (
+        jnp.asarray([index[pair[position]] for pair in components])
+        for position in (0, 1)
+    )
 
-    def responses(chunk_angles: list[jax.Array]) -> jax.Array:
-        r""":math:`F^\mu_{ab}` of every unit Stokes vector, ``(4, chunk, P, F)``."""
-        ra, dec, psi = chunk_angles
-        return jnp.stack(
+    def responses(ra: jax.Array, dec: jax.Array) -> jax.Array:
+        r""":math:`F^\mu_{ab}` of every requested Stokes parameter, ``(S, chunk, P F)``."""
+        per_stokes = jnp.stack(
             [
                 jnp.stack(
                     [
                         stokes_cross_power(
                             frequencies,
-                            detectors[first],
-                            detectors[second],
+                            detectors[a],
+                            detectors[b],
                             ra,
                             dec,
-                            psi,
-                            stokes,
+                            0.0,
+                            unit[:, None, None],
                         )
-                        for first in range(len(detectors))
-                        for second in range(first + 1, len(detectors))
+                        for a in range(len(detectors))
+                        for b in range(a + 1, len(detectors))
                     ],
                     axis=-2,
                 )
-                for stokes in unit_stokes
+                for unit in unit_stokes
             ]
         )
+        return jnp.reshape(per_stokes, (len(stokes), chunk_size, -1))
 
     def accumulate(
         total: jax.Array, chunk: tuple[jax.Array, ...]
     ) -> tuple[jax.Array, None]:
-        *chunk_angles, weight = chunk
-        weighted = jnp.einsum("mk,mlpf->klpf", factor, responses(chunk_angles))
-        flat = jnp.reshape(weighted * weight[None, :, None, None], (4 * chunk_size, -1))
-        return total + flat.T @ flat, None
+        ra, dec, weight = chunk
+        flat = responses(ra, dec) * weight[None, :, None]
+        return total + jnp.einsum("gni,gnj->gij", flat[first], flat[second]), None
 
     shape = (len(detectors) * (len(detectors) - 1) // 2, frequencies.size)
     size = shape[0] * shape[1]
     total, _ = jax.lax.scan(
-        accumulate, jnp.zeros((size, size)), (*angles, counted.astype(float))
+        accumulate,
+        jnp.zeros((len(components), size, size)),
+        (*angles, counted.astype(float)),
     )
-    prefactor = _NORMALIZED_PREFACTOR if normalize else _PAPER_PREFACTOR
-    # Symmetric to round-off only; made exact for the Cholesky downstream.
-    moment = prefactor * 0.5 * (total + total.T) / num_draws
-    return jnp.reshape(moment, (*shape, *shape))
+    moments = _GENERALIZED_ORF_PREFACTOR * total / num_draws
+    result: dict[StokesPair, jax.Array] = {}
+    for pair, moment in zip(components, moments, strict=True):
+        if pair[0] == pair[1]:
+            # Symmetric to round-off only; made exact for the Cholesky downstream.
+            moment = 0.5 * (moment + moment.T)
+        result[pair] = jnp.reshape(moment, (*shape, *shape))
+    return result

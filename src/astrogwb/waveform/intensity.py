@@ -19,15 +19,37 @@ over sources is partially polarized, :math:`I^2 > Q^2 + U^2 + V^2`. A rotation o
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Literal
+
 import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 
 __all__ = [
+    "QUADRUPOLE_STOKES_WEIGHTS",
+    "StokesPair",
     "intensity",
     "quadrupolar_polarizations",
     "quadrupolar_stokes_factors",
 ]
+
+#: A pair :math:`\mu\nu` of Stokes parameters, the superscript of the
+#: generalized ORF :math:`\Gamma^{\mu\nu}` and of the source moment
+#: :math:`\langle \mu(f)\, \nu(f') \rangle` it multiplies. These are the
+#: pairs that survive the polarization-angle average.
+type StokesPair = Literal["II", "IV", "VI", "VV", "QQ", "UU"]
+
+#: :math:`\langle \mu \nu' \rangle / \langle I I' \rangle` of the quadrupole,
+#: averaged over a uniform :math:`\cos\iota` and polarization angle. The
+#: average over :math:`\psi` splits :math:`\langle Q Q' \rangle` evenly between
+#: :math:`QQ` and :math:`UU`, and parity removes :math:`IV` and :math:`VI`.
+QUADRUPOLE_STOKES_WEIGHTS: Mapping[StokesPair, float] = {
+    "II": 1.0,
+    "QQ": 1.0 / 71.0,
+    "UU": 1.0 / 71.0,
+    "VV": 69.0 / 71.0,
+}
 
 
 def intensity(plus: ArrayLike, cross: ArrayLike) -> jax.Array:

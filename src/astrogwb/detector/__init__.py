@@ -18,6 +18,7 @@ from .effective_psd import (
 )
 from .geometry import Detector
 from .overlap import (
+    NORMALIZED_ORF_SCALE,
     OrientationReference,
     align_detector,
     isotropic_overlap_reduction_function,
@@ -28,7 +29,7 @@ from .overlap import (
 )
 from .psd import resolve_psd_path
 from .response import (
-    connected_overlap,
+    generalized_overlap_reduction_function,
     pair_names,
     pair_response,
     sample_pair_response,
@@ -41,6 +42,7 @@ from .sensitivity import (
 
 __all__ = [
     "DETECTOR_DEFAULT_PATHS",
+    "NORMALIZED_ORF_SCALE",
     "Detector",
     "DetectorConfig",
     "DetectorGeometry",
@@ -49,9 +51,9 @@ __all__ = [
     "PairTerms",
     "Sensitivity",
     "align_detector",
-    "connected_overlap",
     "effective_psd",
     "gaussian_bin_scale",
+    "generalized_overlap_reduction_function",
     "isotropic_overlap_reduction_function",
     "load_detector",
     "load_network",

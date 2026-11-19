@@ -258,6 +258,14 @@ def _isotropic_orf_from_tensors(
     )
 
 
+#: :math:`\gamma_{ab} / \Gamma_{ab}`: the normalized isotropic ORF of
+#: :func:`isotropic_overlap_reduction_function`, one for co-located, aligned,
+#: orthogonal arms, over the paper's sky average
+#: :math:`\Gamma_{ab} = \int d^2\hat n / 4\pi \sum_A F^A_a F^A_b`, two fifths
+#: for the same detectors.
+NORMALIZED_ORF_SCALE = 2.5
+
+
 def isotropic_overlap_reduction_function(
     frequencies: ArrayLike,
     detector_1: Detector,
