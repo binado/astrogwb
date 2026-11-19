@@ -70,6 +70,7 @@ A background is stored with :func:`write_background` together with the
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Mapping, Sequence
 from functools import cache
 from pathlib import Path
@@ -105,9 +106,22 @@ __all__ = [
     "network_noise",
     "project_background",
     "read_background",
+    "read_background_attrs",
     "simulate_background",
     "write_background",
 ]
+
+#: The layout version of the files :func:`write_background` writes.
+FORMAT_VERSION = 1
+
+#: The layout versions :func:`read_background` reads.
+READABLE_FORMATS = frozenset({FORMAT_VERSION})
+
+#: Root attributes :func:`write_background` owns.
+RESERVED_ATTRS = frozenset({"metadata", "version", "format_version"})
+
+#: Files written before ``format_version`` existed, which were layout 1.
+_LEGACY_VERSION = re.compile(r"0\.8\.")
 
 #: The columns every event pool must supply besides its waveform parameters.
 SKY_COLUMNS = ("right_ascension", "declination", "polarization_angle")
@@ -304,14 +318,19 @@ class BackgroundDraw(NamedTuple):
 
 
 def write_background(
-    path: str | Path, draw: BackgroundDraw, config: SimulationConfig
+    path: str | Path,
+    draw: BackgroundDraw,
+    config: SimulationConfig,
+    *,
+    attrs: Mapping[str, str | float | int] | None = None,
 ) -> Path:
     """Write a background and the configuration it was simulated with, atomically.
 
     The file holds the datasets ``frequencies``, ``segment_counts`` and, per
     network, ``networks/<name>/pair_spectral_density``. Its root attributes are
-    ``metadata``, the configuration as JSON, and ``version``, the astrogwb
-    version.
+    ``metadata``, the configuration as JSON, ``format_version``, the integer
+    layout version :func:`read_background` keys on, and ``version``, the
+    astrogwb version that wrote it (informational), plus any ``attrs``.
 
     Parameters
     ----------
@@ -321,21 +340,54 @@ def write_background(
         The background.
     config
         The configuration the background was simulated with.
+    attrs
+        Extra root attributes, written in the same atomic write and read back
+        by :func:`read_background_attrs`.
 
     Returns
     -------
     pathlib.Path
         The file written.
+
+    Raises
+    ------
+    ValueError
+        If ``attrs`` uses a reserved key (``metadata``, ``version`` or
+        ``format_version``). Nothing is written.
     """
+    extra = dict(attrs or {})
+    clashes = sorted(RESERVED_ATTRS.intersection(extra))
+    if clashes:
+        raise ValueError(f"attrs may not use the reserved keys {clashes}")
     with atomic_h5(path) as file:
         file.attrs["metadata"] = json.dumps(config.to_metadata())
         file.attrs["version"] = __version__
+        file.attrs["format_version"] = FORMAT_VERSION
+        for name, value in extra.items():
+            file.attrs[name] = value
         file.create_dataset("frequencies", data=draw.frequencies)
         file.create_dataset("segment_counts", data=draw.segment_counts)
         for name, spectrum in draw.spectra.items():
             group = file.create_group(f"networks/{name}")
             group.create_dataset("pair_spectral_density", data=spectrum)
     return Path(path)
+
+
+def _check_format(path: str | Path, attrs: Mapping[str, object]) -> None:
+    """Raise unless the file's layout is one this version can read."""
+    version = attrs.get("version")
+    format_version = attrs.get("format_version")
+    if format_version is None and isinstance(version, str):
+        if _LEGACY_VERSION.match(version):
+            return
+    elif format_version in READABLE_FORMATS:
+        return
+    raise ValueError(
+        f"{path} has format_version {format_version} (written by astrogwb "
+        f"{version}); astrogwb {__version__} reads format versions "
+        f"{sorted(READABLE_FORMATS)} and files written by astrogwb 0.8.*; "
+        "regenerate the background"
+    )
 
 
 def read_background(path: str | Path) -> tuple[BackgroundDraw, SimulationConfig]:
@@ -356,16 +408,12 @@ def read_background(path: str | Path) -> tuple[BackgroundDraw, SimulationConfig]
     Raises
     ------
     ValueError
-        If the file's ``version`` attribute is missing or is not the installed
-        astrogwb version.
+        If the file's ``format_version`` is not one this version reads. A file
+        without ``format_version`` is read as format 1 when its ``version`` is
+        ``0.8.*``, as written before format versions were recorded.
     """
     with h5py.File(path, "r") as file:
-        version = file.attrs.get("version")
-        if version != __version__:
-            raise ValueError(
-                f"{path} was written by astrogwb {version}, but {__version__} "
-                "is installed; regenerate the background"
-            )
+        _check_format(path, file.attrs)
         config = SimulationConfig.from_metadata(json.loads(file.attrs["metadata"]))
         stored = file["networks"]
         draw = BackgroundDraw(
@@ -379,6 +427,34 @@ def read_background(path: str | Path) -> tuple[BackgroundDraw, SimulationConfig]
             np.asarray(file["segment_counts"][()], dtype=np.int64),
         )
     return draw, config
+
+
+def read_background_attrs(path: str | Path) -> dict[str, str | float | int]:
+    """The extra root attributes :func:`write_background` stored as ``attrs``.
+
+    Parameters
+    ----------
+    path
+        File path.
+
+    Returns
+    -------
+    dict
+        The attributes other than the reserved ``metadata``, ``version`` and
+        ``format_version``, as Python scalars.
+
+    Raises
+    ------
+    ValueError
+        As for :func:`read_background`, if the file's format is not readable.
+    """
+    with h5py.File(path, "r") as file:
+        _check_format(path, file.attrs)
+        return {
+            name: value.item() if isinstance(value, np.generic) else value
+            for name, value in file.attrs.items()
+            if name not in RESERVED_ATTRS
+        }
 
 
 def network_noise(

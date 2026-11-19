@@ -65,7 +65,11 @@ rate of the population the catalogue represents; it is converted to
 noiseless expected signal of the same Poisson draw. The file stores the
 `BackgroundDraw` (`frequencies`, `segment_counts` and each network's
 `pair_spectral_density`) and, as JSON in its `metadata` attribute, the
-`SimulationConfig` it was made with and the astrogwb `version`.
+`SimulationConfig` it was made with, the astrogwb `version` (informational) and
+an integer `format_version` that `read_background` keys on, so a patch release
+does not invalidate existing files. `write_background(..., attrs=...)` stores
+extra root attributes in the same atomic write; `read_background_attrs` reads
+them back.
 The on-disk config stores shared detector definitions once, alongside the
 network memberships. `read_background` reconstructs the network configs
 without looking up any registrations, and `network_noise` rebuilds the noise

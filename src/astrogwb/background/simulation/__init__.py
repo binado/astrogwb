@@ -8,6 +8,7 @@ from astrogwb.background.simulation.draw import (
     network_noise,
     project_background,
     read_background,
+    read_background_attrs,
     simulate_background,
     write_background,
 )
@@ -26,6 +27,7 @@ __all__ = [
     "network_spectra_ensemble",
     "project_background",
     "read_background",
+    "read_background_attrs",
     "read_event_pool",
     "realization_key",
     "simulate_background",

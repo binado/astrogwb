@@ -26,6 +26,7 @@ from astrogwb.background.simulation import (
     network_spectra_ensemble,
     project_background,
     read_background,
+    read_background_attrs,
     read_event_pool,
     realization_key,
     simulate_background,
@@ -113,14 +114,80 @@ def test_file_keeps_the_legacy_hdf5_and_detector_metadata_layout(written: Path) 
     }
 
 
-def test_a_file_of_another_version_is_refused(written: Path, tmp_path: Path) -> None:
-    stale = tmp_path / "stale.h5"
-    stale.write_bytes(written.read_bytes())
-    with h5py.File(stale, "r+") as file:
-        file.attrs["version"] = "0.0.0-stale"
+def _edited(written: Path, tmp_path: Path, **attrs: object) -> Path:
+    """A copy of ``written`` with the root attributes set, ``None`` deleting one."""
+    copy = tmp_path / "edited.h5"
+    copy.write_bytes(written.read_bytes())
+    with h5py.File(copy, "r+") as file:
+        for name, value in attrs.items():
+            if value is None:
+                del file.attrs[name]
+            else:
+                file.attrs[name] = value
+    return copy
 
-    with pytest.raises(ValueError, match="regenerate"):
+
+def test_a_file_records_its_format_version(written: Path) -> None:
+    with h5py.File(written, "r") as file:
+        assert file.attrs["format_version"] == 1
+
+
+def test_a_legacy_0_8_file_without_a_format_version_is_read(
+    draw: BackgroundDraw, written: Path, tmp_path: Path
+) -> None:
+    legacy = _edited(written, tmp_path, format_version=None, version="0.8.0")
+
+    reopened, _ = read_background(legacy)
+
+    np.testing.assert_array_equal(reopened.segment_counts, draw.segment_counts)
+
+
+def test_a_file_is_read_whatever_astrogwb_version_wrote_it(
+    written: Path, tmp_path: Path
+) -> None:
+    read_background(_edited(written, tmp_path, version="0.8.1.dev3"))
+
+
+def test_a_file_of_an_unknown_format_is_refused(written: Path, tmp_path: Path) -> None:
+    future = _edited(written, tmp_path, format_version=99, version="9.9.9")
+
+    with pytest.raises(ValueError, match=r"format_version 99.*9\.9\.9"):
+        read_background(future)
+
+
+def test_an_unversioned_file_of_another_release_is_refused(
+    written: Path, tmp_path: Path
+) -> None:
+    stale = _edited(written, tmp_path, format_version=None, version="0.7.0")
+
+    with pytest.raises(ValueError, match=r"format_version None.*0\.7\.0"):
         read_background(stale)
+
+
+def test_extra_attrs_are_written_with_the_file_and_read_back(
+    draw: BackgroundDraw, tmp_path: Path
+) -> None:
+    extra = {"hyperparameters": '{"alpha": 2.7}', "total_merger_rate": 1.5, "n": 3}
+    path = write_background(tmp_path / "attrs.h5", draw, _config(), attrs=extra)
+
+    assert read_background_attrs(path) == extra
+    assert read_background(path)[1] == _config()
+
+
+def test_no_attrs_reads_back_empty(written: Path) -> None:
+    assert read_background_attrs(written) == {}
+
+
+@pytest.mark.parametrize("key", ["metadata", "version", "format_version"])
+def test_reserved_attrs_are_refused_and_nothing_is_written(
+    draw: BackgroundDraw, tmp_path: Path, key: str
+) -> None:
+    path = tmp_path / "reserved.h5"
+
+    with pytest.raises(ValueError, match=key):
+        write_background(path, draw, _config(), attrs={key: "x"})
+
+    assert not path.exists()
 
 
 def test_observation_seconds_is_the_segments_together() -> None:
