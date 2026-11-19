@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from functools import wraps
 
 import jax
@@ -8,6 +8,8 @@ from numpy.polynomial.legendre import leggauss
 
 from astrogwb import __version__
 from astrogwb.constants import SECONDS_PER_YEAR
+
+type PairName = tuple[str, str]
 
 
 def require_current_version(version: str) -> None:
@@ -130,3 +132,71 @@ def gauss_legendre_nodes_weights(
         midpoint[..., None] + half_width[..., None] * nodes,
         half_width[..., None] * weights,
     )
+
+
+def stack_pairs(
+    values: Mapping[PairName, ArrayLike], pairs: Sequence[PairName]
+) -> jax.Array:
+    """Stack pair-keyed arrays along a new pair axis, in ``pairs`` order.
+
+    Parameters
+    ----------
+    values
+        One array per pair, all of the same shape ``(..., F)``.
+    pairs
+        The pairs, in the order of the stacked axis.
+
+    Returns
+    -------
+    jax.Array
+        The stacked arrays, ``(..., P, F)``.
+
+    Raises
+    ------
+    ValueError
+        If the keys of ``values`` are not exactly ``pairs``, or the arrays do
+        not share one shape with a trailing frequency axis.
+    """
+    if set(values) != set(pairs):
+        raise ValueError(
+            f"expected one array per sorted detector pair {list(pairs)}, "
+            f"got {sorted(values)}"
+        )
+    arrays = [jnp.asarray(values[pair]) for pair in pairs]
+    shapes = {array.shape for array in arrays}
+    if len(shapes) != 1 or not arrays[0].shape:
+        raise ValueError(
+            f"per-pair arrays must share a shape (..., F), got {sorted(shapes)}"
+        )
+    return jnp.stack(arrays, axis=-2)
+
+
+def unstack_pairs(
+    array: ArrayLike, pairs: Sequence[PairName]
+) -> dict[PairName, jax.Array]:
+    """Split the pair axis of ``array``, the inverse of :func:`stack_pairs`.
+
+    Parameters
+    ----------
+    array
+        Stacked values, ``(..., P, F)``.
+    pairs
+        The pair of each entry of the pair axis.
+
+    Returns
+    -------
+    dict[tuple[str, str], jax.Array]
+        One ``(..., F)`` array per pair.
+
+    Raises
+    ------
+    ValueError
+        If the pair axis does not have one entry per pair.
+    """
+    array = jnp.asarray(array)
+    if array.ndim < 2 or array.shape[-2] != len(pairs):
+        raise ValueError(
+            f"the pair axis of an array of shape {array.shape} does not match "
+            f"the {len(pairs)} pairs"
+        )
+    return {pair: array[..., index, :] for index, pair in enumerate(pairs)}

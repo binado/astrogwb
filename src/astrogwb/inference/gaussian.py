@@ -54,6 +54,7 @@ from astrogwb.detector import (
     pair_terms,
     resolve_network,
 )
+from astrogwb.utils import PairName, stack_pairs
 from astrogwb.waveform.intensity import QUADRUPOLE_STOKES_WEIGHTS, StokesPair
 
 from .model import SpectralDensityModel, SpectralDensityPrediction
@@ -65,8 +66,6 @@ __all__ = [
 ]
 
 _LOG_TWO_PI = math.log(2.0 * math.pi)
-
-type PairName = tuple[str, str]
 
 #: The generalized ORFs behind each Stokes term of the connected covariance.
 _INTENSITY_PAIRS: tuple[StokesPair, ...] = ("II",)
@@ -93,30 +92,20 @@ def _stokes_sum(
     return jnp.sum(jnp.stack(terms), axis=0)
 
 
-def _stack_pairs(
-    values: Mapping[PairName, ArrayLike], pairs: Sequence[PairName], num_bins: int
-) -> jax.Array:
-    """Pair-keyed ``(..., F)`` arrays stacked in ``pairs`` order, ``(..., P, F)``.
-
-    Raises
-    ------
-    ValueError
-        If the keys are not exactly ``pairs``, or the arrays do not share a
-        shape ending in ``num_bins``.
-    """
-    if set(values) != set(pairs):
-        raise ValueError(
-            f"expected one array per sorted detector pair {list(pairs)}, "
-            f"got {sorted(values)}"
-        )
-    arrays = [jnp.asarray(values[pair]) for pair in pairs]
-    shapes = {array.shape for array in arrays}
-    if len(shapes) != 1 or arrays[0].shape[-1:] != (num_bins,):
-        raise ValueError(
-            f"per-pair arrays must share a shape (..., {num_bins}), "
-            f"got {sorted(shapes)}"
-        )
-    return jnp.stack(arrays, axis=-2)
+def _scaled_orfs(
+    orfs: Mapping[StokesPair, ArrayLike], shape: tuple[int, ...]
+) -> dict[StokesPair, jax.Array]:
+    """``orfs`` in the units of the per-pair data, each checked against ``shape``."""
+    scaled = {}
+    for pair, values in orfs.items():
+        values = jnp.asarray(values)
+        if values.shape != shape:
+            raise ValueError(
+                f"the generalized ORF {pair!r} has shape {values.shape}, not "
+                f"{shape} for this network and frequency grid"
+            )
+        scaled[pair] = NORMALIZED_ORF_SCALE**2 * values
+    return scaled
 
 
 @dataclass(frozen=True)
@@ -242,8 +231,28 @@ class _Network:
         return flat[..., self.keep]
 
     def stack(self, values: Mapping[PairName, ArrayLike]) -> jax.Array:
-        """Pair-keyed ``(..., F)`` arrays in the data's pair order, ``(..., P, F)``."""
-        return _stack_pairs(values, self.pairs, self.num_bins)
+        """Pair-keyed ``(..., F)`` arrays in the data's pair order, ``(..., P, F)``.
+
+        Raises
+        ------
+        ValueError
+            If the keys are not exactly the pairs, or the arrays do not share
+            a shape ending in the frequency grid size.
+        """
+        stacked = stack_pairs(values, self.pairs)
+        if stacked.shape[-1] != self.num_bins:
+            raise ValueError(
+                f"per-pair arrays must share a shape (..., {self.num_bins}), "
+                f"got {stacked.shape[:-2] + stacked.shape[-1:]}"
+            )
+        return stacked
+
+    @property
+    def mask(self) -> np.ndarray:
+        """The counted entries as a boolean ``(P, F)`` grid."""
+        counted = np.zeros(len(self.pairs) * self.num_bins, dtype=bool)
+        counted[np.asarray(self.keep)] = True
+        return counted.reshape(len(self.pairs), self.num_bins)
 
 
 jax.tree_util.register_dataclass(
@@ -411,7 +420,14 @@ class DenseGaussianLikelihood[M: SpectralDensityModel]:
         Random key of the generalized ORFs' sky draws; a fixed key by
         default.
     num_draws
-        Number of sky draws of the generalized ORFs.
+        Number of sky draws of the generalized ORFs; ``2**15`` by default.
+    generalized_orfs
+        Precomputed generalized ORFs, as returned by
+        :func:`~astrogwb.detector.generalized_overlap_reduction_function` for
+        this network's detectors and ``frequencies`` (each ``(P, F, P, F)``,
+        unmasked, not rescaled), which spare the sky draws; one set serves any
+        mask, model or data. Mutually exclusive with ``key`` and
+        ``num_draws``. Ignored, like them, without shot noise.
     keep_generalized_orfs
         Whether to keep the generalized ORFs
         (:func:`~astrogwb.detector.generalized_overlap_reduction_function`)
@@ -422,6 +438,12 @@ class DenseGaussianLikelihood[M: SpectralDensityModel]:
     ----------
     model
         The background model.
+    pairs
+        The sorted name pair of every pair, in the data's order.
+    mask
+        The counted entries, boolean ``(P, F)``: the user mask without the
+        entries of infinite detector noise. The compressed data axis is
+        ``stack_pairs(values, pairs)[..., mask]``, pair-major.
     observed
         Observed cross powers on the counted entries, ``(..., D)``, or ``None``.
     shot_noise
@@ -444,40 +466,46 @@ class DenseGaussianLikelihood[M: SpectralDensityModel]:
         mask: Mapping[PairName, ArrayLike] | None = None,
         shot_noise: bool = True,
         key: jax.Array | None = None,
-        num_draws: int = 2**15,
+        num_draws: int | None = None,
+        generalized_orfs: Mapping[StokesPair, ArrayLike] | None = None,
         keep_generalized_orfs: bool = False,
     ) -> None:
         detectors = resolve_network(network)
         frequencies = np.asarray(frequencies, dtype=float)
         pairs = pair_names(detectors)
+        num_bins = frequencies.size
+        scale = pair_bin_scale(frequencies, detectors, observation_time)
+        counted = np.isfinite(scale)
+        if mask is not None:
+            counted &= np.asarray(stack_pairs(mask, pairs), dtype=bool)
         overlaps: dict[str, Any] = {}
         if shot_noise:
-            orfs = {
-                pair: NORMALIZED_ORF_SCALE**2 * values
-                for pair, values in generalized_overlap_reduction_function(
+            if generalized_orfs is None:
+                generalized_orfs = generalized_overlap_reduction_function(
                     jax.random.key(0) if key is None else key,
-                    num_draws,
+                    2**15 if num_draws is None else num_draws,
                     frequencies,
                     detectors,
-                ).items()
-            }
+                )
+            elif key is not None or num_draws is not None:
+                raise ValueError(
+                    "key and num_draws set the sky draws of the generalized "
+                    "ORFs; do not pass them with generalized_orfs"
+                )
+            orfs = _scaled_orfs(generalized_orfs, (len(pairs), num_bins) * 2)
             overlaps = (
                 {"generalized_orfs": orfs}
                 if keep_generalized_orfs
                 else {"connected_overlap": _stokes_sum(orfs)}
             )
         resolved = _Network.from_leaves(
-            scale=pair_bin_scale(frequencies, detectors, observation_time),
+            scale=scale,
             pair_overlap=np.stack(
                 [term.overlap for term in pair_terms(frequencies, detectors)]
             ),
             observation_time=observation_time,
             pairs=pairs,
-            mask=(
-                None
-                if mask is None
-                else np.asarray(_stack_pairs(mask, pairs, frequencies.size), dtype=bool)
-            ),
+            mask=counted,
             **overlaps,
         )
         self._assign(
@@ -524,6 +552,16 @@ class DenseGaussianLikelihood[M: SpectralDensityModel]:
         # redraw the generalized ORFs.
         model, network, observed = children
         return cls._from_network(model, network, observed, shot_noise=shot_noise)
+
+    @property
+    def pairs(self) -> tuple[PairName, ...]:
+        """The sorted name pair of every pair, in the data's order."""
+        return self._network.pairs
+
+    @property
+    def mask(self) -> np.ndarray:
+        """The counted entries, boolean ``(P, F)``."""
+        return self._network.mask
 
     @property
     def observation_time(self) -> jax.Array:
