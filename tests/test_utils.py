@@ -12,6 +12,8 @@ from astrogwb.utils import (
     cumulative_trapezoid,
     gauss_legendre_nodes_weights,
     require_x64,
+    stack_pairs,
+    unstack_pairs,
 )
 
 
@@ -89,3 +91,45 @@ def test_nodes_weights_promotes_integer_bounds_instead_of_truncating() -> None:
             integer_grid[:-1].astype(dtype), integer_grid[1:].astype(dtype), 4
         )[0],
     )
+
+
+PAIRS = (("A", "B"), ("A", "C"))
+
+
+def test_stack_pairs_round_trips_through_unstack_pairs() -> None:
+    values = {pair: jnp.arange(6.0).reshape(2, 3) + i for i, pair in enumerate(PAIRS)}
+
+    stacked = stack_pairs(values, PAIRS)
+    restored = unstack_pairs(stacked, PAIRS)
+
+    assert stacked.shape == (2, 2, 3)
+    assert list(restored) == list(PAIRS)
+    for pair in PAIRS:
+        assert_close(restored[pair], values[pair])
+
+
+def test_stack_pairs_follows_the_order_of_pairs() -> None:
+    values = {PAIRS[0]: jnp.zeros(3), PAIRS[1]: jnp.ones(3)}
+
+    assert_close(stack_pairs(values, PAIRS[::-1])[0], jnp.ones(3))
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {PAIRS[0]: jnp.zeros(3)},
+        {PAIRS[0]: jnp.zeros(3), ("B", "A"): jnp.zeros(3)},
+        {PAIRS[0]: jnp.zeros(3), PAIRS[1]: jnp.zeros(4)},
+    ],
+    ids=["missing", "wrong-key", "ragged"],
+)
+def test_stack_pairs_with_invalid_values_raises(
+    values: dict[tuple[str, str], jax.Array],
+) -> None:
+    with pytest.raises(ValueError):
+        stack_pairs(values, PAIRS)
+
+
+def test_unstack_pairs_with_the_wrong_pair_count_raises() -> None:
+    with pytest.raises(ValueError, match="pair axis"):
+        unstack_pairs(jnp.zeros((3, 4)), PAIRS)
