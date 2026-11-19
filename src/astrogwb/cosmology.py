@@ -214,7 +214,7 @@ POINTWISE_GAUSS_LEGENDRE_ORDER: int = 48
 def comoving_distance(
     redshift: ArrayLike, hubble_constant: ArrayLike, omega_m: ArrayLike
 ) -> jax.Array:
-    r"""Comoving distance in Mpc at each redshift, for flat :math:`\Lambda`CDM.
+    r"""Comoving distance in Mpc at each redshift, for flat :math:`\Lambda`\ CDM.
 
     Unlike :func:`distance_and_volume_grid` the points need not form a sorted
     grid: each is integrated on its own :math:`[0, z]` with a fixed

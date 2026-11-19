@@ -20,6 +20,6 @@ The dimensionless overlap gives the response of the detector pair to an
 isotropic background at each frequency in Hz. It is normalized to one for
 co-located, aligned detectors with orthogonal arms.
 
-For detector noise curves, use :func:`astrogwb.detector.sensitivity.load_sensitivity`.
+For detector noise curves, use :func:`astrogwb.detector.load_sensitivity`.
 For a population prediction on a frequency grid, continue to
 :doc:`../user_guide/catalog-inference`.
