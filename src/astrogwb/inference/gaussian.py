@@ -49,10 +49,10 @@ from astrogwb.detector import (
     NORMALIZED_ORF_SCALE,
     Detector,
     generalized_overlap_reduction_function,
-    load_network,
     pair_bin_scale,
     pair_names,
     pair_terms,
+    resolve_network,
 )
 from astrogwb.waveform.intensity import QUADRUPOLE_STOKES_WEIGHTS, StokesPair
 
@@ -447,9 +447,7 @@ class DenseGaussianLikelihood[M: SpectralDensityModel]:
         num_draws: int = 2**15,
         keep_generalized_orfs: bool = False,
     ) -> None:
-        detectors = (
-            load_network(network) if isinstance(network, str) else tuple(network)
-        )
+        detectors = resolve_network(network)
         frequencies = np.asarray(frequencies, dtype=float)
         pairs = pair_names(detectors)
         overlaps: dict[str, Any] = {}
