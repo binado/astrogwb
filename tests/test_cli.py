@@ -14,7 +14,7 @@ import tomli_w
 from astrogwb_tiny_pipeline import WAVEFORM, write_population_csv
 from typer.testing import CliRunner
 
-from astrogwb.background.simulation import read_background
+from astrogwb.background.simulation import BackgroundDraw
 from astrogwb.cli import app
 from astrogwb.utils import years_to_seconds
 
@@ -86,7 +86,7 @@ def test_a_simulate_run_writes_one_file_with_its_config(
 
     _simulate(output, inputs)
 
-    draw, config = read_background(output)
+    draw, config = BackgroundDraw.read(output)
     (network,) = config.networks
     assert network.name == "ET"
     assert network.pairs() == (("R1", "S1"),)
@@ -111,4 +111,4 @@ def test_a_simulate_run_with_incoherent_records_the_mode(
 
     _simulate(output, inputs, "--incoherent")
 
-    assert read_background(output)[1].incoherent
+    assert BackgroundDraw.read(output)[1].incoherent

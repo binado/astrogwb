@@ -2,7 +2,7 @@
 
 ``astrogwb simulate`` writes one file per draw, ``<root>/<seed>-<index>.h5``,
 each a :class:`~astrogwb.background.simulation.BackgroundDraw` stored by
-:func:`~astrogwb.background.simulation.write_background`.
+:meth:`~astrogwb.background.simulation.BackgroundDraw.write`.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import TypedDict
 import numpy as np
 from numpy.typing import NDArray
 
-from astrogwb.background.simulation.draw import BackgroundDraw, read_background
+from astrogwb.background.simulation.draw import BackgroundDraw
 
 __all__ = ["NetworkSpectra", "network_spectra_ensemble"]
 
@@ -74,7 +74,7 @@ def network_spectra_ensemble(
     """
     root = Path(root)
     draws = [
-        read_background(root / f"{int(seed)}-{index}.h5")[0]
+        BackgroundDraw.read(root / f"{int(seed)}-{index}.h5")[0]
         for index in range(start, num_draws)
     ]
     return [_stack(draws, name) for name in names]
