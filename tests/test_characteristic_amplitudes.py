@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import jax.numpy as jnp
-import numpy as np
 import pytest
+from tolerances import assert_close
 
 from astrogwb.background import (
     characteristic_noise,
@@ -35,4 +35,4 @@ def test_amplitude_ratio_fourth_power_is_snr_density_per_log_frequency(
         spectral_density, noise, grid, years_to_seconds(observation_time)
     )
 
-    np.testing.assert_allclose(np.asarray(ratio**4), np.asarray(density), rtol=1e-6)
+    assert_close(ratio**4, density)

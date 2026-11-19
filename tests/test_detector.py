@@ -5,6 +5,7 @@ import math
 
 import numpy as np
 import pytest
+from tolerances import assert_close
 
 from astrogwb.constants import SPEED_OF_LIGHT
 from astrogwb.detector import (
@@ -107,7 +108,7 @@ def test_orf_matches_direct_sky_quadrature(
     actual = isotropic_overlap_reduction_function(freqs, first, second)
 
     expected = _sky_quadrature_orf(freqs, first, second)
-    np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1e-11)
+    assert_close(actual, expected)
 
 
 @pytest.mark.parametrize(
@@ -167,7 +168,7 @@ def test_orf_matches_native_sky_quadrature_for_tilted_elevated_arms(
     actual = isotropic_overlap_reduction_function(freqs, first, second)
 
     expected = _sky_quadrature_orf(freqs, first, second)
-    np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1e-11)
+    assert_close(actual, expected)
 
 
 def test_pairwise_overlap_shape_and_symmetry(frequencies: np.ndarray) -> None:
@@ -176,8 +177,8 @@ def test_pairwise_overlap_shape_and_symmetry(frequencies: np.ndarray) -> None:
     )
 
     assert actual.shape == (3, 3, frequencies.shape[0])
-    np.testing.assert_allclose(actual, np.transpose(actual, (1, 0, 2)))
-    np.testing.assert_allclose(actual[0, 0, :], 1.0)
+    assert_close(actual, np.transpose(actual, (1, 0, 2)))
+    assert_close(actual[0, 0, :], np.ones(actual.shape[-1]))
 
 
 @pytest.mark.parametrize(
@@ -263,12 +264,17 @@ def _gwmock_reference(geometry, gmst, ra, dec, psi, frequencies, plus, cross):
         patterns.append((fp, fc))
         delays.append(delay)
         strains.append(np.fft.rfft(strain)[:4] / 1024.0)
+    # custom.to_lal() populates a LALFrDetector whose elevation and arm
+    # azimuth/tilt fields are REAL4 (float32), so the reference only carries
+    # single-precision accuracy.
     return (
-        tensor,
-        location,
-        np.asarray(patterns).T.reshape((2, *gmst.shape)),
-        np.asarray(delays).reshape(gmst.shape),
-        np.asarray(strains).reshape((*gmst.shape, len(frequencies))),
+        np.asarray(tensor, dtype=np.float32),
+        np.asarray(location, dtype=np.float32),
+        np.asarray(patterns, dtype=np.float32).T.reshape((2, *gmst.shape)),
+        np.asarray(delays, dtype=np.float32).reshape(gmst.shape),
+        np.asarray(strains, dtype=np.complex64).reshape(
+            (*gmst.shape, len(frequencies))
+        ),
     )
 
 
@@ -295,7 +301,7 @@ PACKAGED_NAMES = [
 def test_native_projection_matches_gwmock_polarization_convention(
     name: str, batched: bool
 ) -> None:
-    """Precision bounds include LAL's REAL4 arm fields and elevation conversion."""
+    """Compare native detector geometry and projection against gwmock/LAL."""
     if name in PACKAGED_NAMES:
         detector = load_detector(name)
     else:
@@ -323,49 +329,23 @@ def test_native_projection_matches_gwmock_polarization_convention(
     tensor, location, patterns, delays, strains = _gwmock_reference(
         geometry, gmst, ra, dec, psi, frequencies, plus, cross
     )
-    # Each REAL4 field rounds by at most half an ulp. An arm's angular
-    # displacement bounds its vector error; the half outer-product has
-    # Frobenius error <= sqrt(2) times that displacement. A polarization
-    # tensor has norm sqrt(2), hence pattern error <= 2 * sum(angle errors).
-    angle_error = sum(
-        abs(float(np.spacing(np.float32(getattr(geometry, field))))) / 2
-        for field in (
-            "xarm_azimuth_rad",
-            "yarm_azimuth_rad",
-            "xarm_tilt_rad",
-            "yarm_tilt_rad",
-        )
-    )
-    eps = np.finfo(np.float64).eps
-    tensor_bound = np.sqrt(2) * angle_error + 64 * eps
-    position_bound = (
-        abs(float(np.spacing(np.float32(geometry.elevation_m)))) / 2
-        + 32 * eps * 6378137
-    )
-    pattern_bound = 2 * angle_error + 128 * eps
-    delay_bound = position_bound / 299792458.0
-    np.testing.assert_allclose(
-        geometry.response_tensor, tensor, rtol=0, atol=tensor_bound
-    )
-    np.testing.assert_allclose(geometry.location, location, rtol=0, atol=position_bound)
+    assert_close(geometry.response_tensor, tensor, promote_dtypes=True)
+    assert_close(geometry.location, location, promote_dtypes=True)
     coordinates = {"right_ascension": ra, "declination": dec, "polarization_angle": psi}
     actual_patterns = detector.antenna_pattern(gmst, **coordinates)
-    np.testing.assert_allclose(actual_patterns, patterns, rtol=0, atol=pattern_bound)
-    np.testing.assert_allclose(
+    assert_close(actual_patterns, patterns, promote_dtypes=True)
+    assert_close(
         detector.time_delay_from_geocenter(gmst, right_ascension=ra, declination=dec),
         delays,
-        rtol=0,
-        atol=delay_bound,
-    )
-    amplitude_bound = np.abs(plus) + np.abs(cross)
-    strain_bound = (
-        amplitude_bound * (pattern_bound + 2 * np.pi * frequencies * delay_bound)
-        + 128 * eps * amplitude_bound.sum()
+        promote_dtypes=True,
     )
     actual = detector.project_polarizations_fd(
         frequencies, plus, cross, gmst, **coordinates
     )
-    assert np.all(np.abs(actual - strains) <= strain_bound)
+    # _gwmock_reference round-trips through irfft/rfft, leaving O(eps) DC
+    # leakage, whereas the native FD projection is exact zero at DC.
+    np.testing.assert_array_equal(actual[..., 0], 0.0)
+    assert_close(actual[..., 1:], strains[..., 1:], promote_dtypes=True)
 
 
 def test_native_projection_broadcasts_and_jits() -> None:
@@ -390,7 +370,7 @@ def test_native_projection_broadcasts_and_jits() -> None:
     eager = project_polarizations_fd(*args, **coordinates)
     compiled = jax.jit(project_polarizations_fd)(*args, **coordinates)
     assert eager.shape == (2, 3, 2)
-    np.testing.assert_allclose(eager, compiled)
+    assert_close(eager, compiled)
     for i in range(2):
         for j in range(3):
             scalar = detector.project_polarizations_fd(
@@ -402,4 +382,4 @@ def test_native_projection_broadcasts_and_jits() -> None:
                 declination=0.2,
                 polarization_angle=0.7,
             )
-            np.testing.assert_allclose(eager[i, j], scalar)
+            assert_close(eager[i, j], scalar)

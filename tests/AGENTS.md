@@ -6,5 +6,5 @@
 - Add core tests for scientific interfaces.
 - Use pytest fixtures and `pytest.mark.parametrize`.
 - Avoid tests which re-implement functions.
-- Avoid tests which require brittle `atol` and `rtol` in `np.testing.assert_allclose`.
+- Use `assert_close` from `tolerances` for approximate array comparisons, relying on its dtype-aware defaults instead of hand-picked `atol` and `rtol`.
 - Mark dependency-heavy tests with `@pytest.mark.integration`.

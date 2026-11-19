@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 from conftest import PYGWB_POWER_FRACTION
 from numpy.typing import NDArray
+from tolerances import assert_close
 
 from astrogwb.background.spectral import (
     omega_gw_from_spectral_density,
@@ -50,7 +51,7 @@ def test_pair_noise_scale_matches_pygwb_sigma(
 
     scale = pair_bin_scale(frequencies, exact_detectors, observation_years)
 
-    np.testing.assert_allclose(scale[pair], cross_power_sigma, rtol=1e-12)
+    assert_close(scale[pair], cross_power_sigma)
 
 
 def test_network_noise_scale_matches_pygwb_combined_sigma(
@@ -72,7 +73,7 @@ def test_network_noise_scale_matches_pygwb_combined_sigma(
         frequencies,
     )
 
-    np.testing.assert_allclose(scale, combined_sigma, rtol=1e-3)
+    assert_close(scale, combined_sigma)
 
 
 def test_network_spectrum_matches_pygwb_combined_point_estimate(
@@ -94,9 +95,4 @@ def test_network_spectrum_matches_pygwb_combined_point_estimate(
     # In units of the estimator's own standard deviation: the estimate is
     # noise-dominated and crosses zero.
     sigma = pygwb_reference["combined_sigma"]
-    np.testing.assert_allclose(
-        omega / sigma,
-        pygwb_reference["combined_point_estimate"] / sigma,
-        rtol=0.0,
-        atol=1e-3,
-    )
+    assert_close(omega / sigma, pygwb_reference["combined_point_estimate"] / sigma)

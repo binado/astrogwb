@@ -25,6 +25,7 @@ from astrogwb_mock_population import (
     uniform_source_model,
 )
 from numpyro import handlers
+from tolerances import assert_close
 
 from astrogwb.background.importance.catalog import ReferenceCatalog, intensity_data
 from astrogwb.background.importance.model import CatalogModel
@@ -426,7 +427,7 @@ def test_rescaled_prediction_matches_waveforms_generated_at_every_node(
     )
 
     # Linear interpolation of an f^(-7/3) power law on a 0.1% log grid.
-    np.testing.assert_allclose(rescaled, brute_force, rtol=1e-5)
+    assert_close(rescaled, brute_force)
 
 
 @pytest.mark.integration
@@ -440,7 +441,7 @@ def test_rescaled_prediction_reweights_like_waveforms_generated_at_every_node(
         reference_setup, sites, points, variance=variance
     )
 
-    np.testing.assert_allclose(rescaled, brute_force, rtol=1e-5)
+    assert_close(rescaled, brute_force)
 
 
 @pytest.mark.integration
@@ -492,19 +493,17 @@ def test_explicit_bns_weights_at_proposal_and_shifted_support(
     assert np.any(np.isfinite(shifted_weights))
     with pytest.warns(UserWarning, match="Out-of-support"):
         expected_weights = traced_density(narrow) - traced_density(fiducials)
-    np.testing.assert_allclose(shifted_weights, expected_weights, rtol=0, atol=1e-14)
+    assert_close(shifted_weights, expected_weights)
 
     for result, baseline in zip(
         jax.tree.leaves(predict(explicit, fiducials)),
         jax.tree.leaves(predict(cached, fiducials)),
         strict=True,
     ):
-        np.testing.assert_allclose(result, baseline, rtol=1e-12, atol=0)
-    np.testing.assert_allclose(
+        assert_close(result, baseline)
+    assert_close(
         cumulants(explicit, fiducials, projectors),
         cumulants(cached, fiducials, projectors),
-        rtol=1e-12,
-        atol=0,
     )
     np.testing.assert_array_equal(
         predict(explicit, narrow).extras["total_merger_rate"],
@@ -531,7 +530,7 @@ def test_rescaled_shot_noise_grows_linearly_with_the_hubble_constant(
     shifted = np.asarray(_bin_variance(model, {**fiducials, "H0": hubble_constant}))
     ratio = shifted / np.asarray(_bin_variance(model, fiducials))
 
-    np.testing.assert_allclose(ratio, hubble_constant / fiducials["H0"], rtol=1e-12)
+    assert_close(ratio, np.full(ratio.shape, hubble_constant / fiducials["H0"]))
 
 
 @pytest.mark.parametrize("xi_0", [1.0, 0.8])
@@ -555,10 +554,9 @@ def test_phinney_kernel_times_the_distance_ratio_squared_is_the_rate_density(
     distance = distance_ratio * luminosity_distance(redshift, hubble_constant, omega_m)
     undone = np.asarray(kernel) * (np.asarray(distance) / reference_distance) ** 2
 
-    np.testing.assert_allclose(
+    assert_close(
         undone,
         differential_merger_rate(redshift, merger_rate, hubble_constant, omega_m),
-        rtol=1e-12,
     )
 
 
@@ -578,9 +576,7 @@ def test_spectrum_scales_as_a_power_of_h0_and_the_local_merger_rate(
     baseline = spectrum(FIDUCIALS)
     scaled = spectrum({**FIDUCIALS, parameter: factor * fiducial})
 
-    np.testing.assert_allclose(
-        np.asarray(scaled), factor**exponent * np.asarray(baseline), rtol=1e-8
-    )
+    assert_close(scaled, factor**exponent * baseline)
 
 
 def _bound_predictions(
@@ -616,8 +612,8 @@ def test_low_reference_catalog_matches_one_generated_at_the_window_edge(
 
     # Linear interpolation of an f^(-7/3) power law on a 0.1% log grid, as in
     # the comparisons against waveforms generated at every node.
-    np.testing.assert_allclose(rescaled[0], expected[0], rtol=1e-5)
-    np.testing.assert_allclose(rescaled[1], expected[1], rtol=1e-5)
+    assert_close(rescaled[0], expected[0])
+    assert_close(rescaled[1], expected[1])
 
 
 @pytest.mark.integration
@@ -686,10 +682,9 @@ def test_face_on_and_mean_inclination_waveforms_give_equivalent_moments(
     effective = intensity_data(waveform_generator(waveform), columns)
     old_factor = 1.0 if moment == 1 else INCLINATION_SECOND_MOMENT
     new_factor = INCLINATION_MEAN if moment == 1 else INCLINATION_RAW_SECOND_MOMENT
-    np.testing.assert_allclose(
-        new_factor * np.asarray(catalog.intensity) ** moment,
+    assert_close(
+        new_factor * catalog.intensity**moment,
         old_factor * effective["intensity"] ** moment,
-        atol=0,
     )
 
 
@@ -721,12 +716,7 @@ def test_dense_covariance_matches_physical_inclination_quadrature(
     )
     # The reference power uses log-frequency interpolation; the oracle generates
     # each waveform at its actual redshift. This bound covers that grid error.
-    np.testing.assert_allclose(
-        _covariance(model, params),
-        expected,
-        rtol=1e-5,
-        atol=0,
-    )
+    assert_close(_covariance(model, params), expected)
 
 
 @pytest.mark.parametrize(

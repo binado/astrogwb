@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import bilby
-import numpy as np
 import pytest
+from tolerances import assert_close
 
 from astrogwb.detector import load_detector
 
@@ -21,7 +21,7 @@ def test_vertex_matches_bilby_within_a_millimetre(site: str) -> None:
 
     location = load_detector(site).geometry.location
 
-    np.testing.assert_allclose(location, reference.vertex, rtol=0.0, atol=1e-3)
+    assert_close(location, reference.vertex)
 
 
 def test_response_tensor_matches_bilby(site: str) -> None:
@@ -30,4 +30,4 @@ def test_response_tensor_matches_bilby(site: str) -> None:
 
     tensor = load_detector(site).geometry.response_tensor
 
-    np.testing.assert_allclose(tensor, reference.detector_tensor, rtol=0.0, atol=1e-12)
+    assert_close(tensor, reference.detector_tensor)

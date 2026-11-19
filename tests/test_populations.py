@@ -34,6 +34,7 @@ from astrogwb_mock_population import (
 from jax.typing import ArrayLike
 from numpyro import handlers
 from reference_population import reference_merger_rate_distance_and_logprob
+from tolerances import assert_close
 
 from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.populations import SourceModel, coba
@@ -192,9 +193,7 @@ def test_identical_arrival_priors_cancel_from_importance_ratios(
         values=values,
         density_sites=sites,
     )
-    np.testing.assert_allclose(
-        target_with_arrival - reference_with_arrival, target - reference
-    )
+    assert_close(target_with_arrival - reference_with_arrival, target - reference)
 
 
 def test_source_evaluate_needs_no_physical_rate() -> None:
@@ -226,11 +225,9 @@ def test_one_execution_supplies_per_sample_density_distance_and_scalar_rate() ->
     expected_rate, expected_distance, expected_logpdf = reference(FIDUCIALS)
     # Bit-exact: the distribution shares the reference's operation order, which
     # is what keeps a catalog that is its own proposal at exactly zero weight.
-    np.testing.assert_allclose(
-        np.asarray(log_prob), np.asarray(expected_logpdf), rtol=0.0, atol=2e-15
-    )
-    np.testing.assert_allclose(distance, expected_distance, rtol=1e-14)
-    np.testing.assert_allclose(float(rate), float(expected_rate), rtol=1e-15)
+    assert_close(log_prob, expected_logpdf)
+    assert_close(distance, expected_distance)
+    assert_close(rate, expected_rate)
 
 
 def test_source_model_never_sees_redshift() -> None:
@@ -249,7 +246,7 @@ def test_modified_propagation_scales_the_distance_by_the_gw_em_ratio() -> None:
     expected = cosmological_distance * jnp.exp(
         log_gw_em_ratio(SAMPLE_REDSHIFTS, OFF_FIDUCIALS["xi_0"], OFF_FIDUCIALS["xi_n"])
     )
-    np.testing.assert_allclose(distance, expected, rtol=1e-14)
+    assert_close(distance, expected)
 
 
 def test_modified_propagation_reduces_exactly_to_the_cosmological_model() -> None:
@@ -288,9 +285,7 @@ def test_density_selection_preserves_supplied_values_and_deterministics() -> Non
     )
     expected_spin = dist.Uniform(-0.05, 0.05).log_prob(values["spin_1z"])
     expected_mass = jnp.log(2.0) - 2.0 * jnp.log(POPULATION_PARAMS["mass_width"])
-    np.testing.assert_allclose(
-        selected_log_prob, log_prob + expected_spin - expected_mass
-    )
+    assert_close(selected_log_prob, log_prob + expected_spin - expected_mass)
     np.testing.assert_array_equal(luminosity_distance, selected_distance)
 
 
@@ -334,13 +329,10 @@ def test_outer_density_and_gradient_match_a_direct_calculation() -> None:
         return value
 
     points = jnp.array([55.0, 67.66, 90.0])
-    np.testing.assert_allclose(
-        jax.jit(jax.vmap(joint))(points), jax.vmap(direct)(points), rtol=1e-12
-    )
-    np.testing.assert_allclose(
+    assert_close(jax.jit(jax.vmap(joint))(points), jax.vmap(direct)(points))
+    assert_close(
         jax.jit(jax.vmap(jax.grad(joint)))(points),
         jax.vmap(jax.grad(direct))(points),
-        rtol=1e-8,
     )
 
 
@@ -399,9 +391,7 @@ def test_evaluation_traces_under_jit_and_vmaps_over_hyperparameters() -> None:
     hubble_constants = jnp.array([60.0, 67.66, 75.0])
     batched = jax.jit(jax.vmap(redshift_density))(hubble_constants)
     assert batched.shape == (3, SAMPLE_REDSHIFTS.shape[0])
-    np.testing.assert_allclose(
-        batched[1], redshift_density(hubble_constants[1]), rtol=1e-12
-    )
+    assert_close(batched[1], redshift_density(hubble_constants[1]))
 
 
 def test_sampling_is_jittable_and_isolated_from_outer_handlers() -> None:
@@ -418,10 +408,9 @@ def test_sampling_is_jittable_and_isolated_from_outer_handlers() -> None:
     ) -> jax.Array:
         return evaluate(population, params, values)[0]
 
-    np.testing.assert_allclose(
+    assert_close(
         jax.jit(log_prob)(POPULATION_PARAMS, sources),
         log_prob(POPULATION_PARAMS, sources),
-        rtol=1e-12,
     )
 
 
@@ -441,7 +430,7 @@ def test_gaussian_mass_density_matches_two_iid_normals_on_the_ordered_half_plane
         + component.log_prob(values["source_frame_mass_1"])
         + component.log_prob(values["source_frame_mass_2"])
     )
-    np.testing.assert_allclose(actual, expected, rtol=1e-12)
+    assert_close(actual, expected)
 
     unordered = {
         **values,

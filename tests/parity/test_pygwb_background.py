@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 from conftest import REFERENCES
 from numpy.typing import NDArray
+from tolerances import assert_close
 
 from astrogwb.background.spectral import omega_gw_from_spectral_density
 from astrogwb.waveform import WaveformMetadata
@@ -72,4 +73,4 @@ def test_catalog_omega_gw_matches_pygwb(
         hubble_constant=hubble_constant,
     )
 
-    np.testing.assert_allclose(omega, pygwb_reference["cbc_omega_gw"], rtol=1e-9)
+    assert_close(omega, pygwb_reference["cbc_omega_gw"])

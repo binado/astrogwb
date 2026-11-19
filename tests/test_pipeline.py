@@ -22,6 +22,7 @@ from astrogwb_tiny_pipeline import (
     packaged_config,
 )
 from numpy.typing import NDArray
+from tolerances import assert_close
 
 from astrogwb.background.simulation import (
     BackgroundDraw,
@@ -132,8 +133,9 @@ def test_coa_time_shifts_both_polarizations_and_preserves_intensity(
     )
     expected = np.exp(-2j * np.pi * times[:, None] * frequencies)
     for original, timed in zip(base, shifted, strict=True):
-        np.testing.assert_allclose(timed / original, expected)
-    np.testing.assert_allclose(intensity(*shifted) / intensity(*base), 1.0)
+        assert_close(timed / original, expected)
+    intensity_ratio = intensity(*shifted) / intensity(*base)
+    assert_close(intensity_ratio, np.ones(intensity_ratio.shape))
     np.testing.assert_array_equal(
         generator.generate_batch(sources),
         generator.generate_batch({**sources, "coa_time": times}),
@@ -156,12 +158,11 @@ def test_coa_time_shifts_both_polarizations_and_preserves_intensity(
         timed = project_polarizations_fd(
             *args, shifted[0], shifted[1], 0.0, **coordinates
         )
-        np.testing.assert_allclose(timed / original, expected)
+        assert_close(timed / original, expected)
         projected.append((original, timed))
     first, second = projected
-    np.testing.assert_allclose(
-        (np.conj(first[1]) * second[1]) / (np.conj(first[0]) * second[0]), 1.0
-    )
+    cross_ratio = (np.conj(first[1]) * second[1]) / (np.conj(first[0]) * second[0])
+    assert_close(cross_ratio, np.ones(cross_ratio.shape, dtype=np.complex128))
 
 
 @pytest.mark.parametrize(
@@ -186,12 +187,7 @@ def test_polarizations_reduce_to_the_generators_intensity(
     plus, cross = generator.generate_polarizations_batch(sources)
 
     generated = np.asarray(generator.generate_batch(sources))
-    np.testing.assert_allclose(
-        np.asarray(intensity(plus, cross)),
-        generated,
-        rtol=1e-10,
-        atol=1e-12 * np.abs(generated).max(),
-    )
+    assert_close(intensity(plus, cross), generated)
 
 
 def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum() -> None:
@@ -280,7 +276,7 @@ def test_combining_pair_spectra_of_a_pure_signal_recovers_its_spectrum(
         overlap * spectrum, projected.frequencies, network
     )
 
-    np.testing.assert_allclose(combined / spectrum, 1.0)
+    assert_close(combined, spectrum)
 
 
 def test_custom_detector_geometry_is_used_for_projection(
@@ -398,7 +394,7 @@ def test_spectra_do_not_depend_on_the_segment_batch_size(
     )
 
     for name, spectrum in reference.spectra.items():
-        np.testing.assert_allclose(batched.spectra[name], spectrum, atol=0)
+        assert_close(batched.spectra[name], spectrum)
 
 
 @pytest.mark.parametrize("opposite_phase", [False, True])
@@ -441,10 +437,8 @@ def test_segment_sums_use_sampled_coa_times_without_rescaling(
     )
     ratio = 1 / np.sqrt(0.2 * WAVEFORM.frequency_resolution)
     for name, spectrum in baseline.spectra.items():
-        np.testing.assert_allclose(
-            (union[geometry_arrays.rows[name], 0] / spectrum[:, 0] - 1) / ratio,
-            -1.0 if opposite_phase else 1.0,
-        )
+        measured = (union[geometry_arrays.rows[name], 0] / spectrum[:, 0] - 1) / ratio
+        assert_close(measured, np.full(measured.shape, -1.0 if opposite_phase else 1.0))
 
 
 def test_noisy_background_averages_to_the_incoherent_signal(

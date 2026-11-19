@@ -16,6 +16,7 @@ from itertools import combinations
 import numpy as np
 import pytest
 from numpy.typing import NDArray
+from tolerances import assert_close
 
 from astrogwb.detector import (
     Detector,
@@ -39,9 +40,7 @@ def test_orf_matches_pygwb_where_its_formula_is_exact(
     orf = isotropic_overlap_reduction_function(frequencies, first, second)
 
     # pygwb's closed form cancels to ~1e-6 at small arguments; the ORF is O(0.1).
-    np.testing.assert_allclose(
-        orf, pygwb_reference["orf_exact"][pair], rtol=0.0, atol=1e-5
-    )
+    assert_close(orf, pygwb_reference["orf_exact"][pair])
 
 
 @pytest.mark.parametrize(
@@ -65,6 +64,4 @@ def test_orf_follows_pygwb_on_real_sites(
 
     orf = isotropic_overlap_reduction_function(frequencies, first, second)
 
-    np.testing.assert_allclose(
-        orf, pygwb_reference["orf_real"][index], rtol=0.0, atol=1e-2
-    )
+    assert_close(orf, pygwb_reference["orf_real"][index])

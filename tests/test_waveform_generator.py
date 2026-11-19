@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 import ripplegw
 from pydantic import ValidationError
+from tolerances import assert_close
 
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.waveform import (
@@ -243,7 +244,8 @@ def test_ripple_generator_infers_df_from_its_own_5_smooth_grid() -> None:
         )
     )
     frequencies, _ = aligned(_ripple_sources())
-    assert np.diff(np.asarray(frequencies)) == pytest.approx(0.9872)
+    spacing = np.diff(np.asarray(frequencies))
+    assert_close(spacing, np.full(spacing.shape, 0.9872))
 
 
 # --------------------------------------------------------------------- #
@@ -346,7 +348,7 @@ def test_source_frame_masses_and_redshift_give_the_detector_frame_intensity(
     """Either form of the masses reaches the same waveform."""
     derived = _source_frame_sources(np.array([0.1, 0.5]))
 
-    np.testing.assert_allclose(
+    assert_close(
         ripple_generator.generate_batch(derived),
         ripple_generator.generate_batch(_ripple_sources()),
     )
@@ -362,7 +364,7 @@ def test_explicit_detector_frame_masses_take_precedence(
         "redshift": np.array([0.3, 0.3]),
     }
 
-    np.testing.assert_allclose(
+    assert_close(
         ripple_generator.generate_batch(sources),
         ripple_generator.generate_batch(_ripple_sources()),
     )
@@ -436,8 +438,8 @@ def _parity_sources(approximant: str) -> dict[str, np.ndarray]:
 def test_intensity_matches_the_gwmock_backend(approximant: str) -> None:
     """Families supported by both adapters agree with gwmock-signal's backend.
 
-    Exact on the frequency axis. On intensity, ``rtol=1e-11`` with ``atol=0``: the
-    residual is XLA fusion, at most ~2e-13 (``IMRPhenomHM``).
+    Exact on the frequency axis; intensity uses the dtype-aware default
+    tolerance.
     """
     settings = {
         "sampling_frequency": 512.0,
@@ -460,7 +462,7 @@ def test_intensity_matches_the_gwmock_backend(approximant: str) -> None:
     ours = jax.jit(generator.generate_batch)(sources)
 
     np.testing.assert_array_equal(np.asarray(generator.frequencies), frequencies)
-    np.testing.assert_allclose(np.asarray(ours), intensity, rtol=1e-11, atol=0.0)
+    assert_close(ours, intensity)
 
 
 @pytest.mark.integration
@@ -502,12 +504,7 @@ def test_log_intensity_agrees_with_a_dense_uniform_grid(approximant: str) -> Non
 
     assert np.all(np.isfinite(intensity))
     assert np.all(intensity >= 0.0)
-    np.testing.assert_allclose(
-        intensity,
-        union_intensity[np.searchsorted(union, frequencies)],
-        rtol=1e-11,
-        atol=0.0,
-    )
+    assert_close(intensity, union_intensity[np.searchsorted(union, frequencies)])
 
 
 @pytest.mark.integration
@@ -566,12 +563,7 @@ def test_generate_batch_is_traceable_and_values_do_not_recompile(
 
     jitted = jax.jit(counted)
 
-    np.testing.assert_allclose(
-        np.asarray(jitted(sources)),
-        np.asarray(ripple_generator.generate_batch(sources)),
-        rtol=1e-13,
-        atol=0.0,
-    )
+    assert_close(jitted(sources), ripple_generator.generate_batch(sources))
 
     shifted = {name: values * 1.01 for name, values in sources.items()}
     assert np.all(np.asarray(jitted(shifted)) > 0.0)

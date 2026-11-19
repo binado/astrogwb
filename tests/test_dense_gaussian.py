@@ -24,6 +24,7 @@ from astrogwb_mock_population import (
 )
 from jax.tree_util import Partial
 from jax.typing import ArrayLike
+from tolerances import assert_close
 
 from astrogwb.background.importance.model import CatalogModel, interpolation_weights
 from astrogwb.background.importance.spectrum import (
@@ -165,10 +166,9 @@ def test_interpolation_weights_reproduce_jnp_interp_inside_and_outside_the_grid(
     index, weights = interpolation_weights(query, reference)
 
     rows = jnp.stack([index, index + 1], axis=1)
-    np.testing.assert_allclose(
+    assert_close(
         jnp.sum(weights * values[rows], axis=1),
         jnp.interp(query, reference, values, right=0.0),
-        rtol=1e-14,
     )
 
 
@@ -180,10 +180,9 @@ def test_second_moment_held_node_moments_match_the_weighted_gather_at_the_fiduci
     weighted = model_factory(reweight_masses=True)
     assert held.node_moments is not None and weighted.node_moments is None
 
-    np.testing.assert_allclose(
+    assert_close(
         weighted.intensity_second_moment(FIDUCIALS),
         held.intensity_second_moment(FIDUCIALS),
-        rtol=1e-10,
     )
 
 
@@ -191,7 +190,7 @@ def test_second_moment_is_symmetric_positive_semidefinite(model: CatalogModel) -
     moment = np.asarray(model.intensity_second_moment(OFF_FIDUCIAL))
     eigenvalues = np.linalg.eigvalsh(moment)
 
-    np.testing.assert_allclose(moment, moment.T, rtol=1e-14)
+    assert_close(moment, moment.T)
     assert eigenvalues.min() >= -1e-10 * eigenvalues.max()
 
 
@@ -247,10 +246,9 @@ def test_log_likelihood_is_the_multivariate_normal_with_the_catalog_covariance(
         :, network.bins
     ] * network.connected_overlap / seconds + jnp.diag(network.scale**2)
 
-    np.testing.assert_allclose(
+    assert_close(
         likelihood.log_likelihood(OFF_FIDUCIAL)[0],
         dist.MultivariateNormal(factor.mean, covariance).log_prob(observed),
-        rtol=1e-10,
     )
 
 
@@ -267,10 +265,9 @@ def test_log_likelihood_without_shot_noise_is_the_independent_normal(
         * likelihood.model.spectral_density(OFF_FIDUCIAL)[network.bins]
     )
 
-    np.testing.assert_allclose(
+    assert_close(
         diagonal.log_likelihood(OFF_FIDUCIAL)[0],
         jnp.sum(dist.Normal(mean, network.scale).log_prob(observed), axis=-1),
-        rtol=1e-12,
     )
 
 
@@ -288,7 +285,7 @@ def test_log_likelihood_scores_each_realization_against_one_factor(
     ]
 
     assert together.shape == (observed.shape[0],)
-    np.testing.assert_allclose(together, jnp.stack(alone), rtol=1e-12)
+    assert_close(together, jnp.stack(alone))
 
 
 def test_log_likelihood_ignores_the_data_at_masked_entries(
@@ -393,10 +390,9 @@ def test_constructor_does_not_depend_on_the_detector_order(
     forward = _triangle_likelihood(model, triangle, frequencies, triangle_data)
     backward = _triangle_likelihood(model, triangle[::-1], frequencies, triangle_data)
 
-    np.testing.assert_allclose(
+    assert_close(
         forward.log_likelihood(OFF_FIDUCIAL)[0],
         backward.log_likelihood(OFF_FIDUCIAL)[0],
-        rtol=1e-12,
     )
 
 
@@ -467,7 +463,7 @@ def test_constructor_covariance_does_not_depend_on_keeping_the_generalized_orfs(
         for keep in (False, True)
     )
 
-    np.testing.assert_allclose(kept.cholesky, combined.cholesky, rtol=1e-12)
+    assert_close(kept.cholesky, combined.cholesky)
 
 
 def test_constructor_keeping_generalized_orfs_splits_its_covariance(
@@ -487,9 +483,7 @@ def test_constructor_keeping_generalized_orfs_splits_its_covariance(
     _, factor = likelihood.evaluate(OFF_FIDUCIAL)
     components = likelihood.covariance_components(OFF_FIDUCIAL)
 
-    np.testing.assert_allclose(
-        sum(components.values()), factor.cholesky @ factor.cholesky.T, rtol=1e-10
-    )
+    assert_close(sum(components.values()), factor.cholesky @ factor.cholesky.T)
 
 
 # --------------------------------------------------------------------------- #
@@ -514,7 +508,7 @@ def test_generalized_orfs_do_not_depend_on_the_chunk_size(
     )
 
     for pair, values in whole.items():
-        np.testing.assert_allclose(chunked[pair], values, rtol=1e-12, atol=1e-15)
+        assert_close(chunked[pair], values)
 
 
 @pytest.mark.parametrize("pair", ["II", "QQ", "UU", "VV"])
@@ -579,11 +573,9 @@ def test_quadrupole_combination_is_the_source_averaged_response_moment(
     )
     combined = sum(QUADRUPOLE_STOKES_WEIGHTS[pair] * orfs[pair] for pair in orfs)
 
-    np.testing.assert_allclose(
+    assert_close(
         NORMALIZED_ORF_SCALE**2 * np.reshape(np.asarray(combined), moment.shape),
         RESPONSE_TO_CONNECTED * moment / (num_draws * NUM_POLARIZATION_NODES),
-        rtol=1e-10,
-        atol=1e-14,
     )
 
 
@@ -615,7 +607,7 @@ def test_grid_log_likelihood_matches_the_pointwise_log_likelihood(
     ]
 
     assert grid.shape == (3, 2, observed.shape[0])
-    np.testing.assert_allclose(grid, jnp.asarray(pointwise), rtol=1e-10)
+    assert_close(grid, jnp.asarray(pointwise))
 
 
 def test_grid_log_likelihood_of_a_partial_model_matches_the_model(
@@ -628,10 +620,9 @@ def test_grid_log_likelihood_of_a_partial_model_matches_the_model(
     )
     fixed = {name: value for name, value in FIDUCIALS.items() if name not in GRIDS}
 
-    np.testing.assert_allclose(
+    assert_close(
         grid_log_likelihood(partial, GRIDS, fixed=fixed),
         grid_log_likelihood(likelihood, GRIDS, fixed=fixed),
-        rtol=1e-12,
     )
 
 
@@ -721,9 +712,7 @@ def test_amplitude_of_a_rescaled_template_is_the_scale(
     weights = background_amplitude_weights(template, OFF_FIDUCIAL)
     observed = jnp.array([0.5, 1.3])[:, None] * template.mean(OFF_FIDUCIAL)
 
-    np.testing.assert_allclose(
-        background_amplitude_estimate(weights, observed), [0.5, 1.3], rtol=1e-12
-    )
+    assert_close(background_amplitude_estimate(weights, observed), [0.5, 1.3])
 
 
 def test_amplitude_variance_without_shot_noise_is_the_inverse_squared_snr(
@@ -794,11 +783,9 @@ def test_covariance_is_the_sum_of_its_components(
 ) -> None:
     components = split_likelihood.covariance_components(OFF_FIDUCIAL)
 
-    np.testing.assert_allclose(
+    assert_close(
         split_likelihood.covariance(OFF_FIDUCIAL),
         sum(components.values()),
-        rtol=1e-8,
-        atol=1e-8 * float(jnp.max(jnp.abs(split_likelihood.covariance(OFF_FIDUCIAL)))),
     )
 
 

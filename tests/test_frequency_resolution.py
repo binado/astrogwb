@@ -29,6 +29,7 @@ from astrogwb_mock_population import (
     build_reference_spectrum,
     mock_merger_rate,
 )
+from tolerances import assert_close
 
 from astrogwb.background import spectral_snr_squared
 from astrogwb.background.importance.catalog import IntensityData, ReferenceCatalog
@@ -98,12 +99,8 @@ def test_subsampling_a_fine_catalog_matches_a_coarse_one(
             f_max=F_MAX,
             frequency_resolution=factor * FINE_DF,
         )
-        np.testing.assert_allclose(
-            fine_frequencies[::factor], np.asarray(coarse["frequencies"])
-        )
-        np.testing.assert_allclose(
-            fine_intensity[::factor], np.asarray(coarse["intensity"])
-        )
+        assert_close(fine_frequencies[::factor], coarse["frequencies"])
+        assert_close(fine_intensity[::factor], coarse["intensity"])
 
 
 def _analysis_at(frequencies: jax.Array) -> dict[str, Any]:
@@ -205,7 +202,7 @@ def test_the_absolute_log_likelihood_does_not_converge(
     bin_ratio = (
         resolutions[1]["num_bins"] / resolutions[SUBSAMPLE_FACTORS[-1]]["num_bins"]
     )
-    np.testing.assert_allclose(
+    assert_close(
         at_fiducial[1] / at_fiducial[SUBSAMPLE_FACTORS[-1]], bin_ratio, rtol=0.05
     )
     assert at_fiducial[1] / at_fiducial[SUBSAMPLE_FACTORS[-1]] > 10.0
@@ -240,7 +237,7 @@ def test_the_log_likelihood_ratio_residual_is_the_snr_squared_residual(
             _log_likelihood(resolutions[1], OFFSET_H0) - at_fiducial[1]
         ) - 1.0
         snr_squared_residual = run["snr_squared"] / resolutions[1]["snr_squared"] - 1.0
-        np.testing.assert_allclose(delta_residual, snr_squared_residual, rtol=1e-5)
+        assert_close(delta_residual, snr_squared_residual)
     # The ratio converges: the first coarsening moves it very little.
     first = resolutions[SUBSAMPLE_FACTORS[0]]
     assert (

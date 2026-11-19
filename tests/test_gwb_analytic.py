@@ -10,6 +10,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from numpyro.distributions import TruncatedNormal
+from tolerances import assert_close
 
 from astrogwb.background import (
     JointMassFunction,
@@ -233,7 +234,7 @@ def test_analytic_function_is_jittable(
     actual = jax.jit(function)(transform_frequencies, hyperparameters)
 
     assert np.all(np.isfinite(np.asarray(actual)))
-    np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=0.0)
+    assert_close(actual, expected)
 
 
 def test_uniform_mass_moments_are_jittable(
@@ -250,9 +251,7 @@ def test_uniform_mass_moments_are_jittable(
     )
     actual = jax.jit(function)(transform_frequencies)
     assert np.all(np.isfinite(np.asarray(actual)))
-    np.testing.assert_allclose(
-        actual, function(transform_frequencies), rtol=1e-12, atol=0.0
-    )
+    assert_close(actual, function(transform_frequencies))
 
 
 def test_analytic_function_has_finite_hyperparameter_gradients(
@@ -305,7 +304,7 @@ def test_uniform_shortcut_matches_generic_pipeline(
         n_interp_grid=interpolation_grid_sizes[-1],
     )
 
-    np.testing.assert_allclose(generic, shortcut, rtol=5e-5, atol=0.0)
+    assert_close(generic, shortcut)
 
 
 @pytest.mark.parametrize("function_name", ["precompute", "contract", "combined"])
@@ -322,7 +321,7 @@ def test_scalar_hyperparameter_representations_are_equivalent(
 
     assert actual.shape == expected.shape
     assert np.all(np.isfinite(np.asarray(actual)))
-    np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=0.0)
+    assert_close(actual, expected)
 
 
 @pytest.mark.parametrize("prior_name", ["uniform", "gaussian"])

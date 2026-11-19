@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from tolerances import assert_close
 
 from astrogwb.utils import (
     cumulative_trapezoid,
@@ -36,7 +37,7 @@ def test_cumulative_trapezoid_is_exact_for_linear_samples() -> None:
     antiderivative = x**2 + 3.0 * x
     expected = antiderivative - antiderivative[0]
 
-    np.testing.assert_allclose(np.asarray(actual), np.asarray(expected), atol=2e-15)
+    assert_close(actual, expected)
 
 
 @pytest.mark.parametrize("order", [2, 4, 8])
@@ -81,15 +82,10 @@ def test_nodes_weights_promotes_integer_bounds_instead_of_truncating() -> None:
     )
 
     assert jnp.issubdtype(points.dtype, jnp.floating)
-    np.testing.assert_allclose(
-        np.asarray(jnp.sum(weights, axis=-1)), np.ones(4), rtol=2e-15
-    )
-    np.testing.assert_allclose(
-        np.asarray(points),
-        np.asarray(
-            gauss_legendre_nodes_weights(
-                integer_grid[:-1].astype(dtype), integer_grid[1:].astype(dtype), 4
-            )[0]
-        ),
-        rtol=2e-15,
+    assert_close(jnp.sum(weights, axis=-1), np.ones(4))
+    assert_close(
+        points,
+        gauss_legendre_nodes_weights(
+            integer_grid[:-1].astype(dtype), integer_grid[1:].astype(dtype), 4
+        )[0],
     )

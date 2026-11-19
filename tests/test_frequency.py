@@ -5,6 +5,7 @@ from collections.abc import Callable
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from tolerances import assert_close
 
 from astrogwb.frequency import (
     FrequencySpacing,
@@ -49,7 +50,7 @@ def test_log_grid_is_geometric_with_df_wide_first_bin() -> None:
     assert frequencies[0] == 2.0
     assert frequencies[-1] == 2048.0
     ratios = frequencies[1:] / frequencies[:-1]
-    np.testing.assert_allclose(ratios, ratios[0], rtol=1e-12)
+    assert_close(ratios, np.full(ratios.shape, ratios[0]))
     assert frequencies[1] - frequencies[0] <= 0.5
 
 
@@ -61,19 +62,19 @@ def test_bin_widths_of_a_subsampled_uniform_grid_is_stride_times_spacing() -> No
 
     widths = bin_widths(frequencies[::stride])
 
-    np.testing.assert_allclose(np.asarray(widths), stride * fine_spacing)
+    assert_close(widths, np.full(widths.shape, stride * fine_spacing))
 
 
 def test_bin_widths_of_a_geometric_grid_uses_midpoint_edges() -> None:
     widths = bin_widths(np.array([1.0, 2.0, 4.0, 8.0]))
 
-    np.testing.assert_allclose(np.asarray(widths), [1.0, 1.5, 3.0, 4.0])
+    assert_close(widths, [1.0, 1.5, 3.0, 4.0])
 
 
 def test_bin_widths_of_a_two_bin_grid_is_the_one_gap_in_both() -> None:
     widths = bin_widths(np.array([3.0, 5.0]))
 
-    np.testing.assert_allclose(np.asarray(widths), [2.0, 2.0])
+    assert_close(widths, [2.0, 2.0])
 
 
 def test_bin_widths_midpoint_sum_converges_at_second_order() -> None:

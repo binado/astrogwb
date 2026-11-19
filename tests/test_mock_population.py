@@ -18,6 +18,7 @@ from astrogwb_mock_population import (
     make_redshift_grid,
 )
 from reference_population import reference_merger_rate_distance_and_logprob
+from tolerances import assert_close
 
 from astrogwb.background import (
     analytic_spectral_density_from_mass_moments,
@@ -104,12 +105,10 @@ def test_catalog_contraction_matches_the_analytic_spectrum(
         for num_sources, ratio in ratios.items()
     }
     assert residuals[LARGE_CATALOG_SIZE] < residuals[SMALL_CATALOG_SIZE]
-    np.testing.assert_allclose(
-        np.mean(ratios[LARGE_CATALOG_SIZE]), 1.0, rtol=0.05, atol=0.0
-    )
-    np.testing.assert_allclose(
+    mean_ratio = np.mean(ratios[LARGE_CATALOG_SIZE])
+    assert_close(mean_ratio, 1.0, rtol=0.05)
+    assert_close(
         ratios[LARGE_CATALOG_SIZE],
-        np.mean(ratios[LARGE_CATALOG_SIZE]),
+        np.full(ratios[LARGE_CATALOG_SIZE].shape, mean_ratio),
         rtol=0.03,
-        atol=0.0,
     )

@@ -15,6 +15,7 @@ import pytest
 from jax.typing import ArrayLike
 from numpyro import handlers
 from numpyro.infer.util import compute_log_probs, log_density
+from tolerances import assert_close
 
 from astrogwb.utils.numpyro import (
     sample_and_logprob,
@@ -113,11 +114,7 @@ def test_outer_log_density_excludes_source_sites() -> None:
     )
 
     assert set(trace) == {"mu", "source_density"}
-    np.testing.assert_allclose(
-        total,
-        dist.Normal(0.5, 1.0).log_prob(mu) + jnp.sum(source_log_prob),
-        rtol=1e-12,
-    )
+    assert_close(total, dist.Normal(0.5, 1.0).log_prob(mu) + jnp.sum(source_log_prob))
 
 
 def test_a_missing_column_raises_naming_the_site() -> None:
@@ -151,7 +148,7 @@ def test_sample_and_logprob_is_differentiable_and_jittable() -> None:
     mu = jnp.asarray(0.5)
     gradient = jax.grad(total)(mu)
     expected = jnp.sum((jnp.asarray(FIXED["m"]) - 0.5) / 1.5**2)
-    np.testing.assert_allclose(gradient, expected, rtol=1e-12)
+    assert_close(gradient, expected)
     assert jnp.array_equal(jax.jit(total)(mu), total(mu))
 
 
