@@ -52,7 +52,7 @@ from astrogwb.statistics import (
     background_amplitude_variance,
     background_amplitude_weights,
 )
-from astrogwb.utils import gauss_legendre_nodes_weights
+from astrogwb.utils import gauss_legendre_nodes_weights, stack_pairs, unstack_pairs
 from astrogwb.waveform.intensity import QUADRUPOLE_STOKES_WEIGHTS, StokesPair
 
 NUM_PAIRS = 2
@@ -443,6 +443,113 @@ def test_constructor_with_shot_noise_gives_a_finite_log_likelihood(
     )
 
     assert bool(jnp.isfinite(likelihood.log_likelihood(OFF_FIDUCIAL)[0]))
+
+
+@pytest.mark.parametrize("masked", [False, True], ids=["unmasked", "masked"])
+def test_constructor_with_passed_orfs_matches_the_sky_draws(
+    model: CatalogModel,
+    frequencies: np.ndarray,
+    triangle: list[Any],
+    triangle_data: dict[tuple[str, str], np.ndarray],
+    masked: bool,
+) -> None:
+    key = jax.random.key(3)
+    settings: dict[str, Any] = {"shot_noise": True}
+    if masked:
+        settings["mask"] = {
+            pair: np.arange(frequencies.size) % 3 != 0 for pair in triangle_data
+        }
+    drawn = _triangle_likelihood(
+        model, triangle, frequencies, triangle_data, key=key, num_draws=64, **settings
+    )
+    orfs = generalized_overlap_reduction_function(key, 64, frequencies, triangle)
+    passed = _triangle_likelihood(
+        model, triangle, frequencies, triangle_data, generalized_orfs=orfs, **settings
+    )
+
+    assert_close(passed.covariance(OFF_FIDUCIAL), drawn.covariance(OFF_FIDUCIAL))
+    assert_close(
+        passed.log_likelihood(OFF_FIDUCIAL)[0], drawn.log_likelihood(OFF_FIDUCIAL)[0]
+    )
+
+
+@pytest.mark.parametrize("setting", [{"num_draws": 8}, {"key": jax.random.key(1)}])
+def test_constructor_with_passed_orfs_and_sky_draw_settings_raises(
+    model: CatalogModel,
+    frequencies: np.ndarray,
+    triangle: list[Any],
+    setting: dict[str, Any],
+) -> None:
+    orfs = generalized_overlap_reduction_function(
+        jax.random.key(0), 8, frequencies, triangle
+    )
+
+    with pytest.raises(ValueError, match="do not pass them"):
+        _triangle_likelihood(
+            model,
+            triangle,
+            frequencies,
+            None,
+            shot_noise=True,
+            generalized_orfs=orfs,
+            **setting,
+        )
+
+
+def test_constructor_with_orfs_of_another_grid_raises(
+    model: CatalogModel, frequencies: np.ndarray, triangle: list[Any]
+) -> None:
+    orfs = generalized_overlap_reduction_function(
+        jax.random.key(0), 8, frequencies[:-1], triangle
+    )
+
+    with pytest.raises(ValueError, match="for this network and frequency grid"):
+        _triangle_likelihood(
+            model, triangle, frequencies, None, shot_noise=True, generalized_orfs=orfs
+        )
+
+
+def test_constructor_without_shot_noise_ignores_passed_orfs(
+    model: CatalogModel, frequencies: np.ndarray, triangle: list[Any]
+) -> None:
+    orfs = generalized_overlap_reduction_function(
+        jax.random.key(0), 8, frequencies[:-1], triangle
+    )
+    likelihood = _triangle_likelihood(
+        model, triangle, frequencies, None, generalized_orfs=orfs
+    )
+
+    assert likelihood.covariance(OFF_FIDUCIAL).shape[0] == likelihood.mask.sum()
+
+
+def test_constructor_mask_and_pairs_describe_the_compressed_axis(
+    model: CatalogModel,
+    frequencies: np.ndarray,
+    triangle: list[Any],
+    triangle_data: dict[tuple[str, str], np.ndarray],
+) -> None:
+    mask = {pair: np.arange(frequencies.size) % 3 != 0 for pair in triangle_data}
+    likelihood = _triangle_likelihood(
+        model, triangle, frequencies, triangle_data, mask=mask
+    )
+    stacked = stack_pairs(triangle_data, likelihood.pairs)
+
+    assert likelihood.pairs == tuple(pair_names(triangle))
+    assert likelihood.mask.shape == stacked.shape
+    assert np.array_equal(
+        likelihood.mask, np.asarray(stack_pairs(mask, likelihood.pairs))
+    )
+    assert likelihood.observed is not None
+    assert_close(likelihood.observed, stacked[..., likelihood.mask])
+    assert np.array_equal(likelihood._network.keep, np.flatnonzero(likelihood.mask))
+
+    full = np.full(likelihood.mask.shape, np.nan)
+    full[likelihood.mask] = np.asarray(likelihood.observed)
+    per_pair = unstack_pairs(full, likelihood.pairs)
+    for pair, values in per_pair.items():
+        kept = likelihood.mask[likelihood.pairs.index(pair)]
+        assert_close(values[kept], triangle_data[pair][kept])
+        assert bool(np.all(np.isnan(values[~kept])))
 
 
 def test_constructor_covariance_does_not_depend_on_keeping_the_generalized_orfs(
