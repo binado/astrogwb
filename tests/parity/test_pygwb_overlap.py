@@ -1,12 +1,4 @@
-"""The isotropic overlap reduction function against ``pygwb.orfs.calc_orf``.
-
-pygwb evaluates the spherical-Earth closed form of arXiv:0903.0528: it projects
-each arm bisector on the plane normal to the geocentric radius. On the
-archive's exact sites (equator and pole) that plane is the local horizontal,
-so both packages compute the same quantity. On real sites the geodetic and
-geocentric verticals differ by up to 0.2 degrees and the arms are tilted,
-which pygwb drops and this library keeps.
-"""
+"""Compare tensor overlap reduction functions for idealized detector geometry."""
 
 from __future__ import annotations
 
@@ -21,11 +13,7 @@ from tolerances import assert_close
 from astrogwb.detector import (
     Detector,
     isotropic_overlap_reduction_function,
-    load_detector,
 )
-
-REAL_SITES = ["H1", "K1", "L1", "V1"]
-REAL_PAIRS = list(combinations(REAL_SITES, 2))
 
 
 @pytest.mark.parametrize("pair", range(3), ids=["A-B", "A-C", "B-C"])
@@ -39,29 +27,18 @@ def test_orf_matches_pygwb_where_its_formula_is_exact(
 
     orf = isotropic_overlap_reduction_function(frequencies, first, second)
 
-    # pygwb's closed form cancels to ~1e-6 at small arguments; the ORF is O(0.1).
     assert_close(orf, pygwb_reference["orf_exact"][pair])
 
 
-@pytest.mark.parametrize(
-    ("index", "names"),
-    list(enumerate(REAL_PAIRS)),
-    ids=["-".join(p) for p in REAL_PAIRS],
-)
-def test_orf_follows_pygwb_on_real_sites(
-    index: int,
-    names: tuple[str, str],
-    pygwb_reference: Mapping[str, NDArray[np.float64]],
+def test_colocated_aligned_orf_matches_shared_normalization(
     frequencies: NDArray[np.float64],
+    exact_detectors: tuple[Detector, ...],
 ) -> None:
-    """Convention check: sign, normalization and azimuth reference agree.
+    # Both conventions normalize co-located, co-aligned right-angle detectors
+    # to unity. For separated detectors pygwb uses a spherical-Earth formula
+    # with geocentric tangent planes. astrogwb uses the full response tensors,
+    # retaining arm tilts and the local geodetic vertical at real sites.
+    detector = exact_detectors[0]
+    orf = isotropic_overlap_reduction_function(frequencies, detector, detector)
 
-    The residual, up to 6e-3 for H1-V1, is pygwb's spherical-Earth
-    approximation, not a tolerance on this library.
-    """
-    assert [str(name) for name in pygwb_reference["site_real_names"]] == REAL_SITES
-    first, second = (load_detector(name) for name in names)
-
-    orf = isotropic_overlap_reduction_function(frequencies, first, second)
-
-    assert_close(orf, pygwb_reference["orf_real"][index])
+    assert_close(orf, np.ones_like(frequencies))

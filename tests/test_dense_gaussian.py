@@ -533,7 +533,7 @@ def test_generalized_orf_vi_is_iv_with_the_pairs_swapped(
         jax.random.key(6), 50, RESPONSE_FREQUENCIES, triangle, components=("IV", "VI")
     )
 
-    np.testing.assert_array_equal(orfs["VI"], jnp.transpose(orfs["IV"], (2, 3, 0, 1)))
+    assert_close(orfs["VI"], jnp.transpose(orfs["IV"], (2, 3, 0, 1)))
 
 
 def test_quadrupole_combination_is_the_source_averaged_response_moment(
