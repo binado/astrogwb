@@ -54,6 +54,7 @@ tpu = ["jax[tpu]>=0.11.0"]
 Homepage = "https://github.com/binado/astrogwb"
 Repository = "https://github.com/binado/astrogwb"
 Issues = "https://github.com/binado/astrogwb/issues"
+Documentation = "https://astrogwb.readthedocs.io/en/latest/"
 
 [build-system]
 requires = ["uv_build>=0.12.2,<0.13.0"]

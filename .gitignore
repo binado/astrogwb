@@ -347,3 +347,6 @@ TSWLatexianTemp*
 .ruff_cache
 __pycache__
 .DS_Store
+
+# Sphinx build output
+/docs/_build/
