@@ -8,6 +8,7 @@ Validating settings leaves the XLA backend uninitialized.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from collections.abc import Set as AbstractSet
 from functools import cache
 from itertools import combinations
@@ -245,3 +246,15 @@ def load_network(name: str) -> tuple[Detector, ...]:
         Name of a registered network.
     """
     return tuple(load_detector(member) for member in sorted(_NETWORKS[name]))
+
+
+def resolve_network(network: str | Sequence[Detector]) -> tuple[Detector, ...]:
+    """Resolve a network name or detector sequence to detectors.
+
+    Parameters
+    ----------
+    network
+        A registered network name, loaded in canonical sorted order, or
+        detectors, kept in the given order.
+    """
+    return load_network(network) if isinstance(network, str) else tuple(network)

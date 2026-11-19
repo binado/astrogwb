@@ -7,6 +7,7 @@ from .config import (
     load_network,
     register_detector,
     register_network,
+    resolve_network,
 )
 from .effective_psd import (
     PairTerms,
@@ -69,6 +70,7 @@ __all__ = [
     "register_detector",
     "register_network",
     "relative_orientation",
+    "resolve_network",
     "resolve_psd_path",
     "sample_pair_response",
     "stokes_cross_power",

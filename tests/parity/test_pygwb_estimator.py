@@ -86,7 +86,9 @@ def test_network_spectrum_matches_pygwb_combined_point_estimate(
 
     omega = omega_gw_from_spectral_density(
         jnp.asarray(
-            cross_correlation_estimator(pair_spectra, frequencies, exact_network)
+            cross_correlation_estimator(
+                pair_spectra, frequencies, exact_network.build_detectors()
+            )
         ),
         jnp.asarray(frequencies),
         hubble_constant=hubble_constant,
