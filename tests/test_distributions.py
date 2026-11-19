@@ -28,6 +28,7 @@ from astrogwb_mock_population import (
     mock_merger_rate,
 )
 from reference_population import reference_merger_rate_distance_and_logprob
+from tolerances import assert_close, assert_converges
 
 from astrogwb.distributions.interpolated import InterpolatedDistribution
 from astrogwb.distributions.mass import (
@@ -70,11 +71,9 @@ def test_interpolated_normalizes_an_unnormalized_table() -> None:
     x = jnp.linspace(0.0, 1.0, 129)
     interpolated = InterpolatedDistribution(x, 7.5 * (1.0 + x))
 
-    np.testing.assert_allclose(float(interpolated.norm), 7.5 * 1.5, rtol=1e-12)
+    assert_close(interpolated.norm, 7.5 * 1.5)
     density = np.exp(np.asarray(interpolated.log_prob(x)))
-    np.testing.assert_allclose(
-        float(np.trapezoid(density, np.asarray(x))), 1.0, rtol=1e-12
-    )
+    assert_close(np.trapezoid(density, np.asarray(x)), 1.0)
 
 
 # --------------------------------------------------------------------------- #
@@ -110,7 +109,7 @@ def test_density_integrates_to_unity_on_its_own_grid() -> None:
     distribution = _distribution()
     grid = np.asarray(distribution.x)
     density = np.exp(np.asarray(distribution.log_prob(distribution.x)))
-    np.testing.assert_allclose(float(np.trapezoid(density, grid)), 1.0, rtol=1e-12)
+    assert_close(np.trapezoid(density, grid), 1.0)
 
 
 def test_log_prob_is_negative_infinity_off_the_table() -> None:
@@ -131,11 +130,7 @@ def test_cdf_grid_spans_zero_to_one_exactly() -> None:
 
 def test_icdf_inverts_the_tabulated_cdf() -> None:
     distribution = _distribution()
-    np.testing.assert_allclose(
-        np.asarray(distribution.icdf(distribution.cdf_grid)),
-        np.asarray(distribution.x),
-        rtol=1e-12,
-    )
+    assert_close(distribution.icdf(distribution.cdf_grid), distribution.x)
 
 
 def test_sample_mean_matches_the_density_it_reports() -> None:
@@ -201,11 +196,7 @@ def test_distribution_vmaps_over_a_hand_stacked_pytree() -> None:
     assert mapped.shape == (len(gammas), SAMPLE_REDSHIFTS.shape[0])
 
     for row, distribution in zip(mapped, distributions, strict=True):
-        np.testing.assert_allclose(
-            np.asarray(row),
-            np.asarray(distribution.log_prob(SAMPLE_REDSHIFTS)),
-            rtol=1e-12,
-        )
+        assert_close(row, distribution.log_prob(SAMPLE_REDSHIFTS))
     # Three *distinct* rows: identical rows would pass with the pytree broken.
     assert not np.allclose(np.asarray(mapped[0]), np.asarray(mapped[1]))
     assert not np.allclose(np.asarray(mapped[1]), np.asarray(mapped[2]))
@@ -265,9 +256,7 @@ def test_total_merger_rate_scales_as_the_inverse_cube_of_the_hubble_constant() -
         return _distribution(H0=h0).total_merger_rate()
 
     h0 = FIDUCIALS["H0"]
-    np.testing.assert_allclose(
-        float(jax.grad(rate_at)(h0)), -3.0 * float(rate_at(h0)) / h0, rtol=1e-9
-    )
+    assert_close(jax.grad(rate_at)(h0), -3.0 * rate_at(h0) / h0)
 
 
 # --------------------------------------------------------------------------- #
@@ -289,16 +278,12 @@ def test_max_of_two_normals_density_integrates_to_unity() -> None:
         _MASS_MEAN - 10 * _MASS_SIGMA, _MASS_MEAN + 10 * _MASS_SIGMA, 20_001
     )
     density = jnp.exp(distribution.log_prob(mass))
-    np.testing.assert_allclose(float(jnp.trapezoid(density, mass)), 1.0, rtol=1e-8)
+    assert_close(jnp.trapezoid(density, mass), 1.0)
 
 
 def test_max_of_two_normals_icdf_inverts_the_cdf() -> None:
     distribution = _max_of_two_normals()
-    np.testing.assert_allclose(
-        np.asarray(distribution.cdf(distribution.icdf(_MASS_QUANTILES))),
-        np.asarray(_MASS_QUANTILES),
-        rtol=1e-12,
-    )
+    assert_close(distribution.cdf(distribution.icdf(_MASS_QUANTILES)), _MASS_QUANTILES)
 
 
 # --------------------------------------------------------------------------- #
@@ -316,20 +301,15 @@ def test_max_of_two_uniforms_log_prob_is_the_scaled_beta_2_1(
         dist.Beta(2.0, 1.0), dist.transforms.AffineTransform(1.0, 1.5)
     )
     values = jnp.array([1.1, 1.75, 2.4])
-    np.testing.assert_allclose(
-        np.asarray(max_of_two_uniforms.log_prob(values)),
-        np.asarray(scaled_beta.log_prob(values)),
-        rtol=1e-12,
-    )
+    assert_close(max_of_two_uniforms.log_prob(values), scaled_beta.log_prob(values))
 
 
 def test_max_of_two_uniforms_icdf_inverts_the_cdf(
     max_of_two_uniforms: MaxOfTwoUniformsDistribution,
 ) -> None:
-    np.testing.assert_allclose(
-        np.asarray(max_of_two_uniforms.cdf(max_of_two_uniforms.icdf(_MASS_QUANTILES))),
-        np.asarray(_MASS_QUANTILES),
-        rtol=1e-14,
+    assert_close(
+        max_of_two_uniforms.cdf(max_of_two_uniforms.icdf(_MASS_QUANTILES)),
+        _MASS_QUANTILES,
     )
 
 
@@ -354,9 +334,7 @@ def test_uniform_cosine_density_integrates_to_unity() -> None:
     distribution = _uniform_cosine()
     theta = jnp.linspace(0.0, math.pi, 20_001)
     density = jnp.exp(distribution.log_prob(theta))
-    np.testing.assert_allclose(
-        float(jnp.trapezoid(density, theta)), 1.0, rtol=1e-8, atol=0.0
-    )
+    assert_close(jnp.trapezoid(density, theta), 1.0)
 
 
 def test_uniform_cosine_cdf_is_zero_or_one_off_support() -> None:
@@ -367,28 +345,15 @@ def test_uniform_cosine_cdf_is_zero_or_one_off_support() -> None:
         np.asarray(distribution.cdf(outside)), np.asarray(expected)
     )
     mixed = jnp.array([-0.1, 0.0, math.pi / 2.0, math.pi, math.pi + 0.1])
-    np.testing.assert_allclose(
-        np.asarray(distribution.cdf(mixed)),
-        np.array([0.0, 0.0, 0.5, 1.0, 1.0]),
-        rtol=1e-12,
-        atol=0.0,
-    )
+    assert_close(distribution.cdf(mixed), [0.0, 0.0, 0.5, 1.0, 1.0])
 
 
 def test_uniform_cosine_cdf_and_icdf_are_inverses(
     polar_angles: jax.Array, polar_quantiles: jax.Array
 ) -> None:
     distribution = _uniform_cosine()
-    np.testing.assert_allclose(
-        np.asarray(distribution.cdf(distribution.icdf(polar_quantiles))),
-        np.asarray(polar_quantiles),
-        rtol=1e-12,
-    )
-    np.testing.assert_allclose(
-        np.asarray(distribution.icdf(distribution.cdf(polar_angles))),
-        np.asarray(polar_angles),
-        rtol=1e-12,
-    )
+    assert_close(distribution.cdf(distribution.icdf(polar_quantiles)), polar_quantiles)
+    assert_close(distribution.icdf(distribution.cdf(polar_angles)), polar_angles)
 
 
 # --------------------------------------------------------------------------- #
@@ -399,24 +364,37 @@ def test_merger_rate_is_pointwise_and_keeps_the_shape_of_its_input() -> None:
     redshift = jnp.array([[0.3, 1.0, 4.0], [0.5, 2.0, 7.5]])
     rate = distribution.merger_rate(redshift)
     assert rate.shape == redshift.shape
-    np.testing.assert_allclose(
-        rate[0, 1], distribution.merger_rate(jnp.asarray(1.0)), rtol=1e-12
-    )
+    assert_close(rate[0, 1], distribution.merger_rate(jnp.asarray(1.0)))
 
 
 def test_total_merger_rate_by_quadrature_matches_the_distribution() -> None:
     """The quadrature rate and the table-based one integrate the same function."""
-    distribution = _distribution()
+    grid_sizes = (129, 257, 513)
+    distributions = [
+        RedshiftDistribution(
+            source_frame_distribution=mock_merger_rate,
+            params=FIDUCIALS,
+            minimum_redshift=Z_MIN,
+            maximum_redshift=Z_MAX,
+            n_grid=n,
+        )
+        for n in grid_sizes
+    ]
     quadrature = total_merger_rate(
         Z_MIN,
         Z_MAX,
-        distribution.merger_rate,
+        distributions[-1].merger_rate,
         FIDUCIALS["H0"],
         FIDUCIALS["Omega_m"],
     )
-    # The distribution's own normalization is a trapezoid rule on the mock
-    # grid; the nodes are the more accurate side, so this bounds that error.
-    np.testing.assert_allclose(quadrature, distribution.total_merger_rate(), rtol=1e-3)
+    # The distribution's own normalization uses a trapezoid rule on the grid,
+    # so it converges at second order to the Gauss-Legendre quadrature rate.
+    assert_converges(
+        [distribution.total_merger_rate() for distribution in distributions],
+        quadrature,
+        spacings=[1.0 / (n - 1) for n in grid_sizes],
+        order=2.0,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -436,6 +414,4 @@ def test_distribution_survives_jit_as_a_pytree_argument(
 ) -> None:
     """Without its data fields flattened, ``jit`` would drop the parameters."""
     jitted = jax.jit(lambda d, x: d.log_prob(x))(distribution, values)
-    np.testing.assert_allclose(
-        np.asarray(jitted), np.asarray(distribution.log_prob(values)), rtol=1e-12
-    )
+    assert_close(jitted, distribution.log_prob(values))

@@ -11,8 +11,8 @@ from collections.abc import Callable
 
 import jax
 import jax.numpy as jnp
-import numpy as np
 import pytest
+from tolerances import assert_close
 
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.waveform import (
@@ -76,7 +76,7 @@ def test_scales_as_inverse_distance_squared(
         frequencies, luminosity_distance=2.0 * bns["luminosity_distance"]
     )
 
-    np.testing.assert_allclose(far, near / 4.0, rtol=1e-12)
+    assert_close(far, near / 4.0)
 
 
 def test_scales_as_chirp_mass_to_the_five_thirds(
@@ -93,7 +93,7 @@ def test_scales_as_chirp_mass_to_the_five_thirds(
         source_frame_mass_2=2.0 * bns["source_frame_mass_2"],
     )
 
-    np.testing.assert_allclose(heavy, light * 2.0 ** (5.0 / 3.0), rtol=1e-12)
+    assert_close(heavy, light * 2.0 ** (5.0 / 3.0))
 
 
 def test_scales_as_frequency_to_the_minus_seven_thirds(
@@ -101,9 +101,7 @@ def test_scales_as_frequency_to_the_minus_seven_thirds(
 ) -> None:
     intensity = bns_intensity(jnp.array([100.0, 200.0]))
 
-    np.testing.assert_allclose(
-        intensity[0, 1], intensity[0, 0] * 2.0 ** (-7.0 / 3.0), rtol=1e-12
-    )
+    assert_close(intensity[0, 1], intensity[0, 0] * 2.0 ** (-7.0 / 3.0))
 
 
 def test_scales_with_inclination_factor(
@@ -114,9 +112,7 @@ def test_scales_with_inclination_factor(
     face_on = bns_intensity(frequencies)
     edge_on = bns_intensity(frequencies, inclination=jnp.array([math.pi / 2.0]))
 
-    np.testing.assert_allclose(
-        edge_on, face_on * 0.25 / inclination_factor(0.0), rtol=1e-12
-    )
+    assert_close(edge_on, face_on * 0.25 / inclination_factor(0.0))
 
 
 def test_redshift_enters_only_through_detector_frame_masses(
@@ -138,7 +134,7 @@ def test_redshift_enters_only_through_detector_frame_masses(
         source_frame_mass_2=(1.0 + redshift) * bns["source_frame_mass_2"],
     )
 
-    np.testing.assert_allclose(redshifted, rescaled, rtol=1e-12)
+    assert_close(redshifted, rescaled)
 
 
 def test_intensity_is_zero_above_the_termination_frequency(
@@ -186,7 +182,7 @@ def test_batched_sources_match_stacked_single_source_calls() -> None:
         axis=0,
     )
 
-    np.testing.assert_allclose(batched, independent, rtol=1e-12)
+    assert_close(batched, independent)
 
 
 def test_gradient_is_finite_across_the_cutoff(bns: dict[str, jax.Array]) -> None:

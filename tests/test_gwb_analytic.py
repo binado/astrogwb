@@ -10,6 +10,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from numpyro.distributions import TruncatedNormal
+from tolerances import assert_close, assert_converges
 
 from astrogwb.background import (
     JointMassFunction,
@@ -233,7 +234,7 @@ def test_analytic_function_is_jittable(
     actual = jax.jit(function)(transform_frequencies, hyperparameters)
 
     assert np.all(np.isfinite(np.asarray(actual)))
-    np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=0.0)
+    assert_close(actual, expected)
 
 
 def test_uniform_mass_moments_are_jittable(
@@ -250,9 +251,7 @@ def test_uniform_mass_moments_are_jittable(
     )
     actual = jax.jit(function)(transform_frequencies)
     assert np.all(np.isfinite(np.asarray(actual)))
-    np.testing.assert_allclose(
-        actual, function(transform_frequencies), rtol=1e-12, atol=0.0
-    )
+    assert_close(actual, function(transform_frequencies))
 
 
 def test_analytic_function_has_finite_hyperparameter_gradients(
@@ -294,18 +293,22 @@ def test_uniform_shortcut_matches_generic_pipeline(
         maximum_redshift=bounds["maximum_redshift"],
         redshift_quadrature_order=order,
     )
-    generic = analytic_spectral_density(
-        frequencies,
-        hyperparameters,
-        merger_rate_fn,
-        joint_mass_priors["uniform"],
-        **bounds,
-        alpha=equivalence_alpha,
-        quadrature_order=order,
-        n_interp_grid=interpolation_grid_sizes[-1],
-    )
+    generic = [
+        analytic_spectral_density(
+            frequencies,
+            hyperparameters,
+            merger_rate_fn,
+            joint_mass_priors["uniform"],
+            **bounds,
+            alpha=equivalence_alpha,
+            quadrature_order=order,
+            n_interp_grid=size,
+        )
+        for size in interpolation_grid_sizes
+    ]
+    spacings = [1.0 / (size - 1) for size in interpolation_grid_sizes]
 
-    np.testing.assert_allclose(generic, shortcut, rtol=5e-5, atol=0.0)
+    assert_converges(generic, shortcut, spacings=spacings, order=2.0)
 
 
 @pytest.mark.parametrize("function_name", ["precompute", "contract", "combined"])
@@ -322,7 +325,7 @@ def test_scalar_hyperparameter_representations_are_equivalent(
 
     assert actual.shape == expected.shape
     assert np.all(np.isfinite(np.asarray(actual)))
-    np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=0.0)
+    assert_close(actual, expected)
 
 
 @pytest.mark.parametrize("prior_name", ["uniform", "gaussian"])
@@ -384,12 +387,11 @@ def test_spectrum_converges_with_interpolation_grid_size(
         )
         for size in interpolation_grid_sizes
     ]
-    coarse_residual, fine_residual = _successive_fractional_rms(values)
-
-    # Doubling N - 1 halves the spacing; second-order convergence gives
-    # roughly a quarter-sized residual, with room for interpolation phase.
-    assert coarse_residual > 0.0
-    assert 0.15 < fine_residual / coarse_residual < 0.35
+    assert_converges(
+        values,
+        spacings=[1.0 / (size - 1) for size in interpolation_grid_sizes],
+        order=2.0,
+    )
 
 
 @pytest.mark.parametrize("branch", ["uniform_shortcut", "uniform", "gaussian"])

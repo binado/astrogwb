@@ -8,6 +8,7 @@ import jax.numpy as jnp
 import numpy as np
 from conftest import PYGWB_POWER_FRACTION
 from numpy.typing import NDArray
+from tolerances import assert_close
 
 from astrogwb.background.spectral import (
     omega_gw_from_spectral_density,
@@ -26,10 +27,9 @@ def test_spectral_density_of_unit_omega_matches_pygwb(
         hubble_constant=hubble_constant,
     )
 
-    np.testing.assert_allclose(
+    assert_close(
         PYGWB_POWER_FRACTION * spectral_density,
         pygwb_reference["power_per_unit_omega"],
-        rtol=1e-12,
     )
 
 
@@ -46,4 +46,4 @@ def test_omega_of_pygwb_unit_power_is_one(
         spectral_density, jnp.asarray(frequencies), hubble_constant=hubble_constant
     )
 
-    np.testing.assert_allclose(omega, 1.0, rtol=1e-12)
+    assert_close(omega, np.ones(omega.shape))

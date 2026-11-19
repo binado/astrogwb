@@ -19,6 +19,7 @@ import pytest
 from conftest import PYGWB_POWER_FRACTION
 from jax.typing import ArrayLike
 from numpy.typing import NDArray
+from tolerances import assert_close
 
 from astrogwb.background.spectral import spectral_density_from_omega_gw
 from astrogwb.detector import Detector, pair_names
@@ -90,6 +91,4 @@ def test_log_likelihood_differences_match_pygwb(
     )
 
     reference = pygwb_reference["likelihood_log_values"]
-    np.testing.assert_allclose(
-        values - values[0], reference - reference[0], rtol=0.0, atol=1e-4
-    )
+    assert_close(values - values[0], reference - reference[0])

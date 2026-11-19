@@ -12,6 +12,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from test_detector import _sky_quadrature_orf
+from tolerances import assert_close
 
 from astrogwb.detector import (
     load_detector,
@@ -168,9 +169,7 @@ def test_stokes_cross_power_rotates_linear_polarization_by_four_psi(
         flipped,
     )
 
-    np.testing.assert_allclose(
-        np.asarray(rotated), np.asarray(reflected), atol=1e-12, rtol=1e-10
-    )
+    assert_close(rotated, reflected)
 
 
 @pytest.mark.parametrize("circular", [False, True])
@@ -197,10 +196,7 @@ def test_stokes_matches_direct_complex_strain_cross_power(circular: bool) -> Non
     reduced = stokes_cross_power(
         FREQUENCIES, first, second, ra, dec, 0.7, stokes, gmst=1.3
     )
-    # A forward error bound for the two equivalent contractions, including
-    # cancellation near antenna zeros (scaled by the unprojected power).
-    bound = 128 * np.finfo(np.float64).eps * np.asarray(stokes[0])
-    assert np.all(np.abs(reduced - direct) <= bound)
+    assert_close(reduced, direct)
 
 
 @pytest.mark.parametrize("pair", [("H1", "L1"), ("E1", "E2"), ("S2", "R2")])
@@ -225,5 +221,4 @@ def test_native_unpolarized_average_matches_independent_geometry_quadrature(
         2 * phi.size
     )
     expected = _sky_quadrature_orf(frequencies, first, second)
-    # Both independent spherical quadratures are converged at these frequencies.
-    assert np.all(np.abs(integrated - expected) < 512 * np.finfo(np.float64).eps)
+    assert_close(integrated, expected)

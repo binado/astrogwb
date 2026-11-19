@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import jax.numpy as jnp
-import numpy as np
+from tolerances import assert_close
 
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.detector import gaussian_bin_scale
@@ -14,4 +14,4 @@ def test_gaussian_bin_scale_uses_the_grids_bin_widths() -> None:
 
     actual = gaussian_bin_scale(eff, observation_time_yr, frequencies)
 
-    np.testing.assert_allclose(np.asarray(actual), np.array([0.2, 0.4, 0.6]))
+    assert_close(actual, [0.2, 0.4, 0.6])

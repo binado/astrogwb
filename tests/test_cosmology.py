@@ -7,6 +7,7 @@ import jax.numpy as jnp
 import numpy as np
 import numpy.typing as npt
 import pytest
+from tolerances import assert_close
 
 from astrogwb.cosmology import (
     comoving_distance,
@@ -63,7 +64,7 @@ class TestNormalizedHubbleParameter:
         _redshift, _omega_m = _as_jnp(redshift, omega_m)
         ours = normalized_hubble_parameter(_redshift, _omega_m)
         theirs = compute_normalized_hubble_parameter(_redshift, _omega_m)
-        np.testing.assert_allclose(ours, theirs)
+        assert_close(ours, theirs)
 
 
 class TestDistanceAndVolumeGrid:
@@ -113,12 +114,8 @@ class TestDistanceAndVolumeGrid:
         differential_comoving_volume_theirs = compute_differential_comoving_volume(
             _z, _h, _om, n_grid=n_grid
         )
-        np.testing.assert_allclose(
-            luminosity_distance, luminosity_distance_theirs, rtol=1e-8
-        )
-        np.testing.assert_allclose(
-            differential_comoving_volume, differential_comoving_volume_theirs, rtol=1e-8
-        )
+        assert_close(luminosity_distance, luminosity_distance_theirs)
+        assert_close(differential_comoving_volume, differential_comoving_volume_theirs)
 
 
 @pytest.mark.parametrize("redshift", [0.1, 1.0, 5.0, 10.0])
@@ -126,9 +123,7 @@ def test_comoving_distance_matches_einstein_de_sitter(redshift: float) -> None:
     """At Omega_m = 1, chi = 2 D_H (1 - 1 / sqrt(1 + z)) in closed form."""
     h0 = 70.0
     expected = 2.0 * hubble_distance(h0) * (1.0 - 1.0 / np.sqrt(1.0 + redshift))
-    np.testing.assert_allclose(
-        comoving_distance(redshift, h0, 1.0), expected, rtol=1e-9
-    )
+    assert_close(comoving_distance(redshift, h0, 1.0), expected)
 
 
 def test_pointwise_distances_match_the_grid_helper(parameters) -> None:
@@ -136,15 +131,11 @@ def test_pointwise_distances_match_the_grid_helper(parameters) -> None:
     grid = jnp.linspace(0.0, 10.0, 257)
     grid_distance, grid_volume = distance_and_volume_grid(grid, **parameters)
     shuffled = jax.random.permutation(jax.random.PRNGKey(0), grid.shape[0])
-    np.testing.assert_allclose(
+    assert_close(
         luminosity_distance(grid[shuffled], **parameters),
         grid_distance[shuffled],
-        rtol=1e-8,
-        atol=1e-8,
     )
-    np.testing.assert_allclose(
+    assert_close(
         differential_comoving_volume(grid[shuffled], **parameters),
         grid_volume[shuffled],
-        rtol=1e-8,
-        atol=1e-4,
     )

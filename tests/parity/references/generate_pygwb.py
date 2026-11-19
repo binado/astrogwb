@@ -18,10 +18,8 @@ produces is ``coba_bns_events.json`` (``draw_coba_events.py``).
 Sections, by key prefix:
 
 ``site_*`` and ``orf_*``
-    Overlap reduction functions. ``exact`` sites sit on the equator or a pole,
-    where the geodetic vertical is the geocentric one, the case pygwb's
-    spherical-Earth formula is exact for. ``real`` sites are bilby's H1, L1,
-    V1 and K1.
+    Overlap reduction functions for equal-radius equatorial sites with level,
+    perpendicular arms.
 ``psd``, ``csd``, ``point_estimate``, ``sigma``, ``combined_*``
     The optimal estimator of each baseline of the exact network and their
     inverse-variance combination.
@@ -63,12 +61,14 @@ FREQUENCIES = np.arange(4, 1604) * 0.25
 #: Exact sites, in bilby's convention: degrees, metres, arm azimuths
 #: counter-clockwise from East. Columns: latitude, longitude, elevation,
 #: x-arm azimuth, y-arm azimuth. Sorted by name, the pair order of the tests.
+# The spherical-Earth formula uses geocentric tangent planes and assumes a
+# common radius. Equal elevations on the equator satisfy both assumptions
+# for the WGS-84 positions used by astrogwb.
 EXACT_SITES: dict[str, tuple[float, float, float, float, float]] = {
     "A": (0.0, 0.0, 0.0, 30.0, 120.0),
-    "B": (0.0, 40.0, 500.0, 75.0, 165.0),
-    "C": (90.0, 0.0, 0.0, 10.0, 100.0),
+    "B": (0.0, 40.0, 0.0, 75.0, 165.0),
+    "C": (0.0, 110.0, 0.0, 10.0, 100.0),
 }
-REAL_SITES = ("H1", "K1", "L1", "V1")
 
 #: The estimator's analysis segment. The boxcar window has unit window
 #: factors, so pygwb's variance carries no window correction.
@@ -103,15 +103,6 @@ def exact_site_vectors() -> dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]]
             yarm_azimuth=yarm,
         )
         vectors[name] = (geometry.vertex, geometry.x, geometry.y)
-    return vectors
-
-
-def real_site_vectors() -> dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]]:
-    """Vertex and arm unit vectors of bilby's bundled interferometers."""
-    vectors = {}
-    for name in REAL_SITES:
-        detector = bilby.gw.detector.get_empty_interferometer(name)
-        vectors[name] = (detector.vertex, detector.x, detector.y)
     return vectors
 
 
@@ -263,9 +254,7 @@ def main() -> None:
         frequencies=FREQUENCIES,
         site_exact_names=np.array(sorted(EXACT_SITES)),
         site_exact_coordinates=np.array([EXACT_SITES[n] for n in sorted(EXACT_SITES)]),
-        site_real_names=np.array(sorted(REAL_SITES)),
         orf_exact=exact_orfs,
-        orf_real=pair_orfs(real_site_vectors()),
         power_per_unit_omega=np.asarray(omega_to_power(unit_omega, FREQUENCIES)),
         psd=psds,
         segment_duration=np.array(SEGMENT_DURATION),
