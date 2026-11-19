@@ -1,4 +1,5 @@
 default: lint typecheck test-core
+mod docs "docs.just"
 
 lint:
     uv lock --check

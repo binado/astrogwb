@@ -54,20 +54,20 @@ __all__ = [
     "termination_frequency",
 ]
 
-#: $\tfrac{5}{24}\pi^{-4/3}$, the amplitude-squared prefactor in geometrized units.
+#: :math:`\tfrac{5}{24}\pi^{-4/3}`, the amplitude-squared prefactor in geometrized units.
 _AMPLITUDE_PREFACTOR: float = (5.0 / 24.0) * math.pi ** (-4.0 / 3.0)
 
 
 def inclination_factor(inclination: JaxArrayLike) -> jax.Array:
-    r"""Quadrupolar inclination factor $g(\iota)$.
+    r"""Quadrupolar inclination factor :math:`g(\iota)`.
 
     .. math::
 
         g(\iota) = \left(\frac{1 + \cos^2\iota}{2}\right)^2 + \cos^2\iota
 
     The two terms are the plus and cross contributions to
-    $|\tilde h_+|^2 + |\tilde h_\times|^2$. It runs from $g(\pi/2) = 1/4$
-    edge-on to $g(0) = g(\pi) = 2$ face-on/face-off.
+    :math:`|\tilde h_+|^2 + |\tilde h_\times|^2`. It runs from :math:`g(\pi/2) = 1/4`
+    edge-on to :math:`g(0) = g(\pi) = 2` face-on/face-off.
 
     Parameters
     ----------
@@ -79,7 +79,7 @@ def inclination_factor(inclination: JaxArrayLike) -> jax.Array:
 
 
 def chirp_mass(mass_1: JaxArrayLike, mass_2: JaxArrayLike) -> jax.Array:
-    r"""Chirp mass $M_c = (m_1 m_2)^{3/5} / (m_1 + m_2)^{1/5}$.
+    r"""Chirp mass :math:`M_c = (m_1 m_2)^{3/5} / (m_1 + m_2)^{1/5}`.
 
     In the frame and unit of the components.
 
@@ -115,8 +115,8 @@ def termination_frequency(
 
     .. math:: f_{\rm end} = \frac{\alpha}{(1 + z)\, M}
 
-    in geometrized units, i.e. $\alpha c^3 / (G M_{\rm det})$ in Hz with
-    $M_{\rm det} = (1 + z)(m_1 + m_2)$ the detector-frame total mass.
+    in geometrized units, i.e. :math:`\alpha c^3 / (G M_{\rm det})` in Hz with
+    :math:`M_{\rm det} = (1 + z)(m_1 + m_2)` the detector-frame total mass.
 
     Parameters
     ----------
@@ -242,7 +242,7 @@ def inspiral_intensity(
     *,
     alpha: JaxArrayLike,
 ) -> jax.Array:
-    r"""Intensity $|\tilde h_+|^2 + |\tilde h_\times|^2$ on an ``(N, F)`` grid.
+    r"""Intensity :math:`|\tilde h_+|^2 + |\tilde h_\times|^2` on an ``(N, F)`` grid.
 
     Evaluates the module's closed form and zeroes the bins above each source's
     :func:`termination_frequency`. Source parameters may be scalars or ``(N,)``
@@ -253,7 +253,7 @@ def inspiral_intensity(
     ----------
     frequencies
         Frequency grid in Hz, shape ``(F,)``. A zero bin returns zero power
-        rather than the divergence of $f^{-7/3}$.
+        rather than the divergence of :math:`f^{-7/3}`.
     parameters
         ``source_frame_mass_1``, ``source_frame_mass_2`` (solar masses),
         ``redshift``, ``luminosity_distance`` (Mpc) and optional
@@ -265,7 +265,7 @@ def inspiral_intensity(
     Returns
     -------
     jax.Array
-        Intensity of shape ``(N, F)`` in $\mathrm{Hz}^{-2}$.
+        Intensity of shape ``(N, F)`` in :math:`\mathrm{Hz}^{-2}`.
     """
     frequency_grid = _require_frequency_grid(frequencies)
     alpha_value = _require_scalar_alpha(alpha)

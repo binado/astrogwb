@@ -109,7 +109,7 @@ __all__ = [
 #: The inclination site, fixed rather than drawn.
 INCLINATION_SITE = "inclination"
 
-#: Reference waveforms are face-on; intensity remains |h_plus|^2 + |h_cross|^2.
+#: Reference waveforms are face-on.
 REFERENCE_INCLINATION = 0.0
 
 #: Isotropic mean relative to face-on intensity, for the (2, 2) mode alone.
@@ -210,7 +210,7 @@ def phinney_kernel(
         :math:`\Xi = d_{GW}/d_{EM}` of the model's distance to the
         electromagnetic one; all shape ``(Z,)``.
     hubble_constant, omega_m
-        Flat :math:`\Lambda`CDM cosmology.
+        Flat :math:`\Lambda`\ CDM cosmology.
     reference_distance
         The distance :math:`d^{\mathrm{ref}}` in Mpc the intensity was generated at.
 
