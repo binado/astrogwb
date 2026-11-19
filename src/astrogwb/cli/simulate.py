@@ -112,7 +112,6 @@ def simulate(
         read_event_pool,
         realization_key,
         simulate_background,
-        write_background,
     )
     from astrogwb.config import merge_layers
     from astrogwb.detector.config import _DetectorConfigDocument
@@ -150,5 +149,5 @@ def simulate(
         segment_batch_size=segment_batch_size,
         incoherent=incoherent,
     )
-    write_background(output, draw, config)
+    draw.write(output, config)
     typer.echo(f"{int(draw.segment_counts.sum())} events -> {output}")

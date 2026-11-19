@@ -159,7 +159,7 @@ def pair_bin_scale(
 
     the scale of a pair's cross-power whose mean is :math:`\gamma_{ab} S_h`
     (the pair spectra of :class:`~astrogwb.background.simulation.BackgroundDraw`,
-    as stored by :func:`~astrogwb.background.simulation.write_background`),
+    as stored by :meth:`~astrogwb.background.simulation.BackgroundDraw.write`),
     pairs in the order of :func:`pair_terms`. It is not divided by
     :math:`\gamma_{ab}`, so it stays finite at the ORF's zeros, and the pairs
     combine to the network: :math:`\sum_{a<b} \gamma_{ab,i}^2 /

@@ -63,7 +63,7 @@ times independently of row selection. Detector projection applies geometric
 delays once. Signals remain complete within their assigned segment, without
 window truncation or boundary crossing.
 
-A background is stored with :func:`write_background` together with the
+A background is stored with :meth:`BackgroundDraw.write` together with the
 :class:`~astrogwb.background.simulation.SimulationConfig` it was simulated with.
 """
 
@@ -105,19 +105,16 @@ __all__ = [
     "NetworkNoise",
     "network_noise",
     "project_background",
-    "read_background",
-    "read_background_attrs",
     "simulate_background",
-    "write_background",
 ]
 
-#: The layout version of the files :func:`write_background` writes.
+#: The layout version of the files :meth:`BackgroundDraw.write` writes.
 FORMAT_VERSION = 1
 
-#: The layout versions :func:`read_background` reads.
+#: The layout versions :meth:`BackgroundDraw.read` reads.
 READABLE_FORMATS = frozenset({FORMAT_VERSION})
 
-#: Root attributes :func:`write_background` owns.
+#: Root attributes :meth:`BackgroundDraw.write` owns.
 RESERVED_ATTRS = frozenset({"metadata", "version", "format_version"})
 
 #: Files written before ``format_version`` existed, which were layout 1.
@@ -316,61 +313,125 @@ class BackgroundDraw(NamedTuple):
     spectra: dict[str, NDArray[np.float64]]
     segment_counts: NDArray[np.int64]
 
+    def write(
+        self,
+        path: str | Path,
+        config: SimulationConfig,
+        /,
+        **attrs: str | float,
+    ) -> Path:
+        """Write the background and the configuration it was simulated with, atomically.
 
-def write_background(
-    path: str | Path,
-    draw: BackgroundDraw,
-    config: SimulationConfig,
-    *,
-    attrs: Mapping[str, str | float | int] | None = None,
-) -> Path:
-    """Write a background and the configuration it was simulated with, atomically.
+        The file holds the datasets ``frequencies``, ``segment_counts`` and, per
+        network, ``networks/<name>/pair_spectral_density``. Its root attributes
+        are ``metadata``, the configuration as JSON, ``format_version``, the
+        integer layout version :meth:`read` keys on, and ``version``, the
+        astrogwb version that wrote it (informational), plus any ``attrs``.
 
-    The file holds the datasets ``frequencies``, ``segment_counts`` and, per
-    network, ``networks/<name>/pair_spectral_density``. Its root attributes are
-    ``metadata``, the configuration as JSON, ``format_version``, the integer
-    layout version :func:`read_background` keys on, and ``version``, the
-    astrogwb version that wrote it (informational), plus any ``attrs``.
+        Parameters
+        ----------
+        path
+            File path.
+        config
+            The configuration the background was simulated with.
+        **attrs
+            Extra root attributes, written in the same atomic write and read
+            back by :meth:`read_attrs`.
 
-    Parameters
-    ----------
-    path
-        File path.
-    draw
-        The background.
-    config
-        The configuration the background was simulated with.
-    attrs
-        Extra root attributes, written in the same atomic write and read back
-        by :func:`read_background_attrs`.
+        Returns
+        -------
+        pathlib.Path
+            The file written.
 
-    Returns
-    -------
-    pathlib.Path
-        The file written.
+        Raises
+        ------
+        ValueError
+            If ``attrs`` uses a reserved key (``metadata``, ``version`` or
+            ``format_version``). Nothing is written.
+        """
+        clashes = sorted(RESERVED_ATTRS.intersection(attrs))
+        if clashes:
+            raise ValueError(f"attrs may not use the reserved keys {clashes}")
+        with atomic_h5(path) as file:
+            file.attrs["metadata"] = json.dumps(config.to_metadata())
+            file.attrs["version"] = __version__
+            file.attrs["format_version"] = FORMAT_VERSION
+            for name, value in attrs.items():
+                file.attrs[name] = value
+            file.create_dataset("frequencies", data=self.frequencies)
+            file.create_dataset("segment_counts", data=self.segment_counts)
+            for name, spectrum in self.spectra.items():
+                group = file.create_group(f"networks/{name}")
+                group.create_dataset("pair_spectral_density", data=spectrum)
+        return Path(path)
 
-    Raises
-    ------
-    ValueError
-        If ``attrs`` uses a reserved key (``metadata``, ``version`` or
-        ``format_version``). Nothing is written.
-    """
-    extra = dict(attrs or {})
-    clashes = sorted(RESERVED_ATTRS.intersection(extra))
-    if clashes:
-        raise ValueError(f"attrs may not use the reserved keys {clashes}")
-    with atomic_h5(path) as file:
-        file.attrs["metadata"] = json.dumps(config.to_metadata())
-        file.attrs["version"] = __version__
-        file.attrs["format_version"] = FORMAT_VERSION
-        for name, value in extra.items():
-            file.attrs[name] = value
-        file.create_dataset("frequencies", data=draw.frequencies)
-        file.create_dataset("segment_counts", data=draw.segment_counts)
-        for name, spectrum in draw.spectra.items():
-            group = file.create_group(f"networks/{name}")
-            group.create_dataset("pair_spectral_density", data=spectrum)
-    return Path(path)
+    @classmethod
+    def read(cls, path: str | Path) -> tuple[BackgroundDraw, SimulationConfig]:
+        """Read a background and its configuration written by :meth:`write`.
+
+        Parameters
+        ----------
+        path
+            File path.
+
+        Returns
+        -------
+        BackgroundDraw
+            The background, networks in sorted order.
+        SimulationConfig
+            The configuration it was simulated with.
+
+        Raises
+        ------
+        ValueError
+            If the file's ``format_version`` is not one this version reads. A
+            file without ``format_version`` is read as format 1 when its
+            ``version`` is ``0.8.*``, as written before format versions were
+            recorded.
+        """
+        with h5py.File(path, "r") as file:
+            _check_format(path, file.attrs)
+            config = SimulationConfig.from_metadata(json.loads(file.attrs["metadata"]))
+            stored = file["networks"]
+            draw = cls(
+                np.asarray(file["frequencies"][()], dtype=np.float64),
+                {
+                    name: np.asarray(
+                        stored[name]["pair_spectral_density"][()], dtype=np.float64
+                    )
+                    for name in sorted(stored)
+                },
+                np.asarray(file["segment_counts"][()], dtype=np.int64),
+            )
+        return draw, config
+
+    @staticmethod
+    def read_attrs(path: str | Path) -> dict[str, str | float | int]:
+        """The extra root attributes :meth:`write` stored as ``attrs``.
+
+        Parameters
+        ----------
+        path
+            File path.
+
+        Returns
+        -------
+        dict
+            The attributes other than the reserved ``metadata``, ``version``
+            and ``format_version``, as Python scalars.
+
+        Raises
+        ------
+        ValueError
+            As for :meth:`read`, if the file's format is not readable.
+        """
+        with h5py.File(path, "r") as file:
+            _check_format(path, file.attrs)
+            return {
+                name: value.item() if isinstance(value, np.generic) else value
+                for name, value in file.attrs.items()
+                if name not in RESERVED_ATTRS
+            }
 
 
 def _check_format(path: str | Path, attrs: Mapping[str, object]) -> None:
@@ -388,73 +449,6 @@ def _check_format(path: str | Path, attrs: Mapping[str, object]) -> None:
         f"{sorted(READABLE_FORMATS)} and files written by astrogwb 0.8.*; "
         "regenerate the background"
     )
-
-
-def read_background(path: str | Path) -> tuple[BackgroundDraw, SimulationConfig]:
-    """Read a background and its configuration written by :func:`write_background`.
-
-    Parameters
-    ----------
-    path
-        File path.
-
-    Returns
-    -------
-    BackgroundDraw
-        The background, networks in sorted order.
-    SimulationConfig
-        The configuration it was simulated with.
-
-    Raises
-    ------
-    ValueError
-        If the file's ``format_version`` is not one this version reads. A file
-        without ``format_version`` is read as format 1 when its ``version`` is
-        ``0.8.*``, as written before format versions were recorded.
-    """
-    with h5py.File(path, "r") as file:
-        _check_format(path, file.attrs)
-        config = SimulationConfig.from_metadata(json.loads(file.attrs["metadata"]))
-        stored = file["networks"]
-        draw = BackgroundDraw(
-            np.asarray(file["frequencies"][()], dtype=np.float64),
-            {
-                name: np.asarray(
-                    stored[name]["pair_spectral_density"][()], dtype=np.float64
-                )
-                for name in sorted(stored)
-            },
-            np.asarray(file["segment_counts"][()], dtype=np.int64),
-        )
-    return draw, config
-
-
-def read_background_attrs(path: str | Path) -> dict[str, str | float | int]:
-    """The extra root attributes :func:`write_background` stored as ``attrs``.
-
-    Parameters
-    ----------
-    path
-        File path.
-
-    Returns
-    -------
-    dict
-        The attributes other than the reserved ``metadata``, ``version`` and
-        ``format_version``, as Python scalars.
-
-    Raises
-    ------
-    ValueError
-        As for :func:`read_background`, if the file's format is not readable.
-    """
-    with h5py.File(path, "r") as file:
-        _check_format(path, file.attrs)
-        return {
-            name: value.item() if isinstance(value, np.generic) else value
-            for name, value in file.attrs.items()
-            if name not in RESERVED_ATTRS
-        }
 
 
 def network_noise(

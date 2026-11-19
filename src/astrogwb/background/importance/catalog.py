@@ -29,8 +29,6 @@ __all__ = [
     "IntensityData",
     "ReferenceCatalog",
     "intensity_data",
-    "read_reference_catalog",
-    "write_reference_catalog",
 ]
 
 logger = logging.getLogger(__name__)
@@ -113,81 +111,73 @@ class ReferenceCatalog:
             proposal_log_prob=jnp.asarray(self.proposal_log_prob)[:n],
         )
 
+    def write(self, path: str | Path, metadata: BaseModel, **io_kwargs: Any) -> Path:
+        """Write the catalog and the metadata that produced it, atomically.
 
-def write_reference_catalog(
-    path: str | Path,
-    catalog: ReferenceCatalog,
-    metadata: BaseModel,
-    **io_kwargs: Any,
-) -> Path:
-    """Write a reference catalog and the metadata that produced it, atomically.
+        A thin wrapper of :func:`astrogwb.utils.io.write`, which needs the
+        ``io`` extra.
 
-    A thin wrapper of :func:`astrogwb.utils.io.write`, which needs the ``io``
-    extra.
+        Parameters
+        ----------
+        path
+            File path.
+        metadata
+            Metadata describing how the catalog was made.
+        **io_kwargs
+            Passed to :func:`astrogwb.utils.io.write` (``seed``, ``batch_size``).
 
-    Parameters
-    ----------
-    path
-        File path.
-    catalog
-        The catalog.
-    metadata
-        Metadata describing how the catalog was made.
-    **io_kwargs
-        Passed to :func:`astrogwb.utils.io.write` (``seed``, ``batch_size``).
+        Returns
+        -------
+        pathlib.Path
+            The file written.
+        """
+        from astrogwb.utils.io import write
 
-    Returns
-    -------
-    pathlib.Path
-        The file written.
-    """
-    from astrogwb.utils.io import write
+        tree = {
+            "frequencies": np.asarray(self.frequencies),
+            "intensity": np.asarray(self.intensity),
+            "intrinsic": {
+                name: np.asarray(column) for name, column in self.intrinsic.items()
+            },
+            "proposal_log_prob": np.asarray(self.proposal_log_prob),
+            "reference_redshift": np.float64(self.reference_redshift),
+            "reference_distance": np.float64(self.reference_distance),
+        }
+        return write(path, tree, metadata, **io_kwargs)
 
-    tree = {
-        "frequencies": np.asarray(catalog.frequencies),
-        "intensity": np.asarray(catalog.intensity),
-        "intrinsic": {
-            name: np.asarray(column) for name, column in catalog.intrinsic.items()
-        },
-        "proposal_log_prob": np.asarray(catalog.proposal_log_prob),
-        "reference_redshift": np.float64(catalog.reference_redshift),
-        "reference_distance": np.float64(catalog.reference_distance),
-    }
-    return write(path, tree, metadata, **io_kwargs)
+    @classmethod
+    def read[M: BaseModel](
+        cls, path: str | Path, metadata_type: type[M]
+    ) -> tuple[ReferenceCatalog, M]:
+        """Read a catalog written by :meth:`write`.
 
+        Parameters
+        ----------
+        path
+            File path.
+        metadata_type
+            Pydantic model that validates the recorded metadata.
 
-def read_reference_catalog[M: BaseModel](
-    path: str | Path, metadata_type: type[M]
-) -> tuple[ReferenceCatalog, M]:
-    """Read a catalog written by :func:`write_reference_catalog`.
+        Returns
+        -------
+        ReferenceCatalog
+            The catalog, with NumPy array fields.
+        M
+            The metadata it was written with.
+        """
+        from astrogwb.utils.io import load
 
-    Parameters
-    ----------
-    path
-        File path.
-    metadata_type
-        Pydantic model that validates the recorded metadata.
-
-    Returns
-    -------
-    ReferenceCatalog
-        The catalog, with NumPy array fields.
-    M
-        The metadata it was written with.
-    """
-    from astrogwb.utils.io import load
-
-    tree, metadata, _ = load(path, metadata_type)
-    data: dict[str, Any] = dict(tree)
-    catalog = ReferenceCatalog(
-        frequencies=data["frequencies"],
-        intensity=data["intensity"],
-        intrinsic=dict(data["intrinsic"]),
-        proposal_log_prob=data["proposal_log_prob"],
-        reference_redshift=float(data["reference_redshift"]),
-        reference_distance=float(data["reference_distance"]),
-    )
-    return catalog, metadata
+        tree, metadata, _ = load(path, metadata_type)
+        data: dict[str, Any] = dict(tree)
+        catalog = cls(
+            frequencies=data["frequencies"],
+            intensity=data["intensity"],
+            intrinsic=dict(data["intrinsic"]),
+            proposal_log_prob=data["proposal_log_prob"],
+            reference_redshift=float(data["reference_redshift"]),
+            reference_distance=float(data["reference_distance"]),
+        )
+        return catalog, metadata
 
 
 def intensity_data(

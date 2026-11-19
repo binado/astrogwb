@@ -11,11 +11,7 @@ import numpy as np
 import pytest
 from pydantic import BaseModel
 
-from astrogwb.background.importance.catalog import (
-    ReferenceCatalog,
-    read_reference_catalog,
-    write_reference_catalog,
-)
+from astrogwb.background.importance.catalog import ReferenceCatalog
 from astrogwb.background.simulation import realization_key
 from astrogwb.utils.io import atomic_h5, load, write
 
@@ -103,9 +99,9 @@ def _catalog() -> ReferenceCatalog:
 def test_reference_catalog_round_trips_with_its_metadata(tmp_path: Path) -> None:
     catalog = _catalog()
     record = Record(name="ref", size=5)
-    path = write_reference_catalog(tmp_path / "c" / "ref.h5", catalog, record, seed=3)
+    path = catalog.write(tmp_path / "c" / "ref.h5", record, seed=3)
 
-    reopened, metadata = read_reference_catalog(path, Record)
+    reopened, metadata = ReferenceCatalog.read(path, Record)
 
     assert metadata == record
     np.testing.assert_array_equal(reopened.frequencies, catalog.frequencies)

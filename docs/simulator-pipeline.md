@@ -66,12 +66,12 @@ noiseless expected signal of the same Poisson draw. The file stores the
 `BackgroundDraw` (`frequencies`, `segment_counts` and each network's
 `pair_spectral_density`) and, as JSON in its `metadata` attribute, the
 `SimulationConfig` it was made with, the astrogwb `version` (informational) and
-an integer `format_version` that `read_background` keys on, so a patch release
-does not invalidate existing files. `write_background(..., attrs=...)` stores
-extra root attributes in the same atomic write; `read_background_attrs` reads
+an integer `format_version` that `BackgroundDraw.read` keys on, so a patch release
+does not invalidate existing files. `BackgroundDraw.write(path, config, **attrs)` stores
+extra root attributes in the same atomic write; `BackgroundDraw.read_attrs` reads
 them back.
 The on-disk config stores shared detector definitions once, alongside the
-network memberships. `read_background` reconstructs the network configs
+network memberships. `BackgroundDraw.read` reconstructs the network configs
 without looking up any registrations, and `network_noise` rebuilds the noise
 inputs from those configs.
 
