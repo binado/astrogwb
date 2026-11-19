@@ -277,7 +277,7 @@ def test_combining_pair_spectra_of_a_pure_signal_recovers_its_spectrum(
     )
 
     combined = cross_correlation_estimator(
-        overlap * spectrum, projected.frequencies, network
+        overlap * spectrum, projected.frequencies, network.build_detectors()
     )
 
     np.testing.assert_allclose(combined / spectrum, 1.0)
@@ -325,10 +325,10 @@ def test_psd_override_preserves_pair_spectra_and_changes_combination(
     frequencies = baseline.frequencies
     assert not np.array_equal(
         cross_correlation_estimator(
-            baseline.spectra[TRIANGLE.name], frequencies, TRIANGLE
+            baseline.spectra[TRIANGLE.name], frequencies, TRIANGLE.build_detectors()
         ),
         cross_correlation_estimator(
-            overridden.spectra[TRIANGLE.name], frequencies, changed
+            overridden.spectra[TRIANGLE.name], frequencies, changed.build_detectors()
         ),
     )
 
