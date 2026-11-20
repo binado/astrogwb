@@ -42,6 +42,8 @@ from astrogwb.detector import (
 from astrogwb.detector.response import _isotropic_angles
 from astrogwb.inference import (
     DenseGaussianLikelihood,
+    DiagonalGaussianLikelihood,
+    GaussianLikelihood,
     SpectralDensityPrediction,
     grid_log_likelihood,
     grid_log_prior,
@@ -129,12 +131,22 @@ def pair_leaves(model: CatalogModel) -> dict[str, Any]:
 
 
 @pytest.fixture(scope="module")
-def network(pair_leaves: dict[str, Any], response_draws: jax.Array) -> _Network:
+def network(pair_leaves: dict[str, Any]) -> _Network:
+    return _Network.from_leaves(**pair_leaves)
+
+
+@pytest.fixture(scope="module")
+def orfs(network: _Network, response_draws: jax.Array) -> dict[StokesPair, jax.Array]:
+    """Four generalized ORFs, each the moment of a disjoint quarter of the draws."""
     flat = np.reshape(np.asarray(response_draws), (NUM_DRAWS, -1))
-    moment = (flat.T @ flat / NUM_DRAWS).reshape((NUM_PAIRS, NUM_BINS) * 2)
-    return _Network.from_leaves(
-        **pair_leaves, connected_overlap=RESPONSE_TO_CONNECTED * moment
-    )
+    pairs: tuple[StokesPair, ...] = ("II", "QQ", "UU", "VV")
+    return {
+        pair: network.restrict(
+            RESPONSE_TO_CONNECTED
+            * (part.T @ part / NUM_DRAWS).reshape((NUM_PAIRS, NUM_BINS) * 2)
+        )
+        for pair, part in zip(pairs, np.array_split(flat, 4), strict=True)
+    }
 
 
 @pytest.fixture(scope="module")
@@ -149,9 +161,19 @@ def observed(
 
 @pytest.fixture(scope="module")
 def likelihood(
-    model: CatalogModel, network: _Network, observed: jax.Array
+    model: CatalogModel,
+    network: _Network,
+    observed: jax.Array,
+    orfs: dict[StokesPair, jax.Array],
 ) -> DenseGaussianLikelihood[CatalogModel]:
-    return DenseGaussianLikelihood._from_network(model, network, observed)
+    return DenseGaussianLikelihood._from_network(model, network, observed, orfs)
+
+
+@pytest.fixture(scope="module")
+def diagonal_likelihood(
+    model: CatalogModel, network: _Network, observed: jax.Array
+) -> DiagonalGaussianLikelihood[CatalogModel]:
+    return DiagonalGaussianLikelihood._from_network(model, network, observed)
 
 
 # --------------------------------------------------------------------------- #
@@ -201,21 +223,20 @@ def test_network_from_leaves_keeps_only_the_counted_entries(
     network: _Network, pair_leaves: dict[str, Any]
 ) -> None:
     assert network.scale.shape == (int(pair_leaves["mask"].sum()),)
-    assert isinstance(network.connected_overlap, jax.Array)
-    assert network.connected_overlap.shape == (network.scale.size,) * 2
 
 
-def test_network_from_leaves_with_both_overlap_forms_raises(
-    pair_leaves: dict[str, Any],
+def test_network_restrict_keeps_the_counted_block(
+    network: _Network, pair_leaves: dict[str, Any]
 ) -> None:
-    overlap = np.zeros((NUM_PAIRS, NUM_BINS) * 2)
+    size = NUM_PAIRS * NUM_BINS
+    values = np.arange(size * size, dtype=float).reshape((NUM_PAIRS, NUM_BINS) * 2)
+    restricted = network.restrict(values)
+    keep = np.flatnonzero(pair_leaves["mask"])
 
-    with pytest.raises(ValueError, match="not both"):
-        _Network.from_leaves(
-            **pair_leaves,
-            connected_overlap=overlap,
-            generalized_orfs={"II": overlap},
-        )
+    assert restricted.shape == (keep.size,) * 2
+    flat = values.reshape(size, size)
+    np.testing.assert_array_equal(restricted[0, -1], flat[keep[0], keep[-1]])
+    np.testing.assert_array_equal(restricted, flat[np.ix_(keep, keep)])
 
 
 def test_network_from_leaves_drops_entries_with_infinite_noise(
@@ -239,11 +260,10 @@ def test_log_likelihood_is_the_multivariate_normal_with_the_catalog_covariance(
 ) -> None:
     moment = likelihood.model(OFF_FIDUCIAL, shot_noise=True).intensity_second_moment
     assert moment is not None
-    assert isinstance(network.connected_overlap, jax.Array)
     seconds = OBSERVATION_TIME * SECONDS_PER_YEAR
     covariance = moment[network.bins][
         :, network.bins
-    ] * network.connected_overlap / seconds + jnp.diag(network.scale**2)
+    ] * likelihood.connected_overlap / seconds + jnp.diag(network.scale**2)
 
     assert_close(
         likelihood.log_likelihood(OFF_FIDUCIAL)[0],
@@ -253,17 +273,15 @@ def test_log_likelihood_is_the_multivariate_normal_with_the_catalog_covariance(
     )
 
 
-def test_log_likelihood_without_shot_noise_is_the_independent_normal(
-    likelihood: DenseGaussianLikelihood[CatalogModel],
+def test_diagonal_log_likelihood_is_the_independent_normal(
+    diagonal_likelihood: DiagonalGaussianLikelihood[CatalogModel],
     network: _Network,
     observed: jax.Array,
 ) -> None:
-    diagonal = DenseGaussianLikelihood._from_network(
-        likelihood.model, network, observed, shot_noise=False
-    )
+    diagonal = diagonal_likelihood
     mean = (
         network.pair_overlap
-        * likelihood.model.spectral_density(OFF_FIDUCIAL)[network.bins]
+        * diagonal.model.spectral_density(OFF_FIDUCIAL)[network.bins]
     )
 
     assert_close(
@@ -272,12 +290,18 @@ def test_log_likelihood_without_shot_noise_is_the_independent_normal(
     )
 
 
-@pytest.mark.parametrize("shot_noise", [True, False])
+@pytest.mark.parametrize("dense", [True, False], ids=["dense", "diagonal"])
 def test_solve_inverts_the_covariance_on_each_realization(
-    model: CatalogModel, network: _Network, observed: jax.Array, shot_noise: bool
+    model: CatalogModel,
+    network: _Network,
+    orfs: dict[StokesPair, jax.Array],
+    observed: jax.Array,
+    dense: bool,
 ) -> None:
-    solver = DenseGaussianLikelihood._from_network(
-        model, network, None, shot_noise=shot_noise
+    solver = (
+        DenseGaussianLikelihood._from_network(model, network, None, orfs)
+        if dense
+        else DiagonalGaussianLikelihood._from_network(model, network, None)
     )
     solved = solver.solve(observed, OFF_FIDUCIAL)
 
@@ -292,7 +316,7 @@ def test_log_likelihood_scores_each_realization_against_one_factor(
     together = likelihood.log_likelihood(OFF_FIDUCIAL)[0]
     alone = [
         DenseGaussianLikelihood._from_network(
-            likelihood.model, network, row
+            likelihood.model, network, row, likelihood.generalized_orfs
         ).log_likelihood(OFF_FIDUCIAL)[0]
         for row in observed
     ]
@@ -302,7 +326,10 @@ def test_log_likelihood_scores_each_realization_against_one_factor(
 
 
 def test_log_likelihood_ignores_the_data_at_masked_entries(
-    model: CatalogModel, network: _Network, pair_leaves: dict[str, Any]
+    model: CatalogModel,
+    network: _Network,
+    orfs: dict[StokesPair, jax.Array],
+    pair_leaves: dict[str, Any],
 ) -> None:
     data = np.ones((NUM_PAIRS, NUM_BINS)) * float(
         jnp.max(model.spectral_density(FIDUCIALS))
@@ -311,37 +338,28 @@ def test_log_likelihood_ignores_the_data_at_masked_entries(
 
     np.testing.assert_array_equal(
         DenseGaussianLikelihood._from_network(
-            model, network, network.compress(data)
+            model, network, network.compress(data), orfs
         ).log_likelihood(FIDUCIALS)[0],
         DenseGaussianLikelihood._from_network(
-            model, network, network.compress(perturbed)
+            model, network, network.compress(perturbed), orfs
         ).log_likelihood(FIDUCIALS)[0],
     )
-
-
-def test_log_likelihood_with_shot_noise_and_no_connected_overlap_raises(
-    model: CatalogModel, pair_leaves: dict[str, Any]
-) -> None:
-    network = _Network.from_leaves(**pair_leaves)
-    likelihood = DenseGaussianLikelihood._from_network(
-        model, network, jnp.zeros(network.scale.shape)
-    )
-
-    with pytest.raises(ValueError, match="connected overlap"):
-        likelihood.log_likelihood(FIDUCIALS)
 
 
 def test_log_likelihood_without_data_raises(
-    model: CatalogModel, network: _Network
+    model: CatalogModel, network: _Network, orfs: dict[StokesPair, jax.Array]
 ) -> None:
-    likelihood = DenseGaussianLikelihood._from_network(model, network, None)
+    likelihood = DenseGaussianLikelihood._from_network(model, network, None, orfs)
 
     with pytest.raises(ValueError, match="without observed data"):
         likelihood.log_likelihood(FIDUCIALS)
 
 
 def test_log_likelihood_of_a_model_on_another_grid_raises(
-    catalog: Any, network: _Network, observed: jax.Array
+    catalog: Any,
+    network: _Network,
+    orfs: dict[StokesPair, jax.Array],
+    observed: jax.Array,
 ) -> None:
     other = build_reference_spectrum(
         catalog,
@@ -349,7 +367,7 @@ def test_log_likelihood_of_a_model_on_another_grid_raises(
         frequencies=np.asarray(catalog.frequencies)[: NUM_BINS + 1],
         reweight_masses=False,
     )
-    likelihood = DenseGaussianLikelihood._from_network(other, network, observed)
+    likelihood = DenseGaussianLikelihood._from_network(other, network, observed, orfs)
 
     with pytest.raises(ValueError, match="frequency grid"):
         likelihood.log_likelihood(FIDUCIALS)
@@ -381,10 +399,12 @@ def _triangle_likelihood(
     detectors: list[Any],
     frequencies: np.ndarray,
     observed: Mapping[tuple[str, str], ArrayLike] | None,
+    kind: type[
+        DiagonalGaussianLikelihood[CatalogModel] | DenseGaussianLikelihood[CatalogModel]
+    ] = DiagonalGaussianLikelihood,
     **settings: Any,
-) -> DenseGaussianLikelihood[CatalogModel]:
-    settings.setdefault("shot_noise", False)
-    return DenseGaussianLikelihood(
+) -> Any:
+    return kind(
         model,
         detectors,
         frequencies=frequencies,
@@ -452,7 +472,12 @@ def test_constructor_with_shot_noise_gives_a_finite_log_likelihood(
     triangle_data: dict[tuple[str, str], np.ndarray],
 ) -> None:
     likelihood = _triangle_likelihood(
-        model, triangle, frequencies, triangle_data, shot_noise=True, num_draws=256
+        model,
+        triangle,
+        frequencies,
+        triangle_data,
+        DenseGaussianLikelihood,
+        num_draws=256,
     )
 
     assert bool(jnp.isfinite(likelihood.log_likelihood(OFF_FIDUCIAL)[0]))
@@ -467,17 +492,30 @@ def test_constructor_with_passed_orfs_matches_the_sky_draws(
     masked: bool,
 ) -> None:
     key = jax.random.key(3)
-    settings: dict[str, Any] = {"shot_noise": True}
+    settings: dict[str, Any] = {}
     if masked:
         settings["mask"] = {
             pair: np.arange(frequencies.size) % 3 != 0 for pair in triangle_data
         }
     drawn = _triangle_likelihood(
-        model, triangle, frequencies, triangle_data, key=key, num_draws=64, **settings
+        model,
+        triangle,
+        frequencies,
+        triangle_data,
+        DenseGaussianLikelihood,
+        key=key,
+        num_draws=64,
+        **settings,
     )
     orfs = generalized_overlap_reduction_function(key, 64, frequencies, triangle)
     passed = _triangle_likelihood(
-        model, triangle, frequencies, triangle_data, generalized_orfs=orfs, **settings
+        model,
+        triangle,
+        frequencies,
+        triangle_data,
+        DenseGaussianLikelihood,
+        generalized_orfs=orfs,
+        **settings,
     )
 
     assert_close(passed.covariance(OFF_FIDUCIAL), drawn.covariance(OFF_FIDUCIAL))
@@ -503,7 +541,7 @@ def test_constructor_with_passed_orfs_and_sky_draw_settings_raises(
             triangle,
             frequencies,
             None,
-            shot_noise=True,
+            DenseGaussianLikelihood,
             generalized_orfs=orfs,
             **setting,
         )
@@ -518,21 +556,13 @@ def test_constructor_with_orfs_of_another_grid_raises(
 
     with pytest.raises(ValueError, match="for this network and frequency grid"):
         _triangle_likelihood(
-            model, triangle, frequencies, None, shot_noise=True, generalized_orfs=orfs
+            model,
+            triangle,
+            frequencies,
+            None,
+            DenseGaussianLikelihood,
+            generalized_orfs=orfs,
         )
-
-
-def test_constructor_without_shot_noise_ignores_passed_orfs(
-    model: CatalogModel, frequencies: np.ndarray, triangle: list[Any]
-) -> None:
-    orfs = generalized_overlap_reduction_function(
-        jax.random.key(0), 8, frequencies[:-1], triangle
-    )
-    likelihood = _triangle_likelihood(
-        model, triangle, frequencies, None, generalized_orfs=orfs
-    )
-
-    assert likelihood.covariance(OFF_FIDUCIAL).shape[0] == likelihood.mask.sum()
 
 
 def test_constructor_mask_and_pairs_describe_the_compressed_axis(
@@ -565,44 +595,61 @@ def test_constructor_mask_and_pairs_describe_the_compressed_axis(
         assert bool(np.all(np.isnan(values[~kept])))
 
 
-def test_constructor_covariance_does_not_depend_on_keeping_the_generalized_orfs(
-    model: CatalogModel,
-    frequencies: np.ndarray,
-    triangle: list[Any],
-) -> None:
-    combined, kept = (
-        _triangle_likelihood(
-            model,
-            triangle,
-            frequencies,
-            None,
-            shot_noise=True,
-            num_draws=256,
-            keep_generalized_orfs=keep,
-        ).covariance(OFF_FIDUCIAL)
-        for keep in (False, True)
-    )
-
-    assert_close(kept, combined)
-
-
-def test_constructor_keeping_generalized_orfs_splits_its_covariance(
+def test_constructor_covariance_is_the_sum_of_its_components(
     model: CatalogModel,
     frequencies: np.ndarray,
     triangle: list[Any],
 ) -> None:
     likelihood = _triangle_likelihood(
-        model,
-        triangle,
-        frequencies,
-        None,
-        shot_noise=True,
-        num_draws=256,
-        keep_generalized_orfs=True,
+        model, triangle, frequencies, None, DenseGaussianLikelihood, num_draws=256
     )
     components = likelihood.covariance_components(OFF_FIDUCIAL)
 
     assert_close(sum(components.values()), likelihood.covariance(OFF_FIDUCIAL))
+
+
+def test_dense_constructor_missing_weighted_orf_raises(
+    model: CatalogModel, frequencies: np.ndarray, triangle: list[Any]
+) -> None:
+    orfs = generalized_overlap_reduction_function(
+        jax.random.key(0), 8, frequencies, triangle, components=("II", "QQ", "UU")
+    )
+
+    with pytest.raises(ValueError, match=r"missing \['VV'\]"):
+        _triangle_likelihood(
+            model,
+            triangle,
+            frequencies,
+            None,
+            DenseGaussianLikelihood,
+            generalized_orfs=orfs,
+        )
+
+
+def test_dense_constructor_drops_unweighted_orfs(
+    model: CatalogModel, frequencies: np.ndarray, triangle: list[Any]
+) -> None:
+    orfs = generalized_overlap_reduction_function(
+        jax.random.key(0),
+        8,
+        frequencies,
+        triangle,
+        components=("II", "IV", "VI", "VV", "QQ", "UU"),
+    )
+    likelihood = _triangle_likelihood(
+        model,
+        triangle,
+        frequencies,
+        None,
+        DenseGaussianLikelihood,
+        generalized_orfs=orfs,
+    )
+    size = int(likelihood.mask.sum())
+
+    assert set(likelihood.generalized_orfs) == {"II", "QQ", "UU", "VV"}
+    assert all(
+        values.shape == (size, size) for values in likelihood.generalized_orfs.values()
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -729,13 +776,30 @@ def test_grid_log_likelihood_matches_the_pointwise_log_likelihood(
     assert_close(grid, jnp.asarray(pointwise))
 
 
+def test_grid_log_likelihood_of_a_diagonal_likelihood_matches_the_pointwise_log_likelihood(
+    diagonal_likelihood: DiagonalGaussianLikelihood[CatalogModel],
+) -> None:
+    grids = {"H0": GRIDS["H0"]}
+    fixed = {name: value for name, value in FIDUCIALS.items() if name not in grids}
+    grid = grid_log_likelihood(diagonal_likelihood, grids, fixed=fixed)
+    pointwise = [
+        diagonal_likelihood.log_likelihood({**FIDUCIALS, "H0": h0})[0]
+        for h0 in grids["H0"]
+    ]
+
+    assert_close(grid, jnp.stack(pointwise))
+
+
 def test_grid_log_likelihood_of_a_partial_model_matches_the_model(
     likelihood: DenseGaussianLikelihood[CatalogModel],
     network: _Network,
     observed: jax.Array,
 ) -> None:
     partial = DenseGaussianLikelihood._from_network(
-        Partial(_delegate, likelihood.model), network, observed
+        Partial(_delegate, likelihood.model),
+        network,
+        observed,
+        likelihood.generalized_orfs,
     )
     fixed = {name: value for name, value in FIDUCIALS.items() if name not in GRIDS}
 
@@ -763,7 +827,9 @@ def test_grid_log_likelihood_compiles_once_for_data_of_the_same_shape(
     grids = {"H0": jnp.linspace(62.0, 72.0, 5)}
     results = [
         grid_log_likelihood(
-            DenseGaussianLikelihood._from_network(likelihood.model, network, data),
+            DenseGaussianLikelihood._from_network(
+                likelihood.model, network, data, likelihood.generalized_orfs
+            ),
             grids,
             fixed={
                 name: value for name, value in FIDUCIALS.items() if name not in grids
@@ -794,26 +860,6 @@ def test_grid_log_prior_outside_the_support_is_negative_infinite() -> None:
 # --------------------------------------------------------------------------- #
 # The amplitude statistic
 # --------------------------------------------------------------------------- #
-@pytest.fixture(scope="module")
-def split_network(pair_leaves: dict[str, Any], response_draws: jax.Array) -> _Network:
-    """Four generalized ORFs, each the moment of a disjoint quarter of the draws."""
-    flat = np.reshape(np.asarray(response_draws), (NUM_DRAWS, -1))
-    pairs: tuple[StokesPair, ...] = ("II", "QQ", "UU", "VV")
-    orfs: dict[StokesPair, np.ndarray] = {
-        pair: RESPONSE_TO_CONNECTED
-        * (part.T @ part / NUM_DRAWS).reshape((NUM_PAIRS, NUM_BINS) * 2)
-        for pair, part in zip(pairs, np.array_split(flat, 4), strict=True)
-    }
-    return _Network.from_leaves(**pair_leaves, generalized_orfs=orfs)
-
-
-@pytest.fixture(scope="module")
-def split_likelihood(
-    model: CatalogModel, split_network: _Network
-) -> DenseGaussianLikelihood[CatalogModel]:
-    return DenseGaussianLikelihood._from_network(model, split_network, None)
-
-
 def test_amplitude_weights_have_unit_response_to_the_template(
     likelihood: DenseGaussianLikelihood[CatalogModel],
 ) -> None:
@@ -825,9 +871,9 @@ def test_amplitude_weights_have_unit_response_to_the_template(
 
 
 def test_amplitude_of_a_rescaled_template_is_the_scale(
-    model: CatalogModel, network: _Network
+    likelihood: DenseGaussianLikelihood[CatalogModel],
 ) -> None:
-    template = DenseGaussianLikelihood._from_network(model, network, None)
+    template = likelihood
     weights = background_amplitude_weights(template, OFF_FIDUCIAL)
     observed = jnp.array([0.5, 1.3])[:, None] * template.mean(OFF_FIDUCIAL)
 
@@ -835,12 +881,10 @@ def test_amplitude_of_a_rescaled_template_is_the_scale(
 
 
 def test_amplitude_variance_without_shot_noise_is_the_inverse_squared_snr(
-    likelihood: DenseGaussianLikelihood[CatalogModel], network: _Network
+    diagonal_likelihood: DiagonalGaussianLikelihood[CatalogModel], network: _Network
 ) -> None:
-    diagonal = DenseGaussianLikelihood._from_network(
-        likelihood.model, network, None, shot_noise=False
-    )
-    squared_snr = jnp.sum((likelihood.mean(OFF_FIDUCIAL) / network.scale) ** 2)
+    diagonal = diagonal_likelihood
+    squared_snr = jnp.sum((diagonal.mean(OFF_FIDUCIAL) / network.scale) ** 2)
     weights = background_amplitude_weights(diagonal, OFF_FIDUCIAL)
 
     assert float(
@@ -861,26 +905,23 @@ def test_amplitude_variance_is_the_inverse_fisher_information(
 
 
 def test_amplitude_variance_grows_with_shot_noise(
-    likelihood: DenseGaussianLikelihood[CatalogModel], network: _Network
+    likelihood: DenseGaussianLikelihood[CatalogModel],
+    diagonal_likelihood: DiagonalGaussianLikelihood[CatalogModel],
 ) -> None:
-    diagonal = DenseGaussianLikelihood._from_network(
-        likelihood.model, network, None, shot_noise=False
-    )
-
-    def variance(candidate: DenseGaussianLikelihood[CatalogModel]) -> float:
+    def variance(candidate: GaussianLikelihood) -> float:
         weights = background_amplitude_weights(candidate, OFF_FIDUCIAL)
         return float(
             background_amplitude_variance(weights, candidate.covariance(OFF_FIDUCIAL))
         )
 
-    assert variance(likelihood) > variance(diagonal)
+    assert variance(likelihood) > variance(diagonal_likelihood)
 
 
 def test_amplitude_variance_of_the_components_sums_to_the_total(
-    split_likelihood: DenseGaussianLikelihood[CatalogModel],
+    likelihood: DenseGaussianLikelihood[CatalogModel],
 ) -> None:
-    weights = background_amplitude_weights(split_likelihood, OFF_FIDUCIAL)
-    components = split_likelihood.covariance_components(OFF_FIDUCIAL)
+    weights = background_amplitude_weights(likelihood, OFF_FIDUCIAL)
+    components = likelihood.covariance_components(OFF_FIDUCIAL)
     budget = {
         name: background_amplitude_variance(weights, covariance)
         for name, covariance in components.items()
@@ -889,32 +930,30 @@ def test_amplitude_variance_of_the_components_sums_to_the_total(
     assert set(budget) == {"detector", "count", "intensity", "linear", "circular"}
     assert float(sum(budget.values())) == pytest.approx(
         float(
-            background_amplitude_variance(
-                weights, split_likelihood.covariance(OFF_FIDUCIAL)
-            )
+            background_amplitude_variance(weights, likelihood.covariance(OFF_FIDUCIAL))
         ),
         rel=1e-10,
     )
 
 
 def test_covariance_is_the_sum_of_its_components(
-    split_likelihood: DenseGaussianLikelihood[CatalogModel],
+    likelihood: DenseGaussianLikelihood[CatalogModel],
 ) -> None:
-    components = split_likelihood.covariance_components(OFF_FIDUCIAL)
+    components = likelihood.covariance_components(OFF_FIDUCIAL)
 
     assert_close(
-        split_likelihood.covariance(OFF_FIDUCIAL),
+        likelihood.covariance(OFF_FIDUCIAL),
         sum(components.values()),
     )
 
 
 def test_covariance_count_term_is_the_template_over_the_expected_count(
-    split_likelihood: DenseGaussianLikelihood[CatalogModel],
+    likelihood: DenseGaussianLikelihood[CatalogModel],
 ) -> None:
     r"""The count term is rank one along the mean, scaled by :math:`1/(\mathcal R T)`."""
-    count = split_likelihood.covariance_components(OFF_FIDUCIAL)["count"]
-    mean = split_likelihood.mean(OFF_FIDUCIAL)
-    rate = split_likelihood.model(OFF_FIDUCIAL, shot_noise=False).merger_rate
+    count = likelihood.covariance_components(OFF_FIDUCIAL)["count"]
+    mean = likelihood.mean(OFF_FIDUCIAL)
+    rate = likelihood.model(OFF_FIDUCIAL, shot_noise=False).merger_rate
     assert rate is not None
     expected_count = float(rate) * OBSERVATION_TIME * SECONDS_PER_YEAR
 
