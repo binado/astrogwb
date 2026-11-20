@@ -61,8 +61,6 @@ from .model import SpectralDensityModel, SpectralDensityPrediction
 
 __all__ = [
     "DenseGaussianLikelihood",
-    "Evaluation",
-    "GaussianFactor",
 ]
 
 _LOG_TWO_PI = math.log(2.0 * math.pi)
@@ -270,7 +268,7 @@ jax.tree_util.register_dataclass(
 )
 
 
-class GaussianFactor(NamedTuple):
+class _GaussianFactor(NamedTuple):
     """A Gaussian on a network's counted entries, factorized.
 
     Attributes
@@ -314,11 +312,11 @@ class GaussianFactor(NamedTuple):
         return jnp.reshape(solved, whitened.shape)
 
 
-class Evaluation(NamedTuple):
+class _Evaluation(NamedTuple):
     """A likelihood's prediction and factor at one parameter point."""
 
     prediction: SpectralDensityPrediction
-    factor: GaussianFactor
+    factor: _GaussianFactor
 
 
 def _expected_data(
@@ -367,18 +365,18 @@ def _catalog_covariance(
 
 def _factorize(
     prediction: SpectralDensityPrediction, network: _Network, shot_noise: bool
-) -> GaussianFactor:
+) -> _GaussianFactor:
     mean = _expected_data(prediction, network)
     if not shot_noise:
-        return GaussianFactor(
+        return _GaussianFactor(
             mean, network.scale, 2.0 * jnp.sum(jnp.log(network.scale))
         )
     covariance = _catalog_covariance(prediction, network) + jnp.diag(network.scale**2)
     cholesky = jnp.linalg.cholesky(covariance)
-    return GaussianFactor(mean, cholesky, 2.0 * jnp.sum(jnp.log(jnp.diag(cholesky))))
+    return _GaussianFactor(mean, cholesky, 2.0 * jnp.sum(jnp.log(jnp.diag(cholesky))))
 
 
-def _log_density(factor: GaussianFactor, observed: jax.Array) -> jax.Array:
+def _log_density(factor: _GaussianFactor, observed: jax.Array) -> jax.Array:
     """Log density of ``observed``, ``(..., D)``, under ``factor``: ``(...)``."""
     whitened = factor.whiten(observed - factor.mean)
     chi_squared = jnp.sum(whitened * whitened, axis=-1)
@@ -584,7 +582,23 @@ class DenseGaussianLikelihood[M: SpectralDensityModel]:
         params
             Model parameter values.
         """
-        return self.evaluate(params).factor.covariance()
+        return self._evaluate(params).factor.covariance()
+
+    def solve(self, x: ArrayLike, params: Mapping[str, ArrayLike]) -> jax.Array:
+        r"""The solution :math:`\mathbf a = C^{-1}\mathbf x` of :math:`C\mathbf a = \mathbf x`, ``(..., D)``.
+
+        Uses the Cholesky factor of the covariance at ``params``; the inverse
+        is never formed. Leading axes of ``x`` are solved together.
+
+        Parameters
+        ----------
+        x
+            Vectors on the counted entries, ``(..., D)``, in the order of
+            :meth:`mean`.
+        params
+            Model parameter values.
+        """
+        return self._evaluate(params).factor.solve(x)
 
     def covariance_components(
         self, params: Mapping[str, ArrayLike]
@@ -648,7 +662,7 @@ class DenseGaussianLikelihood[M: SpectralDensityModel]:
             "circular": term(_CIRCULAR_PAIRS),
         }
 
-    def evaluate(self, params: Mapping[str, ArrayLike]) -> Evaluation:
+    def _evaluate(self, params: Mapping[str, ArrayLike]) -> _Evaluation:
         """The prediction and the factorized covariance at ``params``.
 
         Parameters
@@ -657,7 +671,7 @@ class DenseGaussianLikelihood[M: SpectralDensityModel]:
             Model parameter values.
         """
         prediction = self.model(params, shot_noise=self.shot_noise)
-        return Evaluation(
+        return _Evaluation(
             prediction, _factorize(prediction, self._network, self.shot_noise)
         )
 
@@ -678,7 +692,7 @@ class DenseGaussianLikelihood[M: SpectralDensityModel]:
         """
         if self.observed is None:
             raise ValueError("the likelihood was built without observed data")
-        prediction, factor = self.evaluate(params)
+        prediction, factor = self._evaluate(params)
         return _log_density(factor, self.observed), prediction.extras
 
     def __call__(

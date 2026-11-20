@@ -129,17 +129,6 @@ class SpectralDensityModel(Protocol):            # a pytree
     def __call__(self, params, *, shot_noise: bool) -> SpectralDensityPrediction: ...
 
 
-class GaussianFactor(NamedTuple):
-    mean: jax.Array                  # (D,)
-    cholesky: jax.Array              # (D, D) lower, or (D,) for a diagonal C
-    log_det: jax.Array               # ()
-
-
-class Evaluation(NamedTuple):
-    prediction: SpectralDensityPrediction
-    factor: GaussianFactor
-
-
 class DenseGaussianLikelihood[M: SpectralDensityModel]:   # registered pytree
     def __init__(self, model: M, network: str | Sequence[Detector], *,
                  frequencies, observation_time,           # years
@@ -147,8 +136,15 @@ class DenseGaussianLikelihood[M: SpectralDensityModel]:   # registered pytree
                  mask=None, shot_noise=True, key=None, num_draws=2**15): ...
     def log_likelihood(self, params) -> tuple[jax.Array, Mapping[str, jax.Array]]:
         """log L of shape (...), one per realization, and the prediction's extras."""
-    def evaluate(self, params) -> Evaluation: ...
+    def mean(self, params) -> jax.Array: ...                # (D,)
+    def covariance(self, params) -> jax.Array: ...          # (D, D)
+    def solve(self, x, params) -> jax.Array:
+        """C^{-1} x for x of shape (..., D), from the Cholesky factor."""
 ```
+
+Internally each call factorizes the covariance once (its Cholesky factor, or
+the noise scale when `C` is diagonal) and evaluates the density, the
+covariance or the solve from that factor; the factor itself is private.
 
 The likelihood's children are the model, its private network and the data;
 `shot_noise` is static. JAX rebuilds it without calling `__init__`, which
@@ -368,7 +364,7 @@ the weights take the likelihood; the estimate and the variance take arrays:
 ```
 inference/
     model.py         # SpectralDensityModel, SpectralDensityPrediction
-    gaussian.py      # DenseGaussianLikelihood, GaussianFactor, Evaluation, private network
+    gaussian.py      # DenseGaussianLikelihood, private factor and network
     grid.py          # grid_log_likelihood, grid_log_prior
     diagnostics.py   # sigma_shot, delta, whitened spectrum, response templates
 background/importance/

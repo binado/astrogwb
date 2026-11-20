@@ -60,9 +60,9 @@ def background_amplitude_weights[M: SpectralDensityModel](
     params
         The template's parameter values, typically the fiducials.
     """
-    _, factor = likelihood.evaluate(params)
-    projected = factor.solve(factor.mean)
-    return projected / (projected @ factor.mean)
+    mean = likelihood.mean(params)
+    projected = likelihood.solve(mean, params)
+    return projected / (projected @ mean)
 
 
 def background_amplitude_estimate(weights: ArrayLike, observed: ArrayLike) -> jax.Array:

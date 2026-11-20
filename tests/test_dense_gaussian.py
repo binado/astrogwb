@@ -237,8 +237,7 @@ def test_log_likelihood_is_the_multivariate_normal_with_the_catalog_covariance(
     network: _Network,
     observed: jax.Array,
 ) -> None:
-    (prediction, factor) = likelihood.evaluate(OFF_FIDUCIAL)
-    moment = prediction.intensity_second_moment
+    moment = likelihood.model(OFF_FIDUCIAL, shot_noise=True).intensity_second_moment
     assert moment is not None
     assert isinstance(network.connected_overlap, jax.Array)
     seconds = OBSERVATION_TIME * SECONDS_PER_YEAR
@@ -248,7 +247,9 @@ def test_log_likelihood_is_the_multivariate_normal_with_the_catalog_covariance(
 
     assert_close(
         likelihood.log_likelihood(OFF_FIDUCIAL)[0],
-        dist.MultivariateNormal(factor.mean, covariance).log_prob(observed),
+        dist.MultivariateNormal(likelihood.mean(OFF_FIDUCIAL), covariance).log_prob(
+            observed
+        ),
     )
 
 
@@ -269,6 +270,18 @@ def test_log_likelihood_without_shot_noise_is_the_independent_normal(
         diagonal.log_likelihood(OFF_FIDUCIAL)[0],
         jnp.sum(dist.Normal(mean, network.scale).log_prob(observed), axis=-1),
     )
+
+
+@pytest.mark.parametrize("shot_noise", [True, False])
+def test_solve_inverts_the_covariance_on_each_realization(
+    model: CatalogModel, network: _Network, observed: jax.Array, shot_noise: bool
+) -> None:
+    solver = DenseGaussianLikelihood._from_network(
+        model, network, None, shot_noise=shot_noise
+    )
+    solved = solver.solve(observed, OFF_FIDUCIAL)
+
+    assert_close(solved @ solver.covariance(OFF_FIDUCIAL), observed)
 
 
 def test_log_likelihood_scores_each_realization_against_one_factor(
@@ -566,11 +579,11 @@ def test_constructor_covariance_does_not_depend_on_keeping_the_generalized_orfs(
             shot_noise=True,
             num_draws=256,
             keep_generalized_orfs=keep,
-        ).evaluate(OFF_FIDUCIAL)[1]
+        ).covariance(OFF_FIDUCIAL)
         for keep in (False, True)
     )
 
-    assert_close(kept.cholesky, combined.cholesky)
+    assert_close(kept, combined)
 
 
 def test_constructor_keeping_generalized_orfs_splits_its_covariance(
@@ -587,10 +600,9 @@ def test_constructor_keeping_generalized_orfs_splits_its_covariance(
         num_draws=256,
         keep_generalized_orfs=True,
     )
-    _, factor = likelihood.evaluate(OFF_FIDUCIAL)
     components = likelihood.covariance_components(OFF_FIDUCIAL)
 
-    assert_close(sum(components.values()), factor.cholesky @ factor.cholesky.T)
+    assert_close(sum(components.values()), likelihood.covariance(OFF_FIDUCIAL))
 
 
 # --------------------------------------------------------------------------- #
