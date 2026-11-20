@@ -3,15 +3,13 @@ Configuration and numerical utilities
 
 .. currentmodule:: astrogwb
 
-Configuration and runtime
--------------------------
+Runtime
+-------
 
 .. autosummary::
    :toctree: generated/
    :nosignatures:
 
-   ~config.merge_layers
-   ~config.require_toml
    ~runtime.configure_runtime
 
 Physical constants

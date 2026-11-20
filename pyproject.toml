@@ -32,7 +32,6 @@ dependencies = [
     # the dependency is declared rather than borrowed from a transitive edge
     # that gwmock-noise is free to drop.
     "pydantic>=2.14",
-    "pyknf>=0.8.1,<0.9",
 ]
 
 [project.scripts]

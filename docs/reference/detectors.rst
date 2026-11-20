@@ -31,7 +31,7 @@ For APIs that accept a detector sequence, use
    ~detector.isotropic_overlap_reduction_function
    ~detector.load_detector
    ~detector.load_network
-   ~detector.load_networks_from_files
+   ~detector.load_networks_from_file
    ~detector.load_sensitivity
    ~detector.load_sensitivity_map
    ~detector.log_frequency_noise_scale

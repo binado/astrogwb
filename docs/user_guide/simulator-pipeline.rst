@@ -48,11 +48,11 @@ CSV, canonical gwmock-pop column names) and writes one HDF5 file:
        --waveform-config waveform.toml --detector-config detectors.toml \
        --rate-per-year 1e5 --num-segments 1024 --segment-seconds 16 --seed 41
 
-Detector TOML layers are merged in argument order on top of the packaged definitions.
-The CLI runs every named network from the merged ``[networks]`` table. For example, ``HL
-= ["H1", "L1"]`` defines a network of built-in detectors. To load just that network in
-Python, use ``load_networks_from_files(Path("detectors.toml"))["HL"]``.
-File layers and Python registrations do not affect each other.
+Pass one complete TOML file per option, with any layers and references resolved
+before invoking the CLI. The CLI runs every named network in the detector file's
+``[networks]`` table. For example, ``HL = ["H1", "L1"]`` requires both
+``[detectors.H1]`` and ``[detectors.L1]`` definitions in that file. To load
+that network in Python, use ``load_networks_from_file(Path("detectors.toml"))["HL"]``.
 
 The catalogue must hold ``distance`` (luminosity distance in Mpc, renamed
 ``luminosity_distance``), the sky columns, and the detector-frame or source-frame

@@ -7,7 +7,7 @@ Validating settings leaves the XLA backend uninitialized.
 
 from __future__ import annotations
 
-import logging
+import tomllib
 from collections.abc import Mapping, Sequence
 from collections.abc import Set as AbstractSet
 from functools import cache
@@ -27,15 +27,9 @@ from pydantic import (
 
 from .geometry import Detector
 
-#: The packaged detector geometry and sensitivity tables, the first layers of
-#: every merge; they use the same tables as the layers that override them.
-_DETECTOR_DEFAULT_PATHS = tuple(
-    Path(__file__).parent / filename
-    for filename in ("geometry.toml", "sensitivity.toml")
-)
+_DETECTOR_DATA = Path(__file__).parent
 
 _STRICT = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
-_logger = logging.getLogger(__name__)
 _Name = Annotated[str, Field(min_length=1, pattern=r"\S")]
 
 
@@ -107,16 +101,6 @@ class _DetectorConfigDocument(BaseModel):
                 )
         return self
 
-    @classmethod
-    def from_files(cls, *paths: Path) -> _DetectorConfigDocument:
-        from astrogwb.config import merge_layers
-
-        layers = (*_DETECTOR_DEFAULT_PATHS, *paths)
-        _logger.info(
-            "Detector config layers (merge order): %s", " -> ".join(map(str, layers))
-        )
-        return cls.model_validate(merge_layers(layers))
-
     def resolve_networks(self) -> Networks:
         return {
             name: {member: self.detectors[member] for member in sorted(members)}
@@ -124,16 +108,18 @@ class _DetectorConfigDocument(BaseModel):
         }
 
 
-def load_networks_from_files(*paths: Path) -> Networks:
-    """Resolve all named networks from ordered TOML layers.
+def load_networks_from_file(path: Path) -> Networks:
+    """Resolve all named networks from a complete TOML document.
 
     Parameters
     ----------
-    paths
-        Layers applied after the packaged detector definitions. The process
-        registry is independent of these layers.
+    path
+        Path to a TOML file containing the network memberships and all detector
+        definitions they reference.
     """
-    return _DetectorConfigDocument.from_files(*paths).resolve_networks()
+    with path.open("rb") as file:
+        document = _DetectorConfigDocument.model_validate(tomllib.load(file))
+    return document.resolve_networks()
 
 
 _NETWORKS: dict[str, frozenset[str]] = {}
@@ -141,7 +127,12 @@ _NETWORKS: dict[str, frozenset[str]] = {}
 
 @cache
 def _detector_catalog() -> dict[str, Detector]:
-    return _DetectorConfigDocument.from_files().detectors
+    with (_DETECTOR_DATA / "geometry.toml").open("rb") as file:
+        geometry = tomllib.load(file)["detectors"]
+    with (_DETECTOR_DATA / "sensitivity.toml").open("rb") as file:
+        sensitivity = tomllib.load(file)["detectors"]
+    detectors = {name: fields | sensitivity[name] for name, fields in geometry.items()}
+    return _DetectorConfigDocument(detectors=detectors).detectors
 
 
 def register_detector(detector: Detector) -> None:
