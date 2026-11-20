@@ -2,11 +2,7 @@
 
 ## Layout
 
-`src/astrogwb/` contains the scientific library and CLI. Tests live in
-`tests/`; `tests/parity/` compares the library against established
-packages (bilby directly, pygwb through the frozen arrays in
-`tests/parity/references/`). Paper workflows live in the separate `experiments-astrogwb` repository
-and must not be imported by this package.
+`src/astrogwb/` contains the scientific library and CLI.
 
 ## Commands
 
@@ -24,15 +20,9 @@ and must not be imported by this package.
 - When manipulating numpyro models, prefer desigining useful custom effect handlers
 - When designing methods that will be jit compiled, avoid capturing large constants or
 closing over arguments which may trigger many re-compilations
-- Don't use comments for enforcing patterns or invariants. Those should be enforced naturally by the API design. Use comments for documenting behavior or gotchas.
-
-
-## Python conventions
-
-- Target Python `>=3.12`, use explicit public type hints, `pathlib.Path`, Ruff
-  formatting, snake_case functions, PascalCase classes, and uppercase constants.
+- Don't use comments for enforcing patterns or invariants. Those should be enforced naturally by the API design. Use comments for documenting non-trivial behavior or gotchas.
 
 ## Commits and pull requests
 
-Use focused Conventional Commits (`feat:`, `fix:`, `chore:`, `refactor:`).
-PRs should state purpose, key changes, commands run, and data/config impacts.
+- Use focused Conventional Commits (`feat:`, `fix:`, `chore:`, `refactor:`).
+- Make sure to check whether the docs are up to date with the changes in the PR
