@@ -39,7 +39,7 @@ import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 
-from astrogwb.inference import DenseGaussianLikelihood, SpectralDensityModel
+from astrogwb.inference import GaussianLikelihood
 
 __all__ = [
     "background_amplitude_estimate",
@@ -48,8 +48,8 @@ __all__ = [
 ]
 
 
-def background_amplitude_weights[M: SpectralDensityModel](
-    likelihood: DenseGaussianLikelihood[M], params: Mapping[str, ArrayLike]
+def background_amplitude_weights(
+    likelihood: GaussianLikelihood, params: Mapping[str, ArrayLike]
 ) -> jax.Array:
     r"""The weights :math:`\mathbf w = \Sigma^{-1}\boldsymbol\mu_0 / \boldsymbol\mu_0^\top\Sigma^{-1}\boldsymbol\mu_0`, ``(D,)``.
 
@@ -60,9 +60,9 @@ def background_amplitude_weights[M: SpectralDensityModel](
     params
         The template's parameter values, typically the fiducials.
     """
-    _, factor = likelihood.evaluate(params)
-    projected = factor.solve(factor.mean)
-    return projected / (projected @ factor.mean)
+    mean = likelihood.mean(params)
+    projected = likelihood.solve(mean, params)
+    return projected / (projected @ mean)
 
 
 def background_amplitude_estimate(weights: ArrayLike, observed: ArrayLike) -> jax.Array:

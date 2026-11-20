@@ -108,25 +108,6 @@ class RedshiftDistribution(InterpolatedDistribution):
         """
         return self._source_frame_distribution(jnp.asarray(redshift), self.params)
 
-    def source_frame_distribution(
-        self, redshift: ArrayLike, params: Mapping[str, ArrayLike]
-    ) -> jax.Array:
-        r"""Forward to the supplied source-frame merger-rate shape :math:`\psi(z)`.
-
-        Parameters
-        ----------
-        redshift
-            Redshift.
-        params
-            Model parameter values.
-        """
-        return self._source_frame_distribution(redshift, params)
-
-    @property
-    def redshift_grid(self) -> jax.Array:
-        """The redshift grid -- an alias for the interpolant abscissa ``x``."""
-        return self.x
-
     @property
     def minimum_redshift(self) -> jax.Array:
         """Lower grid edge."""

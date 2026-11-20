@@ -10,7 +10,6 @@ Configuration and runtime
    :toctree: generated/
    :nosignatures:
 
-   ~config.MERGE_KEY
    ~config.merge_layers
    ~config.require_toml
    ~runtime.configure_runtime

@@ -11,7 +11,7 @@ import numpy as np
 import numpyro.distributions as dist
 from jax.typing import ArrayLike
 
-from .gaussian import DenseGaussianLikelihood
+from .gaussian import GaussianLikelihood
 
 __all__ = ["grid_log_likelihood", "grid_log_prior"]
 
@@ -27,7 +27,7 @@ def _points(
 def _grid_log_likelihood(
     names: tuple[str, ...],
     chunk_size: int,
-    likelihood: DenseGaussianLikelihood,
+    likelihood: GaussianLikelihood,
     grids: tuple[jax.Array, ...],
     fixed: dict[str, ArrayLike],
 ) -> jax.Array:
@@ -48,7 +48,7 @@ _grid_log_likelihood_jit = jax.jit(
 
 
 def grid_log_likelihood(
-    likelihood: DenseGaussianLikelihood,
+    likelihood: GaussianLikelihood,
     grids: Mapping[str, ArrayLike],
     *,
     fixed: Mapping[str, ArrayLike] | None = None,

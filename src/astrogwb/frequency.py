@@ -22,7 +22,7 @@ __all__ = [
 #: ``WaveformMetadata.frequency_spacing``.
 FrequencySpacing = Literal["linear", "log"]
 
-GRID_SPACING_TOLERANCE_ULP = 64.0
+_GRID_SPACING_TOLERANCE_ULP = 64.0
 
 
 def uniform_frequency_grid(
@@ -54,7 +54,7 @@ def uniform_frequency_grid(
     num_bins = int(np.floor(span_in_bins)) + 1
     next_frequency = minimum + spacing * num_bins
     tolerance = (
-        GRID_SPACING_TOLERANCE_ULP
+        _GRID_SPACING_TOLERANCE_ULP
         * np.finfo(np.float64).eps
         * max(1.0, abs(minimum), abs(maximum), abs(next_frequency))
     )

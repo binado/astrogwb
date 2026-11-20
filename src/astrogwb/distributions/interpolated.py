@@ -59,18 +59,18 @@ class InterpolatedDistribution(dist.Distribution):
         return jnp.trapezoid(self.y, x=self.x)
 
     @lazy_property
-    def normalized_y(self) -> jax.Array:
+    def _normalized_y(self) -> jax.Array:
         """The table scaled to unit integral -- the density at the nodes."""
         return self.y / self.norm
 
     @lazy_property
-    def cdf_grid(self) -> jax.Array:
+    def _cdf_grid(self) -> jax.Array:
         """Trapezoidal CDF at the nodes, exactly ``0.0`` to ``1.0``.
 
         Dividing by the endpoint guarantees ``icdf(1.0) == x[-1]``; the
         cumulative sum alone need not round to ``1.0``.
         """
-        cdf = cumulative_trapezoid(self.normalized_y, x=self.x)
+        cdf = cumulative_trapezoid(self._normalized_y, x=self.x)
         return cdf / cdf[..., -1:]
 
     def log_prob(
@@ -93,14 +93,14 @@ class InterpolatedDistribution(dist.Distribution):
         return jnp.log(unnormalized_pdf / self.norm)
 
     def icdf(self, q: ArrayLike) -> jax.Array:
-        """Inverse CDF by linear-in-CDF inversion on :attr:`cdf_grid`.
+        """Inverse CDF by linear-in-CDF inversion on :attr:`_cdf_grid`.
 
         Parameters
         ----------
         q
             Cumulative probability.
         """
-        return jnp.interp(q, self.cdf_grid, self.x)
+        return jnp.interp(q, self._cdf_grid, self.x)
 
     def sample(
         self, key: jax.Array | None, sample_shape: tuple[int, ...] = ()

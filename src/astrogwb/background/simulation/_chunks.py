@@ -18,11 +18,6 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-__all__ = [
-    "iter_rows",
-    "pad_rows",
-]
-
 
 def pad_rows(
     columns: Mapping[str, NDArray[Any]], start: int, size: int

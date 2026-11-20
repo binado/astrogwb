@@ -13,14 +13,9 @@ from typing import Any
 import knf
 
 __all__ = [
-    "MERGE_KEY",
     "merge_layers",
     "require_toml",
 ]
-
-#: The inheritance key: ``extends = "${a.b}"`` in a table starts it from the
-#: table ``a.b`` and lets its own fields win. It is removed from the result.
-MERGE_KEY = "extends"
 
 
 def require_toml(path: Path) -> None:
@@ -42,8 +37,9 @@ def merge_layers(
 
     A deep merge, left to right -- arrays and scalars replace -- except at the
     ``knf`` key-path glob ``shallow``, followed by resolving every ``${...}``
-    reference against the merged result and every :data:`MERGE_KEY`
-    inheritance.
+    reference against the merged result. To inherit a table, assign a reference
+    such as ``custom = "${detectors.S1}"`` under ``[detectors]`` in one layer
+    and put fields to override under ``[detectors.custom]`` in a later layer.
 
     Parameters
     ----------
@@ -59,4 +55,4 @@ def merge_layers(
     """
     for path in paths:
         require_toml(path)
-    return knf.load(paths, interpolate=True, shallow=shallow, merge_key=MERGE_KEY)
+    return knf.load(paths, interpolate=True, shallow=shallow)

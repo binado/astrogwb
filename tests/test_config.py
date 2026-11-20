@@ -22,14 +22,15 @@ def test_detector_loader_merges_packaged_definitions_and_ordered_overrides(
         '[networks]\nreference = ["S1", "R1"]\n'
         'comparison = "${networks.reference}"\n'
         'with_custom = ["S1", "custom"]\n'
-        '[detectors.custom]\nextends = "${detectors.S1}"\nlabel = "Custom"\n',
+        '[detectors]\ncustom = "${detectors.S1}"\n',
         encoding="utf-8",
     )
     override = tmp_path / "override.toml"
     override.write_text(
         '[networks]\nreference = ["S1", "C1"]\n'
         "[detectors.custom.geometry]\nxarm_azimuth_rad = 0.5\n"
-        '[detectors.custom]\npsd_reference = "${detectors.C1.psd_reference}"\n',
+        '[detectors.custom]\npsd_reference = "${detectors.C1.psd_reference}"\n'
+        'label = "Custom"\n',
         encoding="utf-8",
     )
     networks = load_networks_from_files(base, override)

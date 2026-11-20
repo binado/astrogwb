@@ -8,8 +8,6 @@ Inference
    :nosignatures:
 
    ~inference.DenseGaussianLikelihood
-   ~inference.Evaluation
-   ~inference.GaussianFactor
    ~inference.SpectralDensityModel
    ~inference.SpectralDensityPrediction
    ~inference.grid_log_likelihood

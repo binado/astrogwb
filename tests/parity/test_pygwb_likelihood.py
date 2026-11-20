@@ -23,7 +23,7 @@ from tolerances import assert_close
 
 from astrogwb.background.spectral import spectral_density_from_omega_gw
 from astrogwb.detector import Detector, pair_names
-from astrogwb.inference import DenseGaussianLikelihood, SpectralDensityPrediction
+from astrogwb.inference import DiagonalGaussianLikelihood, SpectralDensityPrediction
 
 
 @dataclass(frozen=True)
@@ -62,26 +62,25 @@ def likelihood(
     hubble_constant: float,
     observation_years: float,
     exact_detectors: tuple[Detector, ...],
-) -> DenseGaussianLikelihood[PowerLawSpectrum]:
+) -> DiagonalGaussianLikelihood[PowerLawSpectrum]:
     model = PowerLawSpectrum(
         jnp.asarray(frequencies),
         float(pygwb_reference["reference_frequency"]),
         hubble_constant,
     )
     csd = pygwb_reference["csd"] / PYGWB_POWER_FRACTION
-    return DenseGaussianLikelihood(
+    return DiagonalGaussianLikelihood(
         model,
         exact_detectors,
         frequencies=frequencies,
         observation_time=observation_years,
         observed=dict(zip(pair_names(exact_detectors), csd, strict=True)),
-        shot_noise=False,
     )
 
 
 def test_log_likelihood_differences_match_pygwb(
     pygwb_reference: Mapping[str, NDArray[np.float64]],
-    likelihood: DenseGaussianLikelihood[PowerLawSpectrum],
+    likelihood: DiagonalGaussianLikelihood[PowerLawSpectrum],
 ) -> None:
     values = jnp.stack(
         [

@@ -131,6 +131,12 @@ network from the detectors; the data are keyed by the sorted detector-name pair:
    )
    log_likelihood, extras = likelihood.log_likelihood(params)
 
+``likelihood.generalized_orfs`` holds the network's four weighted generalized ORFs and
+``likelihood.covariance_components(params)`` splits the covariance into its
+detector-noise, count, intensity and polarization terms. Its no-shot-noise limit,
+the diagonal detector noise alone, is ``DiagonalGaussianLikelihood``, which takes the
+same arguments without ``key``, ``num_draws`` and ``generalized_orfs``.
+
 Any pytree implementing ``SpectralDensityModel`` works in place of a catalog model, for
 example a ``jax.tree_util.Partial`` of a module-level function returning a
 ``SpectralDensityPrediction``.

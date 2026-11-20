@@ -17,10 +17,9 @@ import numpy as np
 from gwmock_noise.spectral import interpolate_real_spectral_series, load_spectral_series
 from numpy.typing import ArrayLike, NDArray
 
-from .psd import NOISE_CURVES_BASE_DIR as NOISE_CURVES_BASE_DIR  # noqa: PLC0414
 from .psd import resolve_psd_path
 
-SENSITIVITY_FILE = Path(__file__).parent / "sensitivity.toml"
+_SENSITIVITY_FILE = Path(__file__).parent / "sensitivity.toml"
 
 OutOfBand = Literal["inf", "zero"]
 
@@ -111,7 +110,7 @@ def _load_sensitivity_table(path: str | Path | None) -> Mapping[str, dict]:
             data = tomllib.load(handle)
         # A table may omit the [detectors] wrapper.
         return data.get("detectors", data)
-    with SENSITIVITY_FILE.open("rb") as handle:
+    with _SENSITIVITY_FILE.open("rb") as handle:
         return tomllib.load(handle)["detectors"]
 
 

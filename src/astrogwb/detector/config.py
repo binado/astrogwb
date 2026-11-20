@@ -29,13 +29,13 @@ from .geometry import Detector
 
 #: The packaged detector geometry and sensitivity tables, the first layers of
 #: every merge; they use the same tables as the layers that override them.
-DETECTOR_DEFAULT_PATHS = tuple(
+_DETECTOR_DEFAULT_PATHS = tuple(
     Path(__file__).parent / filename
     for filename in ("geometry.toml", "sensitivity.toml")
 )
 
 _STRICT = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
-logger = logging.getLogger(__name__)
+_logger = logging.getLogger(__name__)
 _Name = Annotated[str, Field(min_length=1, pattern=r"\S")]
 
 
@@ -111,8 +111,8 @@ class _DetectorConfigDocument(BaseModel):
     def from_files(cls, *paths: Path) -> _DetectorConfigDocument:
         from astrogwb.config import merge_layers
 
-        layers = (*DETECTOR_DEFAULT_PATHS, *paths)
-        logger.info(
+        layers = (*_DETECTOR_DEFAULT_PATHS, *paths)
+        _logger.info(
             "Detector config layers (merge order): %s", " -> ".join(map(str, layers))
         )
         return cls.model_validate(merge_layers(layers))

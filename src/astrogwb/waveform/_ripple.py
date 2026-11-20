@@ -42,14 +42,6 @@ from numpy.typing import ArrayLike
 
 from astrogwb.waveform.intensity import intensity
 
-__all__ = [
-    "build_intensity_kernel",
-    "build_polarization_kernel",
-    "check_sources",
-    "next_smooth_even",
-    "ripple_parameters",
-]
-
 
 class _WaveformNames(Sequence[str]):
     """Lazy view over Ripple's registered waveform names."""

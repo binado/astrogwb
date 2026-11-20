@@ -10,7 +10,7 @@ import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 
-SPEED_OF_LIGHT_M_S = 299792458.0
+from astrogwb.constants import SPEED_OF_LIGHT
 
 
 def antenna_pattern(
@@ -77,10 +77,7 @@ def time_delay_from_geocenter(
         [jnp.cos(dec) * jnp.cos(hour), -jnp.cos(dec) * jnp.sin(hour), jnp.sin(dec)],
         axis=-1,
     )
-    return (
-        -jnp.einsum("i,...i->...", jnp.asarray(location), direction)
-        / SPEED_OF_LIGHT_M_S
-    )
+    return -jnp.einsum("i,...i->...", jnp.asarray(location), direction) / SPEED_OF_LIGHT
 
 
 def project_polarizations_fd(
