@@ -85,11 +85,9 @@ def _simulate(output: Path, inputs: dict[str, Path], *options: str) -> None:
     assert result.exit_code == 0, result.output
 
 
-@pytest.mark.integration
 def test_a_simulate_run_writes_one_file_with_its_config(
     tmp_path: Path, inputs: dict[str, Path]
 ) -> None:
-    pytest.importorskip("gwmock_pop")
     output = tmp_path / "41-0.h5"
 
     _simulate(output, inputs)
@@ -109,11 +107,9 @@ def test_a_simulate_run_writes_one_file_with_its_config(
     assert [path.name for path in tmp_path.glob("*.h5")] == ["41-0.h5"]
 
 
-@pytest.mark.integration
 def test_a_simulate_run_with_incoherent_records_the_mode(
     tmp_path: Path, inputs: dict[str, Path]
 ) -> None:
-    pytest.importorskip("gwmock_pop")
     output = tmp_path / "41-0.h5"
 
     _simulate(output, inputs, "--incoherent")

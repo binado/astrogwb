@@ -422,11 +422,9 @@ def test_a_pool_smaller_than_the_draw_names_the_expected_count(
         simulate_pool(small)
 
 
-@pytest.mark.integration
 def test_an_event_pool_read_from_a_gwmock_catalogue_renames_the_distance(
     tmp_path: Path,
 ) -> None:
-    pytest.importorskip("gwmock_pop")
     path = write_population_csv(tmp_path / "pool.csv")
 
     pool = read_event_pool(path)
@@ -437,11 +435,60 @@ def test_an_event_pool_read_from_a_gwmock_catalogue_renames_the_distance(
     )
 
 
-@pytest.mark.integration
 def test_an_event_pool_without_a_distance_is_refused(tmp_path: Path) -> None:
-    pytest.importorskip("gwmock_pop")
     path = tmp_path / "pool.csv"
     path.write_text("detector_frame_mass_1,detector_frame_mass_2\n1.4,1.3\n")
 
     with pytest.raises(ValueError, match="distance"):
+        read_event_pool(path)
+
+
+def test_an_event_pool_read_from_an_hdf5_catalogue_renames_the_distance(
+    tmp_path: Path,
+) -> None:
+    pool = event_pool()
+    pool["distance"] = pool.pop("luminosity_distance")
+    names = list(pool)
+    structured = np.empty(
+        next(iter(pool.values())).shape, dtype=[(name, float) for name in names]
+    )
+    for name in names:
+        structured[name] = pool[name]
+    path = tmp_path / "pool.h5"
+    with h5py.File(path, "w") as file:
+        file.create_dataset("source_parameters", data=structured)
+
+    read = read_event_pool(path)
+
+    assert "distance" not in read
+    np.testing.assert_array_equal(
+        read["luminosity_distance"], event_pool()["luminosity_distance"]
+    )
+
+
+def test_an_event_pool_read_from_an_hdf5_group_of_datasets(tmp_path: Path) -> None:
+    pool = event_pool()
+    pool["distance"] = pool.pop("luminosity_distance")
+    path = tmp_path / "pool.h5"
+    with h5py.File(path, "w") as file:
+        group = file.create_group("source_parameters")
+        for name, values in pool.items():
+            group.create_dataset(name, data=np.asarray(values))
+
+    read = read_event_pool(path)
+
+    assert "distance" not in read
+    np.testing.assert_array_equal(
+        read["luminosity_distance"], event_pool()["luminosity_distance"]
+    )
+
+
+def test_an_event_pool_without_a_catalogue_dataset_is_refused(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "pool.h5"
+    with h5py.File(path, "w") as file:
+        file.create_dataset("data", data=np.arange(3))
+
+    with pytest.raises(ValueError, match="source_parameters"):
         read_event_pool(path)
