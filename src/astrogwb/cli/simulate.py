@@ -8,7 +8,7 @@ from typing import Annotated
 
 import typer
 
-from ._common import DETECTOR_CONFIG_OPTION, _apply_runtime
+from astrogwb.runtime import configure_runtime
 
 
 def simulate(
@@ -33,7 +33,15 @@ def simulate(
             help="TOML file of the waveform settings (WaveformMetadata fields).",
         ),
     ],
-    detector_config: Annotated[Path, DETECTOR_CONFIG_OPTION],
+    detector_config: Annotated[
+        Path,
+        typer.Option(
+            "--detector-config",
+            exists=True,
+            dir_okay=False,
+            help="TOML file containing detector definitions and network memberships.",
+        ),
+    ],
     rate_per_year: Annotated[
         float,
         typer.Option(
@@ -108,7 +116,10 @@ def simulate(
     cpu_threads
         Number of CPU threads.
     """
-    _apply_runtime(platform, cpu_threads)
+    try:
+        configure_runtime(platform=platform, cpu_threads=cpu_threads)
+    except ValueError as error:
+        raise typer.BadParameter(str(error), param_hint="--platform") from error
     from astrogwb.background.simulation import (
         SimulationConfig,
         read_event_pool,
