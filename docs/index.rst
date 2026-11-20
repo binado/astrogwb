@@ -11,7 +11,7 @@ network likelihood with optional population shot noise.
 - :doc:`user_guide/catalog-inference` builds a reference catalog, predicts a
   background, and evaluates a likelihood.
 - :doc:`user_guide/simulator-pipeline` covers the simulation API and CLI.
-- :doc:`reference/api` documents the library's public interfaces.
+- :doc:`reference/index` documents the library's public interfaces.
 
 .. toctree::
    :maxdepth: 2

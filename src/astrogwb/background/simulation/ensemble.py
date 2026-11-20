@@ -41,7 +41,10 @@ def network_spectra_ensemble(
     *,
     start: int = 0,
 ) -> list[NetworkSpectra]:
-    """Draws ``start .. num_draws - 1`` of the networks ``names``, stacked per network.
+    """Read a range of draws and stack them by network.
+
+    Reads indices from ``start`` up to but excluding ``num_draws`` for each
+    network in ``names``.
 
     Draw ``i`` is the background file ``<root>/<seed>-<i>.h5``, simulated at
     ``realization_key(seed, i)``.
