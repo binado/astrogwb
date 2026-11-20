@@ -16,7 +16,7 @@ from typer.testing import CliRunner
 
 from astrogwb.background.simulation import BackgroundDraw
 from astrogwb.cli import app
-from astrogwb.detector import network_pairs
+from astrogwb.detector import load_detector, network_pairs
 from astrogwb.utils import years_to_seconds
 
 
@@ -50,7 +50,14 @@ def inputs(tmp_path: Path) -> dict[str, Path]:
         tomli_w.dumps(WAVEFORM.model_dump(mode="json", exclude_none=True)).encode()
     )
     detector = tmp_path / "detector.toml"
-    detector.write_bytes(tomli_w.dumps({"networks": {"ET": ["S1", "R1"]}}).encode())
+    names = ["S1", "R1"]
+    detectors = {
+        name: load_detector(name).model_dump(mode="json", exclude_none=True)
+        for name in names
+    }
+    detector.write_bytes(
+        tomli_w.dumps({"detectors": detectors, "networks": {"ET": names}}).encode()
+    )
     return {
         "population": write_population_csv(tmp_path / "events.csv"),
         "waveform": waveform,

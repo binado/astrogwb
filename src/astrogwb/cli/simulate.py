@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 from typing import Annotated
 
@@ -31,7 +32,7 @@ def simulate(
             help="TOML file of the waveform settings (WaveformMetadata fields).",
         ),
     ],
-    detector_config: Annotated[list[Path], DETECTOR_CONFIG_OPTION],
+    detector_config: Annotated[Path, DETECTOR_CONFIG_OPTION],
     rate_per_year: Annotated[
         float,
         typer.Option(
@@ -84,7 +85,7 @@ def simulate(
     waveform_config
         Waveform settings TOML path.
     detector_config
-        Detector configuration layer paths.
+        Complete detector configuration TOML path.
     rate_per_year
         Event rate of the pool's population, per year.
     num_segments
@@ -113,18 +114,22 @@ def simulate(
         realization_key,
         simulate_background,
     )
-    from astrogwb.config import merge_layers
-    from astrogwb.detector import load_networks_from_files
+    from astrogwb.detector import load_networks_from_file
     from astrogwb.utils import years_to_seconds
     from astrogwb.waveform import WaveformMetadata
 
     try:
-        networks = load_networks_from_files(*detector_config)
+        networks = load_networks_from_file(detector_config)
     except ValueError as error:
         raise typer.BadParameter(str(error), param_hint="--detector-config") from error
     try:
+        with waveform_config.open("rb") as file:
+            waveform = WaveformMetadata.model_validate(tomllib.load(file))
+    except ValueError as error:
+        raise typer.BadParameter(str(error), param_hint="--waveform-config") from error
+    try:
         config = SimulationConfig(
-            waveform=WaveformMetadata.model_validate(merge_layers([waveform_config])),
+            waveform=waveform,
             networks=networks,
             observer_rate_hz=rate_per_year / years_to_seconds(1.0),
             num_segments=num_segments,

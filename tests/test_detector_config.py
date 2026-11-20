@@ -9,12 +9,13 @@ from uuid import uuid4
 
 import numpy as np
 import pytest
+import tomli_w
 
 from astrogwb.detector import (
     Detector,
     load_detector,
     load_network,
-    load_networks_from_files,
+    load_networks_from_file,
     network_pairs,
     register_detector,
     register_network,
@@ -23,16 +24,23 @@ from astrogwb.detector import (
 
 
 def test_loading_core_detector_config_does_not_initialize_xla(tmp_path: Path) -> None:
-    layer = tmp_path / "network.toml"
-    layer.write_text('[networks]\nlocal = ["L1", "H1"]\n', encoding="utf-8")
+    path = tmp_path / "network.toml"
+    names = ["L1", "H1"]
+    detectors = {
+        name: load_detector(name).model_dump(mode="json", exclude_none=True)
+        for name in names
+    }
+    path.write_bytes(
+        tomli_w.dumps({"detectors": detectors, "networks": {"local": names}}).encode()
+    )
     code = """
 import sys
 from pathlib import Path
-from astrogwb.detector import load_network, load_networks_from_files, register_network
+from astrogwb.detector import load_network, load_networks_from_file, register_network
 
 register_network("test-xla", {"H1", "L1"})
 network = load_network("test-xla")
-local = load_networks_from_files(Path(sys.argv[1]))["local"]
+local = load_networks_from_file(Path(sys.argv[1]))["local"]
 for detector in (*network.values(), *local.values()):
     detector.geometry.location
     detector.geometry.response_tensor
@@ -42,7 +50,7 @@ import jax
 assert jax.device_count() == 2
 """
     result = subprocess.run(
-        [sys.executable, "-c", code, str(layer)],
+        [sys.executable, "-c", code, str(path)],
         capture_output=True,
         text=True,
         check=False,
@@ -94,23 +102,35 @@ def test_toml_and_process_catalog_are_isolated(tmp_path: Path) -> None:
     catalog_s1 = load_detector("S1")
     register_detector(load_detector("H1").model_copy(update={"name": extension}))
     register_network(name, {"S1", extension})
-    layer = tmp_path / "network.toml"
-    layer.write_text(
-        f'[networks]\n{name} = ["S1", "C1"]\n'
-        "[detectors.S1.geometry]\nxarm_azimuth_rad = 0.5\n",
-        encoding="utf-8",
+    path = tmp_path / "network.toml"
+    detectors = {
+        detector: load_detector(detector).model_dump(mode="json", exclude_none=True)
+        for detector in ("S1", "C1")
+    }
+    detectors["S1"]["geometry"]["xarm_azimuth_rad"] = 0.5
+    path.write_bytes(
+        tomli_w.dumps(
+            {"detectors": detectors, "networks": {name: ["S1", "C1"]}}
+        ).encode()
     )
 
-    local = load_networks_from_files(layer)[name]
+    local = load_networks_from_file(path)[name]
     assert network_pairs(local) == (("C1", "S1"),)
     assert local["S1"].geometry.xarm_azimuth_rad == 0.5
     snapshot = load_network(name)
     assert network_pairs(snapshot) == (("S1", extension),)
     assert snapshot["S1"].geometry == catalog_s1.geometry
 
-    layer.write_text(f'[networks]\n{name} = ["S1", "{extension}"]\n', encoding="utf-8")
+    path.write_bytes(
+        tomli_w.dumps(
+            {
+                "detectors": detectors,
+                "networks": {name: ["S1", extension]},
+            }
+        ).encode()
+    )
     with pytest.raises(ValueError, match=f"undefined detectors.*{extension}"):
-        load_networks_from_files(layer)
+        load_networks_from_file(path)
 
 
 def test_standalone_detector_dump_and_lazy_psd_copy(tmp_path: Path) -> None:

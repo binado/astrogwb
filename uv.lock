@@ -46,7 +46,6 @@ dependencies = [
     { name = "numpy" },
     { name = "numpyro" },
     { name = "pydantic" },
-    { name = "pyknf" },
     { name = "ripplegw" },
 ]
 
@@ -105,7 +104,6 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.1" },
     { name = "numpyro", specifier = ">=0.21.0" },
     { name = "pydantic", specifier = ">=2.14" },
-    { name = "pyknf", specifier = ">=0.8.1,<0.9" },
     { name = "ripplegw", specifier = ">=0.3.1" },
     { name = "typer", marker = "extra == 'cli'", specifier = ">=0.16" },
 ]
@@ -1986,21 +1984,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/02/a5/5197bfd06417837ac079921c66fa6393f1dea3557272a263cebfef69e432/pyjwt-2.15.0.tar.gz", hash = "sha256:b11c5f9791d7bf51c2b39a81ed669f6b2dbbd669df2942f6c60167e9e3d1abe4", size = 120513, upload-time = "2026-09-23T16:56:00.689Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e8/55/40e45bf052ee8ee12a4dfd785519660f8effa7b065442b91646ec6828619/pyjwt-2.15.0-py3-none-any.whl", hash = "sha256:7a3742debf6b879e912dbb9819ceec1594be812452b78c5f2e2dfc56564954f8", size = 33680, upload-time = "2026-09-23T16:55:59.241Z" },
-]
-
-[[package]]
-name = "pyknf"
-version = "0.8.1"
-source = { registry = "https://pypi.org/simple" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c9/53/75d6295eb1539c7ca510414a30198c7d1cec06e42a8227b8ba8a138a8c28/pyknf-0.8.1-cp311-abi3-macosx_10_12_x86_64.whl", hash = "sha256:9773b762b505ba4016dcba6a0d680f1a98c2dcb15f4e20899a99ed3e7a7c663a", size = 803274, upload-time = "2026-11-20T19:16:18.727Z" },
-    { url = "https://files.pythonhosted.org/packages/74/82/2c5904b63dcf311feb68df4dabc987ac602dbf5dea327031922b864c4ec0/pyknf-0.8.1-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:afdf76dda4f63fd81b37ec162201f87d6ce481674169a204cead56305ce73603", size = 776617, upload-time = "2026-11-20T19:16:19.876Z" },
-    { url = "https://files.pythonhosted.org/packages/42/43/e880d32a5120a8060223acee93247fe8da8857b936a942ada8296bca09c2/pyknf-0.8.1-cp311-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:fae79419d067c2b6907be7176b77d4e76f3af0e86070ab1bab80be0cee88f5d4", size = 804926, upload-time = "2026-11-20T19:16:21.304Z" },
-    { url = "https://files.pythonhosted.org/packages/e5/24/377175a186820725b7b50367cecd15854985d380b4bbf60675e34d81c93d/pyknf-0.8.1-cp311-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f4515a6f46be1f86965153a0ea529f90f14389435d280494e6a9da2c5284528e", size = 846816, upload-time = "2026-11-20T19:16:22.733Z" },
-    { url = "https://files.pythonhosted.org/packages/32/44/32f137203bfd163c383dd64cf37775c3173559a2a848eb04d1eb1c0fd3d2/pyknf-0.8.1-cp311-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:df1aed443ca7caecdf5e32a615e19250e2245d2163be9a8f8b8d8c890c7ad95c", size = 979937, upload-time = "2026-11-20T19:16:24.24Z" },
-    { url = "https://files.pythonhosted.org/packages/47/52/6da5e367c427696e3dd99fe6c0bdb059d80eff4da5c62e5606ad96314b68/pyknf-0.8.1-cp311-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:6564f91a23050c0861b3271006c0f673f2c4019deead29b62b9e063127f0ad0a", size = 1062212, upload-time = "2026-11-20T19:16:25.593Z" },
-    { url = "https://files.pythonhosted.org/packages/cb/7b/ca46a423d7a9a25c03ad29520a2cb83030f4b669afa0d703bd60f412e858/pyknf-0.8.1-cp311-abi3-win_amd64.whl", hash = "sha256:9938cf5a5c7b029e985a7e7af11065753afabf9d0c827ce74aa6268d3d44781d", size = 800332, upload-time = "2026-11-20T19:16:26.955Z" },
-    { url = "https://files.pythonhosted.org/packages/98/4d/0d8f0b2987654371f5c8115d8324f56cb81113c2d287989f81d15d232b44/pyknf-0.8.1-cp311-abi3-win_arm64.whl", hash = "sha256:4bad2639d0c3add266888ded22d51cdf0cf5ef62933d2a6322806cc8880ad2e2", size = 762765, upload-time = "2026-11-20T19:16:28.15Z" },
 ]
 
 [[package]]
