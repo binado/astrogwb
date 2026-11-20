@@ -19,6 +19,7 @@ from astrogwb_tiny_pipeline import (
     event_pool,
     write_population_csv,
 )
+from tolerances import assert_close
 
 from astrogwb.background.simulation import (
     BackgroundDraw,
@@ -232,10 +233,9 @@ def test_network_noise_follows_the_pair_axis_of_the_draw(draw: BackgroundDraw) -
             detectors = (network[first], network[second])
             (terms,) = pair_terms(draw.frequencies, detectors)
             np.testing.assert_array_equal(noise[name].pair_overlap[row], terms.overlap)
-            np.testing.assert_allclose(
+            assert_close(
                 noise[name].pair_scale[row],
                 pair_bin_scale(draw.frequencies, detectors, years)[0],
-                atol=0,
             )
 
 
