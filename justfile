@@ -11,7 +11,7 @@ fmt:
     uv run --group dev ruff format
 
 typecheck:
-    uv run --extra cli --extra simulation --group dev ty check
+    uv run --extra cli --group dev ty check
 
 test-core:
     uv run --frozen --isolated --no-default-groups --extra cli --group test python -m pytest -m "not integration"
@@ -24,7 +24,7 @@ test-floor:
     uv run --isolated --resolution lowest-direct --no-default-groups --extra cli --group test python -m pytest -m "not integration"
 
 test-integration:
-    uv run --frozen --isolated --no-default-groups --extra cli --extra simulation --group test python -m pytest -m integration
+    uv run --frozen --isolated --no-default-groups --extra cli --group test python -m pytest -m integration
 
 # Comparisons against bilby (live) and pygwb (frozen references).
 test-parity:
@@ -34,6 +34,3 @@ test-parity:
 parity-references:
     uv run python tests/parity/references/draw_coba_events.py
     uv run --no-project tests/parity/references/generate_pygwb.py
-
-build-core:
-    uv build --no-sources

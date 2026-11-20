@@ -12,7 +12,7 @@ and must not be imported by this package.
 
 - `uv sync --extra cli --extra simulation --group dev`
 - `just lint`, `just typecheck`, `just fmt`, `just test-core`
-- `just test-integration`, `just build-core`
+- `just test-integration`
 - `just test-parity`; `just parity-references` regenerates the pygwb arrays
 
 ## Code conventions and styleguide
