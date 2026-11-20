@@ -19,13 +19,16 @@ extensions = [
     "sphinx.ext.viewcode",
 ]
 
+templates_path = ["_templates"]
+
+
 autosummary_generate = True
 autodoc_typehints = "description"
 autodoc_member_order = "bysource"
 
 html_theme = "pydata_sphinx_theme"
 html_theme_options = {
-    "show_nav_level": 2,
+    "show_nav_level": 1,
 }
 html_title = f"{project} {release}"
 
