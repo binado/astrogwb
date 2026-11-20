@@ -15,7 +15,6 @@ from astrogwb.cosmology import (
     distance_and_volume_grid,
     hubble_distance,
     luminosity_distance,
-    normalized_hubble_parameter,
 )
 
 
@@ -52,21 +51,6 @@ def _assert_finite_grad(
     assert jnp.all(jnp.isfinite(grad_jnp))
 
 
-class TestNormalizedHubbleParameter:
-    @pytest.mark.integration
-    def test_matches_gwmockpop(
-        self, redshift: npt.NDArray, omega_m: npt.NDArray
-    ) -> None:
-        from gwmock_pop.cosmology.flat_lambda_cdm import (
-            compute_normalized_hubble_parameter,
-        )
-
-        _redshift, _omega_m = _as_jnp(redshift, omega_m)
-        ours = normalized_hubble_parameter(_redshift, _omega_m)
-        theirs = compute_normalized_hubble_parameter(_redshift, _omega_m)
-        assert_close(ours, theirs)
-
-
 class TestDistanceAndVolumeGrid:
     @pytest.mark.parametrize("output", [0, 1], ids=["distance", "volume"])
     @pytest.mark.parametrize("argnum", [1, 2], ids=["hubble_constant", "omega_m"])
@@ -86,36 +70,6 @@ class TestDistanceAndVolumeGrid:
             _h,
             _om,
         )
-
-    @pytest.mark.integration
-    @pytest.mark.parametrize("hubble_constant,omega_m", [(70, 0.3)])
-    def test_matches_gwmock_pop(
-        self, redshift: npt.NDArray, hubble_constant: npt.NDArray, omega_m: npt.NDArray
-    ) -> None:
-        from gwmock_pop.cosmology.flat_lambda_cdm import (
-            compute_differential_comoving_volume,
-            compute_luminosity_distance,
-        )
-
-        _z, _h, _om = _as_jnp(redshift, hubble_constant, omega_m)
-        luminosity_distance, differential_comoving_volume = distance_and_volume_grid(
-            _z,
-            hubble_constant=_h,
-            omega_m=_om,
-        )
-        # Reference values from gwmock-pop, which integrates on its own fine
-        # internal grid. distance_and_volume_grid uses a 4-point Gauss-Legendre
-        # rule per interval, so the residual difference (~1e-9 relative) is the
-        # reference's own trapezoid error at this n_grid.
-        n_grid = 100_000
-        luminosity_distance_theirs = compute_luminosity_distance(
-            _z, _h, _om, n_grid=n_grid
-        )
-        differential_comoving_volume_theirs = compute_differential_comoving_volume(
-            _z, _h, _om, n_grid=n_grid
-        )
-        assert_close(luminosity_distance, luminosity_distance_theirs)
-        assert_close(differential_comoving_volume, differential_comoving_volume_theirs)
 
 
 @pytest.mark.parametrize("redshift", [0.1, 1.0, 5.0, 10.0])

@@ -43,10 +43,6 @@ cuda = ["jax[cuda12]>=0.11.0"]
 io = ["h5py>=3.15"]
 # The `astrogwb` command line: simulator stages written to disk.
 cli = ["astrogwb[io]", "gwmock-pop>=0.11.4", "typer>=0.16"]
-# Only the integration cosmology cross-check needs it now: populations are
-# declared as NumPyro models here, so nothing in the library draws through a
-# gwmock graph any more.
-simulation = ["gwmock-pop>=0.11.4"]
 tpu = ["jax[tpu]>=0.11.0"]
 
 [project.urls]
@@ -63,11 +59,13 @@ build-backend = "uv_build"
 [dependency-groups]
 # tomli-w writes the TOML inputs of the CLI tests.
 test = ["pytest>=9.0.2", "pytest-xdist>=3.8.0", "tomli-w>=1.2"]
-# Reference packages the parity suite (tests/parity) calls directly. pygwb is
-# not among them: it pins scipy<1.14, so its references are frozen arrays
-# written by tests/parity/references/generate_pygwb.py in its own environment.
+# Reference packages the parity suite (tests/parity) calls directly. astropy
+# is the cosmology reference; pygwb is not among them: it pins scipy<1.14,
+# so its references are frozen arrays written by
+# tests/parity/references/generate_pygwb.py in its own environment.
 parity = [
     { include-group = "test" },
+    "astropy>=8.0.1",
     "bilby>=2.8.2",
 ]
 dev = [

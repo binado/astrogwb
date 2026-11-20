@@ -39,8 +39,10 @@ wherever it appears. Source chunks and segment batches bound working memory.
 Command line
 ------------
 
-``astrogwb simulate`` runs the simulator on a gwmock-pop population catalogue (HDF5 or
-CSV, canonical gwmock-pop column names) and writes one HDF5 file:
+``astrogwb simulate`` runs the simulator on a population catalogue (HDF5 or
+CSV, canonical gwmock-pop column names) and writes one HDF5 file. HDF5
+catalogues are read from the ``source_parameters`` dataset, a compound
+dataset or a group of one dataset per column:
 
 ::
 

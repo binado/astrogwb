@@ -20,7 +20,8 @@ def simulate(
         typer.Argument(
             exists=True,
             dir_okay=False,
-            help="Event pool: an HDF5 or CSV gwmock-pop population catalogue.",
+            help="Event pool: a CSV catalogue, or an HDF5 catalogue under the "
+            "'source_parameters' dataset, with canonical gwmock-pop column names.",
         ),
     ],
     waveform_config: Annotated[

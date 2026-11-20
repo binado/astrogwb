@@ -61,15 +61,13 @@ cuda = [
 io = [
     { name = "h5py" },
 ]
-simulation = [
-    { name = "gwmock-pop" },
-]
 tpu = [
     { name = "jax", extra = ["tpu"] },
 ]
 
 [package.dev-dependencies]
 dev = [
+    { name = "astropy" },
     { name = "bilby" },
     { name = "pytest" },
     { name = "pytest-xdist" },
@@ -78,6 +76,7 @@ dev = [
     { name = "ty" },
 ]
 parity = [
+    { name = "astropy" },
     { name = "bilby" },
     { name = "pytest" },
     { name = "pytest-xdist" },
@@ -94,7 +93,6 @@ requires-dist = [
     { name = "astrogwb", extras = ["io"], marker = "extra == 'cli'" },
     { name = "gwmock-noise", specifier = ">=0.10.1" },
     { name = "gwmock-pop", marker = "extra == 'cli'", specifier = ">=0.11.4" },
-    { name = "gwmock-pop", marker = "extra == 'simulation'", specifier = ">=0.11.4" },
     { name = "gwmock-signal", extras = ["jax"], specifier = ">=0.15.0" },
     { name = "h5py", marker = "extra == 'io'", specifier = ">=3.15" },
     { name = "jax", marker = "sys_platform == 'linux'", specifier = ">=0.10.2" },
@@ -107,10 +105,11 @@ requires-dist = [
     { name = "ripplegw", specifier = ">=0.3.1" },
     { name = "typer", marker = "extra == 'cli'", specifier = ">=0.16" },
 ]
-provides-extras = ["cuda", "io", "cli", "simulation", "tpu"]
+provides-extras = ["cuda", "io", "cli", "tpu"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "astropy", specifier = ">=8.0.1" },
     { name = "bilby", specifier = ">=2.8.2" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
@@ -119,6 +118,7 @@ dev = [
     { name = "ty", specifier = ">=0.0.69" },
 ]
 parity = [
+    { name = "astropy", specifier = ">=8.0.1" },
     { name = "bilby", specifier = ">=2.8.2" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
