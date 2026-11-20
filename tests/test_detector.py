@@ -12,7 +12,6 @@ from astrogwb.detector import (
     Detector,
     DetectorGeometry,
     OrientationReference,
-    Sensitivity,
     align_detector,
     isotropic_overlap_reduction_function,
     load_detector,
@@ -25,7 +24,9 @@ C_LIGHT = SPEED_OF_LIGHT / 1000.0
 
 
 def _owned_detector(name: str, **fields: float) -> Detector:
-    return Detector(name, DetectorGeometry(**fields), Sensitivity("ET_D_psd"))
+    return Detector(
+        name=name, geometry=DetectorGeometry(**fields), psd_reference="ET_D_psd"
+    )
 
 
 def test_load_detector_cosmic_explorer_is_not_lal_prototype() -> None:

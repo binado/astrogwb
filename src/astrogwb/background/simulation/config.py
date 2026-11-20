@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from astrogwb.detector import DetectorConfig, DetectorNetworkConfig
+from astrogwb.detector import Detector, Networks
 from astrogwb.detector.config import _DetectorConfigDocument
 from astrogwb.waveform.metadata import WaveformMetadata
 
@@ -15,22 +15,24 @@ __all__ = ["SimulationConfig"]
 
 
 def _network_detectors(
-    networks: Sequence[DetectorNetworkConfig],
-) -> dict[str, DetectorConfig]:
+    networks: Networks,
+) -> dict[str, Detector]:
     """Resolve the shared definitions and validate that the networks can run together."""
     if not networks:
         raise ValueError("a background needs at least one network")
-    names: set[str] = set()
-    detectors: dict[str, DetectorConfig] = {}
-    for network in networks:
-        if network.name in names:
-            raise ValueError(f"duplicate network name {network.name!r}")
-        names.add(network.name)
-        if len(network.detectors) < 2:
+    detectors: dict[str, Detector] = {}
+    for network_name, network in networks.items():
+        if not network_name.strip():
+            raise ValueError("network names must be non-blank")
+        if len(network) < 2:
             raise ValueError(
-                f"network {network.name!r} must contain at least two detectors"
+                f"network {network_name!r} must contain at least two detectors"
             )
-        for name, detector in network.detectors.items():
+        for name, detector in network.items():
+            if name != detector.name:
+                raise ValueError(
+                    f"detector name {detector.name!r} does not match mapping key {name!r}"
+                )
             previous = detectors.setdefault(name, detector)
             if previous != detector:
                 raise ValueError(f"conflicting definitions for detector {name!r}")
@@ -59,7 +61,7 @@ class SimulationConfig(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
 
     waveform: WaveformMetadata
-    networks: tuple[DetectorNetworkConfig, ...]
+    networks: Networks
     observer_rate_hz: Annotated[float, Field(ge=0.0, allow_inf_nan=False)]
     num_segments: Annotated[int, Field(ge=1)]
     segment_seconds: Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
@@ -70,11 +72,12 @@ class SimulationConfig(BaseModel):
 
     @field_validator("networks")
     @classmethod
-    def _validate_networks(
-        cls, networks: tuple[DetectorNetworkConfig, ...]
-    ) -> tuple[DetectorNetworkConfig, ...]:
+    def _validate_networks(cls, networks: Networks) -> Networks:
         _network_detectors(networks)
-        return tuple(sorted(networks, key=lambda network: network.name))
+        return {
+            name: dict(sorted(network.items()))
+            for name, network in sorted(networks.items())
+        }
 
     def to_metadata(self) -> dict[str, Any]:
         """Serialize to a JSON-compatible document.
@@ -91,8 +94,7 @@ class SimulationConfig(BaseModel):
         document = _DetectorConfigDocument(
             detectors=_network_detectors(self.networks),
             networks={
-                network.name: tuple(sorted(network.detectors))
-                for network in self.networks
+                name: tuple(sorted(network)) for name, network in self.networks.items()
             },
         )
         metadata = self.model_dump(mode="json", exclude={"networks"})
@@ -115,14 +117,7 @@ class SimulationConfig(BaseModel):
         """
         settings = dict(metadata)
         document = _DetectorConfigDocument.model_validate(settings.pop("detectors"))
-        return cls.model_validate(
-            {
-                **settings,
-                "networks": tuple(
-                    document.select_network(name) for name in document.networks
-                ),
-            }
-        )
+        return cls.model_validate({**settings, "networks": document.resolve_networks()})
 
     @property
     def observation_seconds(self) -> float:

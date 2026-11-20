@@ -16,6 +16,7 @@ from typer.testing import CliRunner
 
 from astrogwb.background.simulation import BackgroundDraw
 from astrogwb.cli import app
+from astrogwb.detector import network_pairs
 from astrogwb.utils import years_to_seconds
 
 
@@ -87,9 +88,8 @@ def test_a_simulate_run_writes_one_file_with_its_config(
     _simulate(output, inputs)
 
     draw, config = BackgroundDraw.read(output)
-    (network,) = config.networks
-    assert network.name == "ET"
-    assert network.pairs() == (("R1", "S1"),)
+    assert tuple(config.networks) == ("ET",)
+    assert network_pairs(config.networks["ET"]) == (("R1", "S1"),)
     assert config.population == str(inputs["population"])
     assert (config.seed, config.index, config.incoherent) == (41, 0, False)
     assert config.observer_rate_hz == pytest.approx(8.0)

@@ -86,9 +86,10 @@ from astrogwb import __version__
 from astrogwb.background.simulation._chunks import iter_rows, pad_rows
 from astrogwb.background.simulation.config import SimulationConfig, _network_detectors
 from astrogwb.detector import (
-    DetectorNetworkConfig,
+    Networks,
     effective_psd,
     gaussian_bin_scale,
+    network_pairs,
     pair_bin_scale,
     pair_terms,
 )
@@ -141,7 +142,7 @@ class NetworkNoise(NamedTuple):
     :func:`~astrogwb.detector.pair_bin_scale`, ``(P_n, F)``; ``effective_psd``
     the network's :func:`~astrogwb.detector.effective_psd`, ``(F,)``; ``scale``
     its :func:`~astrogwb.detector.gaussian_bin_scale`, ``(F,)``. The pairs are
-    in the order of :meth:`DetectorNetworkConfig.pairs`.
+    in the order of :func:`~astrogwb.detector.network_pairs`.
     """
 
     pair_overlap: NDArray[np.float64]
@@ -156,7 +157,7 @@ class _Geometry(NamedTuple):
     ``tensors`` ``(D, 3, 3)``, ``locations`` ``(D, 3)`` and ``psds`` ``(D, F)``
     cover the union of the networks' detectors. ``pairs`` indexes only pairs
     requested by a network; ``rows[name]`` selects the rows for network ``name``
-    in the order of :meth:`DetectorNetworkConfig.pairs`.
+    in the order of :func:`~astrogwb.detector.network_pairs`.
     """
 
     tensors: NDArray[np.float64]
@@ -167,18 +168,17 @@ class _Geometry(NamedTuple):
 
 
 def _network_geometry(
-    networks: Sequence[DetectorNetworkConfig], frequencies: NDArray[np.float64]
+    networks: Networks, frequencies: NDArray[np.float64]
 ) -> _Geometry:
     """Index the requested pairs over the shared detector axis."""
     definitions = _network_detectors(networks)
     names = sorted(definitions)
     detector_index = {name: index for index, name in enumerate(names)}
-    detectors = tuple(definitions[name].to_detector(name) for name in names)
-    network_pairs = {
-        network.name: network.pairs()
-        for network in sorted(networks, key=lambda network: network.name)
+    detectors = tuple(definitions[name] for name in names)
+    pairs_by_network = {
+        name: network_pairs(network) for name, network in sorted(networks.items())
     }
-    pairs = sorted({pair for members in network_pairs.values() for pair in members})
+    pairs = sorted({pair for members in pairs_by_network.values() for pair in members})
     rows = {pair: row for row, pair in enumerate(pairs)}
     return _Geometry(
         tensors=np.stack([det.geometry.response_tensor for det in detectors]),
@@ -189,7 +189,7 @@ def _network_geometry(
         ),
         rows={
             name: [rows[pair] for pair in members]
-            for name, members in network_pairs.items()
+            for name, members in pairs_by_network.items()
         },
     )
 
@@ -302,7 +302,7 @@ class BackgroundDraw(NamedTuple):
     spectra
         Each network's pair spectra :math:`Y_{ab}` in :math:`\\mathrm{Hz}^{-1}`,
         ``(P_n, F)``, keyed by network name. The pair axis follows
-        :meth:`~astrogwb.detector.config.DetectorNetworkConfig.pairs`.
+        :func:`~astrogwb.detector.network_pairs`.
     segment_counts
         The number of events in each segment, ``(num_segments,)``. The
         projection of :func:`project_background` has one entry for the whole
@@ -468,10 +468,10 @@ def network_noise(
     grid = np.asarray(frequencies, dtype=np.float64)
     years = config.observation_seconds / years_to_seconds(1.0)
     noise = {}
-    for network in sorted(config.networks, key=lambda network: network.name):
-        detectors = network.build_detectors()
+    for name, network in sorted(config.networks.items()):
+        detectors = tuple(network[member] for member in sorted(network))
         psd = effective_psd(grid, detectors)
-        noise[network.name] = NetworkNoise(
+        noise[name] = NetworkNoise(
             pair_overlap=np.stack(
                 [term.overlap for term in pair_terms(grid, detectors)]
             ),
@@ -510,7 +510,7 @@ def _event_columns(
 
 
 def _projection(
-    waveform: WaveformMetadata, networks: Sequence[DetectorNetworkConfig]
+    waveform: WaveformMetadata, networks: Networks
 ) -> tuple[jax.Array, _Geometry, _Kernels]:
     jax.config.update("jax_enable_x64", True)
     frequencies = np.asarray(waveform_generator(waveform).frequencies)
@@ -521,7 +521,7 @@ def _projection(
 def project_background(
     sources: Mapping[str, ArrayLike],
     waveform: WaveformMetadata,
-    networks: Sequence[DetectorNetworkConfig],
+    networks: Networks,
     *,
     observation_seconds: float,
     chunk_size: int = 1024,
@@ -540,7 +540,7 @@ def project_background(
     waveform
         Waveform generator settings.
     networks
-        Resolved networks to project together.
+        Networks keyed by name, each mapping detector names to detectors.
     observation_seconds
         The normalization, in seconds.
     chunk_size
@@ -616,7 +616,7 @@ def simulate_background(
     key: jax.Array,
     sources: Mapping[str, ArrayLike],
     waveform: WaveformMetadata,
-    networks: Sequence[DetectorNetworkConfig],
+    networks: Networks,
     *,
     observer_rate_hz: float,
     num_segments: int,
@@ -648,7 +648,7 @@ def simulate_background(
     waveform
         Waveform generator settings.
     networks
-        Resolved networks that share one event and detector-noise realization.
+        Networks keyed by name that share one event and detector-noise realization.
     observer_rate_hz
         Rate in events per second of the population the pool represents.
     num_segments

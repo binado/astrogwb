@@ -30,9 +30,8 @@ jax.config.update("jax_enable_x64", True)
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.detector import (
     Detector,
-    DetectorConfig,
     DetectorGeometry,
-    DetectorNetworkConfig,
+    Network,
 )
 
 REFERENCES = Path(__file__).parent / "references"
@@ -103,7 +102,7 @@ def observation_years(pygwb_reference: Mapping[str, NDArray[np.float64]]) -> flo
 def exact_network(
     pygwb_reference: Mapping[str, NDArray[np.float64]],
     tmp_path_factory: pytest.TempPathFactory,
-) -> DetectorNetworkConfig:
+) -> Network:
     """The archive's exact sites with its noise curves, as one network.
 
     The curves are written on the archive's own grid, so the library
@@ -117,14 +116,15 @@ def exact_network(
         path = directory / f"{name}_psd.txt"
         curve = [pygwb_reference["frequencies"], pygwb_reference["psd"][index]]
         np.savetxt(path, np.column_stack(curve))
-        detectors[name] = DetectorConfig(
+        detectors[name] = Detector(
+            name=name,
             geometry=geometry_from_bilby_convention(*coordinates[index]),
             psd_reference=str(path),
         )
-    return DetectorNetworkConfig(name="exact", detectors=detectors)
+    return detectors
 
 
 @pytest.fixture(scope="session")
-def exact_detectors(exact_network: DetectorNetworkConfig) -> tuple[Detector, ...]:
+def exact_detectors(exact_network: Network) -> tuple[Detector, ...]:
     """The exact network's detectors, in the pair order of the archive."""
-    return exact_network.build_detectors()
+    return tuple(exact_network[name] for name in sorted(exact_network))

@@ -7,25 +7,33 @@ import sys
 from pathlib import Path
 from uuid import uuid4
 
+import numpy as np
 import pytest
-from astrogwb_tiny_pipeline import packaged_config
 
 from astrogwb.detector import (
-    DetectorNetworkConfig,
+    Detector,
     load_detector,
     load_network,
+    load_networks_from_files,
+    network_pairs,
     register_detector,
     register_network,
+    resolve_network,
 )
 
 
-def test_loading_core_detector_config_does_not_initialize_xla() -> None:
+def test_loading_core_detector_config_does_not_initialize_xla(tmp_path: Path) -> None:
+    layer = tmp_path / "network.toml"
+    layer.write_text('[networks]\nlocal = ["L1", "H1"]\n', encoding="utf-8")
     code = """
-from astrogwb.detector import DetectorNetworkConfig, load_network, register_network
+import sys
+from pathlib import Path
+from astrogwb.detector import load_network, load_networks_from_files, register_network
 
 register_network("test-xla", {"H1", "L1"})
-network = DetectorNetworkConfig.from_network("test-xla")
-for detector in (*network.build_detectors(), *load_network(network.name)):
+network = load_network("test-xla")
+local = load_networks_from_files(Path(sys.argv[1]))["local"]
+for detector in (*network.values(), *local.values()):
     detector.geometry.location
     detector.geometry.response_tensor
 import numpyro
@@ -34,53 +42,48 @@ import jax
 assert jax.device_count() == 2
 """
     result = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True, check=False
+        [sys.executable, "-c", code, str(layer)],
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
 
 
-def test_network_build_order_pairs_and_serialization_are_canonical() -> None:
-    network = DetectorNetworkConfig(
-        name="triangle",
-        detectors={name: packaged_config(name) for name in ("E3", "E1", "E2")},
-    )
-    before = network.model_dump(mode="json")
-    assert network.pairs() == (
+def test_network_pairs_sort_detector_keys() -> None:
+    network = {name: load_detector(name) for name in ("E3", "E1", "E2")}
+    assert network_pairs(network) == (
         ("E1", "E2"),
         ("E1", "E3"),
         ("E2", "E3"),
-    )
-    built = network.build_detectors()
-    assert tuple(detector.name for detector in built) == ("E1", "E2", "E3")
-    for detector in built:
-        assert detector.geometry is network.detectors[detector.name].geometry
-    assert network.model_dump(mode="json") == before
-    assert (
-        DetectorNetworkConfig.model_validate_json(network.model_dump_json()) == network
     )
 
 
 def test_registered_extensions_build_a_network_snapshot() -> None:
     suffix = uuid4().hex
     detector_name, network_name = f"X-{suffix}", f"network-{suffix}"
-    config = packaged_config("L1")
+    detector = load_detector("L1").model_copy(
+        update={"name": detector_name, "label": "Custom detector"}
+    )
     members = {detector_name, "H1"}
-    register_detector(detector_name, config)
+    register_detector(detector)
     register_network(network_name, members)
     members.clear()
 
     runtime = load_detector(detector_name)
-    assert runtime.name == detector_name
-    assert runtime.geometry == config.geometry
-    assert runtime.sensitivity.psd_reference == config.psd_reference
+    assert runtime is detector
+    assert runtime.label == "Custom detector"
 
-    snapshot = DetectorNetworkConfig.from_network(network_name)
-    assert snapshot.name == network_name
-    assert snapshot.detectors == {"H1": packaged_config("H1"), detector_name: config}
-    assert snapshot.pairs() == (("H1", detector_name),)
-    assert load_network(network_name) == snapshot.build_detectors()
+    snapshot = load_network(network_name)
+    loaded = load_network(network_name)
+    assert snapshot is not loaded
+    assert tuple(snapshot) == ("H1", detector_name)
+    assert snapshot[detector_name] is loaded[detector_name] is detector
+    assert snapshot["H1"] is loaded["H1"] is load_detector("H1")
+    assert resolve_network(network_name) == tuple(snapshot.values())
+    assert resolve_network([detector, snapshot["H1"]]) == (detector, snapshot["H1"])
     with pytest.raises(ValueError, match="already registered"):
-        register_detector(detector_name, config)
+        register_detector(detector)
     with pytest.raises(ValueError, match="already registered"):
         register_network(network_name, {"H1"})
 
@@ -89,7 +92,7 @@ def test_toml_and_process_catalog_are_isolated(tmp_path: Path) -> None:
     suffix = uuid4().hex
     name, extension = f"network-{suffix}", f"X-{suffix}"
     catalog_s1 = load_detector("S1")
-    register_detector(extension, packaged_config("H1"))
+    register_detector(load_detector("H1").model_copy(update={"name": extension}))
     register_network(name, {"S1", extension})
     layer = tmp_path / "network.toml"
     layer.write_text(
@@ -98,13 +101,39 @@ def test_toml_and_process_catalog_are_isolated(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    local = DetectorNetworkConfig.from_files(layer, network=name)
-    assert local.pairs() == (("C1", "S1"),)
-    assert local.detectors["S1"].geometry.xarm_azimuth_rad == 0.5
-    snapshot = DetectorNetworkConfig.from_network(name)
-    assert snapshot.pairs() == (("S1", extension),)
-    assert snapshot.detectors["S1"].geometry == catalog_s1.geometry
+    local = load_networks_from_files(layer)[name]
+    assert network_pairs(local) == (("C1", "S1"),)
+    assert local["S1"].geometry.xarm_azimuth_rad == 0.5
+    snapshot = load_network(name)
+    assert network_pairs(snapshot) == (("S1", extension),)
+    assert snapshot["S1"].geometry == catalog_s1.geometry
 
     layer.write_text(f'[networks]\n{name} = ["S1", "{extension}"]\n', encoding="utf-8")
     with pytest.raises(ValueError, match=f"undefined detectors.*{extension}"):
-        DetectorNetworkConfig.from_files(layer, network=name)
+        load_networks_from_files(layer)
+
+
+def test_standalone_detector_dump_and_lazy_psd_copy(tmp_path: Path) -> None:
+    first, second = tmp_path / "first.txt", tmp_path / "second.txt"
+    np.savetxt(first, [[20.0, 1.0], [40.0, 2.0]])
+    np.savetxt(second, [[20.0, 3.0], [40.0, 4.0]])
+    detector = Detector(
+        name="custom",
+        geometry=load_detector("S1").geometry,
+        psd_reference=str(first),
+        label="Custom detector",
+    )
+    before = detector.model_dump(mode="json")
+    assert before["name"] == "custom"
+    assert before["label"] == "Custom detector"
+    assert detector.geometry.location.shape == (3,)
+    assert detector.geometry.response_tensor.shape == (3, 3)
+    sensitivity = detector.sensitivity
+    np.savetxt(first, [[20.0, 5.0], [40.0, 6.0]])
+    np.testing.assert_array_equal(sensitivity([20.0, 40.0]), [5.0, 6.0])
+    assert detector.model_dump(mode="json") == before
+    assert Detector.model_validate_json(detector.model_dump_json()) == detector
+    assert Detector.model_validate(before).sensitivity is sensitivity
+
+    updated = detector.model_copy(update={"psd_reference": str(second)})
+    np.testing.assert_array_equal(updated.sensitivity([20.0, 40.0]), [3.0, 4.0])

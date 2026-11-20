@@ -7,17 +7,19 @@ Construction and cached NumPy geometry never initialize the XLA backend.
 from __future__ import annotations
 
 import math
-from functools import cached_property
+from functools import cache, cached_property
+from pathlib import Path
 from typing import Annotated
 
 import jax
 import numpy as np
 from jax.typing import ArrayLike
 from numpy.typing import NDArray
-from pydantic import ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.dataclasses import dataclass
 
 from . import projection
+from .psd import resolve_psd_path
 from .sensitivity import Sensitivity
 
 
@@ -84,13 +86,41 @@ class DetectorGeometry:
         return result
 
 
-@dataclass(frozen=True, config=ConfigDict(arbitrary_types_allowed=True))
-class Detector:
-    """A named detector with geometry and a lazily evaluated sensitivity."""
+@cache
+def _sensitivity(psd_reference: str) -> Sensitivity:
+    """The shared :class:`Sensitivity` of a PSD reference."""
+    return Sensitivity(psd_reference)
+
+
+class Detector(BaseModel):
+    """A named detector with geodetic geometry, a PSD reference, and a label."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 
     name: Annotated[str, Field(min_length=1, pattern=r"\S")]
     geometry: DetectorGeometry
-    sensitivity: Sensitivity
+    psd_reference: Annotated[str, Field(min_length=1, pattern=r"\S")]
+    label: Annotated[str, Field(min_length=1)] | None = None
+
+    @field_validator("psd_reference")
+    @classmethod
+    def _validate_reference(cls, reference: str) -> str:
+        try:
+            resolved = resolve_psd_path(reference)
+            if isinstance(resolved, Path) and not resolved.is_file():
+                raise ValueError(f"PSD reference must be a file: {reference!r}")
+        except FileNotFoundError as error:
+            raise ValueError(str(error)) from error
+        return reference
+
+    @property
+    def sensitivity(self) -> Sensitivity:
+        """Sensitivity of this detector's PSD reference, cached per reference.
+
+        Caching per reference, not per instance, keeps ``model_copy`` from
+        carrying a stale curve.
+        """
+        return _sensitivity(self.psd_reference)
 
     def antenna_pattern(
         self,
