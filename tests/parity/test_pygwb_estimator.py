@@ -24,7 +24,6 @@ from astrogwb.background.spectral import (
 )
 from astrogwb.detector import (
     Detector,
-    DetectorNetworkConfig,
     effective_psd,
     gaussian_bin_scale,
     pair_bin_scale,
@@ -80,15 +79,13 @@ def test_network_spectrum_matches_pygwb_combined_point_estimate(
     pygwb_reference: Mapping[str, NDArray[np.float64]],
     frequencies: NDArray[np.float64],
     hubble_constant: float,
-    exact_network: DetectorNetworkConfig,
+    exact_detectors: tuple[Detector, ...],
 ) -> None:
     pair_spectra = pygwb_reference["csd"] / PYGWB_POWER_FRACTION
 
     omega = omega_gw_from_spectral_density(
         jnp.asarray(
-            cross_correlation_estimator(
-                pair_spectra, frequencies, exact_network.build_detectors()
-            )
+            cross_correlation_estimator(pair_spectra, frequencies, exact_detectors)
         ),
         jnp.asarray(frequencies),
         hubble_constant=hubble_constant,

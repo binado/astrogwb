@@ -1,10 +1,11 @@
 from .config import (
     DETECTOR_DEFAULT_PATHS,
-    DetectorConfig,
-    DetectorGeometry,
-    DetectorNetworkConfig,
+    Network,
+    Networks,
     load_detector,
     load_network,
+    load_networks_from_files,
+    network_pairs,
     register_detector,
     register_network,
     resolve_network,
@@ -17,7 +18,7 @@ from .effective_psd import (
     pair_bin_scale,
     pair_terms,
 )
-from .geometry import Detector
+from .geometry import Detector, DetectorGeometry
 from .overlap import (
     NORMALIZED_ORF_SCALE,
     OrientationReference,
@@ -45,9 +46,9 @@ __all__ = [
     "DETECTOR_DEFAULT_PATHS",
     "NORMALIZED_ORF_SCALE",
     "Detector",
-    "DetectorConfig",
     "DetectorGeometry",
-    "DetectorNetworkConfig",
+    "Network",
+    "Networks",
     "OrientationReference",
     "PairTerms",
     "Sensitivity",
@@ -58,9 +59,11 @@ __all__ = [
     "isotropic_overlap_reduction_function",
     "load_detector",
     "load_network",
+    "load_networks_from_files",
     "load_sensitivity",
     "load_sensitivity_map",
     "log_frequency_noise_scale",
+    "network_pairs",
     "overlap_reduction_function",
     "pair_bin_scale",
     "pair_names",

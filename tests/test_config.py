@@ -3,16 +3,20 @@
 from pathlib import Path
 
 import pytest
-from astrogwb_tiny_pipeline import packaged_config
 from pydantic import ValidationError
 
-from astrogwb.detector import DetectorNetworkConfig, load_network
+from astrogwb.detector import (
+    load_detector,
+    load_network,
+    load_networks_from_files,
+    network_pairs,
+)
 
 
 def test_detector_loader_merges_packaged_definitions_and_ordered_overrides(
     tmp_path: Path,
 ) -> None:
-    packaged_s1 = packaged_config("S1")
+    packaged_s1 = load_detector("S1")
     base = tmp_path / "networks.toml"
     base.write_text(
         '[networks]\nreference = ["S1", "R1"]\n'
@@ -28,22 +32,24 @@ def test_detector_loader_merges_packaged_definitions_and_ordered_overrides(
         '[detectors.custom]\npsd_reference = "${detectors.C1.psd_reference}"\n',
         encoding="utf-8",
     )
-    reference = DetectorNetworkConfig.from_files(base, override, network="reference")
-    comparison = DetectorNetworkConfig.from_files(base, override, network="comparison")
-    assert reference.pairs() == (("C1", "S1"),)
-    assert set(reference.detectors) == {"C1", "S1"}
-    assert comparison.detectors == reference.detectors
+    networks = load_networks_from_files(base, override)
+    assert tuple(networks) == ("comparison", "reference", "with_custom")
+    reference = networks["reference"]
+    assert tuple(reference) == ("C1", "S1")
+    assert networks["comparison"]["C1"] is reference["C1"]
 
-    local = DetectorNetworkConfig.from_files(base, override, network="with_custom")
-    assert set(local.detectors) == {"S1", "custom"}
-    custom = local.detectors["custom"]
+    local = networks["with_custom"]
+    assert tuple(local) == ("S1", "custom")
+    assert local["S1"] is reference["S1"]
+    custom = local["custom"]
     assert custom.geometry.xarm_azimuth_rad == 0.5
     assert custom.geometry.latitude_rad == packaged_s1.geometry.latitude_rad
-    assert custom.psd_reference == packaged_config("C1").psd_reference
+    assert custom.psd_reference == load_detector("C1").psd_reference
+    assert custom.name == "custom"
     assert custom.label == "Custom"
 
-    original = DetectorNetworkConfig.from_files(base, network="reference")
-    assert original.pairs() == (("R1", "S1"),)
+    original = load_networks_from_files(base)["reference"]
+    assert network_pairs(original) == (("R1", "S1"),)
     with pytest.raises(KeyError, match="with_custom"):
         load_network("with_custom")
 
@@ -61,8 +67,18 @@ def test_detector_loader_merges_packaged_definitions_and_ordered_overrides(
             ),
             "missing-curve",
         ),
+        (
+            '[detectors.S1]\nname = "C1"\n',
+            "detector name 'C1'.*mapping key 'S1'",
+        ),
     ],
-    ids=["extra-table", "duplicate-member", "unknown-member", "invalid-psd"],
+    ids=[
+        "extra-table",
+        "duplicate-member",
+        "unknown-member",
+        "invalid-psd",
+        "mismatched-name",
+    ],
 )
 def test_detector_loader_rejects_invalid_toml_layers(
     tmp_path: Path, document: str, message: str
@@ -70,4 +86,4 @@ def test_detector_loader_rejects_invalid_toml_layers(
     layer = tmp_path / "invalid.toml"
     layer.write_text(document, encoding="utf-8")
     with pytest.raises(ValidationError, match=message):
-        DetectorNetworkConfig.from_files(layer, network="invalid")
+        load_networks_from_files(layer)

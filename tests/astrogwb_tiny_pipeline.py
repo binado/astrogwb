@@ -11,7 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
-from astrogwb.detector import DetectorConfig, DetectorNetworkConfig, load_detector
+from astrogwb.detector import load_detector
 from astrogwb.waveform import WaveformMetadata
 
 WAVEFORM = WaveformMetadata(
@@ -24,23 +24,9 @@ WAVEFORM = WaveformMetadata(
 )
 
 
-def packaged_config(name: str) -> DetectorConfig:
-    """The settings of a packaged runtime detector."""
-    detector = load_detector(name)
-    return DetectorConfig(
-        geometry=detector.geometry,
-        psd_reference=str(detector.sensitivity.psd_reference),
-    )
-
-
-TRIANGLE = DetectorNetworkConfig(
-    name="triangle",
-    detectors={name: packaged_config(name) for name in ("S1", "R1", "C1")},
-)
-PAIR = DetectorNetworkConfig(
-    name="pair", detectors={name: TRIANGLE.detectors[name] for name in ("S1", "C1")}
-)
-NETWORKS = (TRIANGLE, PAIR)
+TRIANGLE = {name: load_detector(name) for name in ("S1", "R1", "C1")}
+PAIR = {name: TRIANGLE[name] for name in ("S1", "C1")}
+NETWORKS = {"triangle": TRIANGLE, "pair": PAIR}
 
 
 def event_pool(size: int = 64, *, seed: int = 41) -> dict[str, np.ndarray]:

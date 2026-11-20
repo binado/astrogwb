@@ -6,6 +6,7 @@ import json
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
+from types import MappingProxyType
 
 import h5py
 import numpy as np
@@ -18,6 +19,7 @@ from astrogwb_tiny_pipeline import (
     event_pool,
     write_population_csv,
 )
+from tolerances import assert_close
 
 from astrogwb.background.simulation import (
     BackgroundDraw,
@@ -29,7 +31,8 @@ from astrogwb.background.simulation import (
     realization_key,
     simulate_background,
 )
-from astrogwb.detector import DetectorNetworkConfig
+from astrogwb.detector import Networks, network_pairs, pair_bin_scale, pair_terms
+from astrogwb.utils import years_to_seconds
 
 SEED = 41
 CHUNK = 8
@@ -83,6 +86,8 @@ def test_a_file_round_trips_the_draw_and_its_config(
 
     assert draw.segment_counts.sum() > 0
     assert config == _config()
+    pair, triangle = config.networks["pair"], config.networks["triangle"]
+    assert pair["C1"] is triangle["C1"]
     np.testing.assert_array_equal(reopened.frequencies, draw.frequencies)
     np.testing.assert_array_equal(reopened.segment_counts, draw.segment_counts)
     assert reopened.spectra.keys() == draw.spectra.keys()
@@ -102,8 +107,8 @@ def test_file_keeps_the_legacy_hdf5_and_detector_metadata_layout(written: Path) 
     assert "networks" not in metadata
     assert metadata["detectors"] == {
         "detectors": {
-            name: detector.model_dump(mode="json")
-            for name, detector in TRIANGLE.detectors.items()
+            name: detector.model_dump(mode="json", exclude={"name"})
+            for name, detector in TRIANGLE.items()
         },
         "networks": {"triangle": ["C1", "R1", "S1"], "pair": ["C1", "S1"]},
     }
@@ -132,8 +137,17 @@ def test_a_legacy_0_8_file_without_a_format_version_is_read(
 ) -> None:
     legacy = _edited(written, tmp_path, format_version=None, version="0.8.0")
 
-    reopened, _ = BackgroundDraw.read(legacy)
+    with h5py.File(legacy, "r+") as file:
+        metadata = json.loads(file.attrs["metadata"])
+        for members in metadata["detectors"]["networks"].values():
+            members.reverse()
+        file.attrs["metadata"] = json.dumps(metadata)
 
+    reopened, config = BackgroundDraw.read(legacy)
+
+    assert config == _config()
+    assert tuple(config.networks["triangle"]) == ("C1", "R1", "S1")
+    assert config.networks["pair"]["C1"] is config.networks["triangle"]["C1"]
     np.testing.assert_array_equal(reopened.segment_counts, draw.segment_counts)
 
 
@@ -189,23 +203,50 @@ def test_observation_seconds_is_the_segments_together() -> None:
     assert _config().observation_seconds == 2 * SEGMENT_SECONDS
 
 
-def test_network_noise_has_one_row_per_pair_of_the_draw(draw: BackgroundDraw) -> None:
-    noise = network_noise(_config(), draw.frequencies)
+def test_config_copies_and_sorts_network_mappings() -> None:
+    fields = _config().model_dump(exclude={"networks"})
+    members = dict(TRIANGLE)
+    networks = {"triangle": MappingProxyType(members), "pair": PAIR}
+    config = SimulationConfig.model_validate(
+        {**fields, "networks": MappingProxyType(networks)}
+    )
+
+    assert tuple(config.networks) == ("pair", "triangle")
+    assert tuple(config.networks["triangle"]) == ("C1", "R1", "S1")
+    assert config.networks["triangle"]["C1"] is members["C1"]
+    members.clear()
+    networks.clear()
+    assert config.networks == NETWORKS
+
+
+def test_network_noise_follows_the_pair_axis_of_the_draw(draw: BackgroundDraw) -> None:
+    config = _config()
+    noise = network_noise(config, draw.frequencies)
+    years = config.observation_seconds / years_to_seconds(1.0)
 
     assert noise.keys() == draw.spectra.keys()
     for name, spectrum in draw.spectra.items():
+        network = NETWORKS[name]
         assert noise[name].pair_scale.shape == spectrum.shape
         assert noise[name].pair_overlap.shape == spectrum.shape
+        for row, (first, second) in enumerate(network_pairs(network)):
+            detectors = (network[first], network[second])
+            (terms,) = pair_terms(draw.frequencies, detectors)
+            np.testing.assert_array_equal(noise[name].pair_overlap[row], terms.overlap)
+            assert_close(
+                noise[name].pair_scale[row],
+                pair_bin_scale(draw.frequencies, detectors, years)[0],
+            )
 
 
 def test_coherent_joint_draw_reuses_the_shared_baseline() -> None:
     draw = _simulate(_config(incoherent=False))
 
-    (shared,) = PAIR.pairs()
-    pair = draw.spectra[PAIR.name][0]
+    (shared,) = network_pairs(PAIR)
+    pair = draw.spectra["pair"][0]
     assert np.any(pair)
     np.testing.assert_array_equal(
-        pair, draw.spectra[TRIANGLE.name][TRIANGLE.pairs().index(shared)]
+        pair, draw.spectra["triangle"][network_pairs(TRIANGLE).index(shared)]
     )
 
 
@@ -265,7 +306,9 @@ def test_config_rejects_a_nonphysical_observation(field: str, value: float) -> N
 @pytest.mark.parametrize(
     ("issue", "message"),
     [
-        ("duplicate", "duplicate network name.*pair"),
+        ("empty", "at least one network"),
+        ("blank", "non-blank"),
+        ("mismatch", "detector name.*mapping key"),
         ("singleton", "at least two detectors"),
         ("geometry", "conflicting definitions.*C1"),
         ("psd_reference", "conflicting definitions.*C1"),
@@ -274,31 +317,31 @@ def test_config_rejects_a_nonphysical_observation(field: str, value: float) -> N
 def test_background_boundaries_reject_invalid_networks(
     issue: str, message: str
 ) -> None:
-    detector = PAIR.detectors["C1"]
-    if issue == "duplicate":
-        networks = (PAIR, PAIR)
+    detector = PAIR["C1"]
+    networks: Networks
+    if issue == "empty":
+        networks = {}
+    elif issue == "blank":
+        networks = {" ": PAIR}
+    elif issue == "mismatch":
+        networks = {"mismatch": {"wrong": detector, "S1": PAIR["S1"]}}
     elif issue == "singleton":
-        singleton = DetectorNetworkConfig(name="singleton", detectors={"C1": detector})
-        assert singleton.pairs() == ()
-        networks = (singleton,)
+        networks = {"singleton": {"C1": detector}}
     else:
         update = (
             {"geometry": replace(detector.geometry, elevation_m=1234.0)}
             if issue == "geometry"
-            else {"psd_reference": TRIANGLE.detectors["R1"].psd_reference}
+            else {"psd_reference": TRIANGLE["R1"].psd_reference}
         )
-        conflicting = DetectorNetworkConfig(
-            name="conflicting",
-            detectors={**PAIR.detectors, "C1": detector.model_copy(update=update)},
-        )
-        networks = (TRIANGLE, conflicting)
+        conflicting = {**PAIR, "C1": detector.model_copy(update=update)}
+        networks = {"triangle": TRIANGLE, "conflicting": conflicting}
 
     fields = {**_config().model_dump(exclude={"networks"}), "networks": networks}
     with pytest.raises(ValueError, match=message):
         SimulationConfig.model_validate(fields)
     with pytest.raises(ValueError, match=message):
         project_background(
-            event_pool(0), WAVEFORM, networks=list(networks), observation_seconds=1.0
+            event_pool(0), WAVEFORM, networks=networks, observation_seconds=1.0
         )
     with pytest.raises(ValueError, match=message):
         simulate_background(

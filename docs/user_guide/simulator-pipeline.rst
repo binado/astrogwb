@@ -9,16 +9,17 @@ pool and its rate. The pool size only controls how many distinct mergers are ava
 .. code:: python
 
    from astrogwb.background.simulation import simulate_background
-   from astrogwb.detector import DetectorNetworkConfig, register_network
+   from astrogwb.detector import load_network, network_pairs, register_network
 
    register_network("HL", {"H1", "L1"})
-   hl = DetectorNetworkConfig.from_network("HL")
+   hl = load_network("HL")
    draw = simulate_background(
-       key, sources, waveform, networks=(hl,),
+       key, sources, waveform, networks={"HL": hl},
        observer_rate_hz=0.02, num_segments=1024, segment_seconds=16.0,
    )
+   pairs = network_pairs(hl)
    counts = draw.segment_counts
-   pair_spectra = draw.spectra[hl.name]  # (detector pairs, frequencies)
+   pair_spectra = draw.spectra["HL"]  # (detector pairs, frequencies)
 
 The pool supplies the waveform inputs (including source-frame masses, redshift,
 luminosity distance in Mpc, inclination and coalescence phase) and the projection angles
@@ -30,7 +31,7 @@ realized total exceeds capacity, enlarge the pool and repeat with the same key.
 
 Each detector receives both polarizations with its antenna response and geometric delay.
 The code uses fixed sidereal geometry (GMST zero) and places the complete waveform in
-the assigned segment. Network pairs follow ``hl.pairs()`` in the example above. A joint
+the assigned segment. Network pairs follow ``network_pairs(hl)`` in the example above. A joint
 run uses one event and detector-noise realization, computes each requested pair once,
 and reuses shared pair rows. It requires the same definition for a detector name
 wherever it appears. Source chunks and segment batches bound working memory.
@@ -50,7 +51,7 @@ CSV, canonical gwmock-pop column names) and writes one HDF5 file:
 Detector TOML layers are merged in argument order on top of the packaged definitions.
 The CLI runs every named network from the merged ``[networks]`` table. For example, ``HL
 = ["H1", "L1"]`` defines a network of built-in detectors. To load just that network in
-Python, use ``DetectorNetworkConfig.from_files(Path("detectors.toml"), network="HL")``.
+Python, use ``load_networks_from_files(Path("detectors.toml"))["HL"]``.
 File layers and Python registrations do not affect each other.
 
 The catalogue must hold ``distance`` (luminosity distance in Mpc, renamed
@@ -67,7 +68,7 @@ same Poisson draw. The file stores the ``BackgroundDraw`` (``frequencies``,
 ``BackgroundDraw.write(path, config, **attrs)`` stores extra root attributes in the same
 atomic write; ``BackgroundDraw.read_attrs`` reads them back. The on-disk config stores
 shared detector definitions once, alongside the network memberships.
-``BackgroundDraw.read`` reconstructs the network configs without looking up any
+``BackgroundDraw.read`` reconstructs the network mappings without looking up any
 registrations, and ``network_noise`` rebuilds the noise inputs from those configs.
 
 Normalization and noise
@@ -91,7 +92,7 @@ overlap functions and PSDs.
 
 Use ``incoherent=True`` for a Poisson realization of the individual event powers alone.
 To project **all** supplied events deterministically, call ``project_background(sources,
-waveform, networks=(hl,), observation_seconds=T)``. Both signal-only calculations return
+waveform, networks={"HL": hl}, observation_seconds=T)``. Both signal-only calculations return
 :math:`5K/T`.
 
 Repeated draws from one stored pool describe realizations conditional on that pool.

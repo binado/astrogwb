@@ -408,14 +408,12 @@ def align_detector(
     # A counter-clockwise rotation lowers gwmock's clockwise-from-North azimuths.
     rotation = _wrap_half_turn(angle - current)
     geometry = det.geometry
-    return dataclasses.replace(
-        det,
-        geometry=dataclasses.replace(
-            geometry,
-            xarm_azimuth_rad=(geometry.xarm_azimuth_rad - rotation) % (2.0 * math.pi),
-            yarm_azimuth_rad=(geometry.yarm_azimuth_rad - rotation) % (2.0 * math.pi),
-        ),
+    rotated = dataclasses.replace(
+        geometry,
+        xarm_azimuth_rad=(geometry.xarm_azimuth_rad - rotation) % (2.0 * math.pi),
+        yarm_azimuth_rad=(geometry.yarm_azimuth_rad - rotation) % (2.0 * math.pi),
     )
+    return det.model_copy(update={"geometry": rotated})
 
 
 # The isotropic mean of Re[H_a^* H_b] for a unit source: <g> = 4/5 from the

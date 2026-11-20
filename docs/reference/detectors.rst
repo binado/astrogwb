@@ -3,14 +3,26 @@ Detectors
 
 .. currentmodule:: astrogwb
 
+Construct a custom detector with ``Detector(name="S1", geometry=geometry,
+psd_reference="ET_D_psd")`` and register it with
+``register_detector(detector)``. The PSD curve loads on the first call to
+``detector.sensitivity(frequencies)``.
+
+Standalone detector dumps include ``name``. Simulation metadata uses the detector
+mapping key as the name.
+
+``load_network(name)`` now returns a fresh mapping from detector names to detectors.
+For APIs that accept a detector sequence, use
+``tuple(network[name] for name in sorted(network))``.
+
 .. autosummary::
    :toctree: generated/
    :nosignatures:
 
    ~detector.Detector
-   ~detector.DetectorConfig
    ~detector.DetectorGeometry
-   ~detector.DetectorNetworkConfig
+   ~detector.Network
+   ~detector.Networks
    ~detector.PairTerms
    ~detector.Sensitivity
    ~detector.align_detector
@@ -20,9 +32,11 @@ Detectors
    ~detector.isotropic_overlap_reduction_function
    ~detector.load_detector
    ~detector.load_network
+   ~detector.load_networks_from_files
    ~detector.load_sensitivity
    ~detector.load_sensitivity_map
    ~detector.log_frequency_noise_scale
+   ~detector.network_pairs
    ~detector.overlap_reduction_function
    ~detector.pair_bin_scale
    ~detector.pair_names

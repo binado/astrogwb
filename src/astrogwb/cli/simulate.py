@@ -114,13 +114,12 @@ def simulate(
         simulate_background,
     )
     from astrogwb.config import merge_layers
-    from astrogwb.detector.config import _DetectorConfigDocument
+    from astrogwb.detector import load_networks_from_files
     from astrogwb.utils import years_to_seconds
     from astrogwb.waveform import WaveformMetadata
 
     try:
-        document = _DetectorConfigDocument.from_files(*detector_config)
-        networks = tuple(document.select_network(name) for name in document.networks)
+        networks = load_networks_from_files(*detector_config)
     except ValueError as error:
         raise typer.BadParameter(str(error), param_hint="--detector-config") from error
     try:

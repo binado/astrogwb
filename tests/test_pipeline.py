@@ -8,7 +8,6 @@ sample's own standard error, so it holds for any seed.
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Sequence
 
 import jax
 import numpy as np
@@ -19,7 +18,6 @@ from astrogwb_tiny_pipeline import (
     TRIANGLE,
     WAVEFORM,
     event_pool,
-    packaged_config,
 )
 from numpy.typing import NDArray
 from tolerances import assert_close
@@ -31,8 +29,11 @@ from astrogwb.background.simulation import (
 )
 from astrogwb.background.simulation import draw as background_module
 from astrogwb.detector import (
-    DetectorNetworkConfig,
+    Network,
+    Networks,
     isotropic_overlap_reduction_function,
+    load_detector,
+    network_pairs,
     pair_bin_scale,
 )
 from astrogwb.detector.projection import project_polarizations_fd
@@ -56,7 +57,7 @@ def population() -> Pool:
 def _project(
     population: Pool,
     waveform: WaveformMetadata,
-    networks: Sequence[DetectorNetworkConfig],
+    networks: Networks,
     **kwargs,
 ) -> BackgroundDraw:
     return project_background(
@@ -71,7 +72,7 @@ def _project(
 def _simulate(
     population: Pool,
     waveform: WaveformMetadata,
-    networks: Sequence[DetectorNetworkConfig],
+    networks: Networks,
     *,
     segment_duration: float,
     seed: int = 0,
@@ -144,7 +145,7 @@ def test_coa_time_shifts_both_polarizations_and_preserves_intensity(
     # At each physical site the arrival phase multiplies the strain once;
     # the baseline already includes that site's geometric delay.
     projected = []
-    for detector in PAIR.build_detectors():
+    for detector in tuple(PAIR[member] for member in sorted(PAIR)):
         coordinates = {
             name: sources[name]
             for name in ("right_ascension", "declination", "polarization_angle")
@@ -206,18 +207,17 @@ def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum() -> No
             name: values[start : start + group] for name, values in realization.items()
         }
         generated = np.asarray(generator.generate_batch(sources)).sum(axis=1)
-        spectra = _project(sources, WAVEFORM, (TRIANGLE,), chunk_size=8).spectra[
-            "triangle"
-        ]
+        spectra = _project(
+            sources, WAVEFORM, {"triangle": TRIANGLE}, chunk_size=8
+        ).spectra["triangle"]
         ratios.append(spectra / (generated / OBSERVATION_SECONDS))
     ratios = np.asarray(ratios)
-    detectors = {detector.name: detector for detector in TRIANGLE.build_detectors()}
     expected = np.stack(
         [
             isotropic_overlap_reduction_function(
-                np.asarray(generator.frequencies), detectors[first], detectors[second]
+                np.asarray(generator.frequencies), TRIANGLE[first], TRIANGLE[second]
             )
-            for first, second in TRIANGLE.pairs()
+            for first, second in network_pairs(TRIANGLE)
         ]
     )
     errors = ratios.std(axis=0, ddof=1) / np.sqrt(ratios.shape[0])
@@ -232,9 +232,9 @@ def test_an_empty_realization_has_zero_spectra() -> None:
     background = _project(empty, WAVEFORM, NETWORKS)
 
     assert all(values.shape == (0,) for values in empty.values())
-    for network in NETWORKS:
-        pairs = background.spectra[network.name]
-        assert pairs.shape == (len(network.pairs()), background.frequencies.size)
+    for name, network in NETWORKS.items():
+        pairs = background.spectra[name]
+        assert pairs.shape == (len(network_pairs(network)), background.frequencies.size)
         assert not np.any(pairs)
 
 
@@ -244,36 +244,36 @@ def projected(population: Pool) -> BackgroundDraw:
     return _project(population, WAVEFORM, NETWORKS, chunk_size=8)
 
 
-@pytest.mark.parametrize("network", NETWORKS, ids=lambda network: network.name)
+@pytest.mark.parametrize("name,network", NETWORKS.items(), ids=NETWORKS)
 def test_each_network_holds_its_rows_of_a_single_network_projection(
     projected: BackgroundDraw,
     population: Pool,
-    network: DetectorNetworkConfig,
+    name: str,
+    network: Network,
 ) -> None:
-    alone = _project(population, WAVEFORM, (network,), chunk_size=8)
+    alone = _project(population, WAVEFORM, {name: network}, chunk_size=8)
 
-    np.testing.assert_array_equal(
-        projected.spectra[network.name], alone.spectra[network.name]
-    )
+    np.testing.assert_array_equal(projected.spectra[name], alone.spectra[name])
 
 
-@pytest.mark.parametrize("network", NETWORKS, ids=lambda network: network.name)
+@pytest.mark.parametrize("name,network", NETWORKS.items(), ids=NETWORKS)
 def test_combining_pair_spectra_of_a_pure_signal_recovers_its_spectrum(
-    projected: BackgroundDraw, network: DetectorNetworkConfig
+    projected: BackgroundDraw, name: str, network: Network
 ) -> None:
     spectrum = 1e-47 * (1.0 + np.arange(projected.frequencies.size))
-    detectors = {detector.name: detector for detector in network.build_detectors()}
     overlap = np.stack(
         [
             isotropic_overlap_reduction_function(
-                projected.frequencies, detectors[first], detectors[second]
+                projected.frequencies, network[first], network[second]
             )
-            for first, second in network.pairs()
+            for first, second in network_pairs(network)
         ]
     )
 
     combined = cross_correlation_estimator(
-        overlap * spectrum, projected.frequencies, network.build_detectors()
+        overlap * spectrum,
+        projected.frequencies,
+        tuple(network[member] for member in sorted(network)),
     )
 
     assert_close(combined, spectrum)
@@ -282,7 +282,8 @@ def test_combining_pair_spectra_of_a_pure_signal_recovers_its_spectrum(
 def test_custom_detector_geometry_is_used_for_projection(
     population: Pool,
 ) -> None:
-    first, second = packaged_config("E1"), packaged_config("E2")
+    first = load_detector("E1").model_copy(update={"name": "X1"})
+    second = load_detector("E2")
     custom = first.model_copy(
         update={
             "geometry": dataclasses.replace(
@@ -290,41 +291,36 @@ def test_custom_detector_geometry_is_used_for_projection(
             )
         }
     )
-    moved_network = DetectorNetworkConfig(
-        name="custom", detectors={"X1": custom, "E2": second}
-    )
-    reference = DetectorNetworkConfig(
-        name="custom", detectors={"X1": first, "E2": second}
-    )
-    moved = _project(population, WAVEFORM, (moved_network,)).spectra["custom"]
-    original = _project(population, WAVEFORM, (reference,)).spectra["custom"]
-    assert not np.array_equal(moved, original)
+    moved = _project(population, WAVEFORM, {"custom": {"X1": custom, "E2": second}})
+    original = _project(population, WAVEFORM, {"custom": {"X1": first, "E2": second}})
+    assert not np.array_equal(moved.spectra["custom"], original.spectra["custom"])
 
 
 def test_psd_override_preserves_pair_spectra_and_changes_combination(
     population: Pool,
 ) -> None:
-    changed = DetectorNetworkConfig(
-        name=TRIANGLE.name,
-        detectors={
-            **TRIANGLE.detectors,
-            "C1": TRIANGLE.detectors["C1"].model_copy(
-                update={"psd_reference": "ET_COBA_15km_psd.txt"}
-            ),
-        },
-    )
-    baseline = _project(population, WAVEFORM, (TRIANGLE,))
-    overridden = _project(population, WAVEFORM, (changed,))
+    changed = {
+        **TRIANGLE,
+        "C1": TRIANGLE["C1"].model_copy(
+            update={"psd_reference": "ET_COBA_15km_psd.txt"}
+        ),
+    }
+    baseline = _project(population, WAVEFORM, {"triangle": TRIANGLE})
+    overridden = _project(population, WAVEFORM, {"triangle": changed})
     np.testing.assert_array_equal(
-        baseline.spectra[TRIANGLE.name], overridden.spectra[TRIANGLE.name]
+        baseline.spectra["triangle"], overridden.spectra["triangle"]
     )
     frequencies = baseline.frequencies
     assert not np.array_equal(
         cross_correlation_estimator(
-            baseline.spectra[TRIANGLE.name], frequencies, TRIANGLE.build_detectors()
+            baseline.spectra["triangle"],
+            frequencies,
+            tuple(TRIANGLE[member] for member in sorted(TRIANGLE)),
         ),
         cross_correlation_estimator(
-            overridden.spectra[TRIANGLE.name], frequencies, changed.build_detectors()
+            overridden.spectra["triangle"],
+            frequencies,
+            tuple(changed[member] for member in sorted(changed)),
         ),
     )
 
@@ -347,17 +343,17 @@ def test_pure_noise_matches_the_pair_scale(empty: Pool) -> None:
             seed=draw,
             segment_duration=segment_duration,
         )
-        for network in NETWORKS:
+        for name, network in NETWORKS.items():
             scale = np.asarray(
                 pair_bin_scale(
                     background.frequencies,
-                    network.build_detectors(),
+                    tuple(network[member] for member in sorted(network)),
                     int(OBSERVATION_SECONDS // segment_duration)
                     * segment_duration
                     / years_to_seconds(1.0),
                 )
             )
-            residuals.append((background.spectra[network.name] / scale).ravel())
+            residuals.append((background.spectra[name] / scale).ravel())
     residuals = np.concatenate(residuals)
     segments = int(OBSERVATION_SECONDS // segment_duration)
     size = residuals.size
@@ -408,7 +404,7 @@ def test_segment_sums_use_sampled_coa_times_without_rescaling(
     geometry = background_module._network_geometry
 
     def without_noise(
-        networks: Sequence[DetectorNetworkConfig], frequencies: NDArray[np.float64]
+        networks: Networks, frequencies: NDArray[np.float64]
     ) -> background_module._Geometry:
         result = geometry(networks, frequencies)
         return result._replace(psds=np.full_like(result.psds, np.inf))
