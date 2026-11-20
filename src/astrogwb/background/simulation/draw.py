@@ -110,13 +110,13 @@ __all__ = [
 ]
 
 #: The layout version of the files :meth:`BackgroundDraw.write` writes.
-FORMAT_VERSION = 1
+_FORMAT_VERSION = 1
 
 #: The layout versions :meth:`BackgroundDraw.read` reads.
-READABLE_FORMATS = frozenset({FORMAT_VERSION})
+_READABLE_FORMATS = frozenset({_FORMAT_VERSION})
 
 #: Root attributes :meth:`BackgroundDraw.write` owns.
-RESERVED_ATTRS = frozenset({"metadata", "version", "format_version"})
+_RESERVED_ATTRS = frozenset({"metadata", "version", "format_version"})
 
 #: Files written before ``format_version`` existed, which were layout 1.
 _LEGACY_VERSION = re.compile(r"0\.8\.")
@@ -127,7 +127,7 @@ SKY_COLUMNS = ("right_ascension", "declination", "polarization_angle")
 
 #: :math:`\langle K_{ab} \rangle = I \gamma_{ab}` over this, the factor in
 #: :math:`Y_{ab} = 5 D_{ab} / T`.
-PAIR_RESPONSE_DENOMINATOR = 5.0
+_PAIR_RESPONSE_DENOMINATOR = 5.0
 
 #: Absolute slack on ``segment_duration * bin width`` being a whole number of
 #: Fourier modes, for the rounding of a grid's spacing.
@@ -349,13 +349,13 @@ class BackgroundDraw(NamedTuple):
             If ``attrs`` uses a reserved key (``metadata``, ``version`` or
             ``format_version``). Nothing is written.
         """
-        clashes = sorted(RESERVED_ATTRS.intersection(attrs))
+        clashes = sorted(_RESERVED_ATTRS.intersection(attrs))
         if clashes:
             raise ValueError(f"attrs may not use the reserved keys {clashes}")
         with atomic_h5(path) as file:
             file.attrs["metadata"] = json.dumps(config.to_metadata())
             file.attrs["version"] = __version__
-            file.attrs["format_version"] = FORMAT_VERSION
+            file.attrs["format_version"] = _FORMAT_VERSION
             for name, value in attrs.items():
                 file.attrs[name] = value
             file.create_dataset("frequencies", data=self.frequencies)
@@ -430,7 +430,7 @@ class BackgroundDraw(NamedTuple):
             return {
                 name: value.item() if isinstance(value, np.generic) else value
                 for name, value in file.attrs.items()
-                if name not in RESERVED_ATTRS
+                if name not in _RESERVED_ATTRS
             }
 
 
@@ -441,12 +441,12 @@ def _check_format(path: str | Path, attrs: Mapping[str, object]) -> None:
     if format_version is None and isinstance(version, str):
         if _LEGACY_VERSION.match(version):
             return
-    elif format_version in READABLE_FORMATS:
+    elif format_version in _READABLE_FORMATS:
         return
     raise ValueError(
         f"{path} has format_version {format_version} (written by astrogwb "
         f"{version}); astrogwb {__version__} reads format versions "
-        f"{sorted(READABLE_FORMATS)} and files written by astrogwb 0.8.*; "
+        f"{sorted(_READABLE_FORMATS)} and files written by astrogwb 0.8.*; "
         "regenerate the background"
     )
 
@@ -572,7 +572,7 @@ def project_background(
     for start, _ in iter_rows(count, chunk_size):
         rows, valid = pad_rows(columns, start, chunk_size)
         total += kernels.pair_sums(grid, rows, jnp.asarray(valid), tensors, locations)
-    union = PAIR_RESPONSE_DENOMINATOR * np.asarray(total) / observation_seconds
+    union = _PAIR_RESPONSE_DENOMINATOR * np.asarray(total) / observation_seconds
     return BackgroundDraw(
         np.asarray(grid),
         {k: union[v] for k, v in geometry.rows.items()},
@@ -778,7 +778,7 @@ def _segmented(
         )
     ratio = 1.0 / np.sqrt(modes)
     return (
-        PAIR_RESPONSE_DENOMINATOR
+        _PAIR_RESPONSE_DENOMINATOR
         / seconds
         * (
             (1.0 - ratio) * np.asarray(incoherent, dtype=np.float64)

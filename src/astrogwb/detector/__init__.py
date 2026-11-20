@@ -1,5 +1,4 @@
 from .config import (
-    DETECTOR_DEFAULT_PATHS,
     Network,
     Networks,
     load_detector,
@@ -11,7 +10,6 @@ from .config import (
     resolve_network,
 )
 from .effective_psd import (
-    PairTerms,
     effective_psd,
     gaussian_bin_scale,
     log_frequency_noise_scale,
@@ -43,14 +41,12 @@ from .sensitivity import (
 )
 
 __all__ = [
-    "DETECTOR_DEFAULT_PATHS",
     "NORMALIZED_ORF_SCALE",
     "Detector",
     "DetectorGeometry",
     "Network",
     "Networks",
     "OrientationReference",
-    "PairTerms",
     "Sensitivity",
     "align_detector",
     "effective_psd",

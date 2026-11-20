@@ -122,15 +122,15 @@ def test_log_prob_is_negative_infinity_off_the_table() -> None:
 def test_cdf_grid_spans_zero_to_one_exactly() -> None:
     """The renormalizing divide: `cumsum`-order and `sum`-order reductions do not
     agree to the last bit, so the endpoint is made exact by construction."""
-    cdf_grid = _distribution().cdf_grid
-    assert float(cdf_grid[0]) == 0.0
-    assert float(cdf_grid[-1]) == 1.0
-    assert bool(jnp.all(jnp.diff(cdf_grid) > 0.0))
+    _cdf_grid = _distribution()._cdf_grid
+    assert float(_cdf_grid[0]) == 0.0
+    assert float(_cdf_grid[-1]) == 1.0
+    assert bool(jnp.all(jnp.diff(_cdf_grid) > 0.0))
 
 
 def test_icdf_inverts_the_tabulated_cdf() -> None:
     distribution = _distribution()
-    assert_close(distribution.icdf(distribution.cdf_grid), distribution.x)
+    assert_close(distribution.icdf(distribution._cdf_grid), distribution.x)
 
 
 def test_sample_mean_matches_the_density_it_reports() -> None:
@@ -216,7 +216,7 @@ def test_materializing_lazy_fields_does_not_retrace() -> None:
     before = jitted(distribution)
 
     # Force every lazy_property to materialize onto the instance.
-    _ = distribution.norm, distribution.normalized_y, distribution.cdf_grid
+    _ = distribution.norm, distribution._normalized_y, distribution._cdf_grid
 
     after = jitted(distribution)
     assert traces == 1

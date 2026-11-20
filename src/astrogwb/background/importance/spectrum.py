@@ -107,7 +107,7 @@ __all__ = [
 ]
 
 #: The inclination site, fixed rather than drawn.
-INCLINATION_SITE = "inclination"
+_INCLINATION_SITE = "inclination"
 
 #: Reference waveforms are face-on.
 REFERENCE_INCLINATION = 0.0
@@ -290,7 +290,7 @@ def reference_catalog(
     # generator runs, after the sources are sampled.
     jax.config.update("jax_enable_x64", True)
     _require_quadrupole_waveform(generator)
-    reserved = {INCLINATION_SITE, _LUMINOSITY_DISTANCE, _REDSHIFT}
+    reserved = {_INCLINATION_SITE, _LUMINOSITY_DISTANCE, _REDSHIFT}
     if reserved & set(intrinsic_sites):
         raise ValueError(
             f"intrinsic_sites must exclude {sorted(reserved)}; "
@@ -309,7 +309,7 @@ def reference_catalog(
         luminosity_distance(reference_redshift, parameters["H0"], parameters["Omega_m"])
         * gw_distance_ratio(reference_redshift, parameters)
     )
-    columns[INCLINATION_SITE] = np.full(num_samples, REFERENCE_INCLINATION)
+    columns[_INCLINATION_SITE] = np.full(num_samples, REFERENCE_INCLINATION)
     columns[_REDSHIFT] = np.full(num_samples, reference_redshift)
     columns[_LUMINOSITY_DISTANCE] = np.full(num_samples, distance)
     data = intensity_data(generator, columns, chunk_size=chunk_size)

@@ -23,7 +23,6 @@ For APIs that accept a detector sequence, use
    ~detector.DetectorGeometry
    ~detector.Network
    ~detector.Networks
-   ~detector.PairTerms
    ~detector.Sensitivity
    ~detector.align_detector
    ~detector.effective_psd
@@ -50,11 +49,6 @@ For APIs that accept a detector sequence, use
    ~detector.resolve_psd_path
    ~detector.sample_pair_response
    ~detector.stokes_cross_power
-
-.. autodata:: astrogwb.detector.DETECTOR_DEFAULT_PATHS
-   :no-value:
-
-   Packaged detector configuration layers loaded by default.
 
 .. autodata:: astrogwb.detector.NORMALIZED_ORF_SCALE
 

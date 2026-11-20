@@ -31,7 +31,7 @@ __all__ = [
     "intensity_data",
 ]
 
-logger = logging.getLogger(__name__)
+_logger = logging.getLogger(__name__)
 
 
 class IntensityData(TypedDict):
@@ -203,7 +203,7 @@ def intensity_data(
     """
     jax.config.update("jax_enable_x64", True)
     columns = {name: np.asarray(values) for name, values in source_parameters.items()}
-    logger.info(
+    _logger.info(
         "Generating %s waveforms for %d events (f_min=%.1f Hz, f_max=%.1f Hz)",
         generator.metadata.approximant,
         len(next(iter(columns.values()))),

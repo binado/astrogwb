@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 
 from gwmock_noise.gaussian.psd import resolve_bundled_psd_preset
 
-NOISE_CURVES_BASE_DIR = Path(__file__).parent / "noise_curves"
+_NOISE_CURVES_BASE_DIR = Path(__file__).parent / "noise_curves"
 
 
 def resolve_psd_path(reference: str | Path) -> Path | str:
@@ -31,7 +31,7 @@ def resolve_psd_path(reference: str | Path) -> Path | str:
         if bundled is not None:
             return bundled
 
-    packaged = NOISE_CURVES_BASE_DIR / reference_str
+    packaged = _NOISE_CURVES_BASE_DIR / reference_str
     if packaged.exists():
         return packaged
 

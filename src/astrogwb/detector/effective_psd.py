@@ -28,7 +28,7 @@ from .overlap import isotropic_overlap_reduction_function
 _OVERLAP_REDUCTION_FUNCTION_NORM = 0.4
 
 
-class PairTerms(NamedTuple):
+class _PairTerms(NamedTuple):
     r"""One detector pair of an optimally weighted cross-correlation network.
 
     Attributes
@@ -51,7 +51,7 @@ class PairTerms(NamedTuple):
 def pair_terms(
     frequencies: ArrayLike,
     detectors: Sequence[Detector],
-) -> list[PairTerms]:
+) -> list[_PairTerms]:
     r"""The optimal weight and isotropic ORF of every pair :math:`a < b`.
 
     Used by :func:`effective_psd` (:math:`S_{\mathrm{eff}}^{-2} \propto
@@ -63,6 +63,16 @@ def pair_terms(
         Frequency grid in Hz.
     detectors
         Detectors in the network.
+
+    Returns
+    -------
+    list
+        One named tuple per pair, ordered by ``(first, second)``, with fields
+        ``first`` and ``second`` (indices into ``detectors``, ``first < second``),
+        ``weight``
+        (:math:`w_{ab} = \gamma_{ab} / (S_{n,a} S_{n,b})`, zero where it is not
+        finite, ``(F,)``) and ``overlap`` (the isotropic ORF
+        :math:`\gamma_{ab}`, ``(F,)``).
     """
     frequencies = np.asarray(frequencies, dtype=float)
     det_list = list(detectors)
@@ -74,7 +84,7 @@ def pair_terms(
             with np.errstate(invalid="ignore", divide="ignore"):
                 weight = gamma / (psds[i] * psds[j])
             pairs.append(
-                PairTerms(i, j, np.where(np.isfinite(weight), weight, 0.0), gamma)
+                _PairTerms(i, j, np.where(np.isfinite(weight), weight, 0.0), gamma)
             )
     return pairs
 
