@@ -62,10 +62,10 @@ from .spectrum import (
     _weighted_mean_intensity,
 )
 
-__all__ = ["CatalogModel", "interpolation_weights"]
+__all__ = ["CatalogModel"]
 
 
-def interpolation_weights(
+def _interpolation_weights(
     query: ArrayLike, reference: ArrayLike
 ) -> tuple[jax.Array, jax.Array]:
     r"""Linear interpolation from ``reference`` to ``query`` as two weights per row.
@@ -121,39 +121,21 @@ class CatalogModel:
     data field, so one compilation serves every catalog of the same shape and
     callables. The callables are static. Build with :meth:`from_catalog`;
     every method is traceable.
-
-    Attributes
-    ----------
-    intensity
-        Literal face-on reference-catalog intensity, ``(F_ref, N)``.
-    mean_intensity
-        Its mean over draws, ``(F_ref,)``, cached when the target matches the proposal.
-    node_moments
-        :math:`s_z^8 W_z G W_z^T`, ``(Z, F, F)``, cached with the mean intensity.
-    interpolation_index, interpolation_weight
-        The two-weight form of every node's :math:`W_z`
-        (:func:`interpolation_weights`), ``(Z, F)`` and ``(Z, F, 2)``.
-    intrinsic, proposal_log_prob, log_reference_frequencies, query_log_frequencies,
-    amplitude, redshift, redshift_weights, reference_distance
-        The arrays of :func:`~astrogwb.background.importance.spectrum._rescaling_arrays`.
-    merger_rate, log_prob
-        The source-frame merger rate density and joint intrinsic log density
-        of the target. If the target matches the proposal, ``log_prob`` is ``None``.
     """
 
-    intensity: jax.Array
-    mean_intensity: jax.Array | None
-    node_moments: jax.Array | None
-    interpolation_index: jax.Array
-    interpolation_weight: jax.Array
-    intrinsic: Mapping[str, jax.Array]
-    proposal_log_prob: jax.Array
-    log_reference_frequencies: jax.Array
-    query_log_frequencies: jax.Array
-    amplitude: jax.Array
-    redshift: jax.Array
-    redshift_weights: jax.Array
-    reference_distance: jax.Array
+    _intensity: jax.Array
+    _mean_intensity: jax.Array | None
+    _node_moments: jax.Array | None
+    _interpolation_index: jax.Array
+    _interpolation_weight: jax.Array
+    _intrinsic: Mapping[str, jax.Array]
+    _proposal_log_prob: jax.Array
+    _log_reference_frequencies: jax.Array
+    _query_log_frequencies: jax.Array
+    _amplitude: jax.Array
+    _redshift: jax.Array
+    _redshift_weights: jax.Array
+    _reference_distance: jax.Array
     merger_rate: MergerRate
     log_prob: IntrinsicLogProb | None
 
@@ -210,25 +192,25 @@ class CatalogModel:
             maximum_redshift,
         )
         intensity = jnp.asarray(catalog.intensity, dtype=jnp.float64)
-        index, weight = jax.vmap(interpolation_weights, in_axes=(1, None))(
-            arrays["query_log_frequencies"], arrays["log_reference_frequencies"]
+        index, weight = jax.vmap(_interpolation_weights, in_axes=(1, None))(
+            arrays["_query_log_frequencies"], arrays["_log_reference_frequencies"]
         )
         constant = log_prob is None
         return cls(
-            intensity=intensity,
-            mean_intensity=jnp.mean(intensity, axis=1) if constant else None,
-            node_moments=(
+            _intensity=intensity,
+            _mean_intensity=jnp.mean(intensity, axis=1) if constant else None,
+            _node_moments=(
                 _node_moments(
                     index,
                     weight,
                     intensity @ intensity.T / intensity.shape[1],
-                    arrays["amplitude"],
+                    arrays["_amplitude"],
                 )
                 if constant
                 else None
             ),
-            interpolation_index=index,
-            interpolation_weight=weight,
+            _interpolation_index=index,
+            _interpolation_weight=weight,
             merger_rate=merger_rate,
             log_prob=log_prob,
             **arrays,
@@ -239,11 +221,11 @@ class CatalogModel:
             params,
             merger_rate=self.merger_rate,
             log_prob=self.log_prob,
-            intrinsic=self.intrinsic,
-            proposal_log_prob=self.proposal_log_prob,
-            redshift=self.redshift,
-            redshift_weights=self.redshift_weights,
-            reference_distance=self.reference_distance,
+            intrinsic=self._intrinsic,
+            proposal_log_prob=self._proposal_log_prob,
+            redshift=self._redshift,
+            redshift_weights=self._redshift_weights,
+            reference_distance=self._reference_distance,
         )
 
     def _variance_kernel(self, shared: _SharedTerms) -> jax.Array:
@@ -256,19 +238,19 @@ class CatalogModel:
     def _squared_distance_ratio(self, shared: _SharedTerms) -> jax.Array:
         r""":math:`(d^{\mathrm{ref}}/d_{GW})^2` at each redshift node, ``(Z,)``."""
         gw_distance = shared.distance_ratio * luminosity_distance(
-            self.redshift, shared.hubble_constant, shared.omega_m
+            self._redshift, shared.hubble_constant, shared.omega_m
         )
-        return (self.reference_distance / gw_distance) ** 2
+        return (self._reference_distance / gw_distance) ** 2
 
     def _pullback(self, projector: jax.Array) -> jax.Array:
         r""":math:`W_z^T \mathbf v` at every node, ``(Z, F_ref)``, for ``projector`` ``(F,)``."""
 
         def node(index: jax.Array, weight: jax.Array) -> jax.Array:
-            reference = jnp.zeros(self.log_reference_frequencies.shape[0])
+            reference = jnp.zeros(self._log_reference_frequencies.shape[0])
             reference = reference.at[index].add(weight[:, 0] * projector)
             return reference.at[index + 1].add(weight[:, 1] * projector)
 
-        return jax.vmap(node)(self.interpolation_index, self.interpolation_weight)
+        return jax.vmap(node)(self._interpolation_index, self._interpolation_weight)
 
     def projected_cumulants(
         self,
@@ -322,10 +304,10 @@ class CatalogModel:
         ratio = self._squared_distance_ratio(shared)
         weights = jnp.exp(shared.log_weights) / shared.log_weights.shape[0]
         counts = (seconds * shared.kernel / ratio)[:, None] * weights
-        scale = (INCLINATION_MEAN * ratio * self.amplitude / seconds)[:, None]
+        scale = (INCLINATION_MEAN * ratio * self._amplitude / seconds)[:, None]
 
         def per_draw(projector: jax.Array) -> jax.Array:
-            contributions = scale * (self._pullback(projector) @ self.intensity)
+            contributions = scale * (self._pullback(projector) @ self._intensity)
             return jnp.stack(
                 [jnp.sum(counts * contributions**order) for order in orders]
             )
@@ -333,29 +315,29 @@ class CatalogModel:
         return jnp.mean(jax.lax.map(per_draw, jnp.asarray(projectors)), axis=0)
 
     def _spectral_density(self, shared: _SharedTerms) -> jax.Array:
-        mean_intensity = self.mean_intensity
-        if mean_intensity is None:
-            mean_intensity = _weighted_mean_intensity(
-                self.intensity, shared.log_weights
+        _mean_intensity = self._mean_intensity
+        if _mean_intensity is None:
+            _mean_intensity = _weighted_mean_intensity(
+                self._intensity, shared.log_weights
             )
         node_intensity = _node_intensity(
-            mean_intensity,
-            self.log_reference_frequencies,
-            self.query_log_frequencies,
-            self.amplitude,
+            _mean_intensity,
+            self._log_reference_frequencies,
+            self._query_log_frequencies,
+            self._amplitude,
         )
         return INCLINATION_MEAN * (node_intensity @ shared.kernel)
 
     def _intensity_second_moment(self, shared: _SharedTerms) -> jax.Array:
-        moments = self.node_moments
+        moments = self._node_moments
         if moments is None:
             weights = jnp.exp(shared.log_weights) / shared.log_weights.shape[0]
-            gram = (self.intensity * weights) @ self.intensity.T
+            gram = (self._intensity * weights) @ self._intensity.T
             moments = _node_moments(
-                self.interpolation_index,
-                self.interpolation_weight,
+                self._interpolation_index,
+                self._interpolation_weight,
                 gram,
-                self.amplitude,
+                self._amplitude,
             )
         return INCLINATION_RAW_SECOND_MOMENT * jnp.einsum(
             "z,zkl->kl", self._variance_kernel(shared), moments
@@ -425,19 +407,19 @@ class CatalogModel:
 jax.tree_util.register_dataclass(
     CatalogModel,
     data_fields=[
-        "intensity",
-        "mean_intensity",
-        "node_moments",
-        "interpolation_index",
-        "interpolation_weight",
-        "intrinsic",
-        "proposal_log_prob",
-        "log_reference_frequencies",
-        "query_log_frequencies",
-        "amplitude",
-        "redshift",
-        "redshift_weights",
-        "reference_distance",
+        "_intensity",
+        "_mean_intensity",
+        "_node_moments",
+        "_interpolation_index",
+        "_interpolation_weight",
+        "_intrinsic",
+        "_proposal_log_prob",
+        "_log_reference_frequencies",
+        "_query_log_frequencies",
+        "_amplitude",
+        "_redshift",
+        "_redshift_weights",
+        "_reference_distance",
     ],
     meta_fields=["merger_rate", "log_prob"],
 )

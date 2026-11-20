@@ -8,13 +8,12 @@ mean :math:`S_h`, weighting each pair by its inverse noise variance.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-
 import numpy as np
 from jax.typing import ArrayLike
 from numpy.typing import NDArray
 
-from astrogwb.detector import Detector, pair_terms, resolve_network
+from astrogwb.detector import Network
+from astrogwb.detector.effective_psd import _pair_terms
 
 __all__ = ["cross_correlation_estimator"]
 
@@ -30,14 +29,13 @@ def _combine(
 def cross_correlation_estimator(
     pair_spectral_density: ArrayLike,
     frequencies: ArrayLike,
-    network: str | Sequence[Detector],
+    network: Network,
 ) -> NDArray[np.float64]:
     r"""The network spectrum of per-pair spectra ``(..., P, F)``, ``(..., F)``.
 
     :math:`\sum_{a<b} w_{ab} Y_{ab} / \sum_{a<b} w_{ab} \gamma_{ab}` with the
-    optimal weights :math:`w_{ab} = \gamma_{ab} / (S_a S_b)` of
-    :func:`~astrogwb.detector.pair_terms`, the pairs in the order of
-    :func:`~astrogwb.detector.pair_names`; its mean is :math:`S_h` for an
+    optimal weights :math:`w_{ab} = \gamma_{ab} / (S_a S_b)` with pairs in the order of
+    :func:`~astrogwb.detector.network_pairs`; its mean is :math:`S_h` for an
     isotropic, unpolarized population. Bins where no pair has a finite weight
     return zero.
 
@@ -48,15 +46,15 @@ def cross_correlation_estimator(
     frequencies
         The frequency grid in Hz, ``(F,)``.
     network
-        A registered network name or the detectors, whose pairs index the
-        pair axis in the order of :func:`~astrogwb.detector.pair_names`.
+        Detectors keyed by name, whose pairs index the
+        pair axis in the order of :func:`~astrogwb.detector.network_pairs`.
 
     Returns
     -------
     numpy.ndarray
         The network spectrum, ``(..., F)``.
     """
-    terms = pair_terms(np.asarray(frequencies), resolve_network(network))
+    terms = _pair_terms(np.asarray(frequencies), network)
     weights = np.stack([term.weight for term in terms])
     denominator = np.sum([term.weight * term.overlap for term in terms], axis=0)
     numerator = np.sum(weights * np.asarray(pair_spectral_density), axis=-2)

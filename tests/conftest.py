@@ -28,11 +28,10 @@ jax.config.update("jax_enable_x64", True)
 from astrogwb_mock_population import (
     F_MAX,
     F_MIN,
+    IntensityData,
     build_mock_catalog,
     load_mock_population,
 )
-
-from astrogwb.background.importance.catalog import IntensityData
 
 
 @pytest.fixture

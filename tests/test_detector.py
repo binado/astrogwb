@@ -15,7 +15,6 @@ from astrogwb.detector import (
     align_detector,
     isotropic_overlap_reduction_function,
     load_detector,
-    pairwise_overlap_reduction_function,
     relative_orientation,
 )
 
@@ -170,16 +169,6 @@ def test_orf_matches_native_sky_quadrature_for_tilted_elevated_arms(
 
     expected = _sky_quadrature_orf(freqs, first, second)
     assert_close(actual, expected)
-
-
-def test_pairwise_overlap_shape_and_symmetry(frequencies: np.ndarray) -> None:
-    actual = pairwise_overlap_reduction_function(
-        frequencies, [load_detector(name) for name in ("H1", "L1", "V1")]
-    )
-
-    assert actual.shape == (3, 3, frequencies.shape[0])
-    assert_close(actual, np.transpose(actual, (1, 0, 2)))
-    assert_close(actual[0, 0, :], np.ones(actual.shape[-1]))
 
 
 @pytest.mark.parametrize(

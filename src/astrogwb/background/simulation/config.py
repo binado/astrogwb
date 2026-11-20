@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from astrogwb.detector import Detector, Networks
 from astrogwb.detector.config import _DetectorConfigDocument
-from astrogwb.waveform.metadata import WaveformMetadata
+from astrogwb.waveform.metadata import WaveformConfig
 
 __all__ = ["SimulationConfig"]
 
@@ -60,7 +60,7 @@ class SimulationConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
 
-    waveform: WaveformMetadata
+    waveform: WaveformConfig
     networks: Networks
     observer_rate_hz: Annotated[float, Field(ge=0.0, allow_inf_nan=False)]
     num_segments: Annotated[int, Field(ge=1)]

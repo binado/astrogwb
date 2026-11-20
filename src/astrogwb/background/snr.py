@@ -34,7 +34,7 @@ def _broadcast_scale_along_axis(
 def spectral_snr_squared_per_bin(
     spectral_density: jax.Array,
     effective_psd: jax.Array,
-    observation_time_sec: float | jax.Array,
+    observation_seconds: float | jax.Array,
     frequencies: ArrayLike,
     *,
     frequency_mask: jax.Array | None = None,
@@ -61,7 +61,7 @@ def spectral_snr_squared_per_bin(
         Strain spectral density.
     effective_psd
         Effective noise PSD.
-    observation_time_sec
+    observation_seconds
         Observation time in seconds.
     frequencies
         Frequency grid in Hz.
@@ -73,7 +73,7 @@ def spectral_snr_squared_per_bin(
     ratio_squared = spectral_density**2 / effective_psd**2
     widths = broadcast_along_axis(bin_widths(frequencies), ratio_squared.ndim, axis)
     scale = _broadcast_scale_along_axis(
-        2.0 * observation_time_sec,
+        2.0 * observation_seconds,
         ratio_squared.ndim,
         axis,
     )
@@ -87,7 +87,7 @@ def spectral_snr_squared_per_bin(
 def spectral_snr_squared(
     spectral_density: jax.Array,
     effective_psd: jax.Array,
-    observation_time_sec: float | jax.Array,
+    observation_seconds: float | jax.Array,
     frequencies: ArrayLike,
     *,
     frequency_mask: jax.Array | None = None,
@@ -103,8 +103,7 @@ def spectral_snr_squared(
             = \sum_i \Delta\mathrm{SNR}^2_i,
 
     with per-bin terms from :func:`spectral_snr_squared_per_bin`.
-    :math:`\sigma_i` matches :func:`astrogwb.detector.gaussian_bin_scale`, which
-    takes the observation time in years rather than seconds.
+    :math:`\sigma_i` matches :func:`astrogwb.detector.network_cross_power_std`.
 
     Parameters
     ----------
@@ -112,7 +111,7 @@ def spectral_snr_squared(
         Strain spectral density.
     effective_psd
         Effective noise PSD.
-    observation_time_sec
+    observation_seconds
         Observation time in seconds.
     frequencies
         Frequency grid in Hz.
@@ -125,7 +124,7 @@ def spectral_snr_squared(
         spectral_snr_squared_per_bin(
             spectral_density,
             effective_psd,
-            observation_time_sec,
+            observation_seconds,
             frequencies,
             frequency_mask=frequency_mask,
             axis=axis,
@@ -138,7 +137,7 @@ def spectral_snr_squared_per_log_frequency(
     spectral_density: jax.Array,
     effective_psd: jax.Array,
     frequencies: jax.Array,
-    observation_time_sec: float | jax.Array,
+    observation_seconds: float | jax.Array,
 ) -> jax.Array:
     r"""SNR density per e-fold of frequency, independent of the grid.
 
@@ -149,8 +148,7 @@ def spectral_snr_squared_per_log_frequency(
             = \left(\frac{S_h}{\sigma_{\ln f}}\right)^2
             = \frac{f_i}{\Delta f_i}\,\Delta\mathrm{SNR}^2_i,
 
-    with :math:`\sigma_{\ln f}` from
-    :func:`astrogwb.detector.log_frequency_noise_scale` and
+    with :math:`\sigma_{\ln f} = S_{\mathrm{eff}} / \sqrt{2 T f}` and
     :math:`\Delta\mathrm{SNR}^2_i` from :func:`spectral_snr_squared_per_bin`.
     Plotted against :math:`f` with a log x-axis and a linear y-axis, the area
     under the curve over a band is that band's share of :math:`\mathrm{SNR}^2`.
@@ -164,17 +162,17 @@ def spectral_snr_squared_per_log_frequency(
         Effective noise PSD.
     frequencies
         Frequency grid in Hz.
-    observation_time_sec
+    observation_seconds
         Observation time in seconds.
     """
     ratio_squared = spectral_density**2 / effective_psd**2
-    return 2.0 * observation_time_sec * frequencies * ratio_squared
+    return 2.0 * observation_seconds * frequencies * ratio_squared
 
 
 def spectral_snr(
     spectral_density: jax.Array,
     effective_psd: jax.Array,
-    observation_time_sec: float | jax.Array,
+    observation_seconds: float | jax.Array,
     frequencies: ArrayLike,
     *,
     frequency_mask: jax.Array | None = None,
@@ -189,7 +187,7 @@ def spectral_snr(
         Strain spectral density.
     effective_psd
         Effective noise PSD.
-    observation_time_sec
+    observation_seconds
         Observation time in seconds.
     frequencies
         Frequency grid in Hz.
@@ -202,7 +200,7 @@ def spectral_snr(
         spectral_snr_squared(
             spectral_density,
             effective_psd,
-            observation_time_sec,
+            observation_seconds,
             frequencies,
             frequency_mask=frequency_mask,
             axis=axis,

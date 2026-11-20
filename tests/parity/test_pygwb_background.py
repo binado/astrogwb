@@ -20,7 +20,7 @@ from numpy.typing import NDArray
 from tolerances import assert_close
 
 from astrogwb.background.spectral import omega_gw_from_spectral_density
-from astrogwb.waveform import WaveformMetadata
+from astrogwb.waveform import WaveformConfig
 from astrogwb.waveform.base import WaveformGenerator
 from astrogwb.waveform.factory import waveform_generator
 
@@ -37,7 +37,7 @@ def generator(
 ) -> WaveformGenerator:
     frequencies = pygwb_reference["cbc_frequencies"]
     return waveform_generator(
-        WaveformMetadata(
+        WaveformConfig(
             approximant="IMRPhenomD",
             minimum_frequency=float(frequencies[0]),
             maximum_frequency=float(frequencies[-1]),
@@ -63,12 +63,12 @@ def test_catalog_omega_gw_matches_pygwb(
     events: dict[str, NDArray[np.float64]],
     generator: WaveformGenerator,
 ) -> None:
-    intensity = generator.generate_batch(events)
-    count = intensity.shape[-1]
+    intensity = generator.intensity(events)
+    count = intensity.shape[0]
     rate = count / float(pygwb_reference["cbc_observation_seconds"])
 
     omega = omega_gw_from_spectral_density(
-        rate * jnp.mean(intensity, axis=-1),
+        rate * jnp.mean(intensity, axis=0),
         jnp.asarray(generator.frequencies),
         hubble_constant=hubble_constant,
     )

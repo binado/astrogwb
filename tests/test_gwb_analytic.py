@@ -15,8 +15,8 @@ from tolerances import assert_close, assert_converges
 from astrogwb.background import (
     JointMassFunction,
     PopulationFunction,
-    analytic_spectral_density,
     analytic_spectral_density_from_mass_moments,
+    inspiral_spectral_density,
     precompute_cumulative_mass_moments,
     uniform_prior_mass_moments,
 )
@@ -160,7 +160,7 @@ def analytic_functions(
         redshift_quadrature_order=order,
     )
     combined = partial(
-        analytic_spectral_density,
+        inspiral_spectral_density,
         merger_rate_fn=merger_rate_fn,
         joint_mass_prior_fn=joint_mass_priors["gaussian"],
         **bounds,
@@ -294,7 +294,7 @@ def test_uniform_shortcut_matches_generic_pipeline(
         redshift_quadrature_order=order,
     )
     generic = [
-        analytic_spectral_density(
+        inspiral_spectral_density(
             frequencies,
             hyperparameters,
             merger_rate_fn,
@@ -341,7 +341,7 @@ def test_spectrum_converges_with_quadrature_order(
     joint_mass_priors: Mapping[str, JointMassFunction],
 ) -> None:
     values = [
-        analytic_spectral_density(
+        inspiral_spectral_density(
             frequencies,
             hyperparameters,
             merger_rate_fn,
@@ -375,7 +375,7 @@ def test_spectrum_converges_with_interpolation_grid_size(
     joint_mass_priors: Mapping[str, JointMassFunction],
 ) -> None:
     values = [
-        analytic_spectral_density(
+        inspiral_spectral_density(
             frequencies,
             hyperparameters,
             merger_rate_fn,
@@ -423,7 +423,7 @@ def test_spectrum_is_zero_at_and_above_maximum_observer_frequency(
             redshift_quadrature_order=order,
         )
     else:
-        spectrum = analytic_spectral_density(
+        spectrum = inspiral_spectral_density(
             cutoff_frequencies,
             hyperparameters,
             merger_rate_fn,

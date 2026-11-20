@@ -10,12 +10,20 @@ Analytic spectra
    :toctree: generated/
    :nosignatures:
 
+   ~background.inspiral_spectral_density
+
+Fixed-mass population calculations
+----------------------------------
+
+.. autosummary::
+   :toctree: generated/
+   :nosignatures:
+
    ~background.analytic.PopulationFunction
    ~background.analytic.JointMassFunction
    ~background.analytic.uniform_prior_mass_moments
    ~background.analytic.precompute_cumulative_mass_moments
    ~background.analytic.analytic_spectral_density_from_mass_moments
-   ~background.analytic.analytic_spectral_density
 
 Spectral conversions
 --------------------

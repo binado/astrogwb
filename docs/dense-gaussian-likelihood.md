@@ -130,10 +130,10 @@ class SpectralDensityModel(Protocol):            # a pytree
 
 
 class DenseGaussianLikelihood[M: SpectralDensityModel]:   # registered pytree
-    def __init__(self, model: M, network: str | Sequence[Detector], *,
-                 frequencies, observation_time,           # years
+    def __init__(self, model: M, network: Mapping[str, Detector], *,
+                 frequencies, observation_seconds,
                  observed: Mapping[tuple[str, str], ArrayLike] | None = None,
-                 mask=None, shot_noise=True, key=None, num_draws=2**15): ...
+                 mask=None, key=None, num_draws=None, generalized_orfs=None): ...
     def log_likelihood(self, params) -> tuple[jax.Array, Mapping[str, jax.Array]]:
         """log L of shape (...), one per realization, and the prediction's extras."""
     def mean(self, params) -> jax.Array: ...                # (D,)
@@ -296,7 +296,7 @@ log_prior = grid_log_prior(priors, grids)
 posteriors = {
     name: grid_log_likelihood(
         DenseGaussianLikelihood(model, detectors, frequencies=frequencies,
-                                observation_time=1.0, observed=data[name]),
+                                observation_seconds=SECONDS_PER_YEAR, observed=data[name]),
         grids,
     )
     + log_prior
@@ -370,7 +370,7 @@ inference/
 background/importance/
     model.py         # CatalogModel, sparse node moments
     diagnostics.py   # relative ESS, amplitude cumulants
-detector/response.py # generalized_overlap_reduction_function, pair_names
+detector/response.py # generalized_overlap_reduction_function, pair_response
 ```
 
 ## Paper impact

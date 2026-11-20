@@ -2,7 +2,7 @@ r"""The background spectrum as a redshift quadrature over an intrinsic sample.
 
 The spectrum is an expectation over sources. Only the intrinsic parameters
 are left to Monte Carlo here: redshift is integrated on fixed Gauss-Legendre
-nodes in the scale factor :math:`1/(1 + z)` (:func:`redshift_quadrature`),
+nodes in the scale factor :math:`1/(1 + z)` (:func:`_redshift_quadrature`),
 and inclination is averaged exactly. Every one of :math:`N` intrinsic
 draws is placed at each of :math:`Z` nodes, so
 
@@ -34,7 +34,7 @@ intensity of a draw generated at the reference redshift :math:`z_{\mathrm{ref}}`
 
 with :math:`d^{\mathrm{ref}} = d_L(z_{\mathrm{ref}})` at the fiducials. One
 catalog serves every window whose lower edge is at or above
-:math:`z_{\mathrm{ref}}`. :func:`reference_catalog` generates one waveform per
+:math:`z_{\mathrm{ref}}`. :meth:`~astrogwb.background.importance.ReferenceCatalog.from_samples` generates one waveform per
 caller-drawn intrinsic sample, and :class:`~astrogwb.background.importance.model.CatalogModel` rescales their
 weighted mean to the nodes, interpolating in :math:`\ln f`; the node count is
 the model's, not the catalog's.
@@ -72,7 +72,7 @@ Unchecked contracts:
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from typing import Any, NamedTuple
 
 import jax
@@ -81,36 +81,22 @@ import numpy as np
 from jax.typing import ArrayLike
 from numpy.typing import NDArray
 
-from astrogwb.background.importance.catalog import (
-    ReferenceCatalog,
-    intensity_data,
-)
+from astrogwb.background.importance.catalog import ReferenceCatalog
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import (
     gw_distance_ratio,
     hubble_distance,
-    luminosity_distance,
     normalized_hubble_parameter,
 )
 from astrogwb.populations._types import Parameters
 from astrogwb.rates import differential_merger_rate
 from astrogwb.utils import gauss_legendre_nodes_weights
-from astrogwb.waveform.base import WaveformGenerator
 
 __all__ = [
     "INCLINATION_MEAN",
     "INCLINATION_RAW_SECOND_MOMENT",
-    "REFERENCE_INCLINATION",
     "phinney_kernel",
-    "redshift_quadrature",
-    "reference_catalog",
 ]
-
-#: The inclination site, fixed rather than drawn.
-_INCLINATION_SITE = "inclination"
-
-#: Reference waveforms are face-on.
-REFERENCE_INCLINATION = 0.0
 
 #: Isotropic mean relative to face-on intensity, for the (2, 2) mode alone.
 INCLINATION_MEAN = 2.0 / 5.0
@@ -118,37 +104,8 @@ INCLINATION_MEAN = 2.0 / 5.0
 #: Isotropic raw intensity product relative to the face-on product.
 INCLINATION_RAW_SECOND_MOMENT = 71.0 / 315.0
 
-# Analytic averaging and redshift rescaling require aligned-spin,
-# quasi-circular dominant-quadrupole waveforms, excluding higher modes.
-_REFERENCE_APPROXIMANTS = frozenset(
-    {
-        "AnalyticInspiral",
-        "TaylorF2",
-        "IMRPhenomD",
-        "IMRPhenomD_NRTidalv2",
-        "IMRPhenomXAS",
-        "IMRPhenomXAS_NRTidalv3",
-    }
-)
 
-
-def _require_quadrupole_waveform(generator: WaveformGenerator) -> None:
-    """Restrict analytic inclination conversion to supported quadrupole models."""
-    if generator.metadata.approximant not in _REFERENCE_APPROXIMANTS:
-        raise ValueError(
-            "reference integration requires a supported dominant-quadrupole, "
-            "aligned-spin approximant; higher modes and precession are unsupported"
-        )
-
-
-#: The luminosity distance declared by a source model.
-_LUMINOSITY_DISTANCE = "luminosity_distance"
-
-#: The redshift site.
-_REDSHIFT = "redshift"
-
-
-def redshift_quadrature(
+def _redshift_quadrature(
     minimum_redshift: float, maximum_redshift: float, num_nodes: int
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     r"""Gauss-Legendre nodes and weights for :math:`\int dz` over a window.
@@ -236,90 +193,6 @@ def phinney_kernel(
             * normalized_hubble_parameter(redshift, omega_m)
             * jnp.asarray(distance_ratio) ** 2
         )
-    )
-
-
-def reference_catalog(
-    generator: WaveformGenerator,
-    samples: Mapping[str, ArrayLike],
-    *,
-    intrinsic_sites: Sequence[str],
-    proposal_log_prob: ArrayLike,
-    reference_redshift: float,
-    parameters: Parameters,
-    chunk_size: int | None = None,
-) -> ReferenceCatalog:
-    """Place intrinsic ``samples`` at a reference redshift and generate their intensity.
-
-    ``samples`` holds one ``(N,)`` column per intrinsic site, drawn by the
-    caller from the proposal. A copy is made with inclination set to
-    :data:`REFERENCE_INCLINATION`, redshift to ``reference_redshift`` and the
-    luminosity distance to the cosmological one at that redshift times the
-    modified-propagation ratio when ``xi_0`` is in ``parameters``. No
-    extrinsic parameters are used. ``chunk_size`` is
-    :meth:`~astrogwb.waveform.WaveformGenerator.generate_batch`'s.
-
-    Parameters
-    ----------
-    generator
-        Waveform generator. Its approximant must be a supported
-        dominant-quadrupole, aligned-spin one.
-    samples
-        Source columns by name, each ``(N,)``.
-    intrinsic_sites
-        Names of the columns of ``samples`` the importance weights are
-        evaluated on. Must exclude redshift, luminosity distance and
-        inclination.
-    proposal_log_prob
-        Joint log density of each draw under the proposal, shape ``(N,)``,
-        over ``intrinsic_sites``.
-    reference_redshift
-        Redshift all waveforms are generated at.
-    parameters
-        Must carry ``H0`` and ``Omega_m``; ``xi_0`` and ``xi_n`` are optional.
-    chunk_size
-        Number of sources per chunk.
-
-    Raises
-    ------
-    ValueError
-        If the approximant is unsupported, ``intrinsic_sites`` names a
-        reserved or missing column, or ``proposal_log_prob`` is not ``(N,)``.
-    """
-    # Before the draw: ripplegw enables x64 on import, but only once the
-    # generator runs, after the sources are sampled.
-    jax.config.update("jax_enable_x64", True)
-    _require_quadrupole_waveform(generator)
-    reserved = {_INCLINATION_SITE, _LUMINOSITY_DISTANCE, _REDSHIFT}
-    if reserved & set(intrinsic_sites):
-        raise ValueError(
-            f"intrinsic_sites must exclude {sorted(reserved)}; "
-            f"got {sorted(reserved & set(intrinsic_sites))}"
-        )
-    columns = {name: np.asarray(values) for name, values in samples.items()}
-    if missing := set(intrinsic_sites) - columns.keys():
-        raise ValueError(f"intrinsic_sites missing from samples: {sorted(missing)}")
-    num_samples = len(next(iter(columns.values())))
-    log_prob = np.asarray(proposal_log_prob)
-    if log_prob.shape != (num_samples,):
-        raise ValueError(
-            f"proposal_log_prob must have shape ({num_samples},), got {log_prob.shape}"
-        )
-    distance = float(
-        luminosity_distance(reference_redshift, parameters["H0"], parameters["Omega_m"])
-        * gw_distance_ratio(reference_redshift, parameters)
-    )
-    columns[_INCLINATION_SITE] = np.full(num_samples, REFERENCE_INCLINATION)
-    columns[_REDSHIFT] = np.full(num_samples, reference_redshift)
-    columns[_LUMINOSITY_DISTANCE] = np.full(num_samples, distance)
-    data = intensity_data(generator, columns, chunk_size=chunk_size)
-    return ReferenceCatalog(
-        frequencies=data["frequencies"],
-        intensity=data["intensity"],
-        intrinsic={name: columns[name] for name in intrinsic_sites},
-        proposal_log_prob=log_prob,
-        reference_redshift=reference_redshift,
-        reference_distance=distance,
     )
 
 
@@ -416,7 +289,7 @@ def _rescaling_arrays(
             f"the window's lower edge, {minimum_redshift}, is below the reference "
             f"redshift {reference} the catalog was generated at"
         )
-    redshift, redshift_weights = redshift_quadrature(
+    redshift, redshift_weights = _redshift_quadrature(
         minimum_redshift, maximum_redshift, num_redshift_nodes
     )
     scale = (1.0 + redshift) / (1.0 + reference)
@@ -425,16 +298,16 @@ def _rescaling_arrays(
         + np.log(scale)[None, :]
     )
     return {
-        "intrinsic": {
+        "_intrinsic": {
             name: jnp.asarray(values) for name, values in catalog.intrinsic.items()
         },
-        "proposal_log_prob": jnp.asarray(catalog.proposal_log_prob, dtype=jnp.float64),
-        "log_reference_frequencies": jnp.log(jnp.asarray(catalog.frequencies)),
-        "query_log_frequencies": jnp.asarray(query_log_frequencies),
-        "amplitude": jnp.asarray(scale**4),
-        "redshift": jnp.asarray(redshift),
-        "redshift_weights": jnp.asarray(redshift_weights),
-        "reference_distance": jnp.asarray(
+        "_proposal_log_prob": jnp.asarray(catalog.proposal_log_prob, dtype=jnp.float64),
+        "_log_reference_frequencies": jnp.log(jnp.asarray(catalog.frequencies)),
+        "_query_log_frequencies": jnp.asarray(query_log_frequencies),
+        "_amplitude": jnp.asarray(scale**4),
+        "_redshift": jnp.asarray(redshift),
+        "_redshift_weights": jnp.asarray(redshift_weights),
+        "_reference_distance": jnp.asarray(
             catalog.reference_distance, dtype=jnp.float64
         ),
     }

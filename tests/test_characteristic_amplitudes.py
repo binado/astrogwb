@@ -29,10 +29,13 @@ def test_amplitude_ratio_fourth_power_is_snr_density_per_log_frequency(
     spectral_density, noise = _power_law(grid)
 
     ratio = characteristic_strain(spectral_density, grid) / characteristic_noise(
-        noise, grid, observation_time
+        noise, grid, observation_seconds=years_to_seconds(observation_time)
     )
     density = spectral_snr_squared_per_log_frequency(
-        spectral_density, noise, grid, years_to_seconds(observation_time)
+        spectral_density,
+        noise,
+        grid,
+        observation_seconds=years_to_seconds(observation_time),
     )
 
     assert_close(ratio**4, density)

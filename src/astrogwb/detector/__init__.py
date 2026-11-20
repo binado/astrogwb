@@ -4,17 +4,15 @@ from .config import (
     load_detector,
     load_network,
     load_networks_from_file,
+    map_over_pairs,
     network_pairs,
     register_detector,
     register_network,
-    resolve_network,
 )
 from .effective_psd import (
     effective_psd,
-    gaussian_bin_scale,
-    log_frequency_noise_scale,
-    pair_bin_scale,
-    pair_terms,
+    network_cross_power_std,
+    pair_cross_power_std,
 )
 from .geometry import Detector, DetectorGeometry
 from .overlap import (
@@ -22,17 +20,14 @@ from .overlap import (
     OrientationReference,
     align_detector,
     isotropic_overlap_reduction_function,
-    overlap_reduction_function,
-    pairwise_overlap_reduction_function,
+    point_source_overlap_reduction_function,
     relative_orientation,
     stokes_cross_power,
 )
 from .psd import resolve_psd_path
 from .response import (
     generalized_overlap_reduction_function,
-    pair_names,
     pair_response,
-    sample_pair_response,
 )
 from .sensitivity import (
     Sensitivity,
@@ -50,7 +45,6 @@ __all__ = [
     "Sensitivity",
     "align_detector",
     "effective_psd",
-    "gaussian_bin_scale",
     "generalized_overlap_reduction_function",
     "isotropic_overlap_reduction_function",
     "load_detector",
@@ -58,19 +52,15 @@ __all__ = [
     "load_networks_from_file",
     "load_sensitivity",
     "load_sensitivity_map",
-    "log_frequency_noise_scale",
+    "map_over_pairs",
+    "network_cross_power_std",
     "network_pairs",
-    "overlap_reduction_function",
-    "pair_bin_scale",
-    "pair_names",
+    "pair_cross_power_std",
     "pair_response",
-    "pair_terms",
-    "pairwise_overlap_reduction_function",
+    "point_source_overlap_reduction_function",
     "register_detector",
     "register_network",
     "relative_orientation",
-    "resolve_network",
     "resolve_psd_path",
-    "sample_pair_response",
     "stokes_cross_power",
 ]

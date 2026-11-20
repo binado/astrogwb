@@ -19,7 +19,6 @@ from astrogwb.detector import (
     network_pairs,
     register_detector,
     register_network,
-    resolve_network,
 )
 
 
@@ -88,8 +87,6 @@ def test_registered_extensions_build_a_network_snapshot() -> None:
     assert tuple(snapshot) == ("H1", detector_name)
     assert snapshot[detector_name] is loaded[detector_name] is detector
     assert snapshot["H1"] is loaded["H1"] is load_detector("H1")
-    assert resolve_network(network_name) == tuple(snapshot.values())
-    assert resolve_network([detector, snapshot["H1"]]) == (detector, snapshot["H1"])
     with pytest.raises(ValueError, match="already registered"):
         register_detector(detector)
     with pytest.raises(ValueError, match="already registered"):

@@ -11,9 +11,31 @@ psd_reference="ET_D_psd")`` and register it with
 Standalone detector dumps include ``name``. Simulation metadata uses the detector
 mapping key as the name.
 
-``load_network(name)`` now returns a fresh mapping from detector names to detectors.
-For APIs that accept a detector sequence, use
-``tuple(network[name] for name in sorted(network))``.
+``load_network(name)`` returns a mapping from detector names to detectors.
+Pass that mapping, or a mapping you construct, directly to detector-network
+calculations. Array rows follow :func:`~astrogwb.detector.network_pairs`,
+regardless of the mapping's insertion order.
+
+Use :func:`~astrogwb.detector.map_over_pairs` to evaluate a custom observable
+and keep its detector-pair keys.
+
+.. code-block:: python
+
+   import numpy as np
+   from astrogwb.detector import (
+       isotropic_overlap_reduction_function,
+       load_detector,
+       map_over_pairs,
+   )
+
+   frequencies = np.arange(10.0, 101.0)
+   network = {name: load_detector(name) for name in ("V1", "H1", "L1")}
+   overlaps = map_over_pairs(
+       lambda first, second: isotropic_overlap_reduction_function(
+           frequencies, first, second
+       ),
+       network,
+   )
 
 .. autosummary::
    :toctree: generated/
@@ -24,31 +46,34 @@ For APIs that accept a detector sequence, use
    ~detector.Network
    ~detector.Networks
    ~detector.Sensitivity
-   ~detector.align_detector
    ~detector.effective_psd
-   ~detector.gaussian_bin_scale
-   ~detector.generalized_overlap_reduction_function
    ~detector.isotropic_overlap_reduction_function
    ~detector.load_detector
    ~detector.load_network
    ~detector.load_networks_from_file
    ~detector.load_sensitivity
    ~detector.load_sensitivity_map
-   ~detector.log_frequency_noise_scale
+   ~detector.map_over_pairs
    ~detector.network_pairs
-   ~detector.overlap_reduction_function
-   ~detector.pair_bin_scale
-   ~detector.pair_names
+   ~detector.point_source_overlap_reduction_function
+   ~detector.pair_cross_power_std
    ~detector.pair_response
-   ~detector.pair_terms
-   ~detector.pairwise_overlap_reduction_function
    ~detector.register_detector
    ~detector.register_network
-   ~detector.relative_orientation
-   ~detector.resolve_network
-   ~detector.resolve_psd_path
-   ~detector.sample_pair_response
+
+Advanced response and noise calculations
+----------------------------------------
+
+.. autosummary::
+   :toctree: generated/
+   :nosignatures:
+
+   ~detector.generalized_overlap_reduction_function
    ~detector.stokes_cross_power
+   ~detector.align_detector
+   ~detector.relative_orientation
+   ~detector.network_cross_power_std
+   ~detector.resolve_psd_path
 
 .. autodata:: astrogwb.detector.NORMALIZED_ORF_SCALE
 

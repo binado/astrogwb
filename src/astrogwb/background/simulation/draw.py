@@ -49,7 +49,7 @@ and :math:`r_i = 1 / \sqrt{\tau \Delta f_i}`, the pair spectrum is
 :math:`E[C_{ab}] = \sum_i K_{ab,i}`, so the mean stays the incoherent signal;
 the zero-mean part (noise by noise, signal by noise, source interference) is
 scaled by :math:`r_i`, which makes the noise-by-noise term have the standard
-deviation :func:`~astrogwb.detector.pair_bin_scale`. Every bin must hold a
+deviation :func:`~astrogwb.detector.pair_cross_power_std`. Every bin must hold a
 whole number :math:`\tau \Delta f_i \ge 1` of the segment's Fourier modes, so
 that bins are sums of disjoint Fourier modes, e.g. a 1 Hz linear grid with a
 power-of-two :math:`\tau`; a log grid does not qualify. The model holds while
@@ -85,26 +85,16 @@ from numpy.typing import NDArray
 from astrogwb import __version__
 from astrogwb.background.simulation._chunks import iter_rows, pad_rows
 from astrogwb.background.simulation.config import SimulationConfig, _network_detectors
-from astrogwb.detector import (
-    Networks,
-    effective_psd,
-    gaussian_bin_scale,
-    network_pairs,
-    pair_bin_scale,
-    pair_terms,
-)
+from astrogwb.detector import Networks, network_pairs
 from astrogwb.detector.projection import project_polarizations_fd
 from astrogwb.frequency import bin_widths
-from astrogwb.utils import years_to_seconds
 from astrogwb.utils.io import atomic_h5, h5py
 from astrogwb.waveform.base import WaveformGenerator
 from astrogwb.waveform.factory import waveform_generator
-from astrogwb.waveform.metadata import WaveformMetadata
+from astrogwb.waveform.metadata import WaveformConfig
 
 __all__ = [
     "BackgroundDraw",
-    "NetworkNoise",
-    "network_noise",
     "project_background",
     "simulate_background",
 ]
@@ -132,23 +122,6 @@ _PAIR_RESPONSE_DENOMINATOR = 5.0
 #: Absolute slack on ``segment_duration * bin width`` being a whole number of
 #: Fourier modes, for the rounding of a grid's spacing.
 _MODE_TOLERANCE = 1e-6
-
-
-class NetworkNoise(NamedTuple):
-    """One network's noise on the background's grid, the likelihood inputs.
-
-    ``pair_overlap`` is the isotropic ORF :math:`\\gamma_{ab}` of each pair,
-    ``(P_n, F)``; ``pair_scale`` the per-pair Gaussian scale of
-    :func:`~astrogwb.detector.pair_bin_scale`, ``(P_n, F)``; ``effective_psd``
-    the network's :func:`~astrogwb.detector.effective_psd`, ``(F,)``; ``scale``
-    its :func:`~astrogwb.detector.gaussian_bin_scale`, ``(F,)``. The pairs are
-    in the order of :func:`~astrogwb.detector.network_pairs`.
-    """
-
-    pair_overlap: NDArray[np.float64]
-    pair_scale: NDArray[np.float64]
-    effective_psd: NDArray[np.float64]
-    scale: NDArray[np.float64]
 
 
 class _Geometry(NamedTuple):
@@ -203,9 +176,7 @@ class _Kernels(NamedTuple):
 
 
 @cache
-def _kernels(
-    waveform: WaveformMetadata, pairs: tuple[tuple[int, int], ...]
-) -> _Kernels:
+def _kernels(waveform: WaveformConfig, pairs: tuple[tuple[int, int], ...]) -> _Kernels:
     """The chunk kernels of ``waveform`` over detector ``pairs``.
 
     Cached on its hashable arguments, so every background of one waveform and
@@ -225,7 +196,7 @@ def _kernels(
 
         Padding rows have zero strain.
         """
-        plus, cross = generator.generate_polarizations_batch(sources)
+        plus, cross = generator.polarizations(sources)
         real = (jnp.arange(plus.shape[0]) < valid)[:, None]
         plus = jnp.where(real, plus, 0.0)
         cross = jnp.where(real, cross, 0.0)
@@ -451,37 +422,6 @@ def _check_format(path: str | Path, attrs: Mapping[str, object]) -> None:
     )
 
 
-def network_noise(
-    config: SimulationConfig, frequencies: NDArray[np.float64]
-) -> dict[str, NetworkNoise]:
-    """Each network's :class:`NetworkNoise` on a background's grid.
-
-    Derived from the configuration, not stored in the file.
-
-    Parameters
-    ----------
-    config
-        The configuration the background was simulated with.
-    frequencies
-        The background's frequency grid in Hz, ``(F,)``.
-    """
-    grid = np.asarray(frequencies, dtype=np.float64)
-    years = config.observation_seconds / years_to_seconds(1.0)
-    noise = {}
-    for name, network in sorted(config.networks.items()):
-        detectors = tuple(network[member] for member in sorted(network))
-        psd = effective_psd(grid, detectors)
-        noise[name] = NetworkNoise(
-            pair_overlap=np.stack(
-                [term.overlap for term in pair_terms(grid, detectors)]
-            ),
-            pair_scale=np.asarray(pair_bin_scale(grid, detectors, years)),
-            effective_psd=np.asarray(psd),
-            scale=np.asarray(gaussian_bin_scale(jnp.asarray(psd), years, grid)),
-        )
-    return noise
-
-
 def _event_columns(
     sources: Mapping[str, ArrayLike], required: Sequence[str] = SKY_COLUMNS
 ) -> dict[str, NDArray]:
@@ -510,7 +450,7 @@ def _event_columns(
 
 
 def _projection(
-    waveform: WaveformMetadata, networks: Networks
+    waveform: WaveformConfig, networks: Networks
 ) -> tuple[jax.Array, _Geometry, _Kernels]:
     jax.config.update("jax_enable_x64", True)
     frequencies = np.asarray(waveform_generator(waveform).frequencies)
@@ -520,7 +460,7 @@ def _projection(
 
 def project_background(
     sources: Mapping[str, ArrayLike],
-    waveform: WaveformMetadata,
+    waveform: WaveformConfig,
     networks: Networks,
     *,
     observation_seconds: float,
@@ -615,7 +555,7 @@ def _draw_events(
 def simulate_background(
     key: jax.Array,
     sources: Mapping[str, ArrayLike],
-    waveform: WaveformMetadata,
+    waveform: WaveformConfig,
     networks: Networks,
     *,
     observer_rate_hz: float,

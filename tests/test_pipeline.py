@@ -34,12 +34,11 @@ from astrogwb.detector import (
     isotropic_overlap_reduction_function,
     load_detector,
     network_pairs,
-    pair_bin_scale,
+    pair_cross_power_std,
 )
 from astrogwb.detector.projection import project_polarizations_fd
 from astrogwb.statistics import cross_correlation_estimator
-from astrogwb.utils import years_to_seconds
-from astrogwb.waveform import WaveformMetadata, intensity, waveform_generator
+from astrogwb.waveform import WaveformConfig, intensity, waveform_generator
 
 #: Standard errors a Monte Carlo mean may sit from its expectation.
 MAX_STANDARD_ERRORS = 5.0
@@ -56,7 +55,7 @@ def population() -> Pool:
 
 def _project(
     population: Pool,
-    waveform: WaveformMetadata,
+    waveform: WaveformConfig,
     networks: Networks,
     **kwargs,
 ) -> BackgroundDraw:
@@ -71,7 +70,7 @@ def _project(
 
 def _simulate(
     population: Pool,
-    waveform: WaveformMetadata,
+    waveform: WaveformConfig,
     networks: Networks,
     *,
     segment_duration: float,
@@ -99,7 +98,7 @@ def _simulate(
     ids=["fractional-modes", "log-grid"],
 )
 def test_segmented_noise_needs_whole_fourier_modes_per_bin(
-    population: Pool, waveform: WaveformMetadata
+    population: Pool, waveform: WaveformConfig
 ) -> None:
     with pytest.raises(ValueError, match="whole number"):
         _simulate(population, waveform, NETWORKS, segment_duration=0.5)
@@ -113,7 +112,7 @@ def test_coa_time_shifts_both_polarizations_and_preserves_intensity(
     population: Pool, approximant: str
 ) -> None:
     generator = waveform_generator(
-        WaveformMetadata.model_validate(
+        WaveformConfig.model_validate(
             {
                 **WAVEFORM.model_dump(exclude={"alpha"}),
                 "approximant": approximant,
@@ -128,18 +127,16 @@ def test_coa_time_shifts_both_polarizations_and_preserves_intensity(
     # and checks independent source times rather than a shared batch phase.
     frequencies = np.asarray(generator.frequencies)
     times = np.array([1.0, -1.0]) / (4 * frequencies[0])
-    base = generator.generate_polarizations_batch(sources)
-    shifted = jax.jit(generator.generate_polarizations_batch)(
-        {**sources, "coa_time": times}
-    )
+    base = generator.polarizations(sources)
+    shifted = jax.jit(generator.polarizations)({**sources, "coa_time": times})
     expected = np.exp(-2j * np.pi * times[:, None] * frequencies)
     for original, timed in zip(base, shifted, strict=True):
         assert_close(timed / original, expected)
     intensity_ratio = intensity(*shifted) / intensity(*base)
     assert_close(intensity_ratio, np.ones(intensity_ratio.shape))
     np.testing.assert_array_equal(
-        generator.generate_batch(sources),
-        generator.generate_batch({**sources, "coa_time": times}),
+        generator.intensity(sources),
+        generator.intensity({**sources, "coa_time": times}),
     )
 
     # At each physical site the arrival phase multiplies the strain once;
@@ -175,7 +172,7 @@ def test_polarizations_reduce_to_the_generators_intensity(
 ) -> None:
     # A 1 Hz grid puts the band's edges on Ripple's FFT grid.
     generator = waveform_generator(
-        WaveformMetadata.model_validate(
+        WaveformConfig.model_validate(
             {
                 **WAVEFORM.model_dump(exclude={"alpha"}),
                 "approximant": approximant,
@@ -185,10 +182,10 @@ def test_polarizations_reduce_to_the_generators_intensity(
     )
     sources = population
 
-    plus, cross = generator.generate_polarizations_batch(sources)
+    plus, cross = generator.polarizations(sources)
 
-    generated = np.asarray(generator.generate_batch(sources))
-    assert_close(intensity(plus, cross), generated)
+    generated = np.asarray(generator.intensity(sources))
+    assert_close(intensity(plus, cross).T, generated)
 
 
 def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum() -> None:
@@ -206,7 +203,7 @@ def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum() -> No
         sources = {
             name: values[start : start + group] for name, values in realization.items()
         }
-        generated = np.asarray(generator.generate_batch(sources)).sum(axis=1)
+        generated = np.asarray(generator.intensity(sources)).sum(axis=0)
         spectra = _project(
             sources, WAVEFORM, {"triangle": TRIANGLE}, chunk_size=8
         ).spectra["triangle"]
@@ -273,9 +270,16 @@ def test_combining_pair_spectra_of_a_pure_signal_recovers_its_spectrum(
     combined = cross_correlation_estimator(
         overlap * spectrum,
         projected.frequencies,
-        tuple(network[member] for member in sorted(network)),
+        network,
     )
 
+    reordered = dict(reversed(tuple(network.items())))
+    assert_close(
+        cross_correlation_estimator(
+            overlap * spectrum, projected.frequencies, reordered
+        ),
+        combined,
+    )
     assert_close(combined, spectrum)
 
 
@@ -315,12 +319,12 @@ def test_psd_override_preserves_pair_spectra_and_changes_combination(
         cross_correlation_estimator(
             baseline.spectra["triangle"],
             frequencies,
-            tuple(TRIANGLE[member] for member in sorted(TRIANGLE)),
+            TRIANGLE,
         ),
         cross_correlation_estimator(
             overridden.spectra["triangle"],
             frequencies,
-            tuple(changed[member] for member in sorted(changed)),
+            changed,
         ),
     )
 
@@ -345,12 +349,10 @@ def test_pure_noise_matches_the_pair_scale(empty: Pool) -> None:
         )
         for name, network in NETWORKS.items():
             scale = np.asarray(
-                pair_bin_scale(
+                pair_cross_power_std(
                     background.frequencies,
-                    tuple(network[member] for member in sorted(network)),
-                    int(OBSERVATION_SECONDS // segment_duration)
-                    * segment_duration
-                    / years_to_seconds(1.0),
+                    network,
+                    int(OBSERVATION_SECONDS // segment_duration) * segment_duration,
                 )
             )
             residuals.append((background.spectra[name] / scale).ravel())

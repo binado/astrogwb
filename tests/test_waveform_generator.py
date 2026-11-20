@@ -16,15 +16,15 @@ from tolerances import assert_close
 
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.waveform import (
-    AnalyticInspiralGenerator,
-    RippleGenerator,
-    WaveformMetadata,
+    WaveformConfig,
 )
 from astrogwb.waveform._ripple import (
     SUPPORTED_APPROXIMANTS,
     next_smooth_even,
     ripple_parameters,
 )
+from astrogwb.waveform.analytical import AnalyticInspiralGenerator
+from astrogwb.waveform.ripple import RippleGenerator
 
 
 def _fd_cbc_models(**filters: bool) -> set[str]:
@@ -44,7 +44,7 @@ def _ripple_sources() -> dict[str, np.ndarray]:
 @pytest.fixture
 def ripple_generator() -> RippleGenerator:
     return RippleGenerator(
-        WaveformMetadata(
+        WaveformConfig(
             approximant="TaylorF2",
             sampling_frequency=256.0,
             minimum_frequency=20.0,
@@ -57,7 +57,7 @@ def ripple_generator() -> RippleGenerator:
 
 def test_waveform_metadata_json_round_trip_includes_alpha() -> None:
     generator = AnalyticInspiralGenerator(
-        WaveformMetadata(
+        WaveformConfig(
             approximant="AnalyticInspiral",
             minimum_frequency=10.0,
             maximum_frequency=12.0,
@@ -71,17 +71,17 @@ def test_waveform_metadata_json_round_trip_includes_alpha() -> None:
     attrs = generator.metadata.model_dump(mode="json")
     assert attrs["alpha"] == ISCO_ALPHA
 
-    restored = WaveformMetadata.model_validate_json(json.dumps(attrs))
+    restored = WaveformConfig.model_validate_json(json.dumps(attrs))
     assert restored.model_dump(mode="json") == attrs
 
     del attrs["reference_frequency"]
     with pytest.raises(ValueError, match="reference_frequency"):
-        WaveformMetadata.model_validate_json(json.dumps(attrs))
+        WaveformConfig.model_validate_json(json.dumps(attrs))
 
 
 def test_waveform_metadata_rejects_disabled_tidal_taper_for_analytic_inspiral() -> None:
     with pytest.raises(ValidationError, match="use_taper_in_tidal_corrections=False"):
-        WaveformMetadata(
+        WaveformConfig(
             approximant="AnalyticInspiral",
             minimum_frequency=10.0,
             maximum_frequency=12.0,
@@ -104,12 +104,12 @@ def _grid_settings(**overrides: Any) -> dict[str, Any]:
 
 
 def test_waveform_metadata_reads_a_record_without_grid_settings_as_uniform() -> None:
-    attrs = WaveformMetadata.model_validate(
+    attrs = WaveformConfig.model_validate(
         _grid_settings(frequency_resolution=2.0)
     ).model_dump(mode="json")
     del attrs["frequency_spacing"]
 
-    restored = WaveformMetadata.model_validate_json(json.dumps(attrs))
+    restored = WaveformConfig.model_validate_json(json.dumps(attrs))
 
     assert restored.frequency_spacing == "linear"
 
@@ -127,7 +127,7 @@ def test_waveform_metadata_rejects_inconsistent_grid_settings(
     settings: dict[str, Any], message: str
 ) -> None:
     with pytest.raises(ValidationError, match=message):
-        WaveformMetadata.model_validate(_grid_settings(**settings))
+        WaveformConfig.model_validate(_grid_settings(**settings))
 
 
 def test_ripple_generator_calls_its_kernel_with_the_full_grid_above_dc(
@@ -146,7 +146,7 @@ def test_ripple_generator_calls_its_kernel_with_the_full_grid_above_dc(
     kernel = Mock(return_value=jnp.ones((n_grid, 2), dtype=jnp.float64))
     object.__setattr__(ripple_generator, "_kernel", kernel)
 
-    intensity = ripple_generator.generate_batch(_ripple_sources())
+    intensity = ripple_generator.intensity(_ripple_sources())
 
     kernel.assert_called_once()
     frequencies, events = kernel.call_args.args
@@ -155,7 +155,7 @@ def test_ripple_generator_calls_its_kernel_with_the_full_grid_above_dc(
     )
     assert set(events) >= {"M_c", "eta", "d_L", "iota"}
     np.testing.assert_array_equal(
-        intensity, np.ones((ripple_generator.frequencies.size, 2))
+        intensity, np.ones((2, ripple_generator.frequencies.size))
     )
 
 
@@ -166,7 +166,7 @@ def test_ripple_generator_evaluates_a_non_uniform_grid_directly() -> None:
     sampling frequency and the segment length play no part.
     """
     generator = RippleGenerator(
-        WaveformMetadata.model_validate(
+        WaveformConfig.model_validate(
             _grid_settings(
                 minimum_frequency=20.0,
                 frequency_resolution=2.0,
@@ -178,14 +178,14 @@ def test_ripple_generator_evaluates_a_non_uniform_grid_directly() -> None:
     kernel = Mock(return_value=jnp.ones((frequencies.size, 2), dtype=jnp.float64))
     object.__setattr__(generator, "_kernel", kernel)
 
-    intensity = generator.generate_batch(_ripple_sources())
+    intensity = generator.intensity(_ripple_sources())
 
     kernel.assert_called_once()
     np.testing.assert_array_equal(np.asarray(kernel.call_args.args[0]), frequencies)
     assert frequencies[0] == 20.0
     assert frequencies[-1] == 100.0
     assert np.ptp(np.diff(frequencies)) > 0.0
-    assert intensity.shape == (frequencies.size, 2)
+    assert intensity.shape == (2, frequencies.size)
     assert generator.n_samples is None
     assert generator.segment_duration is None
 
@@ -201,7 +201,7 @@ def test_ripple_generate_batch_has_no_nan_gradient(
     sources = _ripple_sources()
 
     def total_intensity(distance: jax.Array) -> jax.Array:
-        return ripple_generator.generate_batch(
+        return ripple_generator.intensity(
             {**sources, "luminosity_distance": distance}
         ).sum()
 
@@ -223,7 +223,7 @@ def test_ripple_generator_infers_df_from_its_own_5_smooth_grid() -> None:
     """
     with pytest.raises(ValueError, match="not on Ripple's frequency grid"):
         RippleGenerator(
-            WaveformMetadata(
+            WaveformConfig(
                 approximant="TaylorF2",
                 sampling_frequency=1234.0,
                 minimum_frequency=2.0,
@@ -234,7 +234,7 @@ def test_ripple_generator_infers_df_from_its_own_5_smooth_grid() -> None:
         )
 
     aligned = RippleGenerator(
-        WaveformMetadata(
+        WaveformConfig(
             approximant="TaylorF2",
             sampling_frequency=1234.0,
             minimum_frequency=2.0 * (1234.0 / 1250.0),
@@ -243,7 +243,8 @@ def test_ripple_generator_infers_df_from_its_own_5_smooth_grid() -> None:
             frequency_resolution=1.0,
         )
     )
-    frequencies, _ = aligned(_ripple_sources())
+    frequencies = aligned.frequencies
+    assert aligned.intensity(_ripple_sources()).shape == (2, frequencies.size)
     spacing = np.diff(np.asarray(frequencies))
     assert_close(spacing, np.full(spacing.shape, 0.9872))
 
@@ -280,7 +281,7 @@ def test_next_smooth_even_is_the_smallest_admissible_length(minimum: int) -> Non
 def test_check_sources_rejects_values_the_approximant_cannot_carry() -> None:
     """An aligned-spin model would otherwise ignore in-plane spin in silence."""
     generator = RippleGenerator(
-        WaveformMetadata(
+        WaveformConfig(
             approximant="IMRPhenomXAS",
             sampling_frequency=256.0,
             minimum_frequency=20.0,
@@ -297,7 +298,7 @@ def test_check_sources_rejects_values_the_approximant_cannot_carry() -> None:
 def test_generate_batch_does_not_validate_values(
     ripple_generator: RippleGenerator,
 ) -> None:
-    """``generate_batch`` lets through what ``check_sources`` rejects.
+    """``intensity`` lets through what ``check_sources`` rejects.
 
     Value checks would need a host sync on every chunk, breaking traced use.
     """
@@ -306,8 +307,8 @@ def test_generate_batch_does_not_validate_values(
     with pytest.raises(ValueError, match="non-negative"):
         ripple_generator.check_sources(sources)
 
-    intensity = ripple_generator.generate_batch(sources)
-    assert intensity.shape == (ripple_generator.frequencies.size, 2)
+    intensity = ripple_generator.intensity(sources)
+    assert intensity.shape == (2, ripple_generator.frequencies.size)
 
 
 @pytest.mark.parametrize(
@@ -325,9 +326,9 @@ def test_generate_batch_still_rejects_names_and_shapes(
 ) -> None:
     """Names and shapes are static, so they raise under tracing too."""
     with pytest.raises(ValueError, match=message):
-        ripple_generator.generate_batch(sources)
+        ripple_generator.intensity(sources)
     with pytest.raises(ValueError, match=message):
-        jax.jit(ripple_generator.generate_batch)(sources)
+        jax.jit(ripple_generator.intensity)(sources)
 
 
 def _source_frame_sources(redshift: np.ndarray) -> dict[str, np.ndarray]:
@@ -349,8 +350,8 @@ def test_source_frame_masses_and_redshift_give_the_detector_frame_intensity(
     derived = _source_frame_sources(np.array([0.1, 0.5]))
 
     assert_close(
-        ripple_generator.generate_batch(derived),
-        ripple_generator.generate_batch(_ripple_sources()),
+        ripple_generator.intensity(derived),
+        ripple_generator.intensity(_ripple_sources()),
     )
 
 
@@ -365,8 +366,8 @@ def test_explicit_detector_frame_masses_take_precedence(
     }
 
     assert_close(
-        ripple_generator.generate_batch(sources),
-        ripple_generator.generate_batch(_ripple_sources()),
+        ripple_generator.intensity(sources),
+        ripple_generator.intensity(_ripple_sources()),
     )
 
 
@@ -449,7 +450,7 @@ def test_intensity_matches_the_gwmock_backend(approximant: str) -> None:
     }
     sources = _parity_sources(approximant)
     generator = RippleGenerator(
-        WaveformMetadata.model_validate(
+        WaveformConfig.model_validate(
             {"approximant": approximant, "frequency_resolution": 1.0, **settings}
         )
     )
@@ -459,10 +460,10 @@ def test_intensity_matches_the_gwmock_backend(approximant: str) -> None:
 
     # Jitted, like every real caller: the generator carries no jit of its own,
     # and the precessing models are far too slow to evaluate op by op.
-    ours = jax.jit(generator.generate_batch)(sources)
+    ours = jax.jit(generator.intensity)(sources)
 
     np.testing.assert_array_equal(np.asarray(generator.frequencies), frequencies)
-    assert_close(ours, intensity)
+    assert_close(ours, intensity.T)
 
 
 @pytest.mark.integration
@@ -483,10 +484,10 @@ def test_log_intensity_agrees_with_a_dense_uniform_grid(approximant: str) -> Non
     }
     sources = _parity_sources(approximant)
     dense = RippleGenerator(
-        WaveformMetadata.model_validate({**band, "frequency_resolution": 0.25})
+        WaveformConfig.model_validate({**band, "frequency_resolution": 0.25})
     )
     log = RippleGenerator(
-        WaveformMetadata.model_validate(
+        WaveformConfig.model_validate(
             {**band, "frequency_spacing": "log", "frequency_resolution": 1.0}
         )
     )
@@ -495,7 +496,7 @@ def test_log_intensity_agrees_with_a_dense_uniform_grid(approximant: str) -> Non
     assert union[1] - union[0] == 0.25
     assert union[-1] == frequencies[-1]
 
-    intensity = np.asarray(jax.jit(log.generate_batch)(sources))
+    intensity = np.asarray(jax.jit(log.intensity)(sources))
     union_intensity = np.asarray(
         jax.jit(dense._kernel)(
             jnp.asarray(union), ripple_parameters(approximant, sources)
@@ -504,7 +505,7 @@ def test_log_intensity_agrees_with_a_dense_uniform_grid(approximant: str) -> Non
 
     assert np.all(np.isfinite(intensity))
     assert np.all(intensity >= 0.0)
-    assert_close(intensity, union_intensity[np.searchsorted(union, frequencies)])
+    assert_close(intensity, union_intensity[np.searchsorted(union, frequencies)].T)
 
 
 @pytest.mark.integration
@@ -518,7 +519,7 @@ def test_untapered_nrtidal_intensity_survives_the_normal_merger_cutoff() -> None
         "lambda_2": np.array([500.0]),
     }
     tapered = RippleGenerator(
-        WaveformMetadata(
+        WaveformConfig(
             approximant="IMRPhenomXAS_NRTidalv3",
             sampling_frequency=8192.0,
             minimum_frequency=2.0,
@@ -528,7 +529,7 @@ def test_untapered_nrtidal_intensity_survives_the_normal_merger_cutoff() -> None
         )
     )
     untapered = RippleGenerator(
-        WaveformMetadata(
+        WaveformConfig(
             approximant="IMRPhenomXAS_NRTidalv3",
             sampling_frequency=8192.0,
             minimum_frequency=2.0,
@@ -539,12 +540,13 @@ def test_untapered_nrtidal_intensity_survives_the_normal_merger_cutoff() -> None
         )
     )
 
-    frequencies, tapered_intensity = tapered(sources)
-    _, untapered_intensity = untapered(sources)
+    frequencies = tapered.frequencies
+    tapered_intensity = tapered.intensity(sources)
+    untapered_intensity = untapered.intensity(sources)
     high_frequency = np.asarray(frequencies) > 3000.0
 
-    assert np.all(np.asarray(tapered_intensity)[high_frequency] == 0.0)
-    assert np.all(np.asarray(untapered_intensity)[high_frequency] > 0.0)
+    assert np.all(np.asarray(tapered_intensity)[..., high_frequency] == 0.0)
+    assert np.all(np.asarray(untapered_intensity)[..., high_frequency] > 0.0)
 
 
 @pytest.mark.integration
@@ -559,11 +561,11 @@ def test_generate_batch_is_traceable_and_values_do_not_recompile(
         # The body runs once per trace, so this counts compilations.
         nonlocal traces
         traces += 1
-        return ripple_generator.generate_batch(catalog)
+        return ripple_generator.intensity(catalog)
 
     jitted = jax.jit(counted)
 
-    assert_close(jitted(sources), ripple_generator.generate_batch(sources))
+    assert_close(jitted(sources), ripple_generator.intensity(sources))
 
     shifted = {name: values * 1.01 for name, values in sources.items()}
     assert np.all(np.asarray(jitted(shifted)) > 0.0)

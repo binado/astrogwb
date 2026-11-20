@@ -19,7 +19,7 @@ from astrogwb.waveform._ripple import (
     ripple_parameters,
 )
 from astrogwb.waveform.base import WaveformGenerator
-from astrogwb.waveform.metadata import WaveformMetadata
+from astrogwb.waveform.metadata import WaveformConfig
 
 __all__ = ["RippleGenerator"]
 
@@ -55,7 +55,7 @@ class RippleGenerator(WaveformGenerator):
 
     def __init__(
         self,
-        metadata: WaveformMetadata,
+        metadata: WaveformConfig,
     ) -> None:
         super().__init__(metadata)
         segment_duration: float | None
@@ -99,7 +99,7 @@ class RippleGenerator(WaveformGenerator):
         )
 
     @staticmethod
-    def _fft_grid(metadata: WaveformMetadata) -> tuple[float, int, np.ndarray]:
+    def _fft_grid(metadata: WaveformConfig) -> tuple[float, int, np.ndarray]:
         """Return the segment duration, sample count and one-sided FFT grid.
 
         The ``"linear"`` spacing: Ripple's own uniform grid from ``delta_f`` to
@@ -195,7 +195,7 @@ class RippleGenerator(WaveformGenerator):
 
     @require_x64
     def _generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
-        """Generate power in ``(frequency, sample)`` layout via Ripple.
+        """Generate intensity in ``(sample, frequency)`` layout via Ripple.
 
         With ``"linear"`` spacing the band is sliced from the output, not the
         input: the NRTidal and precessing models read the grid's spacing and
@@ -203,7 +203,7 @@ class RippleGenerator(WaveformGenerator):
         """
         events = ripple_parameters(self.metadata.approximant, source_parameters)
         power = self._kernel(jnp.asarray(self._frequencies), events)
-        return power[self._band, :]
+        return power[self._band, :].T
 
     @require_x64
     def _generate_polarizations_batch(
@@ -216,9 +216,3 @@ class RippleGenerator(WaveformGenerator):
         events = ripple_parameters(self.metadata.approximant, source_parameters)
         plus, cross = self._polarization_kernel(jnp.asarray(self._frequencies), events)
         return plus[:, self._band], cross[:, self._band]
-
-    def __call__(
-        self, source_parameters: Mapping[str, ArrayLike]
-    ) -> tuple[jax.Array, jax.Array]:
-        """Return the Ripple frequency axis and power."""
-        return self.frequencies, self.generate_batch(source_parameters)

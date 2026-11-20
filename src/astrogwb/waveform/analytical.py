@@ -301,7 +301,7 @@ class AnalyticInspiralGenerator(WaveformGenerator):
         assert self.metadata.alpha is not None
         return inspiral_intensity(
             frequencies, prepared_parameters, alpha=self.metadata.alpha
-        ).T
+        )
 
     def _generate_polarizations_batch(
         self, source_parameters: Mapping[str, ArrayLike]
@@ -328,8 +328,3 @@ class AnalyticInspiralGenerator(WaveformGenerator):
             alpha=self.metadata.alpha,
         )
         return jnp.sqrt(face_on / 2.0), inclination
-
-    def __call__(
-        self, source_parameters: Mapping[str, ArrayLike]
-    ) -> tuple[jax.Array, jax.Array]:
-        return jnp.asarray(self.frequencies), self.generate_batch(source_parameters)

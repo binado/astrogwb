@@ -19,20 +19,17 @@ from astrogwb_tiny_pipeline import (
     event_pool,
     write_population_csv,
 )
-from tolerances import assert_close
 
 from astrogwb.background.simulation import (
     BackgroundDraw,
     SimulationConfig,
-    network_noise,
-    network_spectra_ensemble,
     project_background,
+    read_background_ensemble,
     read_event_pool,
     realization_key,
     simulate_background,
 )
-from astrogwb.detector import Networks, network_pairs, pair_bin_scale, pair_terms
-from astrogwb.utils import years_to_seconds
+from astrogwb.detector import Networks, network_pairs
 
 SEED = 41
 CHUNK = 8
@@ -219,26 +216,6 @@ def test_config_copies_and_sorts_network_mappings() -> None:
     assert config.networks == NETWORKS
 
 
-def test_network_noise_follows_the_pair_axis_of_the_draw(draw: BackgroundDraw) -> None:
-    config = _config()
-    noise = network_noise(config, draw.frequencies)
-    years = config.observation_seconds / years_to_seconds(1.0)
-
-    assert noise.keys() == draw.spectra.keys()
-    for name, spectrum in draw.spectra.items():
-        network = NETWORKS[name]
-        assert noise[name].pair_scale.shape == spectrum.shape
-        assert noise[name].pair_overlap.shape == spectrum.shape
-        for row, (first, second) in enumerate(network_pairs(network)):
-            detectors = (network[first], network[second])
-            (terms,) = pair_terms(draw.frequencies, detectors)
-            np.testing.assert_array_equal(noise[name].pair_overlap[row], terms.overlap)
-            assert_close(
-                noise[name].pair_scale[row],
-                pair_bin_scale(draw.frequencies, detectors, years)[0],
-            )
-
-
 def test_coherent_joint_draw_reuses_the_shared_baseline() -> None:
     draw = _simulate(_config(incoherent=False))
 
@@ -260,8 +237,11 @@ def ensemble(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return root
 
 
-def test_network_spectra_ensemble_stacks_every_draws_pairs(ensemble: Path) -> None:
-    triangle, pair = network_spectra_ensemble(ensemble, SEED, 2, ["triangle", "pair"])
+def test_read_background_ensemble_stacks_every_draws_pairs(ensemble: Path) -> None:
+    draws = read_background_ensemble(
+        [ensemble / f"{SEED}-{i}.h5" for i in range(2)], ["triangle", "pair"]
+    )
+    triangle, pair = draws["triangle"], draws["pair"]
 
     assert triangle["pair_spectral_density"].shape[:2] == (2, 3)
     assert triangle["n_events"].shape == (2,)
@@ -271,10 +251,12 @@ def test_network_spectra_ensemble_stacks_every_draws_pairs(ensemble: Path) -> No
     )
 
 
-def test_network_spectra_ensemble_counts_the_events_of_every_segment(
+def test_read_background_ensemble_counts_the_events_of_every_segment(
     ensemble: Path,
 ) -> None:
-    (stacked,) = network_spectra_ensemble(ensemble, SEED, 2, ["pair"])
+    stacked = read_background_ensemble(
+        [ensemble / f"{SEED}-{i}.h5" for i in range(2)], ["pair"]
+    )["pair"]
 
     expected = [
         BackgroundDraw.read(ensemble / f"{SEED}-{index}.h5")[0].segment_counts.sum()
@@ -283,12 +265,13 @@ def test_network_spectra_ensemble_counts_the_events_of_every_segment(
     np.testing.assert_array_equal(stacked["n_events"], expected)
 
 
-def test_network_spectra_ensemble_from_start_is_a_suffix(ensemble: Path) -> None:
-    (full,) = network_spectra_ensemble(ensemble, SEED, 2, ["triangle"])
-    (second,) = network_spectra_ensemble(ensemble, SEED, 2, ["triangle"], start=1)
+def test_read_background_ensemble_respects_path_order(ensemble: Path) -> None:
+    paths = [ensemble / f"{SEED}-{i}.h5" for i in range(2)]
+    full = read_background_ensemble(paths, ["triangle"])["triangle"]
+    reverse = read_background_ensemble(paths[::-1], ["triangle"])["triangle"]
 
     np.testing.assert_array_equal(
-        second["pair_spectral_density"], full["pair_spectral_density"][1:]
+        reverse["pair_spectral_density"], full["pair_spectral_density"][::-1]
     )
 
 
