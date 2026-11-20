@@ -563,11 +563,6 @@ class DenseGaussianLikelihood[M: SpectralDensityModel]:
         """The counted entries, boolean ``(P, F)``."""
         return self._network.mask
 
-    @property
-    def observation_time(self) -> jax.Array:
-        """Observation time :math:`T` in years, ``()``."""
-        return self._network.observation_time
-
     def mean(self, params: Mapping[str, ArrayLike]) -> jax.Array:
         r"""The expected data :math:`\gamma_{ab}(f_k) S_h(f_k)` at ``params``, ``(D,)``.
 
