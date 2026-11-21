@@ -28,7 +28,7 @@ def source_parameters() -> dict[str, np.ndarray]:
     }
 
 
-def test_analytic_generator_evaluates_on_exact_metadata_grid(
+def test_analytic_generator_evaluates_on_exact_config_grid(
     source_parameters: dict[str, np.ndarray],
 ) -> None:
     generator = AnalyticInspiralGenerator(

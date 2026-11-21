@@ -13,6 +13,7 @@ from .effective_psd import (
     effective_psd,
     network_cross_power_std,
     pair_cross_power_std,
+    pair_weights,
 )
 from .geometry import Detector, DetectorGeometry
 from .overlap import (
@@ -20,6 +21,7 @@ from .overlap import (
     OrientationReference,
     align_detector,
     isotropic_overlap_reduction_function,
+    network_overlap_reduction_function,
     point_source_overlap_reduction_function,
     relative_orientation,
     stokes_cross_power,
@@ -54,9 +56,11 @@ __all__ = [
     "load_sensitivity_map",
     "map_over_pairs",
     "network_cross_power_std",
+    "network_overlap_reduction_function",
     "network_pairs",
     "pair_cross_power_std",
     "pair_response",
+    "pair_weights",
     "point_source_overlap_reduction_function",
     "register_detector",
     "register_network",

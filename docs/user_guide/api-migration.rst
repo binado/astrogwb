@@ -41,6 +41,7 @@ Construct ``WaveformConfig`` with the same fields as ``WaveformMetadata`` and
 pass it to ``waveform_generator()``. Use ``generator.frequencies`` for the
 frequency grid and ``generator.intensity(sources)`` for the former callable and
 ``generate_batch()``. Intensity is now shaped ``(sources, frequencies)``.
+The generator's ``metadata`` attribute is now ``config``.
 For one source, pass length-one columns and take the first row. Use
 ``generator.polarizations(sources)`` for the former
 ``generate_polarizations_batch()``. Both polarizations use frequency last.
@@ -61,12 +62,19 @@ with ``read_background_ensemble(paths, names)``, where ``paths`` contains
 Index the result by network name. Existing background files and CLI options
 use the same format and units.
 
-Use ``observation_seconds=years * SECONDS_PER_YEAR`` for previous year-valued
-likelihood and characteristic-noise arguments. Pass the duration by keyword
-to ``characteristic_noise()``. SNR functions already took
-seconds and now use the same argument name. Use ``pair_cross_power_std()``
-and ``network_cross_power_std()`` in place of ``pair_bin_scale()`` and
-``gaussian_bin_scale()``, converting their previous year-valued arguments.
+Observation times stay in years: the likelihoods, ``effective_psd`` noise
+scales and ``characteristic_noise()`` take ``observation_time`` in years
+(``characteristic_noise()`` by keyword), and convert with
+``years_to_seconds()``. The SNR functions and ``project_background()`` take
+durations in seconds under the name ``observation_seconds``. Use
+``pair_cross_power_std()`` and ``network_cross_power_std()`` in place of
+``pair_bin_scale()`` and ``gaussian_bin_scale()``.
+
+Networks are mappings keyed by detector name, and ``network_pairs()`` raises
+``ValueError`` for fewer than two detectors or a key that differs from its
+detector's name. Use ``network_overlap_reduction_function()`` for the isotropic
+ORF of every pair, ``(pairs, frequencies)``, and ``pair_weights()`` for the
+optimal cross-correlation weights.
 
 Recover the four fields previously returned by ``network_noise()`` per network
 from a saved draw and its configuration as follows.
@@ -82,11 +90,11 @@ from a saved draw and its configuration as follows.
        network_pairs,
        pair_cross_power_std,
    )
-   from astrogwb.utils import stack_pairs
+   from astrogwb.utils import stack_pairs, years_to_seconds
 
    frequencies = draw.frequencies
    network = config.networks[name]
-   seconds = config.observation_seconds
+   years = config.observation_seconds / years_to_seconds(1.0)
    pair_overlap = stack_pairs(
        map_over_pairs(
            lambda first, second: isotropic_overlap_reduction_function(
@@ -96,9 +104,9 @@ from a saved draw and its configuration as follows.
        ),
        network_pairs(network),
    )
-   pair_scale = pair_cross_power_std(frequencies, network, seconds)
+   pair_scale = pair_cross_power_std(frequencies, network, years)
    psd = effective_psd(frequencies, network)
-   scale = network_cross_power_std(jnp.asarray(psd), seconds, frequencies)
+   scale = network_cross_power_std(jnp.asarray(psd), years, frequencies)
 
 Use ``likelihood.masked_generalized_orfs`` to inspect the matrices on the
 counted entries. The likelihood constructor still takes full-grid matrices

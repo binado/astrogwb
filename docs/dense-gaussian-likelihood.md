@@ -131,7 +131,7 @@ class SpectralDensityModel(Protocol):            # a pytree
 
 class DenseGaussianLikelihood[M: SpectralDensityModel]:   # registered pytree
     def __init__(self, model: M, network: Mapping[str, Detector], *,
-                 frequencies, observation_seconds,
+                 frequencies, observation_time,
                  observed: Mapping[tuple[str, str], ArrayLike] | None = None,
                  mask=None, key=None, num_draws=None, generalized_orfs=None): ...
     def log_likelihood(self, params) -> tuple[jax.Array, Mapping[str, jax.Array]]:
@@ -148,7 +148,7 @@ covariance or the solve from that factor; the factor itself is private.
 
 The likelihood's children are the model, its private network and the data;
 `shot_noise` is static. JAX rebuilds it without calling `__init__`, which
-resolves the detectors, builds the noise scale and ORFs and draws the
+resolves the network, builds the noise scale and ORFs and draws the
 connected overlap once, outside JAX transformations: one compilation per
 structure and shape serves every model and data set.
 
@@ -190,7 +190,7 @@ def node_moment(index, weights, gram):    # index (F,), weights (F, 2)
 
 The redshift nodes and the reference redshift are fixed, so the query
 frequencies $f_k s_z$, and with them $(i_k, t_k)$, do not depend on
-$\Lambda$: they are formed once (`interpolation_weights`). Queries above the
+$\Lambda$: they are formed once, in `CatalogModel.from_catalog`. Queries above the
 reference grid get zero weights, matching `jnp.interp(..., right=0.0)`; queries
 below it clamp to the first reference value, matching `jnp.interp`'s default.
 
@@ -220,7 +220,7 @@ in the units of the normalized isotropic ORF ($\gamma_{ab} = \tfrac52\Gamma_{ab}
 
 ```python
 def generalized_overlap_reduction_function(
-    key, num_draws, frequencies, detectors, *,
+    key, num_draws, frequencies, network, *,
     components=("II", "QQ", "UU", "VV"), chunk_size=4096,
 ) -> dict[StokesPair, jax.Array]:  # each (P, F, P, F)
 ```
@@ -295,8 +295,8 @@ model = CatalogModel.from_catalog(...)
 log_prior = grid_log_prior(priors, grids)
 posteriors = {
     name: grid_log_likelihood(
-        DenseGaussianLikelihood(model, detectors, frequencies=frequencies,
-                                observation_seconds=SECONDS_PER_YEAR, observed=data[name]),
+        DenseGaussianLikelihood(model, network, frequencies=frequencies,
+                                observation_time=1.0, observed=data[name]),
         grids,
     )
     + log_prior
@@ -333,12 +333,10 @@ the weights take the likelihood; the estimate and the variance take arrays:
   shot noise.
 - A variance budget is the same call mapped over `covariance_components`,
   each term contributing $\mathbf w^T\Sigma^X\mathbf w$; the terms sum to the
-  variance. It needs a likelihood built with `keep_generalized_orfs=True`,
-  whose `covariance_components` splits $\Sigma$ into detector noise, count
-  ($\Gamma^{II}$, needs the model's `merger_rate`), intensity ($\Gamma^{II}$
-  less the count), linear ($\Gamma^{QQ}$, $\Gamma^{UU}$) and circular
-  polarization ($\Gamma^{VV}$, and $\Gamma^{IV}$, $\Gamma^{VI}$ when kept).
-  Keeping the ORFs changes memory, not the covariance.
+  variance. It needs a `DenseGaussianLikelihood`, whose `covariance_components`
+  splits $\Sigma$ into detector noise, count ($\Gamma^{II}$, needs the model's
+  `merger_rate`), intensity ($\Gamma^{II}$ less the count), linear
+  ($\Gamma^{QQ}$, $\Gamma^{UU}$) and circular polarization ($\Gamma^{VV}$).
 
 ### D8. Deleted
 

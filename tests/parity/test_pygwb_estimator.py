@@ -37,7 +37,7 @@ def test_pair_noise_scale_matches_pygwb_sigma(
     pygwb_reference: Mapping[str, NDArray[np.float64]],
     frequencies: NDArray[np.float64],
     hubble_constant: float,
-    observation_seconds: float,
+    observation_years: float,
     exact_network: Network,
 ) -> None:
     cross_power_sigma = spectral_density_from_omega_gw(
@@ -48,7 +48,7 @@ def test_pair_noise_scale_matches_pygwb_sigma(
         hubble_constant=hubble_constant,
     )
 
-    scale = pair_cross_power_std(frequencies, exact_network, observation_seconds)
+    scale = pair_cross_power_std(frequencies, exact_network, observation_years)
 
     assert_close(scale[pair], cross_power_sigma)
 
@@ -57,7 +57,7 @@ def test_network_noise_scale_matches_pygwb_combined_sigma(
     pygwb_reference: Mapping[str, NDArray[np.float64]],
     frequencies: NDArray[np.float64],
     hubble_constant: float,
-    observation_seconds: float,
+    observation_years: float,
     exact_network: Network,
 ) -> None:
     combined_sigma = spectral_density_from_omega_gw(
@@ -68,7 +68,7 @@ def test_network_noise_scale_matches_pygwb_combined_sigma(
 
     scale = network_cross_power_std(
         jnp.asarray(effective_psd(frequencies, exact_network)),
-        observation_seconds,
+        observation_years,
         frequencies,
     )
 

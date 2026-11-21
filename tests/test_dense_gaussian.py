@@ -409,7 +409,7 @@ def _triangle_likelihood(
         model,
         detectors,
         frequencies=frequencies,
-        observation_seconds=OBSERVATION_TIME * SECONDS_PER_YEAR,
+        observation_time=OBSERVATION_TIME,
         observed=observed,
         **settings,
     )

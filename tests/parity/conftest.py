@@ -27,6 +27,7 @@ from numpy.typing import NDArray
 # Module scope, above the library imports: must precede any array creation.
 jax.config.update("jax_enable_x64", True)
 
+from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.detector import (
     Detector,
     DetectorGeometry,
@@ -92,9 +93,9 @@ def frequencies(
 
 
 @pytest.fixture(scope="session")
-def observation_seconds(pygwb_reference: Mapping[str, NDArray[np.float64]]) -> float:
+def observation_years(pygwb_reference: Mapping[str, NDArray[np.float64]]) -> float:
     """The estimator's segment duration, in the years the library takes."""
-    return float(pygwb_reference["segment_duration"])
+    return float(pygwb_reference["segment_duration"]) / SECONDS_PER_YEAR
 
 
 @pytest.fixture(scope="session")

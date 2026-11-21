@@ -5,7 +5,7 @@ Inference
 
 Use :class:`~astrogwb.inference.DiagonalGaussianLikelihood` for detector noise
 alone and :class:`~astrogwb.inference.DenseGaussianLikelihood` to include
-background shot noise. Both take the observation duration in seconds.
+background shot noise. Both take the observation time in years.
 
 .. autosummary::
    :toctree: generated/

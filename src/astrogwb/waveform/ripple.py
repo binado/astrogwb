@@ -55,13 +55,13 @@ class RippleGenerator(WaveformGenerator):
 
     def __init__(
         self,
-        metadata: WaveformConfig,
+        config: WaveformConfig,
     ) -> None:
-        super().__init__(metadata)
+        super().__init__(config)
         segment_duration: float | None
         n_samples: int | None
-        if metadata.frequency_spacing == "linear":
-            segment_duration, n_samples, grid = self._fft_grid(metadata)
+        if config.frequency_spacing == "linear":
+            segment_duration, n_samples, grid = self._fft_grid(config)
             band = self._resolve_band(grid)
         else:
             # The models used leave |h+|^2 + |hx|^2 independent of the grid
@@ -69,10 +69,10 @@ class RippleGenerator(WaveformGenerator):
             segment_duration = None
             n_samples = None
             grid = frequency_grid(
-                metadata.frequency_spacing,
-                metadata.minimum_frequency,
-                metadata.maximum_frequency,
-                metadata.frequency_resolution,
+                config.frequency_spacing,
+                config.minimum_frequency,
+                config.maximum_frequency,
+                config.frequency_resolution,
             )
             band = slice(None)
 
@@ -81,32 +81,32 @@ class RippleGenerator(WaveformGenerator):
         object.__setattr__(self, "_frequencies", grid)
         object.__setattr__(self, "_band", band)
         kernel_options = {
-            "use_taper_in_tidal_corrections": metadata.use_taper_in_tidal_corrections
+            "use_taper_in_tidal_corrections": config.use_taper_in_tidal_corrections
         }
         object.__setattr__(
             self,
             "_kernel",
             build_intensity_kernel(
-                metadata.approximant, metadata.reference_frequency, **kernel_options
+                config.approximant, config.reference_frequency, **kernel_options
             ),
         )
         object.__setattr__(
             self,
             "_polarization_kernel",
             build_polarization_kernel(
-                metadata.approximant, metadata.reference_frequency, **kernel_options
+                config.approximant, config.reference_frequency, **kernel_options
             ),
         )
 
     @staticmethod
-    def _fft_grid(metadata: WaveformConfig) -> tuple[float, int, np.ndarray]:
+    def _fft_grid(config: WaveformConfig) -> tuple[float, int, np.ndarray]:
         """Return the segment duration, sample count and one-sided FFT grid.
 
         The ``"linear"`` spacing: Ripple's own uniform grid from ``delta_f`` to
         Nyquist, of which the band is a slice.
         """
-        resolution = metadata.frequency_resolution
-        resolved_sampling_frequency = metadata.sampling_frequency
+        resolution = config.frequency_resolution
+        resolved_sampling_frequency = config.sampling_frequency
         # Rounded up to a power of two: only ever finer than asked.
         segment_duration = float(2.0 ** np.ceil(np.log2(1.0 / resolution)))
         n_samples = next_smooth_even(
@@ -129,25 +129,25 @@ class RippleGenerator(WaveformGenerator):
         reported as a misalignment.
         """
         in_band = np.flatnonzero(
-            (grid >= self.metadata.minimum_frequency)
-            & (grid <= self.metadata.maximum_frequency)
+            (grid >= self.config.minimum_frequency)
+            & (grid <= self.config.maximum_frequency)
         )
         if in_band.size < 2:
             raise ValueError(
                 "Ripple's in-band frequency grid has fewer than two bins in "
-                f"[{self.metadata.minimum_frequency}, {self.metadata.maximum_frequency}] Hz"
+                f"[{self.config.minimum_frequency}, {self.config.maximum_frequency}] Hz"
             )
         first_frequency = float(grid[in_band[0]])
         tolerance = (
             _ALIGNMENT_TOLERANCE_EPS
             * np.finfo(np.float64).eps
-            * max(1.0, abs(self.metadata.minimum_frequency), abs(first_frequency))
+            * max(1.0, abs(self.config.minimum_frequency), abs(first_frequency))
         )
         if not np.isclose(
-            first_frequency, self.metadata.minimum_frequency, rtol=0.0, atol=tolerance
+            first_frequency, self.config.minimum_frequency, rtol=0.0, atol=tolerance
         ):
             raise ValueError(
-                f"minimum_frequency ({self.metadata.minimum_frequency} Hz) is not on "
+                f"minimum_frequency ({self.config.minimum_frequency} Hz) is not on "
                 "Ripple's frequency grid; the nearest in-band bin is "
                 f"{first_frequency} Hz"
             )
@@ -191,7 +191,7 @@ class RippleGenerator(WaveformGenerator):
         source_parameters
             Source parameter values by name.
         """
-        check_sources(self.metadata.approximant, source_parameters)
+        check_sources(self.config.approximant, source_parameters)
 
     @require_x64
     def _generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
@@ -201,7 +201,7 @@ class RippleGenerator(WaveformGenerator):
         input: the NRTidal and precessing models read the grid's spacing and
         top. Other spacings evaluate the band itself.
         """
-        events = ripple_parameters(self.metadata.approximant, source_parameters)
+        events = ripple_parameters(self.config.approximant, source_parameters)
         power = self._kernel(jnp.asarray(self._frequencies), events)
         return power[self._band, :].T
 
@@ -213,6 +213,6 @@ class RippleGenerator(WaveformGenerator):
 
         The same grid and band as :meth:`_generate_batch`.
         """
-        events = ripple_parameters(self.metadata.approximant, source_parameters)
+        events = ripple_parameters(self.config.approximant, source_parameters)
         plus, cross = self._polarization_kernel(jnp.asarray(self._frequencies), events)
         return plus[:, self._band], cross[:, self._band]

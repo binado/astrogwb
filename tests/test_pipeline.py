@@ -38,6 +38,7 @@ from astrogwb.detector import (
 )
 from astrogwb.detector.projection import project_polarizations_fd
 from astrogwb.statistics import cross_correlation_estimator
+from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import WaveformConfig, intensity, waveform_generator
 
 #: Standard errors a Monte Carlo mean may sit from its expectation.
@@ -352,7 +353,9 @@ def test_pure_noise_matches_the_pair_scale(empty: Pool) -> None:
                 pair_cross_power_std(
                     background.frequencies,
                     network,
-                    int(OBSERVATION_SECONDS // segment_duration) * segment_duration,
+                    int(OBSERVATION_SECONDS // segment_duration)
+                    * segment_duration
+                    / years_to_seconds(1.0),
                 )
             )
             residuals.append((background.spectra[name] / scale).ravel())

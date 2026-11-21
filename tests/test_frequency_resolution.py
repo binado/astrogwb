@@ -34,7 +34,6 @@ from tolerances import assert_close
 
 from astrogwb.background import spectral_snr_squared
 from astrogwb.background.importance import ReferenceCatalog
-from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.detector import effective_psd, load_detector, network_cross_power_std
 from astrogwb.frequency import frequency_mask
 
@@ -118,9 +117,7 @@ def _analysis_at(frequencies: jax.Array) -> dict[str, Any]:
     mask = frequency_mask(frequencies, fmin=F_MIN, fmax=F_MAX) & jnp.isfinite(
         network_psd
     )
-    noise_scale = network_cross_power_std(
-        network_psd, OBSERVATION_TIME * SECONDS_PER_YEAR, frequencies
-    )
+    noise_scale = network_cross_power_std(network_psd, OBSERVATION_TIME, frequencies)
     return {
         "frequencies": frequencies,
         "mask": mask,
@@ -169,7 +166,7 @@ def resolutions(
             spectral_snr_squared(
                 run["observed"],
                 run["effective_psd"],
-                OBSERVATION_TIME * SECONDS_PER_YEAR,
+                OBSERVATION_TIME,
                 run["frequencies"],
                 frequency_mask=run["mask"],
             )

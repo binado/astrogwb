@@ -9,7 +9,9 @@ psd_reference="ET_D_psd")`` and register it with
 ``detector.sensitivity(frequencies)``.
 
 Standalone detector dumps include ``name``. Simulation metadata uses the detector
-mapping key as the name.
+mapping key as the name. A network passed to a calculation must be keyed by the
+name of each detector and hold at least two;
+:func:`~astrogwb.detector.network_pairs` raises ``ValueError`` otherwise.
 
 ``load_network(name)`` returns a mapping from detector names to detectors.
 Pass that mapping, or a mapping you construct, directly to detector-network
@@ -54,10 +56,12 @@ and keep its detector-pair keys.
    ~detector.load_sensitivity
    ~detector.load_sensitivity_map
    ~detector.map_over_pairs
+   ~detector.network_overlap_reduction_function
    ~detector.network_pairs
    ~detector.point_source_overlap_reduction_function
    ~detector.pair_cross_power_std
    ~detector.pair_response
+   ~detector.pair_weights
    ~detector.register_detector
    ~detector.register_network
 

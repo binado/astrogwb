@@ -2,7 +2,7 @@ r"""The background spectrum as a redshift quadrature over an intrinsic sample.
 
 The spectrum is an expectation over sources. Only the intrinsic parameters
 are left to Monte Carlo here: redshift is integrated on fixed Gauss-Legendre
-nodes in the scale factor :math:`1/(1 + z)` (:func:`_redshift_quadrature`),
+nodes in the scale factor :math:`1/(1 + z)` (Gauss-Legendre quadrature),
 and inclination is averaged exactly. Every one of :math:`N` intrinsic
 draws is placed at each of :math:`Z` nodes, so
 

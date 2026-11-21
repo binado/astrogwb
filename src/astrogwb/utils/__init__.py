@@ -32,13 +32,18 @@ def require_current_version(version: str) -> None:
         )
 
 
-def years_to_seconds(observation_time_yr: float) -> float:
+def years_to_seconds[T: (float, jax.Array)](observation_time_yr: T) -> T:
     """Convert an observation time from years to seconds.
 
     Parameters
     ----------
     observation_time_yr
-        Observation time in years.
+        Observation time in years, a float or a JAX array.
+
+    Returns
+    -------
+    float or jax.Array
+        The same time in seconds, of the type of the argument.
     """
     return observation_time_yr * SECONDS_PER_YEAR
 

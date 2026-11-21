@@ -1,14 +1,11 @@
 r"""Network effective PSD and per-bin Gaussian noise scale.
 
-The inverse-variance network ``effective_psd``, the per-bin Gaussian scale
-:math:`\sigma_i = S_{\mathrm{eff},i} / \sqrt{2 T \Delta f_i}`, and its
-grid-independent plotting counterpart
-:math:`\sigma_{\ln f} = S_{\mathrm{eff}} / \sqrt{2 T f}`.
+The inverse-variance network ``effective_psd`` and the per-bin Gaussian scale
+:math:`\sigma_i = S_{\mathrm{eff},i} / \sqrt{2 T \Delta f_i}`. Observation times are
+in years.
 """
 
 from __future__ import annotations
-
-from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
@@ -16,9 +13,10 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from astrogwb.frequency import bin_widths
+from astrogwb.utils import years_to_seconds
 
-from .config import Network, map_over_pairs, network_pairs
-from .overlap import isotropic_overlap_reduction_function
+from .config import Network, map_over_pairs
+from .overlap import network_overlap_reduction_function
 
 # Normalization of the overlap reduction function: the paper's
 # Gamma_ab = (2/5) gamma_ab, with gamma_ab the normalized ORF returned by
@@ -26,40 +24,36 @@ from .overlap import isotropic_overlap_reduction_function
 _OVERLAP_REDUCTION_FUNCTION_NORM = 0.4
 
 
-class _PairTerms(NamedTuple):
-    r"""One detector pair of an optimally weighted cross-correlation network.
-
-    Attributes
-    ----------
-    weight
-        :math:`w_{ab} = \gamma_{ab} / (S_{n,a} S_{n,b})`, zero where it is not
-        finite (out of band), ``(F,)``.
-    overlap
-        The isotropic ORF :math:`\gamma_{ab}`, ``(F,)``.
-    """
-
-    weight: NDArray[np.float64]
-    overlap: NDArray[np.float64]
-
-
-def _pair_terms(frequencies: ArrayLike, network: Network) -> list[_PairTerms]:
-    """Return optimal weights and isotropic overlaps in canonical pair order."""
-    frequencies = np.asarray(frequencies, dtype=float)
-    psds = {
-        name: detector.sensitivity(frequencies) for name, detector in network.items()
-    }
-    overlaps = map_over_pairs(
-        lambda first, second: isotropic_overlap_reduction_function(
-            frequencies, first, second
+def _noise_product(frequencies: NDArray[np.float64], network: Network) -> NDArray:
+    """Product of the two detectors' noise PSDs of every pair, ``(P, F)``."""
+    products = map_over_pairs(
+        lambda first, second: (
+            first.sensitivity(frequencies) * second.sensitivity(frequencies)
         ),
         network,
     )
-    terms = []
-    for (first, second), overlap in overlaps.items():
-        with np.errstate(invalid="ignore", divide="ignore"):
-            weight = overlap / (psds[first] * psds[second])
-        terms.append(_PairTerms(np.where(np.isfinite(weight), weight, 0.0), overlap))
-    return terms
+    return np.stack(tuple(products.values()))
+
+
+def pair_weights(frequencies: ArrayLike, network: Network) -> NDArray[np.float64]:
+    r"""Optimal cross-correlation weights of every pair, ``(P, F)``.
+
+    :math:`w_{ab} = \gamma_{ab} / (S_{n,a} S_{n,b})`, with pairs in the order of
+    :func:`~astrogwb.detector.network_pairs` and zero where the weight is not
+    finite (out of band).
+
+    Parameters
+    ----------
+    frequencies
+        Frequency grid in Hz.
+    network
+        Detectors keyed by name; at least two.
+    """
+    frequencies = np.asarray(frequencies, dtype=float)
+    overlap = np.asarray(network_overlap_reduction_function(frequencies, network))
+    with np.errstate(invalid="ignore", divide="ignore"):
+        weight = overlap / _noise_product(frequencies, network)
+    return np.where(np.isfinite(weight), weight, 0.0)
 
 
 def effective_psd(
@@ -82,15 +76,19 @@ def effective_psd(
     frequencies
         Frequency grid in Hz.
     network
-        Detectors in the network.
+        Detectors keyed by name. With fewer than two the PSD is infinite.
+
+    Returns
+    -------
+    numpy.ndarray
+        :math:`S_{\mathrm{eff}}` in Hz^-1, aligned with ``frequencies``.
     """
     frequencies = np.asarray(frequencies, dtype=float)
     if len(network) < 2:
         return np.full(frequencies.shape, np.inf, dtype=float)
 
-    inverse_variance = np.zeros(frequencies.shape, dtype=float)
-    for pair in _pair_terms(frequencies, network):
-        inverse_variance += pair.weight * pair.overlap
+    overlap = np.asarray(network_overlap_reduction_function(frequencies, network))
+    inverse_variance = np.sum(pair_weights(frequencies, network) * overlap, axis=0)
 
     with np.errstate(invalid="ignore", divide="ignore"):
         result = 1.0 / (_OVERLAP_REDUCTION_FUNCTION_NORM * np.sqrt(inverse_variance))
@@ -99,7 +97,7 @@ def effective_psd(
 
 def network_cross_power_std(
     effective_psd: jax.Array,
-    observation_seconds: float,
+    observation_time: float,
     frequencies: ArrayLike,
 ) -> jax.Array:
     r"""Per-bin Gaussian noise scale for a stochastic background search.
@@ -115,20 +113,21 @@ def network_cross_power_std(
     ----------
     effective_psd
         Network effective PSD, aligned with ``frequencies``.
-    observation_seconds
-        Observation time in seconds.
+    observation_time
+        Observation time in years.
     frequencies
         The frequency grid in Hz. Bin widths come from
         :func:`astrogwb.frequency.bin_widths`, so pass the catalog's *full*
         axis and mask afterwards rather than a selected sub-grid.
     """
-    return effective_psd / jnp.sqrt(2.0 * observation_seconds * bin_widths(frequencies))
+    seconds = years_to_seconds(observation_time)
+    return effective_psd / jnp.sqrt(2.0 * seconds * bin_widths(frequencies))
 
 
 def pair_cross_power_std(
     frequencies: ArrayLike,
     network: Network,
-    observation_seconds: float,
+    observation_time: float,
 ) -> jax.Array:
     r"""Per-bin Gaussian noise scale of every pair's cross-power, ``(P, F)``.
 
@@ -152,48 +151,15 @@ def pair_cross_power_std(
     frequencies
         The frequency grid in Hz; bin widths as for :func:`network_cross_power_std`.
     network
-        As for :func:`effective_psd`.
-    observation_seconds
-        Observation time in seconds.
+        Detectors keyed by name; at least two.
+    observation_time
+        Observation time in years.
     """
     frequencies = np.asarray(frequencies, dtype=float)
-    psds = {
-        name: detector.sensitivity(frequencies) for name, detector in network.items()
-    }
-    modes = np.sqrt(2.0 * observation_seconds * np.asarray(bin_widths(frequencies)))
+    seconds = years_to_seconds(observation_time)
+    modes = np.sqrt(2.0 * seconds * np.asarray(bin_widths(frequencies)))
     with np.errstate(invalid="ignore"):
-        scale = np.stack(
-            [
-                np.sqrt(psds[first] * psds[second])
-                for first, second in network_pairs(network)
-            ]
-        ) / (_OVERLAP_REDUCTION_FUNCTION_NORM * modes)
+        scale = np.sqrt(_noise_product(frequencies, network)) / (
+            _OVERLAP_REDUCTION_FUNCTION_NORM * modes
+        )
     return jnp.asarray(np.where(np.isnan(scale), np.inf, scale))
-
-
-def _log_frequency_noise_scale(
-    effective_psd: jax.Array,
-    frequencies: jax.Array,
-    observation_seconds: float,
-) -> jax.Array:
-    r"""Grid-independent sensitivity curve: the noise scale per e-fold of frequency.
-
-    .. math::
-
-        \sigma_{\ln f}(f) = \frac{S_{\mathrm{eff}}(f)}{\sqrt{2 T f}}
-
-    :func:`network_cross_power_std` with the bin width replaced by :math:`f`: a
-    presentation scale for sensitivity plots, not the likelihood's.
-    :math:`(S_h/\sigma_{\ln f})^2` is :math:`d\mathrm{SNR}^2/d\ln f`
-    (:func:`astrogwb.background.spectral_snr_squared_per_log_frequency`).
-
-    Parameters
-    ----------
-    effective_psd
-        Network effective PSD in Hz^-1.
-    frequencies
-        Frequencies in Hz, aligned with ``effective_psd``.
-    observation_seconds
-        Observation time in seconds.
-    """
-    return effective_psd / jnp.sqrt(2.0 * observation_seconds * frequencies)

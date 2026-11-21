@@ -5,7 +5,7 @@ import jax.numpy as jnp
 from jax.typing import ArrayLike
 
 from astrogwb.cosmology import hubble_constant_si
-from astrogwb.detector.effective_psd import _log_frequency_noise_scale
+from astrogwb.utils import years_to_seconds
 
 
 def omega_gw_from_spectral_density(
@@ -94,7 +94,7 @@ def characteristic_noise(
     effective_psd: ArrayLike,
     frequencies: ArrayLike,
     *,
-    observation_seconds: float,
+    observation_time: float,
 ) -> jax.Array:
     r"""Characteristic noise strain of a stochastic background search.
 
@@ -114,8 +114,8 @@ def characteristic_noise(
         Network effective PSD in Hz^-1, aligned with ``frequencies``.
     frequencies
         Frequencies in Hz.
-    observation_seconds
-        Observation time in seconds.
+    observation_time
+        Observation time in years.
 
     Returns
     -------
@@ -123,7 +123,7 @@ def characteristic_noise(
         :math:`h_n`, aligned with ``frequencies``.
     """
     frequencies = jnp.asarray(frequencies)
-    scale = _log_frequency_noise_scale(
-        jnp.asarray(effective_psd), frequencies, observation_seconds
+    scale = jnp.asarray(effective_psd) / jnp.sqrt(
+        2.0 * years_to_seconds(observation_time) * frequencies
     )
     return jnp.sqrt(2.0 * frequencies * scale)

@@ -55,7 +55,7 @@ def ripple_generator() -> RippleGenerator:
     )
 
 
-def test_waveform_metadata_json_round_trip_includes_alpha() -> None:
+def test_waveform_config_json_round_trip_includes_alpha() -> None:
     generator = AnalyticInspiralGenerator(
         WaveformConfig(
             approximant="AnalyticInspiral",
@@ -68,7 +68,7 @@ def test_waveform_metadata_json_round_trip_includes_alpha() -> None:
         )
     )
 
-    attrs = generator.metadata.model_dump(mode="json")
+    attrs = generator.config.model_dump(mode="json")
     assert attrs["alpha"] == ISCO_ALPHA
 
     restored = WaveformConfig.model_validate_json(json.dumps(attrs))
@@ -79,7 +79,7 @@ def test_waveform_metadata_json_round_trip_includes_alpha() -> None:
         WaveformConfig.model_validate_json(json.dumps(attrs))
 
 
-def test_waveform_metadata_rejects_disabled_tidal_taper_for_analytic_inspiral() -> None:
+def test_waveform_config_rejects_disabled_tidal_taper_for_analytic_inspiral() -> None:
     with pytest.raises(ValidationError, match="use_taper_in_tidal_corrections=False"):
         WaveformConfig(
             approximant="AnalyticInspiral",
@@ -103,7 +103,7 @@ def _grid_settings(**overrides: Any) -> dict[str, Any]:
     }
 
 
-def test_waveform_metadata_reads_a_record_without_grid_settings_as_uniform() -> None:
+def test_waveform_config_reads_a_record_without_grid_settings_as_uniform() -> None:
     attrs = WaveformConfig.model_validate(
         _grid_settings(frequency_resolution=2.0)
     ).model_dump(mode="json")
@@ -123,7 +123,7 @@ def test_waveform_metadata_reads_a_record_without_grid_settings_as_uniform() -> 
         ),
     ],
 )
-def test_waveform_metadata_rejects_inconsistent_grid_settings(
+def test_waveform_config_rejects_inconsistent_grid_settings(
     settings: dict[str, Any], message: str
 ) -> None:
     with pytest.raises(ValidationError, match=message):
@@ -190,7 +190,7 @@ def test_ripple_generator_evaluates_a_non_uniform_grid_directly() -> None:
     assert generator.segment_duration is None
 
 
-def test_ripple_generate_batch_has_no_nan_gradient(
+def test_ripple_intensity_has_no_nan_gradient(
     ripple_generator: RippleGenerator,
 ) -> None:
     """No NaN reaches reverse mode, which masking the output could not fix.
@@ -295,7 +295,7 @@ def test_check_sources_rejects_values_the_approximant_cannot_carry() -> None:
         generator.check_sources(_ripple_sources() | {"spin_1x": np.array([0.1, 0.0])})
 
 
-def test_generate_batch_does_not_validate_values(
+def test_intensity_does_not_validate_values(
     ripple_generator: RippleGenerator,
 ) -> None:
     """``intensity`` lets through what ``check_sources`` rejects.
@@ -321,7 +321,7 @@ def test_generate_batch_does_not_validate_values(
         ),
     ],
 )
-def test_generate_batch_still_rejects_names_and_shapes(
+def test_intensity_still_rejects_names_and_shapes(
     ripple_generator: RippleGenerator, sources: dict[str, np.ndarray], message: str
 ) -> None:
     """Names and shapes are static, so they raise under tracing too."""
@@ -550,7 +550,7 @@ def test_untapered_nrtidal_intensity_survives_the_normal_merger_cutoff() -> None
 
 
 @pytest.mark.integration
-def test_generate_batch_is_traceable_and_values_do_not_recompile(
+def test_intensity_is_traceable_and_values_do_not_recompile(
     ripple_generator: RippleGenerator,
 ) -> None:
     """The whole point: a Ripple catalog can be drawn inside a jitted model."""
@@ -570,3 +570,48 @@ def test_generate_batch_is_traceable_and_values_do_not_recompile(
     shifted = {name: values * 1.01 for name, values in sources.items()}
     assert np.all(np.asarray(jitted(shifted)) > 0.0)
     assert traces == 1, "changing parameter values must not recompile"
+
+
+def _catalog_of_five() -> dict[str, np.ndarray]:
+    return {
+        "detector_frame_mass_1": np.array([1.4, 1.3, 1.5, 1.6, 1.35]),
+        "detector_frame_mass_2": np.array([1.3, 1.2, 1.1, 1.4, 1.25]),
+        "inclination": np.array([0.0, 0.4, 0.8, 1.2, 0.2]),
+        "luminosity_distance": np.array([100.0, 200.0, 150.0, 300.0, 250.0]),
+    }
+
+
+@pytest.mark.parametrize("chunk_size", [1, 2, 3, 5, 8])
+def test_intensity_chunked_matches_the_whole_catalog(
+    ripple_generator: RippleGenerator, chunk_size: int
+) -> None:
+    sources = _catalog_of_five()
+
+    whole = ripple_generator.intensity(sources)
+    chunked = ripple_generator.intensity(sources, chunk_size=chunk_size)
+
+    assert chunked.shape == (5, ripple_generator.frequencies.size)
+    assert_close(chunked, whole)
+
+
+@pytest.mark.parametrize("chunk_size", [0, -1])
+def test_intensity_rejects_a_non_positive_chunk_size(
+    ripple_generator: RippleGenerator, chunk_size: int
+) -> None:
+    with pytest.raises(ValueError, match="chunk_size must be positive"):
+        ripple_generator.intensity(_catalog_of_five(), chunk_size=chunk_size)
+
+
+def test_intensity_chunked_rejects_an_empty_sources_mapping(
+    ripple_generator: RippleGenerator,
+) -> None:
+    with pytest.raises(ValueError, match="at least one column"):
+        ripple_generator.intensity({}, chunk_size=2)
+
+
+def test_intensity_chunked_rejects_columns_of_different_lengths(
+    ripple_generator: RippleGenerator,
+) -> None:
+    sources = _catalog_of_five() | {"inclination": np.array([0.0, 0.4])}
+    with pytest.raises(ValueError, match="one length"):
+        ripple_generator.intensity(sources, chunk_size=2)

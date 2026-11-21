@@ -114,7 +114,6 @@ network from the detectors; the data are keyed by the sorted detector-name pair:
 
 .. code:: python
 
-   from astrogwb.constants import SECONDS_PER_YEAR
    from astrogwb.detector import load_detector
    from astrogwb.inference import DenseGaussianLikelihood
 
@@ -125,7 +124,7 @@ network from the detectors; the data are keyed by the sorted detector-name pair:
        model,
        {name: load_detector(name) for name in ("E1", "E2", "E3")},
        frequencies=frequencies,
-       observation_seconds=SECONDS_PER_YEAR,
+       observation_time=1.0,
        observed={("E1", "E2"): c_12, ("E1", "E3"): c_13, ("E2", "E3"): c_23},
    )
    log_likelihood, extras = likelihood.log_likelihood(params)

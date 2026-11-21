@@ -2,7 +2,9 @@
 
 The analytic isotropic ORF for the native detector geometry,
 :func:`isotropic_overlap_reduction_function`, and the response of a pair to one
-source, :func:`overlap_reduction_function`, whose isotropic average it equals.
+source, :func:`point_source_overlap_reduction_function`, whose isotropic average it
+equals. :func:`network_overlap_reduction_function` evaluates the isotropic ORF of every
+pair of a network.
 Single-source responses go through :func:`stokes_cross_power`.
 """
 
@@ -22,6 +24,7 @@ from numpy.typing import ArrayLike, NDArray
 from astrogwb.constants import SPEED_OF_LIGHT
 from astrogwb.waveform.intensity import quadrupolar_stokes_factors
 
+from .config import Network, map_over_pairs
 from .geometry import Detector, DetectorGeometry
 
 # Below this alpha the closed-form g1/g2/g3 lose ~eps/alpha^4 to cancellation
@@ -293,6 +296,28 @@ def isotropic_overlap_reduction_function(
         second.response_tensor,
         second.location - first.location,
     )
+
+
+def network_overlap_reduction_function(
+    frequencies: ArrayLike, network: Network
+) -> NDArray[np.float64]:
+    """Isotropic ORF of every detector pair of a network, ``(P, F)``.
+
+    Parameters
+    ----------
+    frequencies
+        Frequency grid in Hz.
+    network
+        Detectors keyed by name; at least two. Pairs are in the order of
+        :func:`~astrogwb.detector.network_pairs`.
+    """
+    overlaps = map_over_pairs(
+        lambda first, second: isotropic_overlap_reduction_function(
+            frequencies, first, second
+        ),
+        network,
+    )
+    return np.stack(tuple(overlaps.values()))
 
 
 #: Reference direction for the relative orientation of two detectors:

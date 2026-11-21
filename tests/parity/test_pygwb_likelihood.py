@@ -60,7 +60,7 @@ def likelihood(
     pygwb_reference: Mapping[str, NDArray[np.float64]],
     frequencies: NDArray[np.float64],
     hubble_constant: float,
-    observation_seconds: float,
+    observation_years: float,
     exact_network: Network,
 ) -> DiagonalGaussianLikelihood[PowerLawSpectrum]:
     model = PowerLawSpectrum(
@@ -73,7 +73,7 @@ def likelihood(
         model,
         exact_network,
         frequencies=frequencies,
-        observation_seconds=observation_seconds,
+        observation_time=observation_years,
         observed=dict(zip(network_pairs(exact_network), csd, strict=True)),
     )
 

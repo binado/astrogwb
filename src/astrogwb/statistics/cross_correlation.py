@@ -12,8 +12,7 @@ import numpy as np
 from jax.typing import ArrayLike
 from numpy.typing import NDArray
 
-from astrogwb.detector import Network
-from astrogwb.detector.effective_psd import _pair_terms
+from astrogwb.detector import Network, network_overlap_reduction_function, pair_weights
 
 __all__ = ["cross_correlation_estimator"]
 
@@ -54,8 +53,9 @@ def cross_correlation_estimator(
     numpy.ndarray
         The network spectrum, ``(..., F)``.
     """
-    terms = _pair_terms(np.asarray(frequencies), network)
-    weights = np.stack([term.weight for term in terms])
-    denominator = np.sum([term.weight * term.overlap for term in terms], axis=0)
+    frequencies = np.asarray(frequencies)
+    weights = pair_weights(frequencies, network)
+    overlap = network_overlap_reduction_function(frequencies, network)
+    denominator = np.sum(weights * overlap, axis=0)
     numerator = np.sum(weights * np.asarray(pair_spectral_density), axis=-2)
     return _combine(numerator, denominator)

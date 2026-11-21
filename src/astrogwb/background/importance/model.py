@@ -44,9 +44,9 @@ import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 
-from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import luminosity_distance
 from astrogwb.inference.model import SpectralDensityPrediction
+from astrogwb.utils import years_to_seconds
 
 from .catalog import ReferenceCatalog
 from .diagnostics import relative_ess
@@ -299,7 +299,7 @@ class CatalogModel:
         jax.Array
             :math:`\kappa_n` for each of ``orders``, ``(len(orders),)``.
         """
-        seconds = jnp.asarray(observation_time) * SECONDS_PER_YEAR
+        seconds = years_to_seconds(jnp.asarray(observation_time))
         shared = self._shared(params)
         ratio = self._squared_distance_ratio(shared)
         weights = jnp.exp(shared.log_weights) / shared.log_weights.shape[0]
@@ -315,13 +315,13 @@ class CatalogModel:
         return jnp.mean(jax.lax.map(per_draw, jnp.asarray(projectors)), axis=0)
 
     def _spectral_density(self, shared: _SharedTerms) -> jax.Array:
-        _mean_intensity = self._mean_intensity
-        if _mean_intensity is None:
-            _mean_intensity = _weighted_mean_intensity(
+        mean_intensity = self._mean_intensity
+        if mean_intensity is None:
+            mean_intensity = _weighted_mean_intensity(
                 self._intensity, shared.log_weights
             )
         node_intensity = _node_intensity(
-            _mean_intensity,
+            mean_intensity,
             self._log_reference_frequencies,
             self._query_log_frequencies,
             self._amplitude,

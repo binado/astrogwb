@@ -66,6 +66,17 @@ def test_network_pairs_sort_detector_keys() -> None:
     )
 
 
+def test_network_pairs_rejects_a_single_detector() -> None:
+    with pytest.raises(ValueError, match="at least two detectors"):
+        network_pairs({"H1": load_detector("H1")})
+
+
+def test_network_pairs_rejects_a_key_that_differs_from_the_detector_name() -> None:
+    network = {"H1": load_detector("L1"), "L1": load_detector("H1")}
+    with pytest.raises(ValueError, match="keyed by"):
+        network_pairs(network)
+
+
 def test_registered_extensions_build_a_network_snapshot() -> None:
     suffix = uuid4().hex
     detector_name, network_name = f"X-{suffix}", f"network-{suffix}"

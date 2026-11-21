@@ -70,12 +70,37 @@ _Detectors = Annotated[
 ]
 
 
+#: Detectors keyed by their own name.
 Network = Mapping[str, Detector]
 Networks = Mapping[str, Network]
 
 
 def network_pairs(network: Network) -> tuple[tuple[str, str], ...]:
-    """Return detector key pairs in the order of spectra and noise rows."""
+    """Return detector key pairs in the order of spectra and noise rows.
+
+    Parameters
+    ----------
+    network
+        Detectors keyed by name.
+
+    Returns
+    -------
+    tuple
+        Every pair of keys, each sorted, in lexicographic order.
+
+    Raises
+    ------
+    ValueError
+        If the network has fewer than two detectors, or a key differs from the
+        name of its detector.
+    """
+    if len(network) < 2:
+        raise ValueError("a network needs at least two detectors to form a pair")
+    for key, detector in network.items():
+        if detector.name != key:
+            raise ValueError(
+                f"detector {detector.name!r} is keyed by {key!r} in the network"
+            )
     return tuple(combinations(sorted(network), 2))
 
 

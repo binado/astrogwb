@@ -21,14 +21,13 @@ from astrogwb.waveform.base import WaveformGenerator
 __all__ = ["ReferenceCatalog"]
 
 
-#: The inclination site, fixed rather than drawn.
 _INCLINATION_SITE = "inclination"
 
-#: Reference waveforms are face-on.
+# Face-on, in radians.
 _REFERENCE_INCLINATION = 0.0
 
-# Analytic averaging and redshift rescaling require aligned-spin,
-# quasi-circular dominant-quadrupole waveforms, excluding higher modes.
+# Dominant-quadrupole, aligned-spin models: the analytic inclination average and
+# redshift rescaling do not hold for higher modes or precession.
 _REFERENCE_APPROXIMANTS = frozenset(
     {
         "AnalyticInspiral",
@@ -43,17 +42,14 @@ _REFERENCE_APPROXIMANTS = frozenset(
 
 def _require_quadrupole_waveform(generator: WaveformGenerator) -> None:
     """Restrict analytic inclination conversion to supported quadrupole models."""
-    if generator.metadata.approximant not in _REFERENCE_APPROXIMANTS:
+    if generator.config.approximant not in _REFERENCE_APPROXIMANTS:
         raise ValueError(
             "reference integration requires a supported dominant-quadrupole, "
             "aligned-spin approximant; higher modes and precession are unsupported"
         )
 
 
-#: The luminosity distance declared by a source model.
 _LUMINOSITY_DISTANCE = "luminosity_distance"
-
-#: The redshift site.
 _REDSHIFT = "redshift"
 
 
@@ -72,7 +68,8 @@ class ReferenceCatalog:
         ``(F_ref,)``. Cover the redshifted query frequencies through the
         waveform's nonzero support.
     intensity
-        Sum of the squared polarization amplitudes, shape ``(F_ref, N)``.
+        Sum of the squared polarization amplitudes, shape ``(F_ref, N)``: the
+        transpose of :meth:`~astrogwb.waveform.WaveformGenerator.intensity`.
     intrinsic
         Source-frame intrinsic columns, in intensity column order.
     proposal_log_prob
@@ -107,8 +104,9 @@ class ReferenceCatalog:
         """Place intrinsic ``samples`` at a reference redshift and generate their intensity.
 
         ``samples`` holds one ``(N,)`` column per intrinsic site, drawn by the
-        caller from the proposal. A copy is made with face-on inclination, redshift set to ``reference_redshift`` and the
-        luminosity distance to the cosmological one at that redshift times the
+        caller from the proposal, and is not modified. The waveforms are
+        generated face-on at ``reference_redshift``, at the gravitational-wave
+        luminosity distance of that redshift: the cosmological distance times the
         modified-propagation ratio when ``xi_0`` is in ``parameters``. No
         extrinsic parameters are used. ``chunk_size`` is
         :meth:`~astrogwb.waveform.WaveformGenerator.intensity`'s.
@@ -140,8 +138,7 @@ class ReferenceCatalog:
             If the approximant is unsupported, ``intrinsic_sites`` names a
             reserved or missing column, or ``proposal_log_prob`` is not ``(N,)``.
         """
-        # Before the draw: ripplegw enables x64 on import, but only once the
-        # generator runs, after the sources are sampled.
+        # ripplegw enables x64 only lazily, once a generator runs.
         jax.config.update("jax_enable_x64", True)
         _require_quadrupole_waveform(generator)
         reserved = {_INCLINATION_SITE, _LUMINOSITY_DISTANCE, _REDSHIFT}

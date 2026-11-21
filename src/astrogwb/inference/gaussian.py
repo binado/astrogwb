@@ -50,12 +50,11 @@ from astrogwb.detector import (
     NORMALIZED_ORF_SCALE,
     Network,
     generalized_overlap_reduction_function,
-    isotropic_overlap_reduction_function,
-    map_over_pairs,
+    network_overlap_reduction_function,
     network_pairs,
     pair_cross_power_std,
 )
-from astrogwb.utils import PairName, stack_pairs
+from astrogwb.utils import PairName, stack_pairs, years_to_seconds
 from astrogwb.waveform.intensity import QUADRUPOLE_STOKES_WEIGHTS, StokesPair
 
 from .model import SpectralDensityModel, SpectralDensityPrediction
@@ -405,28 +404,19 @@ def _log_density(factor: _Factor, observed: jax.Array) -> jax.Array:
 def _resolve(
     network: Network,
     frequencies: np.ndarray,
-    observation_seconds: float,
+    observation_time: float,
     mask: Mapping[PairName, ArrayLike] | None,
 ) -> _Network:
     """Prepare the network arrays on the entries it counts."""
     pairs = network_pairs(network)
-    scale = pair_cross_power_std(frequencies, network, observation_seconds)
+    scale = pair_cross_power_std(frequencies, network, observation_time)
     counted = np.isfinite(scale)
     if mask is not None:
         counted &= np.asarray(stack_pairs(mask, pairs), dtype=bool)
     return _Network.from_leaves(
         scale=scale,
-        pair_overlap=np.stack(
-            tuple(
-                map_over_pairs(
-                    lambda first, second: isotropic_overlap_reduction_function(
-                        frequencies, first, second
-                    ),
-                    network,
-                ).values()
-            )
-        ),
-        observation_seconds=observation_seconds,
+        pair_overlap=network_overlap_reduction_function(frequencies, network),
+        observation_seconds=years_to_seconds(observation_time),
         pairs=pairs,
         mask=counted,
     )
@@ -590,8 +580,8 @@ class DiagonalGaussianLikelihood[M: SpectralDensityModel](_GaussianLikelihood[M]
         Detectors keyed by name.
     frequencies
         Frequency grid in Hz, ``(F,)``.
-    observation_seconds
-        Observation time :math:`T` in seconds.
+    observation_time
+        Observation time :math:`T` in years.
     observed
         Observed cross powers keyed by the sorted detector-name pair
         (:func:`~astrogwb.detector.network_pairs`), each ``(..., F)``; leading
@@ -617,12 +607,12 @@ class DiagonalGaussianLikelihood[M: SpectralDensityModel](_GaussianLikelihood[M]
         network: Network,
         *,
         frequencies: ArrayLike,
-        observation_seconds: float,
+        observation_time: float,
         observed: Mapping[PairName, ArrayLike] | None = None,
         mask: Mapping[PairName, ArrayLike] | None = None,
     ) -> None:
         frequencies = np.asarray(frequencies, dtype=float)
-        resolved = _resolve(network, frequencies, observation_seconds, mask)
+        resolved = _resolve(network, frequencies, observation_time, mask)
         self._assign(model, resolved, _compressed(resolved, observed))
 
     @classmethod
@@ -668,8 +658,8 @@ class DenseGaussianLikelihood[M: SpectralDensityModel](_GaussianLikelihood[M]):
         Detectors keyed by name.
     frequencies
         Frequency grid in Hz, ``(F,)``.
-    observation_seconds
-        Observation time :math:`T` in seconds.
+    observation_time
+        Observation time :math:`T` in years.
     observed
         Observed cross powers keyed by the sorted detector-name pair
         (:func:`~astrogwb.detector.network_pairs`), each ``(..., F)``; leading
@@ -716,7 +706,7 @@ class DenseGaussianLikelihood[M: SpectralDensityModel](_GaussianLikelihood[M]):
         network: Network,
         *,
         frequencies: ArrayLike,
-        observation_seconds: float,
+        observation_time: float,
         observed: Mapping[PairName, ArrayLike] | None = None,
         mask: Mapping[PairName, ArrayLike] | None = None,
         key: jax.Array | None = None,
@@ -724,7 +714,7 @@ class DenseGaussianLikelihood[M: SpectralDensityModel](_GaussianLikelihood[M]):
         generalized_orfs: Mapping[StokesPair, ArrayLike] | None = None,
     ) -> None:
         frequencies = np.asarray(frequencies, dtype=float)
-        resolved = _resolve(network, frequencies, observation_seconds, mask)
+        resolved = _resolve(network, frequencies, observation_time, mask)
         if generalized_orfs is None:
             generalized_orfs = generalized_overlap_reduction_function(
                 jax.random.key(0) if key is None else key,

@@ -1,4 +1,4 @@
-"""Construct waveform generators from their metadata."""
+"""Construct waveform generators from their configuration."""
 
 from astrogwb.waveform.analytical import AnalyticInspiralGenerator
 from astrogwb.waveform.base import WaveformGenerator
