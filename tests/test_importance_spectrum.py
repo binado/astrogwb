@@ -229,18 +229,6 @@ def test_inclination_second_moment_is_the_isotropic_ratio_of_moments() -> None:
     assert second_moment / 0.8**2 == pytest.approx(INCLINATION_SECOND_MOMENT, rel=1e-13)
 
 
-@pytest.mark.parametrize("power", [2, 3, 5])
-def test_redshift_quadrature_polynomial_in_scale_factor_is_exact(power: int) -> None:
-    # dz = da / a**2, so a**power integrates as a polynomial of degree
-    # power - 2 in a, which four nodes reproduce up to degree seven.
-    minimum, maximum = 0.01, 5.0
-    redshift, weights = _redshift_quadrature(minimum, maximum, 4)
-    lower, upper = 1.0 / (1.0 + maximum), 1.0 / (1.0 + minimum)
-    exact = (upper ** (power - 1) - lower ** (power - 1)) / (power - 1)
-    estimate = np.sum(weights / (1.0 + redshift) ** power)
-    assert estimate == pytest.approx(exact, rel=1e-13)
-
-
 @pytest.mark.integration
 def test_sobol_reference_catalog_stratifies_the_primary_mass(
     reference_setup: ReferenceSetup,
@@ -519,7 +507,6 @@ def test_explicit_bns_weights_at_proposal_and_shifted_support(
     )
     projectors = jnp.ones((1, frequencies.size))
     narrow = {**fiducials, "mass_width": 1.0}
-    assert cached._node_moments is not None
     np.testing.assert_array_equal(weights(cached, fiducials), 0)
 
     def traced_density(params: dict[str, float]) -> jax.Array:

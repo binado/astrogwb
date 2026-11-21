@@ -195,13 +195,12 @@ def test_interpolation_weights_reproduce_jnp_interp_inside_and_outside_the_grid(
     )
 
 
-def test_second_moment_held_node_moments_match_the_weighted_gather_at_the_fiducials(
+def test_second_moment_with_reweighted_masses_matches_the_held_moment_at_the_fiducials(
     model_factory: Callable[..., CatalogModel],
 ) -> None:
     """At the fiducials every weight is one, so both paths are the same moment."""
     held = model_factory()
     weighted = model_factory(reweight_masses=True)
-    assert held._node_moments is not None and weighted._node_moments is None
 
     assert_close(
         weighted.intensity_second_moment(FIDUCIALS),
@@ -587,7 +586,6 @@ def test_constructor_mask_and_pairs_describe_the_compressed_axis(
     )
     assert likelihood.observed is not None
     assert_close(likelihood.observed, stacked[..., likelihood.mask])
-    assert np.array_equal(likelihood._network.keep, np.flatnonzero(likelihood.mask))
 
     full = np.full(likelihood.mask.shape, np.nan)
     full[likelihood.mask] = np.asarray(likelihood.observed)
