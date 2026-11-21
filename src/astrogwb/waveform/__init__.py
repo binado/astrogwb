@@ -1,7 +1,6 @@
 """Waveform generation, power reduction, and inspiral models."""
 
 from astrogwb.waveform.analytical import (
-    AnalyticInspiralGenerator,
     chirp_mass,
     inclination_factor,
     inspiral_intensity,
@@ -14,14 +13,11 @@ from astrogwb.waveform.intensity import (
     quadrupolar_polarizations,
     quadrupolar_stokes_factors,
 )
-from astrogwb.waveform.metadata import WaveformMetadata
-from astrogwb.waveform.ripple import RippleGenerator
+from astrogwb.waveform.metadata import WaveformConfig
 
 __all__ = [
-    "AnalyticInspiralGenerator",
-    "RippleGenerator",
+    "WaveformConfig",
     "WaveformGenerator",
-    "WaveformMetadata",
     "chirp_mass",
     "inclination_factor",
     "inspiral_intensity",

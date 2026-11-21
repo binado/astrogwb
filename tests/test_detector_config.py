@@ -19,7 +19,6 @@ from astrogwb.detector import (
     network_pairs,
     register_detector,
     register_network,
-    resolve_network,
 )
 
 
@@ -67,6 +66,17 @@ def test_network_pairs_sort_detector_keys() -> None:
     )
 
 
+def test_network_pairs_rejects_a_single_detector() -> None:
+    with pytest.raises(ValueError, match="at least two detectors"):
+        network_pairs({"H1": load_detector("H1")})
+
+
+def test_network_pairs_rejects_a_key_that_differs_from_the_detector_name() -> None:
+    network = {"H1": load_detector("L1"), "L1": load_detector("H1")}
+    with pytest.raises(ValueError, match="keyed by"):
+        network_pairs(network)
+
+
 def test_registered_extensions_build_a_network_snapshot() -> None:
     suffix = uuid4().hex
     detector_name, network_name = f"X-{suffix}", f"network-{suffix}"
@@ -88,8 +98,6 @@ def test_registered_extensions_build_a_network_snapshot() -> None:
     assert tuple(snapshot) == ("H1", detector_name)
     assert snapshot[detector_name] is loaded[detector_name] is detector
     assert snapshot["H1"] is loaded["H1"] is load_detector("H1")
-    assert resolve_network(network_name) == tuple(snapshot.values())
-    assert resolve_network([detector, snapshot["H1"]]) == (detector, snapshot["H1"])
     with pytest.raises(ValueError, match="already registered"):
         register_detector(detector)
     with pytest.raises(ValueError, match="already registered"):

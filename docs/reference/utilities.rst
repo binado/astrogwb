@@ -36,17 +36,13 @@ Frequency grids
    :toctree: generated/
    :nosignatures:
 
-   ~frequency.FrequencySpacing
-   ~frequency.bin_widths
-   ~frequency.broadcast_along_axis
    ~frequency.frequency_grid
+   ~frequency.bin_widths
+   ~frequency.FrequencySpacing
    ~frequency.frequency_mask
-   ~frequency.log_frequency_grid
-   ~frequency.uniform_frequency_grid
-   ~frequency.validate_frequency_grid
 
-Utilities
----------
+Advanced utilities
+------------------
 
 .. autosummary::
    :toctree: generated/
@@ -55,16 +51,8 @@ Utilities
    ~utils.require_current_version
    ~utils.years_to_seconds
    ~utils.require_x64
-   ~utils.cumulative_trapezoid
-   ~utils.gauss_legendre_nodes_weights
    ~utils.stack_pairs
    ~utils.unstack_pairs
-   ~utils.io.Arrays
-   ~utils.io.atomic_h5
-   ~utils.io.load
-   ~utils.io.read_tree
-   ~utils.io.write
-   ~utils.io.write_tree
    ~utils.numpyro.InverseCDF
    ~utils.numpyro.Sampling
    ~utils.numpyro.sample_and_logprob

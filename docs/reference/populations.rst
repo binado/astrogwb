@@ -10,15 +10,10 @@ Reference catalogs
    :toctree: generated/
    :nosignatures:
 
-   ~background.importance.catalog.IntensityData
-   ~background.importance.catalog.ReferenceCatalog
-   ~background.importance.catalog.intensity_data
+   ~background.importance.ReferenceCatalog
    ~background.importance.spectrum.INCLINATION_MEAN
    ~background.importance.spectrum.INCLINATION_RAW_SECOND_MOMENT
-   ~background.importance.spectrum.REFERENCE_INCLINATION
    ~background.importance.spectrum.phinney_kernel
-   ~background.importance.spectrum.redshift_quadrature
-   ~background.importance.spectrum.reference_catalog
 
 Catalog models and diagnostics
 ------------------------------
@@ -27,8 +22,7 @@ Catalog models and diagnostics
    :toctree: generated/
    :nosignatures:
 
-   ~background.importance.model.CatalogModel
-   ~background.importance.model.interpolation_weights
+   ~background.importance.CatalogModel
    ~background.importance.diagnostics.relative_ess
 
 Population models

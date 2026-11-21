@@ -1,48 +1,56 @@
-"""Importance-integration reference catalogs: per-source intensity.
-
-:func:`intensity_data` turns a generator and source columns into
-:class:`IntensityData`, one intensity column per source.
-:func:`~astrogwb.background.importance.spectrum.reference_catalog` places caller-drawn
-intrinsic sources at a reference redshift and returns a
-:class:`ReferenceCatalog`.
-"""
+"""Reference catalogs of compact-binary waveform intensities."""
 
 from __future__ import annotations
 
-import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any
 
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax.typing import ArrayLike as JaxArrayLike
-from numpy.typing import ArrayLike, NDArray
+from jax.typing import ArrayLike
 from pydantic import BaseModel
 
+from astrogwb.cosmology import gw_distance_ratio, luminosity_distance
+from astrogwb.populations._types import Parameters
 from astrogwb.waveform.base import WaveformGenerator
 
-__all__ = [
-    "IntensityData",
-    "ReferenceCatalog",
-    "intensity_data",
-]
-
-_logger = logging.getLogger(__name__)
+__all__ = ["ReferenceCatalog"]
 
 
-class IntensityData(TypedDict):
-    """One catalog: ``frequencies`` ``(F,)``, ``intensity`` ``(F, N)``.
+_INCLINATION_SITE = "inclination"
 
-    ``source_parameters`` columns are each ``(N,)``.
-    """
+# Face-on, in radians.
+_REFERENCE_INCLINATION = 0.0
 
-    frequencies: NDArray[np.float64]
-    intensity: NDArray[np.float64]
-    source_parameters: dict[str, NDArray[Any]]
+# Dominant-quadrupole, aligned-spin models: the analytic inclination average and
+# redshift rescaling do not hold for higher modes or precession.
+_REFERENCE_APPROXIMANTS = frozenset(
+    {
+        "AnalyticInspiral",
+        "TaylorF2",
+        "IMRPhenomD",
+        "IMRPhenomD_NRTidalv2",
+        "IMRPhenomXAS",
+        "IMRPhenomXAS_NRTidalv3",
+    }
+)
+
+
+def _require_quadrupole_waveform(generator: WaveformGenerator) -> None:
+    """Restrict analytic inclination conversion to supported quadrupole models."""
+    if generator.config.approximant not in _REFERENCE_APPROXIMANTS:
+        raise ValueError(
+            "reference integration requires a supported dominant-quadrupole, "
+            "aligned-spin approximant; higher modes and precession are unsupported"
+        )
+
+
+_LUMINOSITY_DISTANCE = "luminosity_distance"
+_REDSHIFT = "redshift"
 
 
 @dataclass(frozen=True)
@@ -60,7 +68,8 @@ class ReferenceCatalog:
         ``(F_ref,)``. Cover the redshifted query frequencies through the
         waveform's nonzero support.
     intensity
-        Sum of the squared polarization amplitudes, shape ``(F_ref, N)``.
+        Sum of the squared polarization amplitudes, shape ``(F_ref, N)``: the
+        transpose of :meth:`~astrogwb.waveform.WaveformGenerator.intensity`.
     intrinsic
         Source-frame intrinsic columns, in intensity column order.
     proposal_log_prob
@@ -73,12 +82,100 @@ class ReferenceCatalog:
         waveforms.
     """
 
-    frequencies: JaxArrayLike
-    intensity: JaxArrayLike
-    intrinsic: Mapping[str, JaxArrayLike]
-    proposal_log_prob: JaxArrayLike
+    frequencies: ArrayLike
+    intensity: ArrayLike
+    intrinsic: Mapping[str, ArrayLike]
+    proposal_log_prob: ArrayLike
     reference_redshift: float
     reference_distance: float
+
+    @classmethod
+    def from_samples(
+        cls,
+        generator: WaveformGenerator,
+        samples: Mapping[str, ArrayLike],
+        *,
+        intrinsic_sites: Sequence[str],
+        proposal_log_prob: ArrayLike,
+        reference_redshift: float,
+        parameters: Parameters,
+        chunk_size: int | None = None,
+    ) -> ReferenceCatalog:
+        """Place intrinsic ``samples`` at a reference redshift and generate their intensity.
+
+        ``samples`` holds one ``(N,)`` column per intrinsic site, drawn by the
+        caller from the proposal, and is not modified. The waveforms are
+        generated face-on at ``reference_redshift``, at the gravitational-wave
+        luminosity distance of that redshift: the cosmological distance times the
+        modified-propagation ratio when ``xi_0`` is in ``parameters``. No
+        extrinsic parameters are used. ``chunk_size`` is
+        :meth:`~astrogwb.waveform.WaveformGenerator.intensity`'s.
+
+        Parameters
+        ----------
+        generator
+            Waveform generator. Its approximant must be a supported
+            dominant-quadrupole, aligned-spin one.
+        samples
+            Source columns by name, each ``(N,)``.
+        intrinsic_sites
+            Names of the columns of ``samples`` the importance weights are
+            evaluated on. Must exclude redshift, luminosity distance and
+            inclination.
+        proposal_log_prob
+            Joint log density of each draw under the proposal, shape ``(N,)``,
+            over ``intrinsic_sites``.
+        reference_redshift
+            Redshift all waveforms are generated at.
+        parameters
+            Must carry ``H0`` and ``Omega_m``; ``xi_0`` and ``xi_n`` are optional.
+        chunk_size
+            Number of sources per chunk.
+
+        Raises
+        ------
+        ValueError
+            If the approximant is unsupported, ``intrinsic_sites`` names a
+            reserved or missing column, or ``proposal_log_prob`` is not ``(N,)``.
+        """
+        # ripplegw enables x64 only lazily, once a generator runs.
+        jax.config.update("jax_enable_x64", True)
+        _require_quadrupole_waveform(generator)
+        reserved = {_INCLINATION_SITE, _LUMINOSITY_DISTANCE, _REDSHIFT}
+        if reserved & set(intrinsic_sites):
+            raise ValueError(
+                f"intrinsic_sites must exclude {sorted(reserved)}; "
+                f"got {sorted(reserved & set(intrinsic_sites))}"
+            )
+        columns = {name: np.asarray(values) for name, values in samples.items()}
+        if missing := set(intrinsic_sites) - columns.keys():
+            raise ValueError(f"intrinsic_sites missing from samples: {sorted(missing)}")
+        num_samples = len(next(iter(columns.values())))
+        log_prob = np.asarray(proposal_log_prob)
+        if log_prob.shape != (num_samples,):
+            raise ValueError(
+                f"proposal_log_prob must have shape ({num_samples},), got {log_prob.shape}"
+            )
+        distance = float(
+            luminosity_distance(
+                reference_redshift, parameters["H0"], parameters["Omega_m"]
+            )
+            * gw_distance_ratio(reference_redshift, parameters)
+        )
+        columns[_INCLINATION_SITE] = np.full(num_samples, _REFERENCE_INCLINATION)
+        columns[_REDSHIFT] = np.full(num_samples, reference_redshift)
+        columns[_LUMINOSITY_DISTANCE] = np.full(num_samples, distance)
+        generator.check_sources(columns)
+        # Fuse eager waveform generation to avoid retaining its intermediates.
+        generate = jax.jit(partial(generator.intensity, chunk_size=chunk_size))
+        return cls(
+            frequencies=np.asarray(generator.frequencies),
+            intensity=np.asarray(generate(columns)).T,
+            intrinsic={name: columns[name] for name in intrinsic_sites},
+            proposal_log_prob=log_prob,
+            reference_redshift=reference_redshift,
+            reference_distance=distance,
+        )
 
     def take(self, n: int) -> ReferenceCatalog:
         """The first ``n`` draws, as a catalog.
@@ -178,44 +275,3 @@ class ReferenceCatalog:
             reference_distance=float(data["reference_distance"]),
         )
         return catalog, metadata
-
-
-def intensity_data(
-    generator: WaveformGenerator,
-    source_parameters: Mapping[str, ArrayLike],
-    *,
-    chunk_size: int | None = None,
-) -> IntensityData:
-    """The intensity of ``source_parameters`` as a catalog, generated eagerly.
-
-    Values are checked here, eagerly: traced generation would silently drop a
-    degree of freedom the approximant cannot represent. ``chunk_size`` is
-    :meth:`~astrogwb.waveform.WaveformGenerator.generate_batch`'s.
-
-    Parameters
-    ----------
-    generator
-        Waveform generator.
-    source_parameters
-        Source parameter values by name.
-    chunk_size
-        Number of sources per chunk.
-    """
-    jax.config.update("jax_enable_x64", True)
-    columns = {name: np.asarray(values) for name, values in source_parameters.items()}
-    _logger.info(
-        "Generating %s waveforms for %d events (f_min=%.1f Hz, f_max=%.1f Hz)",
-        generator.metadata.approximant,
-        len(next(iter(columns.values()))),
-        generator.metadata.minimum_frequency,
-        generator.metadata.maximum_frequency,
-    )
-    generator.check_sources(columns)
-    # Generators are jit-free to compose inside NumPyro models; eagerly, an
-    # unfused graph would hold every waveform intermediate at once.
-    generate = jax.jit(partial(generator.generate_batch, chunk_size=chunk_size))
-    return {
-        "frequencies": np.asarray(generator.frequencies),
-        "intensity": np.asarray(generate(columns)),
-        "source_parameters": columns,
-    }

@@ -8,7 +8,10 @@ overlap reduction function on a frequency grid.
 
    import numpy as np
 
-   from astrogwb.detector import isotropic_overlap_reduction_function, load_detector
+   from astrogwb.detector import (
+       isotropic_overlap_reduction_function,
+       load_detector,
+   )
 
    frequencies = np.arange(10.0, 101.0)
    hanford = load_detector("H1")
@@ -20,6 +23,9 @@ The dimensionless overlap gives the response of the detector pair to an
 isotropic background at each frequency in Hz. It is normalized to one for
 co-located, aligned detectors with orthogonal arms.
 
+For network calculations, pass a mapping such as
+``{"H1": hanford, "L1": livingston}``. Use
+:func:`astrogwb.detector.network_pairs` to identify the rows of pair spectra.
 For detector noise curves, use :func:`astrogwb.detector.load_sensitivity`.
 For a population prediction on a frequency grid, continue to
 :doc:`../user_guide/catalog-inference`.

@@ -43,7 +43,7 @@ def test_sensitivity_call_out_of_band_policy(
 
 
 def test_effective_psd_inf_for_single_detector(frequencies: np.ndarray) -> None:
-    actual = effective_psd(frequencies, [load_detector("H1")])
+    actual = effective_psd(frequencies, {"H1": load_detector("H1")})
 
     assert actual.shape == frequencies.shape
     assert np.all(np.isinf(actual))

@@ -19,7 +19,7 @@ __all__ = [
 ]
 
 #: How a frequency grid is laid out; the values of
-#: ``WaveformMetadata.frequency_spacing``.
+#: ``WaveformConfig.frequency_spacing``.
 FrequencySpacing = Literal["linear", "log"]
 
 _GRID_SPACING_TOLERANCE_ULP = 64.0

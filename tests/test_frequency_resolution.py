@@ -24,6 +24,7 @@ import numpyro.distributions as dist
 import pytest
 from astrogwb_mock_population import (
     FIDUCIALS,
+    IntensityData,
     build_mock_catalog,
     build_reference_catalog,
     build_reference_spectrum,
@@ -32,9 +33,8 @@ from astrogwb_mock_population import (
 from tolerances import assert_close
 
 from astrogwb.background import spectral_snr_squared
-from astrogwb.background.importance.catalog import IntensityData, ReferenceCatalog
-from astrogwb.constants import SECONDS_PER_YEAR
-from astrogwb.detector import effective_psd, gaussian_bin_scale, load_detector
+from astrogwb.background.importance import ReferenceCatalog
+from astrogwb.detector import effective_psd, load_detector, network_cross_power_std
 from astrogwb.frequency import frequency_mask
 
 #: Reference resolution, and the band the refinement study runs over.
@@ -111,13 +111,13 @@ def _analysis_at(frequencies: jax.Array) -> dict[str, Any]:
     """
     network_psd = jnp.asarray(
         effective_psd(
-            np.asarray(frequencies), [load_detector(name) for name in DETECTORS]
+            np.asarray(frequencies), {name: load_detector(name) for name in DETECTORS}
         )
     )
     mask = frequency_mask(frequencies, fmin=F_MIN, fmax=F_MAX) & jnp.isfinite(
         network_psd
     )
-    noise_scale = gaussian_bin_scale(network_psd, OBSERVATION_TIME, frequencies)
+    noise_scale = network_cross_power_std(network_psd, OBSERVATION_TIME, frequencies)
     return {
         "frequencies": frequencies,
         "mask": mask,
@@ -166,7 +166,7 @@ def resolutions(
             spectral_snr_squared(
                 run["observed"],
                 run["effective_psd"],
-                OBSERVATION_TIME * SECONDS_PER_YEAR,
+                OBSERVATION_TIME,
                 run["frequencies"],
                 frequency_mask=run["mask"],
             )
@@ -225,7 +225,7 @@ def test_the_log_likelihood_ratio_residual_is_the_snr_squared_residual(
     and the relative residual of :math:`\Delta\log\mathcal{L}` under
     coarsening must equal that of :math:`\rho^2`, with no dependence on
     :math:`H_0` at all. This ties ``spectral_density``,
-    ``spectral_snr_squared`` and ``gaussian_bin_scale`` to one another.
+    ``spectral_snr_squared`` and ``network_cross_power_std`` to one another.
     """
     at_fiducial = {
         factor: _log_likelihood(run, FIDUCIALS["H0"])

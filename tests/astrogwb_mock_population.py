@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Mapping
+from typing import TypedDict
 
 import jax
 import jax.numpy as jnp
@@ -22,12 +23,7 @@ import numpyro.distributions as dist
 from jax.typing import ArrayLike
 from numpyro import handlers
 
-from astrogwb.background.importance.catalog import IntensityData, ReferenceCatalog
-from astrogwb.background.importance.model import CatalogModel
-from astrogwb.background.importance.spectrum import (
-    REFERENCE_INCLINATION,
-    reference_catalog,
-)
+from astrogwb.background.importance import CatalogModel, ReferenceCatalog
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.distributions.orientation import UniformCosineDistribution
 from astrogwb.distributions.redshift.base import RedshiftDistribution
@@ -41,10 +37,17 @@ from astrogwb.utils.numpyro import (
     sample_sources_qmc,
 )
 from astrogwb.waveform import (
-    AnalyticInspiralGenerator,
+    WaveformConfig,
     WaveformGenerator,
-    WaveformMetadata,
 )
+from astrogwb.waveform.analytical import AnalyticInspiralGenerator
+
+
+class IntensityData(TypedDict):
+    frequencies: np.ndarray
+    intensity: np.ndarray
+    source_parameters: dict[str, np.ndarray]
+
 
 type MergerRate = Callable[[ArrayLike, Mapping[str, ArrayLike]], jax.Array]
 type SourceModelFactory = Callable[[Mapping[str, ArrayLike]], SourceModel]
@@ -245,7 +248,7 @@ def analytic_generator(
 ) -> AnalyticInspiralGenerator:
     """The closed-form inspiral generator on a linear grid."""
     return AnalyticInspiralGenerator(
-        WaveformMetadata(
+        WaveformConfig(
             alpha=ISCO_ALPHA,
             approximant="AnalyticInspiral",
             minimum_frequency=f_min,
@@ -263,7 +266,7 @@ def mock_catalog(
     generator: AnalyticInspiralGenerator,
 ) -> IntensityData:
     """The intensity of a mock draw, one column per source."""
-    power = np.asarray(jax.jit(generator.generate_batch)(source_parameters))
+    power = np.asarray(jax.jit(generator.intensity)(source_parameters)).T
     return IntensityData(
         frequencies=np.asarray(generator.frequencies),
         intensity=power,
@@ -339,7 +342,7 @@ def draw_bns_sources(
     The pinned site takes no Sobol coordinate.
     """
     model = handlers.condition(
-        uniform_source_model(parameters), data={"inclination": REFERENCE_INCLINATION}
+        uniform_source_model(parameters), data={"inclination": 0.0}
     )
     samples = sample_model(model, key, num_samples, sampling=sampling)
     return {name: np.asarray(values) for name, values in samples.items()}
@@ -354,7 +357,7 @@ def bns_reference_catalog(
 ) -> ReferenceCatalog:
     """The reference catalog of ``samples``, weighted on the ordered mass pair."""
     intrinsic = {name: jnp.asarray(samples[name]) for name in INTRINSIC_DENSITY_SITES}
-    return reference_catalog(
+    return ReferenceCatalog.from_samples(
         generator,
         samples,
         intrinsic_sites=INTRINSIC_DENSITY_SITES,

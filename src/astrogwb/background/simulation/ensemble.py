@@ -1,9 +1,4 @@
-"""Read an ensemble of simulated backgrounds back, stacked per network.
-
-``astrogwb simulate`` writes one file per draw, ``<root>/<seed>-<index>.h5``,
-each a :class:`~astrogwb.background.simulation.BackgroundDraw` stored by
-:meth:`~astrogwb.background.simulation.BackgroundDraw.write`.
-"""
+"""Read background draws and stack their pair spectra by detector network."""
 
 from __future__ import annotations
 
@@ -16,10 +11,10 @@ from numpy.typing import NDArray
 
 from astrogwb.background.simulation.draw import BackgroundDraw
 
-__all__ = ["NetworkSpectra", "network_spectra_ensemble"]
+__all__ = ["read_background_ensemble"]
 
 
-class NetworkSpectra(TypedDict):
+class _NetworkSpectra(TypedDict):
     """One network's draws, stacked along the leading draw axis.
 
     ``frequencies`` ``(F,)``; ``pair_spectral_density`` ``(D, P, F)``, which
@@ -33,57 +28,29 @@ class NetworkSpectra(TypedDict):
     n_events: NDArray[np.int64]
 
 
-def network_spectra_ensemble(
-    root: str | Path,
-    seed: int,
-    num_draws: int,
-    names: Sequence[str],
-    *,
-    start: int = 0,
-) -> list[NetworkSpectra]:
-    """Read a range of draws and stack them by network.
-
-    Reads indices from ``start`` up to but excluding ``num_draws`` for each
-    network in ``names``.
-
-    Draw ``i`` is the background file ``<root>/<seed>-<i>.h5``, simulated at
-    ``realization_key(seed, i)``.
+def read_background_ensemble(
+    paths: Sequence[str | Path], names: Sequence[str]
+) -> dict[str, _NetworkSpectra]:
+    """Read draws and stack their spectra and event counts in path order.
 
     Parameters
     ----------
-    root
-        The ensemble root.
-    seed
-        The seed the ensemble was simulated with.
-    num_draws
-        One past the last index read.
+    paths
+        Background draw files on a shared frequency grid, in ensemble order.
     names
-        Networks, each recorded in every draw's background.
-    start
-        The first index read; must be below ``num_draws``. Every draw is
-        taken to share one frequency grid.
+        Network names present in the draws.
 
     Returns
     -------
-    list of NetworkSpectra
-        Each network's draws, in ``names`` order.
-
-    Raises
-    ------
-    FileNotFoundError
-        If a draw's file is missing.
-    KeyError
-        If a draw's background does not record one of ``names``.
+    dict
+        For each network, its frequencies, pair spectral densities stacked
+        along the leading draw axis and total event count per draw.
     """
-    root = Path(root)
-    draws = [
-        BackgroundDraw.read(root / f"{int(seed)}-{index}.h5")[0]
-        for index in range(start, num_draws)
-    ]
-    return [_stack(draws, name) for name in names]
+    draws = [BackgroundDraw.read(path)[0] for path in paths]
+    return {name: _stack(draws, name) for name in names}
 
 
-def _stack(draws: Sequence[BackgroundDraw], name: str) -> NetworkSpectra:
+def _stack(draws: Sequence[BackgroundDraw], name: str) -> _NetworkSpectra:
     """One network's spectra of every draw, stacked."""
     return {
         "frequencies": draws[0].frequencies,

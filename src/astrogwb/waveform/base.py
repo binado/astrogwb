@@ -2,28 +2,29 @@
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 import jax
 import jax.numpy as jnp
-from numpy.typing import ArrayLike
+from jax.typing import ArrayLike
 
-from astrogwb.waveform.metadata import WaveformMetadata
+from astrogwb.waveform.metadata import WaveformConfig
 
 __all__ = ["WaveformGenerator"]
 
 
 @dataclass(frozen=True, slots=True)
-class WaveformGenerator:
-    """Base for live generators; persisted description lives in ``metadata``."""
+class WaveformGenerator(ABC):
+    """Base for live generators; the persisted description lives in ``config``."""
 
-    metadata: WaveformMetadata
+    config: WaveformConfig
 
     @property
-    def frequencies(self) -> ArrayLike:
-        """The frequency axis produced by the concrete generator."""
-        raise NotImplementedError
+    @abstractmethod
+    def frequencies(self) -> jax.Array:
+        """The frequency axis in Hz, ``(F,)``, produced by the concrete generator."""
 
     def check_sources(self, source_parameters: Mapping[str, ArrayLike]) -> None:
         """Check eager source values supported by a concrete generator.
@@ -35,33 +36,13 @@ class WaveformGenerator:
         """
         del source_parameters
 
-    def generate(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
-        """Generate power for one source.
-
-        Parameters
-        ----------
-        source_parameters
-            Source parameter values by name.
-        """
-        power = self.generate_batch(
-            {
-                name: jnp.atleast_1d(jnp.asarray(value))
-                for name, value in source_parameters.items()
-            }
-        )
-        if power.shape[-1] != 1:
-            raise ValueError(
-                f"generate expects a single source; received {power.shape[-1]} events"
-            )
-        return power[:, 0]
-
-    def generate_batch(
+    def intensity(
         self,
-        source_parameters: Mapping[str, ArrayLike],
+        sources: Mapping[str, ArrayLike],
         *,
         chunk_size: int | None = None,
     ) -> jax.Array:
-        """Generate frequency-first power ``(F, N)`` for a catalog.
+        """Generate frequency-domain intensity of a catalog of ``N`` sources.
 
         Trace-safe; an eager whole-catalog caller should ``jit`` it.
         ``chunk_size`` bounds peak memory via :func:`jax.lax.map`, changing the
@@ -69,15 +50,27 @@ class WaveformGenerator:
 
         Parameters
         ----------
-        source_parameters
-            Source parameter values by name.
+        sources
+            Source parameter values by name, each ``(N,)``.
         chunk_size
-            Number of sources per chunk.
-        """
-        return _chunked(self._generate_batch, source_parameters, chunk_size)
+            Number of sources per chunk. It fixes array shapes, so it must be a
+            static argument when the method is jit compiled.
 
-    def generate_polarizations_batch(
-        self, source_parameters: Mapping[str, ArrayLike]
+        Returns
+        -------
+        jax.Array
+            The intensity, ``(N, F)``, with sources on the first axis.
+
+        Raises
+        ------
+        ValueError
+            If ``chunk_size`` is not positive, or the columns of ``sources`` are
+            missing or differ in length.
+        """
+        return _chunked(self._generate_batch, sources, chunk_size)
+
+    def polarizations(
+        self, sources: Mapping[str, ArrayLike]
     ) -> tuple[jax.Array, jax.Array]:
         r"""Generate the complex polarizations of a catalog, each ``(N, F)``.
 
@@ -89,16 +82,21 @@ class WaveformGenerator:
 
         Parameters
         ----------
-        source_parameters
+        sources
             Source parameter values by name. Optional ``coa_time`` gives
             the geocentric arrival time in seconds relative to the chosen origin,
             one per source, ``(N,)`` (or a scalar shared by all sources).
             Applies ``exp(-2 pi i f coa_time)`` to both polarizations.
             A missing column leaves them unshifted. Detector delays are applied by
             detector projection; intensity-only generation is independent of time.
+
+        Returns
+        -------
+        tuple of jax.Array
+            :math:`\tilde h_+` and :math:`\tilde h_\times`, each ``(N, F)``.
         """
-        plus, cross = self._generate_polarizations_batch(source_parameters)
-        coa_time = source_parameters.get("coa_time")
+        plus, cross = self._generate_polarizations_batch(sources)
+        coa_time = sources.get("coa_time")
         if coa_time is None:
             return plus, cross
         phase = jnp.exp(
@@ -109,23 +107,15 @@ class WaveformGenerator:
         )
         return plus * phase, cross * phase
 
+    @abstractmethod
     def _generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
-        """Every source in one vectorized pass; what a concrete generator implements."""
-        del source_parameters
-        raise NotImplementedError
+        """Every source in one vectorized pass, ``(N, F)``."""
 
+    @abstractmethod
     def _generate_polarizations_batch(
         self, source_parameters: Mapping[str, ArrayLike]
     ) -> tuple[jax.Array, jax.Array]:
         """The polarizations of every source in one pass, each ``(N, F)``."""
-        del source_parameters
-        raise NotImplementedError
-
-    def __call__(
-        self, source_parameters: Mapping[str, ArrayLike]
-    ) -> tuple[jax.Array, jax.Array]:
-        """Return the generated frequency axis and power."""
-        return jnp.asarray(self.frequencies), self.generate_batch(source_parameters)
 
 
 def _chunked(
@@ -133,18 +123,26 @@ def _chunked(
     source_parameters: Mapping[str, ArrayLike],
     chunk_size: int | None,
 ) -> jax.Array:
-    """``generate`` over the catalog, whole or in chunks, sources on the last axis.
+    """``generate`` over the catalog, whole or in chunks, sources on the first axis.
 
     The full chunks run under :func:`jax.lax.map` and the remainder as one more
     batch, so peak memory is ``chunk_size`` sources' worth of intermediates.
-    ``generate`` returns ``(..., n)`` for ``n`` sources.
+    ``generate`` returns ``(n, F)`` for ``n`` sources.
     """
     if chunk_size is None:
         return generate(source_parameters)
     if chunk_size <= 0:
         raise ValueError("chunk_size must be positive")
+    if not source_parameters:
+        raise ValueError("sources must have at least one column")
     columns = {name: jnp.asarray(value) for name, value in source_parameters.items()}
-    count = next(iter(columns.values())).shape[0]
+    counts = {name: value.shape[:1] for name, value in columns.items()}
+    if len(set(counts.values())) != 1 or any(len(c) != 1 for c in counts.values()):
+        raise ValueError(f"sources must be one-dimensional of one length, got {counts}")
+    (count,) = next(iter(counts.values()))
+    if count == 0:
+        # There is no chunk to map, and lax.map needs at least one.
+        return generate(columns)
     full = count - count % chunk_size
     pieces = []
     if full:
@@ -152,11 +150,9 @@ def _chunked(
             name: value[:full].reshape(full // chunk_size, chunk_size)
             for name, value in columns.items()
         }
-        # (n_chunks, ..., chunk_size) -> (..., full), sources in order.
         mapped = jax.lax.map(generate, chunks)
-        ordered = jnp.moveaxis(mapped, 0, -2)
-        pieces.append(ordered.reshape(*ordered.shape[:-2], full))
+        pieces.append(mapped.reshape(full, mapped.shape[-1]))
     if full < count:
         tail = {name: value[full:] for name, value in columns.items()}
         pieces.append(generate(tail))
-    return jnp.concatenate(pieces, axis=-1)
+    return jnp.concatenate(pieces, axis=0)

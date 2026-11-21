@@ -3,8 +3,8 @@ from __future__ import annotations
 from astrogwb.background.analytic import (
     JointMassFunction,
     PopulationFunction,
-    analytic_spectral_density,
     analytic_spectral_density_from_mass_moments,
+    inspiral_spectral_density,
     precompute_cumulative_mass_moments,
     uniform_prior_mass_moments,
 )
@@ -24,10 +24,10 @@ from astrogwb.background.spectral import (
 __all__ = [
     "JointMassFunction",
     "PopulationFunction",
-    "analytic_spectral_density",
     "analytic_spectral_density_from_mass_moments",
     "characteristic_noise",
     "characteristic_strain",
+    "inspiral_spectral_density",
     "omega_gw_from_spectral_density",
     "precompute_cumulative_mass_moments",
     "spectral_density_from_omega_gw",

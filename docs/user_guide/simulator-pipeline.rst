@@ -59,7 +59,7 @@ that network in Python, use ``load_networks_from_file(Path("detectors.toml"))["H
 The catalogue must hold ``distance`` (luminosity distance in Mpc, renamed
 ``luminosity_distance``), the sky columns, and the detector-frame or source-frame
 masses; other columns pass through. ``--waveform-config`` is a TOML file of the
-``WaveformMetadata`` fields. ``--rate-per-year`` is the observer-frame rate of the
+``WaveformConfig`` fields. ``--rate-per-year`` is the observer-frame rate of the
 population the catalogue represents; it is converted to ``observer_rate_hz``.
 ``--incoherent`` skips noise and sums event powers, the noiseless expected signal of the
 same Poisson draw. The file stores the ``BackgroundDraw`` (``frequencies``,
@@ -71,7 +71,12 @@ same Poisson draw. The file stores the ``BackgroundDraw`` (``frequencies``,
 atomic write; ``BackgroundDraw.read_attrs`` reads them back. The on-disk config stores
 shared detector definitions once, alongside the network memberships.
 ``BackgroundDraw.read`` reconstructs the network mappings without looking up any
-registrations, and ``network_noise`` rebuilds the noise inputs from those configs.
+registrations. Use the stored networks and frequency grid to evaluate
+``effective_psd`` and ``pair_cross_power_std`` with the original observation duration.
+
+Use ``read_background_ensemble(paths, names)`` to stack draws from explicitly
+ordered paths. Index the result by network name to get its frequencies,
+pair spectral densities, and event counts.
 
 Normalization and noise
 -----------------------

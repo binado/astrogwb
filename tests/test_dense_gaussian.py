@@ -26,7 +26,7 @@ from jax.tree_util import Partial
 from jax.typing import ArrayLike
 from tolerances import assert_close
 
-from astrogwb.background.importance.model import CatalogModel, interpolation_weights
+from astrogwb.background.importance.model import CatalogModel, _interpolation_weights
 from astrogwb.background.importance.spectrum import (
     INCLINATION_MEAN,
     INCLINATION_RAW_SECOND_MOMENT,
@@ -34,9 +34,10 @@ from astrogwb.background.importance.spectrum import (
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.detector import (
     NORMALIZED_ORF_SCALE,
+    Network,
     generalized_overlap_reduction_function,
     load_detector,
-    pair_names,
+    network_pairs,
     pair_response,
 )
 from astrogwb.detector.response import _isotropic_angles
@@ -125,7 +126,7 @@ def pair_leaves(model: CatalogModel) -> dict[str, Any]:
             [np.linspace(0.9, 0.4, NUM_BINS), np.linspace(-0.3, 0.2, NUM_BINS)]
         ),
         "mask": mask,
-        "observation_time": OBSERVATION_TIME,
+        "observation_seconds": OBSERVATION_TIME * SECONDS_PER_YEAR,
         "pairs": PAIRS,
     }
 
@@ -177,7 +178,7 @@ def diagonal_likelihood(
 
 
 # --------------------------------------------------------------------------- #
-# interpolation_weights and the intensity second moment
+# _interpolation_weights and the intensity second moment
 # --------------------------------------------------------------------------- #
 def test_interpolation_weights_reproduce_jnp_interp_inside_and_outside_the_grid() -> (
     None
@@ -185,7 +186,7 @@ def test_interpolation_weights_reproduce_jnp_interp_inside_and_outside_the_grid(
     reference = jnp.array([0.0, 1.0, 2.5, 4.0])
     query = jnp.array([-1.0, 0.0, 0.3, 1.0, 3.9, 4.0, 4.5])
     values = jax.random.normal(jax.random.key(3), (4,))
-    index, weights = interpolation_weights(query, reference)
+    index, weights = _interpolation_weights(query, reference)
 
     rows = jnp.stack([index, index + 1], axis=1)
     assert_close(
@@ -194,13 +195,12 @@ def test_interpolation_weights_reproduce_jnp_interp_inside_and_outside_the_grid(
     )
 
 
-def test_second_moment_held_node_moments_match_the_weighted_gather_at_the_fiducials(
+def test_second_moment_with_reweighted_masses_matches_the_held_moment_at_the_fiducials(
     model_factory: Callable[..., CatalogModel],
 ) -> None:
     """At the fiducials every weight is one, so both paths are the same moment."""
     held = model_factory()
     weighted = model_factory(reweight_masses=True)
-    assert held.node_moments is not None and weighted.node_moments is None
 
     assert_close(
         weighted.intensity_second_moment(FIDUCIALS),
@@ -316,7 +316,7 @@ def test_log_likelihood_scores_each_realization_against_one_factor(
     together = likelihood.log_likelihood(OFF_FIDUCIAL)[0]
     alone = [
         DenseGaussianLikelihood._from_network(
-            likelihood.model, network, row, likelihood.generalized_orfs
+            likelihood.model, network, row, likelihood.masked_generalized_orfs
         ).log_likelihood(OFF_FIDUCIAL)[0]
         for row in observed
     ]
@@ -377,26 +377,26 @@ def test_log_likelihood_of_a_model_on_another_grid_raises(
 # The public constructor, on the ET triangle
 # --------------------------------------------------------------------------- #
 @pytest.fixture(scope="module")
-def triangle() -> list[Any]:
-    return [load_detector(name) for name in ("E1", "E2", "E3")]
+def triangle() -> Network:
+    return {name: load_detector(name) for name in ("E1", "E2", "E3")}
 
 
 @pytest.fixture(scope="module")
 def triangle_data(
-    model: CatalogModel, frequencies: np.ndarray, triangle: list[Any]
+    model: CatalogModel, frequencies: np.ndarray, triangle: Network
 ) -> dict[tuple[str, str], np.ndarray]:
     """One realization per sorted pair, a little above the fiducial spectrum."""
     spectrum = np.asarray(model.spectral_density(FIDUCIALS))
     rng = np.random.default_rng(2)
     return {
         pair: spectrum * (1.0 + 0.1 * rng.normal(size=frequencies.size))
-        for pair in pair_names(triangle)
+        for pair in network_pairs(triangle)
     }
 
 
 def _triangle_likelihood(
     model: CatalogModel,
-    detectors: list[Any],
+    detectors: Network,
     frequencies: np.ndarray,
     observed: Mapping[tuple[str, str], ArrayLike] | None,
     kind: type[
@@ -417,11 +417,13 @@ def _triangle_likelihood(
 def test_constructor_does_not_depend_on_the_detector_order(
     model: CatalogModel,
     frequencies: np.ndarray,
-    triangle: list[Any],
+    triangle: Network,
     triangle_data: dict[tuple[str, str], np.ndarray],
 ) -> None:
     forward = _triangle_likelihood(model, triangle, frequencies, triangle_data)
-    backward = _triangle_likelihood(model, triangle[::-1], frequencies, triangle_data)
+    backward = _triangle_likelihood(
+        model, dict(reversed(tuple(triangle.items()))), frequencies, triangle_data
+    )
 
     assert_close(
         forward.log_likelihood(OFF_FIDUCIAL)[0],
@@ -441,7 +443,7 @@ def test_constructor_does_not_depend_on_the_detector_order(
 def test_constructor_with_mismatched_pair_keys_raises(
     model: CatalogModel,
     frequencies: np.ndarray,
-    triangle: list[Any],
+    triangle: Network,
     triangle_data: dict[tuple[str, str], np.ndarray],
     rekey: Callable[[dict[Any, Any]], dict[Any, Any]],
 ) -> None:
@@ -452,7 +454,7 @@ def test_constructor_with_mismatched_pair_keys_raises(
 def test_constructor_mask_drops_the_masked_bins(
     model: CatalogModel,
     frequencies: np.ndarray,
-    triangle: list[Any],
+    triangle: Network,
     triangle_data: dict[tuple[str, str], np.ndarray],
 ) -> None:
     mask = {pair: np.arange(frequencies.size) % 2 == 0 for pair in triangle_data}
@@ -468,7 +470,7 @@ def test_constructor_mask_drops_the_masked_bins(
 def test_constructor_with_shot_noise_gives_a_finite_log_likelihood(
     model: CatalogModel,
     frequencies: np.ndarray,
-    triangle: list[Any],
+    triangle: Network,
     triangle_data: dict[tuple[str, str], np.ndarray],
 ) -> None:
     likelihood = _triangle_likelihood(
@@ -487,7 +489,7 @@ def test_constructor_with_shot_noise_gives_a_finite_log_likelihood(
 def test_constructor_with_passed_orfs_matches_the_sky_draws(
     model: CatalogModel,
     frequencies: np.ndarray,
-    triangle: list[Any],
+    triangle: Network,
     triangle_data: dict[tuple[str, str], np.ndarray],
     masked: bool,
 ) -> None:
@@ -528,7 +530,7 @@ def test_constructor_with_passed_orfs_matches_the_sky_draws(
 def test_constructor_with_passed_orfs_and_sky_draw_settings_raises(
     model: CatalogModel,
     frequencies: np.ndarray,
-    triangle: list[Any],
+    triangle: Network,
     setting: dict[str, Any],
 ) -> None:
     orfs = generalized_overlap_reduction_function(
@@ -548,7 +550,7 @@ def test_constructor_with_passed_orfs_and_sky_draw_settings_raises(
 
 
 def test_constructor_with_orfs_of_another_grid_raises(
-    model: CatalogModel, frequencies: np.ndarray, triangle: list[Any]
+    model: CatalogModel, frequencies: np.ndarray, triangle: Network
 ) -> None:
     orfs = generalized_overlap_reduction_function(
         jax.random.key(0), 8, frequencies[:-1], triangle
@@ -568,7 +570,7 @@ def test_constructor_with_orfs_of_another_grid_raises(
 def test_constructor_mask_and_pairs_describe_the_compressed_axis(
     model: CatalogModel,
     frequencies: np.ndarray,
-    triangle: list[Any],
+    triangle: Network,
     triangle_data: dict[tuple[str, str], np.ndarray],
 ) -> None:
     mask = {pair: np.arange(frequencies.size) % 3 != 0 for pair in triangle_data}
@@ -577,14 +579,13 @@ def test_constructor_mask_and_pairs_describe_the_compressed_axis(
     )
     stacked = stack_pairs(triangle_data, likelihood.pairs)
 
-    assert likelihood.pairs == tuple(pair_names(triangle))
+    assert likelihood.pairs == tuple(network_pairs(triangle))
     assert likelihood.mask.shape == stacked.shape
     assert np.array_equal(
         likelihood.mask, np.asarray(stack_pairs(mask, likelihood.pairs))
     )
     assert likelihood.observed is not None
     assert_close(likelihood.observed, stacked[..., likelihood.mask])
-    assert np.array_equal(likelihood._network.keep, np.flatnonzero(likelihood.mask))
 
     full = np.full(likelihood.mask.shape, np.nan)
     full[likelihood.mask] = np.asarray(likelihood.observed)
@@ -598,7 +599,7 @@ def test_constructor_mask_and_pairs_describe_the_compressed_axis(
 def test_constructor_covariance_is_the_sum_of_its_components(
     model: CatalogModel,
     frequencies: np.ndarray,
-    triangle: list[Any],
+    triangle: Network,
 ) -> None:
     likelihood = _triangle_likelihood(
         model, triangle, frequencies, None, DenseGaussianLikelihood, num_draws=256
@@ -609,7 +610,7 @@ def test_constructor_covariance_is_the_sum_of_its_components(
 
 
 def test_dense_constructor_missing_weighted_orf_raises(
-    model: CatalogModel, frequencies: np.ndarray, triangle: list[Any]
+    model: CatalogModel, frequencies: np.ndarray, triangle: Network
 ) -> None:
     orfs = generalized_overlap_reduction_function(
         jax.random.key(0), 8, frequencies, triangle, components=("II", "QQ", "UU")
@@ -627,7 +628,7 @@ def test_dense_constructor_missing_weighted_orf_raises(
 
 
 def test_dense_constructor_drops_unweighted_orfs(
-    model: CatalogModel, frequencies: np.ndarray, triangle: list[Any]
+    model: CatalogModel, frequencies: np.ndarray, triangle: Network
 ) -> None:
     orfs = generalized_overlap_reduction_function(
         jax.random.key(0),
@@ -646,9 +647,10 @@ def test_dense_constructor_drops_unweighted_orfs(
     )
     size = int(likelihood.mask.sum())
 
-    assert set(likelihood.generalized_orfs) == {"II", "QQ", "UU", "VV"}
+    assert set(likelihood.masked_generalized_orfs) == {"II", "QQ", "UU", "VV"}
     assert all(
-        values.shape == (size, size) for values in likelihood.generalized_orfs.values()
+        values.shape == (size, size)
+        for values in likelihood.masked_generalized_orfs.values()
     )
 
 
@@ -663,7 +665,7 @@ NUM_POLARIZATION_NODES = 8
 
 
 def test_generalized_orfs_do_not_depend_on_the_chunk_size(
-    triangle: list[Any],
+    triangle: Network,
 ) -> None:
     key = jax.random.key(4)
     whole = generalized_overlap_reduction_function(
@@ -679,7 +681,7 @@ def test_generalized_orfs_do_not_depend_on_the_chunk_size(
 
 @pytest.mark.parametrize("pair", ["II", "QQ", "UU", "VV"])
 def test_generalized_orf_diagonal_component_is_symmetric_positive_semidefinite(
-    triangle: list[Any], pair: StokesPair
+    triangle: Network, pair: StokesPair
 ) -> None:
     orfs = generalized_overlap_reduction_function(
         jax.random.key(5), 200, RESPONSE_FREQUENCIES, triangle
@@ -693,7 +695,7 @@ def test_generalized_orf_diagonal_component_is_symmetric_positive_semidefinite(
 
 
 def test_generalized_orf_vi_is_iv_with_the_pairs_swapped(
-    triangle: list[Any],
+    triangle: Network,
 ) -> None:
     orfs = generalized_overlap_reduction_function(
         jax.random.key(6), 50, RESPONSE_FREQUENCIES, triangle, components=("IV", "VI")
@@ -703,7 +705,7 @@ def test_generalized_orf_vi_is_iv_with_the_pairs_swapped(
 
 
 def test_quadrupole_combination_is_the_source_averaged_response_moment(
-    triangle: list[Any],
+    triangle: Network,
 ) -> None:
     r"""The per-source ORF moment, inclination and polarization integrated exactly.
 
@@ -799,7 +801,7 @@ def test_grid_log_likelihood_of_a_partial_model_matches_the_model(
         Partial(_delegate, likelihood.model),
         network,
         observed,
-        likelihood.generalized_orfs,
+        likelihood.masked_generalized_orfs,
     )
     fixed = {name: value for name, value in FIDUCIALS.items() if name not in GRIDS}
 
@@ -828,7 +830,7 @@ def test_grid_log_likelihood_compiles_once_for_data_of_the_same_shape(
     results = [
         grid_log_likelihood(
             DenseGaussianLikelihood._from_network(
-                likelihood.model, network, data, likelihood.generalized_orfs
+                likelihood.model, network, data, likelihood.masked_generalized_orfs
             ),
             grids,
             fixed={

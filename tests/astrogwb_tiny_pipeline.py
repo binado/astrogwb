@@ -12,9 +12,9 @@ from pathlib import Path
 import numpy as np
 
 from astrogwb.detector import load_detector
-from astrogwb.waveform import WaveformMetadata
+from astrogwb.waveform import WaveformConfig
 
-WAVEFORM = WaveformMetadata(
+WAVEFORM = WaveformConfig(
     approximant="AnalyticInspiral",
     minimum_frequency=20.0,
     maximum_frequency=50.0,

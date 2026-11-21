@@ -2,7 +2,9 @@
 
 The analytic isotropic ORF for the native detector geometry,
 :func:`isotropic_overlap_reduction_function`, and the response of a pair to one
-source, :func:`overlap_reduction_function`, whose isotropic average it equals.
+source, :func:`point_source_overlap_reduction_function`, whose isotropic average it
+equals. :func:`network_overlap_reduction_function` evaluates the isotropic ORF of every
+pair of a network.
 Single-source responses go through :func:`stokes_cross_power`.
 """
 
@@ -10,7 +12,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from typing import Literal
 
 import jax
@@ -22,6 +24,7 @@ from numpy.typing import ArrayLike, NDArray
 from astrogwb.constants import SPEED_OF_LIGHT
 from astrogwb.waveform.intensity import quadrupolar_stokes_factors
 
+from .config import Network, map_over_pairs
 from .geometry import Detector, DetectorGeometry
 
 # Below this alpha the closed-form g1/g2/g3 lose ~eps/alpha^4 to cancellation
@@ -295,31 +298,26 @@ def isotropic_overlap_reduction_function(
     )
 
 
-def pairwise_overlap_reduction_function(
-    frequencies: ArrayLike,
-    detectors: Sequence[Detector],
+def network_overlap_reduction_function(
+    frequencies: ArrayLike, network: Network
 ) -> NDArray[np.float64]:
-    """Symmetric ``(n, n, nfreq)`` isotropic ORF matrix with unit diagonal.
+    """Isotropic ORF of every detector pair of a network, ``(P, F)``.
 
     Parameters
     ----------
     frequencies
         Frequency grid in Hz.
-    detectors
-        Detectors in the network.
+    network
+        Detectors keyed by name; at least two. Pairs are in the order of
+        :func:`~astrogwb.detector.network_pairs`.
     """
-    frequencies = np.asarray(frequencies, dtype=float)
-    det_list = list(detectors)
-    n = len(det_list)
-    out = np.zeros((n, n, frequencies.shape[0]), dtype=float)
-
-    for i, det1 in enumerate(det_list):
-        out[i, i, :] = 1.0
-        for j in range(i + 1, n):
-            orf = isotropic_overlap_reduction_function(frequencies, det1, det_list[j])
-            out[i, j, :] = orf
-            out[j, i, :] = orf
-    return out
+    overlaps = map_over_pairs(
+        lambda first, second: isotropic_overlap_reduction_function(
+            frequencies, first, second
+        ),
+        network,
+    )
+    return np.stack(tuple(overlaps.values()))
 
 
 #: Reference direction for the relative orientation of two detectors:
@@ -489,7 +487,7 @@ def stokes_cross_power(
     )
 
 
-def overlap_reduction_function(
+def point_source_overlap_reduction_function(
     frequencies: JaxArrayLike,
     detector_1: Detector,
     detector_2: Detector,

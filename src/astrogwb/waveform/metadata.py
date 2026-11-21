@@ -15,7 +15,7 @@ _CONFUSABLE = frozenset(
 )
 
 
-class WaveformMetadata(BaseModel):
+class WaveformConfig(BaseModel):
     """The complete settings that determine a waveform generator.
 
     The frequency grid is ``frequency_spacing`` over

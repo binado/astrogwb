@@ -9,7 +9,6 @@ from astrogwb.background import (
     spectral_snr_squared_per_bin,
     spectral_snr_squared_per_log_frequency,
 )
-from astrogwb.detector import log_frequency_noise_scale
 from astrogwb.frequency import bin_widths
 from astrogwb.utils import years_to_seconds
 
@@ -72,7 +71,7 @@ def test_snr_per_log_frequency_is_squared_ratio_to_log_frequency_scale() -> None
     freqs = jnp.array([5.0, 50.0, 500.0])
     observation_time_yr = 0.5
 
-    scale = log_frequency_noise_scale(eff, freqs, observation_time_yr)
+    scale = eff / jnp.sqrt(2.0 * years_to_seconds(observation_time_yr) * freqs)
     density = spectral_snr_squared_per_log_frequency(
         sd, eff, freqs, years_to_seconds(observation_time_yr)
     )

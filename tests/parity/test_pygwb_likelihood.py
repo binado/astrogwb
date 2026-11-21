@@ -22,7 +22,7 @@ from numpy.typing import NDArray
 from tolerances import assert_close
 
 from astrogwb.background.spectral import spectral_density_from_omega_gw
-from astrogwb.detector import Detector, pair_names
+from astrogwb.detector import Network, network_pairs
 from astrogwb.inference import DiagonalGaussianLikelihood, SpectralDensityPrediction
 
 
@@ -61,7 +61,7 @@ def likelihood(
     frequencies: NDArray[np.float64],
     hubble_constant: float,
     observation_years: float,
-    exact_detectors: tuple[Detector, ...],
+    exact_network: Network,
 ) -> DiagonalGaussianLikelihood[PowerLawSpectrum]:
     model = PowerLawSpectrum(
         jnp.asarray(frequencies),
@@ -71,10 +71,10 @@ def likelihood(
     csd = pygwb_reference["csd"] / PYGWB_POWER_FRACTION
     return DiagonalGaussianLikelihood(
         model,
-        exact_detectors,
+        exact_network,
         frequencies=frequencies,
         observation_time=observation_years,
-        observed=dict(zip(pair_names(exact_detectors), csd, strict=True)),
+        observed=dict(zip(network_pairs(exact_network), csd, strict=True)),
     )
 
 

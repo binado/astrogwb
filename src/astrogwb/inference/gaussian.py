@@ -46,17 +46,15 @@ import numpy as np
 from jax.scipy.linalg import solve_triangular
 from jax.typing import ArrayLike
 
-from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.detector import (
     NORMALIZED_ORF_SCALE,
-    Detector,
+    Network,
     generalized_overlap_reduction_function,
-    pair_bin_scale,
-    pair_names,
-    pair_terms,
-    resolve_network,
+    network_overlap_reduction_function,
+    network_pairs,
+    pair_cross_power_std,
 )
-from astrogwb.utils import PairName, stack_pairs
+from astrogwb.utils import PairName, stack_pairs, years_to_seconds
 from astrogwb.waveform.intensity import QUADRUPOLE_STOKES_WEIGHTS, StokesPair
 
 from .model import SpectralDensityModel, SpectralDensityPrediction
@@ -138,8 +136,8 @@ class _Network:
     pair_overlap
         Isotropic ORF :math:`\gamma_{ab}(f_k)`, the gain from the spectral
         density to each entry's mean, ``(D,)``.
-    observation_time
-        Observation time :math:`T` in years, ``()``.
+    observation_seconds
+        Observation time :math:`T` in seconds, ``()``.
     pairs
         The sorted name pair of every pair, in the data's order.
     num_bins
@@ -150,7 +148,7 @@ class _Network:
     bins: jax.Array
     scale: jax.Array
     pair_overlap: jax.Array
-    observation_time: jax.Array
+    observation_seconds: jax.Array
     pairs: tuple[PairName, ...]
     num_bins: int
 
@@ -160,7 +158,7 @@ class _Network:
         *,
         scale: ArrayLike,
         pair_overlap: ArrayLike,
-        observation_time: float,
+        observation_seconds: float,
         pairs: Sequence[PairName],
         mask: ArrayLike | None = None,
     ) -> Self:
@@ -174,8 +172,8 @@ class _Network:
             Detector-noise standard deviation, ``(P, F)``, infinite out of band.
         pair_overlap
             Isotropic ORF of every pair, ``(P, F)``.
-        observation_time
-            Observation time in years.
+        observation_seconds
+            Observation time in seconds.
         pairs
             The sorted name pair of every pair, ``(P,)``.
         mask
@@ -193,7 +191,7 @@ class _Network:
             bins=jnp.asarray(keep % num_bins),
             scale=jnp.asarray(scale.reshape(-1)[keep]),
             pair_overlap=jnp.asarray(np.asarray(pair_overlap).reshape(-1)[keep]),
-            observation_time=jnp.asarray(observation_time, dtype=float),
+            observation_seconds=jnp.asarray(observation_seconds, dtype=float),
             pairs=tuple(pairs),
             num_bins=num_bins,
         )
@@ -246,7 +244,7 @@ jax.tree_util.register_dataclass(
         "bins",
         "scale",
         "pair_overlap",
-        "observation_time",
+        "observation_seconds",
     ],
     meta_fields=["pairs", "num_bins"],
 )
@@ -389,9 +387,7 @@ def _catalog_covariance(
             f"{(network.num_bins,) * 2}"
         )
     covariance = (
-        moment[network.bins][:, network.bins]
-        * overlap
-        / (network.observation_time * SECONDS_PER_YEAR)
+        moment[network.bins][:, network.bins] * overlap / network.observation_seconds
     )
     # Symmetric to round-off only; made exact for the Cholesky downstream.
     return 0.5 * (covariance + covariance.T)
@@ -406,28 +402,24 @@ def _log_density(factor: _Factor, observed: jax.Array) -> jax.Array:
 
 
 def _resolve(
-    network: str | Sequence[Detector],
+    network: Network,
     frequencies: np.ndarray,
     observation_time: float,
     mask: Mapping[PairName, ArrayLike] | None,
-) -> tuple[list[Detector], _Network]:
-    """The detectors of ``network`` and the network on the entries it counts."""
-    detectors = list(resolve_network(network))
-    pairs = pair_names(detectors)
-    scale = pair_bin_scale(frequencies, detectors, observation_time)
+) -> _Network:
+    """Prepare the network arrays on the entries it counts."""
+    pairs = network_pairs(network)
+    scale = pair_cross_power_std(frequencies, network, observation_time)
     counted = np.isfinite(scale)
     if mask is not None:
         counted &= np.asarray(stack_pairs(mask, pairs), dtype=bool)
-    resolved = _Network.from_leaves(
+    return _Network.from_leaves(
         scale=scale,
-        pair_overlap=np.stack(
-            [term.overlap for term in pair_terms(frequencies, detectors)]
-        ),
-        observation_time=observation_time,
+        pair_overlap=network_overlap_reduction_function(frequencies, network),
+        observation_seconds=years_to_seconds(observation_time),
         pairs=pairs,
         mask=counted,
     )
-    return detectors, resolved
 
 
 def _compressed(
@@ -585,15 +577,14 @@ class DiagonalGaussianLikelihood[M: SpectralDensityModel](_GaussianLikelihood[M]
     model
         The background model, on ``frequencies``.
     network
-        A registered network name (:func:`~astrogwb.detector.load_network`)
-        or its detectors.
+        Detectors keyed by name.
     frequencies
         Frequency grid in Hz, ``(F,)``.
     observation_time
         Observation time :math:`T` in years.
     observed
         Observed cross powers keyed by the sorted detector-name pair
-        (:func:`~astrogwb.detector.pair_names`), each ``(..., F)``; leading
+        (:func:`~astrogwb.detector.network_pairs`), each ``(..., F)``; leading
         axes are independent realizations. ``None`` builds a likelihood for
         diagnostics only.
     mask
@@ -613,7 +604,7 @@ class DiagonalGaussianLikelihood[M: SpectralDensityModel](_GaussianLikelihood[M]
     def __init__(
         self,
         model: M,
-        network: str | Sequence[Detector],
+        network: Network,
         *,
         frequencies: ArrayLike,
         observation_time: float,
@@ -621,7 +612,7 @@ class DiagonalGaussianLikelihood[M: SpectralDensityModel](_GaussianLikelihood[M]
         mask: Mapping[PairName, ArrayLike] | None = None,
     ) -> None:
         frequencies = np.asarray(frequencies, dtype=float)
-        _, resolved = _resolve(network, frequencies, observation_time, mask)
+        resolved = _resolve(network, frequencies, observation_time, mask)
         self._assign(model, resolved, _compressed(resolved, observed))
 
     @classmethod
@@ -664,15 +655,14 @@ class DenseGaussianLikelihood[M: SpectralDensityModel](_GaussianLikelihood[M]):
         The background model, on ``frequencies``; it must predict the
         intensity second moment.
     network
-        A registered network name (:func:`~astrogwb.detector.load_network`)
-        or its detectors.
+        Detectors keyed by name.
     frequencies
         Frequency grid in Hz, ``(F,)``.
     observation_time
         Observation time :math:`T` in years.
     observed
         Observed cross powers keyed by the sorted detector-name pair
-        (:func:`~astrogwb.detector.pair_names`), each ``(..., F)``; leading
+        (:func:`~astrogwb.detector.network_pairs`), each ``(..., F)``; leading
         axes are independent realizations. ``None`` builds a likelihood for
         diagnostics only.
     mask
@@ -713,7 +703,7 @@ class DenseGaussianLikelihood[M: SpectralDensityModel](_GaussianLikelihood[M]):
     def __init__(
         self,
         model: M,
-        network: str | Sequence[Detector],
+        network: Network,
         *,
         frequencies: ArrayLike,
         observation_time: float,
@@ -724,13 +714,13 @@ class DenseGaussianLikelihood[M: SpectralDensityModel](_GaussianLikelihood[M]):
         generalized_orfs: Mapping[StokesPair, ArrayLike] | None = None,
     ) -> None:
         frequencies = np.asarray(frequencies, dtype=float)
-        detectors, resolved = _resolve(network, frequencies, observation_time, mask)
+        resolved = _resolve(network, frequencies, observation_time, mask)
         if generalized_orfs is None:
             generalized_orfs = generalized_overlap_reduction_function(
                 jax.random.key(0) if key is None else key,
                 2**15 if num_draws is None else num_draws,
                 frequencies,
-                detectors,
+                network,
                 components=_WEIGHTED_PAIRS,
             )
         elif key is not None or num_draws is not None:
@@ -790,7 +780,7 @@ class DenseGaussianLikelihood[M: SpectralDensityModel](_GaussianLikelihood[M]):
         return likelihood
 
     @property
-    def generalized_orfs(self) -> Mapping[StokesPair, jax.Array]:
+    def masked_generalized_orfs(self) -> Mapping[StokesPair, jax.Array]:
         r"""The generalized ORFs :math:`\Gamma^{\mu\nu}` the quadrupole weights.
 
         Keyed ``II``, ``QQ``, ``UU`` and ``VV``, each ``(D, D)`` on the
@@ -841,7 +831,7 @@ class DenseGaussianLikelihood[M: SpectralDensityModel](_GaussianLikelihood[M]):
                 "the count term needs the model to predict its merger rate"
             )
         mean = _expected_data(prediction, self._network)
-        seconds = self._network.observation_time * SECONDS_PER_YEAR
+        seconds = self._network.observation_seconds
         count = jnp.outer(mean, mean) / (prediction.merger_rate * seconds)
 
         def term(pairs: Sequence[StokesPair]) -> jax.Array:

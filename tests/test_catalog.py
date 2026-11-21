@@ -10,10 +10,10 @@ import pytest
 
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.waveform import (
-    AnalyticInspiralGenerator,
-    WaveformMetadata,
+    WaveformConfig,
     inspiral_intensity,
 )
+from astrogwb.waveform.analytical import AnalyticInspiralGenerator
 
 
 @pytest.fixture
@@ -28,11 +28,11 @@ def source_parameters() -> dict[str, np.ndarray]:
     }
 
 
-def test_analytic_generator_evaluates_on_exact_metadata_grid(
+def test_analytic_generator_evaluates_on_exact_config_grid(
     source_parameters: dict[str, np.ndarray],
 ) -> None:
     generator = AnalyticInspiralGenerator(
-        WaveformMetadata(
+        WaveformConfig(
             alpha=ISCO_ALPHA,
             approximant="AnalyticInspiral",
             minimum_frequency=9.5,
@@ -43,10 +43,11 @@ def test_analytic_generator_evaluates_on_exact_metadata_grid(
         )
     )
 
-    frequencies, actual = generator(source_parameters)
+    frequencies = generator.frequencies
+    actual = generator.intensity(source_parameters)
     expected = np.asarray(
         inspiral_intensity(generator.frequencies, source_parameters, alpha=ISCO_ALPHA)
-    ).T
+    )
 
     np.testing.assert_array_equal(frequencies, generator.frequencies)
     assert isinstance(actual, jax.Array)
@@ -62,7 +63,7 @@ def test_analytic_generator_evaluates_on_a_log_spaced_grid(
     source_parameters: dict[str, np.ndarray], grid_settings: dict[str, Any]
 ) -> None:
     generator = AnalyticInspiralGenerator(
-        WaveformMetadata.model_validate(
+        WaveformConfig.model_validate(
             {
                 "alpha": ISCO_ALPHA,
                 "approximant": "AnalyticInspiral",
@@ -76,10 +77,11 @@ def test_analytic_generator_evaluates_on_a_log_spaced_grid(
         )
     )
 
-    frequencies, actual = generator(source_parameters)
+    frequencies = generator.frequencies
+    actual = generator.intensity(source_parameters)
     expected = np.asarray(
         inspiral_intensity(frequencies, source_parameters, alpha=ISCO_ALPHA)
-    ).T
+    )
 
     assert frequencies[0] == 10.0
     assert frequencies[-1] == 100.0

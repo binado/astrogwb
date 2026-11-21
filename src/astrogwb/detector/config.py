@@ -8,7 +8,7 @@ Validating settings leaves the XLA backend uninitialized.
 from __future__ import annotations
 
 import tomllib
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping
 from collections.abc import Set as AbstractSet
 from functools import cache
 from itertools import combinations
@@ -70,13 +70,61 @@ _Detectors = Annotated[
 ]
 
 
+#: Detectors keyed by their own name.
 Network = Mapping[str, Detector]
 Networks = Mapping[str, Network]
 
 
 def network_pairs(network: Network) -> tuple[tuple[str, str], ...]:
-    """Return detector key pairs in the order of spectra and noise rows."""
+    """Return detector key pairs in the order of spectra and noise rows.
+
+    Parameters
+    ----------
+    network
+        Detectors keyed by name.
+
+    Returns
+    -------
+    tuple
+        Every pair of keys, each sorted, in lexicographic order.
+
+    Raises
+    ------
+    ValueError
+        If the network has fewer than two detectors, or a key differs from the
+        name of its detector.
+    """
+    if len(network) < 2:
+        raise ValueError("a network needs at least two detectors to form a pair")
+    for key, detector in network.items():
+        if detector.name != key:
+            raise ValueError(
+                f"detector {detector.name!r} is keyed by {key!r} in the network"
+            )
     return tuple(combinations(sorted(network), 2))
+
+
+def map_over_pairs[T](
+    function: Callable[[Detector, Detector], T], network: Network
+) -> dict[tuple[str, str], T]:
+    """Evaluate a function on each pair in canonical detector-name order.
+
+    Parameters
+    ----------
+    function
+        Function receiving the two detectors in name order.
+    network
+        Detectors keyed by name.
+
+    Returns
+    -------
+    dict
+        Function results keyed by detector-name pair, in network pair order.
+    """
+    return {
+        (first, second): function(network[first], network[second])
+        for first, second in network_pairs(network)
+    }
 
 
 class _DetectorConfigDocument(BaseModel):
@@ -192,17 +240,3 @@ def load_network(name: str) -> Network:
         Name of a registered network.
     """
     return {member: load_detector(member) for member in sorted(_NETWORKS[name])}
-
-
-def resolve_network(network: str | Sequence[Detector]) -> tuple[Detector, ...]:
-    """Resolve a network name or detector sequence to detectors.
-
-    Parameters
-    ----------
-    network
-        A registered network name, loaded in canonical sorted order, or
-        detectors, kept in the given order.
-    """
-    if isinstance(network, str):
-        return tuple(load_network(network).values())
-    return tuple(network)

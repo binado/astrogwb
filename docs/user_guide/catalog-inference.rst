@@ -12,12 +12,11 @@ proposal log density of the draws and the reference redshift:
 
    import jax
    import numpy as np
-   from numpyro import handlers
 
-   from astrogwb.background.importance.spectrum import REFERENCE_INCLINATION, reference_catalog
+   from astrogwb.background.importance import CatalogModel, ReferenceCatalog
    from astrogwb.populations import coba
-   from astrogwb.utils.numpyro import sample_model
-   from astrogwb.waveform import WaveformMetadata, waveform_generator
+   from astrogwb.utils.numpyro import sample_and_logprob
+   from astrogwb.waveform import WaveformConfig, waveform_generator
 
    params = {
        "H0": 67.66,
@@ -29,7 +28,7 @@ proposal log density of the draws and the reference redshift:
        "minimum_mass": 1.0,
        "mass_width": 1.5,
    }
-   waveform = WaveformMetadata(
+   waveform = WaveformConfig(
        approximant="AnalyticInspiral",
        minimum_frequency=2.0,
        maximum_frequency=2048.0,
@@ -38,17 +37,17 @@ proposal log density of the draws and the reference redshift:
        frequency_resolution=1.0,
    )
    mass_sites = ("source_frame_mass_1", "source_frame_mass_2")
-   model = handlers.condition(
+   samples, proposal_log_prob = sample_and_logprob(
        coba.source_model(params, mass_model="uniform"),
-       data={"inclination": REFERENCE_INCLINATION},
+       jax.random.key(42),
+       num_samples=1024,
+       density_sites=mass_sites,
    )
-   samples = sample_model(model, jax.random.key(42), 1024)
-   catalog = reference_catalog(
+   catalog = ReferenceCatalog.from_samples(
        waveform_generator(waveform),
        samples,
        intrinsic_sites=mass_sites,
-       # Joint density of the ordered uniform mass pair.
-       proposal_log_prob=np.full(1024, np.log(2.0) - 2.0 * np.log(params["mass_width"])),
+       proposal_log_prob=proposal_log_prob,
        reference_redshift=0.01,
        parameters=params,
    )
@@ -65,7 +64,6 @@ densities cancel and only the ordered mass pair enters the ratio.
    import jax.numpy as jnp
    import numpy as np
 
-   from astrogwb.background.importance.model import CatalogModel
    from astrogwb.rates import madau_dickinson_rate
 
 
@@ -124,14 +122,14 @@ network from the detectors; the data are keyed by the sorted detector-name pair:
 
    likelihood = DenseGaussianLikelihood(
        model,
-       [load_detector(name) for name in ("E1", "E2", "E3")],  # or a network name
+       {name: load_detector(name) for name in ("E1", "E2", "E3")},
        frequencies=frequencies,
-       observation_time=1.0,  # years
+       observation_time=1.0,
        observed={("E1", "E2"): c_12, ("E1", "E3"): c_13, ("E2", "E3"): c_23},
    )
    log_likelihood, extras = likelihood.log_likelihood(params)
 
-``likelihood.generalized_orfs`` holds the network's four weighted generalized ORFs and
+``likelihood.masked_generalized_orfs`` holds the network's four weighted generalized ORFs and
 ``likelihood.covariance_components(params)`` splits the covariance into its
 detector-noise, count, intensity and polarization terms. Its no-shot-noise limit,
 the diagonal detector noise alone, is ``DiagonalGaussianLikelihood``, which takes the

@@ -16,10 +16,13 @@ from tolerances import assert_close
 
 from astrogwb.detector import (
     load_detector,
-    overlap_reduction_function,
+    map_over_pairs,
+    network_pairs,
     pair_response,
+    point_source_overlap_reduction_function,
     stokes_cross_power,
 )
+from astrogwb.utils import stack_pairs
 from astrogwb.waveform import quadrupolar_stokes_factors
 
 NUM_DRAWS = 40_000
@@ -54,7 +57,7 @@ def test_the_isotropic_mean_of_the_per_source_orf_is_the_isotropic_orf(
     detector_1: str, detector_2: str
 ) -> None:
     first, second = load_detector(detector_1), load_detector(detector_2)
-    draws = overlap_reduction_function(
+    draws = point_source_overlap_reduction_function(
         FREQUENCIES,
         first,
         second,
@@ -72,12 +75,12 @@ def test_the_isotropic_mean_of_the_per_source_orf_is_the_isotropic_orf(
         (
             ["E1", "E2", "E3", "C1"],
             [
+                ("C1", "E1"),
+                ("C1", "E2"),
+                ("C1", "E3"),
                 ("E1", "E2"),
                 ("E1", "E3"),
-                ("E1", "C1"),
                 ("E2", "E3"),
-                ("E2", "C1"),
-                ("E3", "C1"),
             ],
         ),
     ],
@@ -87,16 +90,30 @@ def test_pair_response_stacks_each_pairs_orf_in_a_less_than_b_order(
 ) -> None:
     angles = _isotropic_angles(jax.random.key(4), 100)
 
-    stacked = pair_response(
-        FREQUENCIES, [load_detector(name) for name in names], *angles
-    )
+    network = {name: load_detector(name) for name in names}
+    calls = []
+
+    def response(first, second):
+        calls.append((first.name, second.name))
+        return point_source_overlap_reduction_function(
+            FREQUENCIES, first, second, *angles
+        )
+
+    mapped = map_over_pairs(response, network)
+    scaled = jax.tree.map(lambda values: 2 * values, mapped)
+    stacked = pair_response(FREQUENCIES, network, *angles)
+
+    assert calls == pairs
+    assert list(mapped) == pairs
+    assert scaled.keys() == mapped.keys()
+    assert_close(stack_pairs(scaled, network_pairs(network)), 2 * stacked)
 
     assert stacked.shape == (100, len(pairs), FREQUENCIES.size)
     for index, (first, second) in enumerate(pairs):
         np.testing.assert_array_equal(
             np.asarray(stacked[:, index]),
             np.asarray(
-                overlap_reduction_function(
+                point_source_overlap_reduction_function(
                     FREQUENCIES, load_detector(first), load_detector(second), *angles
                 )
             ),

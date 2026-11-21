@@ -36,7 +36,6 @@ from dataclasses import dataclass
 
 import jax
 import jax.numpy as jnp
-import numpy as np
 from jax.typing import ArrayLike as JaxArrayLike
 from numpy.typing import ArrayLike
 
@@ -284,13 +283,15 @@ class AnalyticInspiralGenerator(WaveformGenerator):
     """Generate inspiral-only intensity on the descriptor grid."""
 
     @property
-    def frequencies(self) -> np.ndarray:
+    def frequencies(self) -> jax.Array:
         """Return the waveform frequency grid in Hz."""
-        return frequency_grid(
-            self.metadata.frequency_spacing,
-            self.metadata.minimum_frequency,
-            self.metadata.maximum_frequency,
-            self.metadata.frequency_resolution,
+        return jnp.asarray(
+            frequency_grid(
+                self.config.frequency_spacing,
+                self.config.minimum_frequency,
+                self.config.maximum_frequency,
+                self.config.frequency_resolution,
+            )
         )
 
     def _generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
@@ -298,10 +299,10 @@ class AnalyticInspiralGenerator(WaveformGenerator):
             name: jnp.asarray(values) for name, values in source_parameters.items()
         }
         frequencies = self.frequencies
-        assert self.metadata.alpha is not None
+        assert self.config.alpha is not None
         return inspiral_intensity(
-            frequencies, prepared_parameters, alpha=self.metadata.alpha
-        ).T
+            frequencies, prepared_parameters, alpha=self.config.alpha
+        )
 
     def _generate_polarizations_batch(
         self, source_parameters: Mapping[str, ArrayLike]
@@ -319,17 +320,12 @@ class AnalyticInspiralGenerator(WaveformGenerator):
         prepared_parameters = {
             name: jnp.asarray(values) for name, values in source_parameters.items()
         }
-        assert self.metadata.alpha is not None
+        assert self.config.alpha is not None
         count = next(iter(prepared_parameters.values())).shape[0]
         inclination = prepared_parameters.get("inclination", jnp.zeros(count))
         face_on = inspiral_intensity(
             self.frequencies,
             {**prepared_parameters, "inclination": jnp.zeros_like(inclination)},
-            alpha=self.metadata.alpha,
+            alpha=self.config.alpha,
         )
         return jnp.sqrt(face_on / 2.0), inclination
-
-    def __call__(
-        self, source_parameters: Mapping[str, ArrayLike]
-    ) -> tuple[jax.Array, jax.Array]:
-        return jnp.asarray(self.frequencies), self.generate_batch(source_parameters)

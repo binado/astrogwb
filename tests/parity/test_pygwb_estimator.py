@@ -23,10 +23,10 @@ from astrogwb.background.spectral import (
     spectral_density_from_omega_gw,
 )
 from astrogwb.detector import (
-    Detector,
+    Network,
     effective_psd,
-    gaussian_bin_scale,
-    pair_bin_scale,
+    network_cross_power_std,
+    pair_cross_power_std,
 )
 from astrogwb.statistics import cross_correlation_estimator
 
@@ -38,7 +38,7 @@ def test_pair_noise_scale_matches_pygwb_sigma(
     frequencies: NDArray[np.float64],
     hubble_constant: float,
     observation_years: float,
-    exact_detectors: tuple[Detector, ...],
+    exact_network: Network,
 ) -> None:
     cross_power_sigma = spectral_density_from_omega_gw(
         jnp.asarray(
@@ -48,7 +48,7 @@ def test_pair_noise_scale_matches_pygwb_sigma(
         hubble_constant=hubble_constant,
     )
 
-    scale = pair_bin_scale(frequencies, exact_detectors, observation_years)
+    scale = pair_cross_power_std(frequencies, exact_network, observation_years)
 
     assert_close(scale[pair], cross_power_sigma)
 
@@ -58,7 +58,7 @@ def test_network_noise_scale_matches_pygwb_combined_sigma(
     frequencies: NDArray[np.float64],
     hubble_constant: float,
     observation_years: float,
-    exact_detectors: tuple[Detector, ...],
+    exact_network: Network,
 ) -> None:
     combined_sigma = spectral_density_from_omega_gw(
         jnp.asarray(pygwb_reference["combined_sigma"]),
@@ -66,8 +66,8 @@ def test_network_noise_scale_matches_pygwb_combined_sigma(
         hubble_constant=hubble_constant,
     )
 
-    scale = gaussian_bin_scale(
-        jnp.asarray(effective_psd(frequencies, exact_detectors)),
+    scale = network_cross_power_std(
+        jnp.asarray(effective_psd(frequencies, exact_network)),
         observation_years,
         frequencies,
     )
@@ -79,13 +79,13 @@ def test_network_spectrum_matches_pygwb_combined_point_estimate(
     pygwb_reference: Mapping[str, NDArray[np.float64]],
     frequencies: NDArray[np.float64],
     hubble_constant: float,
-    exact_detectors: tuple[Detector, ...],
+    exact_network: Network,
 ) -> None:
     pair_spectra = pygwb_reference["csd"] / PYGWB_POWER_FRACTION
 
     omega = omega_gw_from_spectral_density(
         jnp.asarray(
-            cross_correlation_estimator(pair_spectra, frequencies, exact_detectors)
+            cross_correlation_estimator(pair_spectra, frequencies, exact_network)
         ),
         jnp.asarray(frequencies),
         hubble_constant=hubble_constant,

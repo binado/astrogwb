@@ -7,10 +7,8 @@ Waveforms
    :toctree: generated/
    :nosignatures:
 
-   ~waveform.AnalyticInspiralGenerator
-   ~waveform.RippleGenerator
    ~waveform.WaveformGenerator
-   ~waveform.WaveformMetadata
+   ~waveform.WaveformConfig
    ~waveform.chirp_mass
    ~waveform.inclination_factor
    ~waveform.inspiral_intensity
@@ -19,6 +17,16 @@ Waveforms
    ~waveform.quadrupolar_stokes_factors
    ~waveform.termination_frequency
    ~waveform.waveform_generator
+
+Generator implementations and Stokes conventions
+-------------------------------------------------
+
+.. autosummary::
+   :toctree: generated/
+   :nosignatures:
+
+   ~waveform.analytical.AnalyticInspiralGenerator
+   ~waveform.ripple.RippleGenerator
 
 .. autodata:: astrogwb.waveform.intensity.StokesPair
 

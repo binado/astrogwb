@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from tolerances import assert_close
 
 from astrogwb.constants import SECONDS_PER_YEAR
-from astrogwb.detector import gaussian_bin_scale
+from astrogwb.detector import network_cross_power_std
 
 
 def test_gaussian_bin_scale_uses_the_grids_bin_widths() -> None:
@@ -12,6 +12,6 @@ def test_gaussian_bin_scale_uses_the_grids_bin_widths() -> None:
     frequencies = jnp.array([0.0, 10.0, 20.0])
     observation_time_yr = 5.0 / SECONDS_PER_YEAR
 
-    actual = gaussian_bin_scale(eff, observation_time_yr, frequencies)
+    actual = network_cross_power_std(eff, observation_time_yr, frequencies)
 
     assert_close(actual, [0.2, 0.4, 0.6])

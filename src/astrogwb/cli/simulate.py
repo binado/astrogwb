@@ -30,7 +30,7 @@ def simulate(
             "--waveform-config",
             exists=True,
             dir_okay=False,
-            help="TOML file of the waveform settings (WaveformMetadata fields).",
+            help="TOML file of the waveform settings (WaveformConfig fields).",
         ),
     ],
     detector_config: Annotated[
@@ -128,7 +128,7 @@ def simulate(
     )
     from astrogwb.detector import load_networks_from_file
     from astrogwb.utils import years_to_seconds
-    from astrogwb.waveform import WaveformMetadata
+    from astrogwb.waveform import WaveformConfig
 
     try:
         networks = load_networks_from_file(detector_config)
@@ -136,7 +136,7 @@ def simulate(
         raise typer.BadParameter(str(error), param_hint="--detector-config") from error
     try:
         with waveform_config.open("rb") as file:
-            waveform = WaveformMetadata.model_validate(tomllib.load(file))
+            waveform = WaveformConfig.model_validate(tomllib.load(file))
     except ValueError as error:
         raise typer.BadParameter(str(error), param_hint="--waveform-config") from error
     try:

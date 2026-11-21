@@ -27,15 +27,13 @@ from astrogwb_mock_population import (
 from numpyro import handlers
 from tolerances import assert_close, assert_converges
 
-from astrogwb.background.importance.catalog import ReferenceCatalog, intensity_data
+from astrogwb.background.importance import ReferenceCatalog
 from astrogwb.background.importance.model import CatalogModel
 from astrogwb.background.importance.spectrum import (
     INCLINATION_MEAN,
     INCLINATION_RAW_SECOND_MOMENT,
-    REFERENCE_INCLINATION,
+    _redshift_quadrature,
     phinney_kernel,
-    redshift_quadrature,
-    reference_catalog,
 )
 from astrogwb.background.simulation import realization_key
 from astrogwb.constants import SECONDS_PER_YEAR
@@ -44,13 +42,13 @@ from astrogwb.distributions.mass import MaxOfTwoUniformsDistribution
 from astrogwb.rates import differential_merger_rate, madau_dickinson_rate
 from astrogwb.utils import gauss_legendre_nodes_weights
 from astrogwb.utils.numpyro import Sampling, sample_and_logprob
-from astrogwb.waveform import WaveformMetadata, inclination_factor, waveform_generator
+from astrogwb.waveform import WaveformConfig, inclination_factor, waveform_generator
 
 #: Relative second moment <P^2>/<P>^2 for unit-mean inclination response draws.
 INCLINATION_SECOND_MOMENT = 355.0 / 252.0
 
 #: The observed grid of the comparisons: four 10 Hz bins from 20 Hz.
-OBSERVED_WAVEFORM = WaveformMetadata(
+OBSERVED_WAVEFORM = WaveformConfig(
     approximant="AnalyticInspiral",
     minimum_frequency=20.0,
     maximum_frequency=50.0,
@@ -84,7 +82,7 @@ def _bin_variance(model: CatalogModel, params: dict[str, Any]) -> np.ndarray:
 class ReferenceSetup:
     """What a test needs to draw and bind one reference catalog."""
 
-    waveform: WaveformMetadata
+    waveform: WaveformConfig
     fiducials: dict[str, float]
     num_samples: int
     minimum_redshift: float
@@ -104,7 +102,7 @@ def _with_resolution(setup: ReferenceSetup, resolution: float) -> ReferenceSetup
     )
 
 
-def _log_grid_step(waveform: WaveformMetadata) -> float:
+def _log_grid_step(waveform: WaveformConfig) -> float:
     """Return the uniform step size ``Delta ln f`` of a logarithmic grid."""
     frequencies = np.asarray(waveform_generator(waveform).frequencies)
     return float(np.log(frequencies[-1] / frequencies[0]) / (frequencies.size - 1))
@@ -167,7 +165,7 @@ def _catalog(
     *,
     samples: dict[str, np.ndarray] | None = None,
     reference_redshift: float | None = None,
-    waveform: WaveformMetadata | None = None,
+    waveform: WaveformConfig | None = None,
 ) -> ReferenceCatalog:
     """The reference catalog of ``samples``, at the window's lower edge by default."""
     return bns_reference_catalog(
@@ -204,9 +202,7 @@ def _spectrum(
 
 
 def test_reference_inclination_is_face_on() -> None:
-    assert float(inclination_factor(REFERENCE_INCLINATION)) == pytest.approx(
-        2.0, rel=1e-14
-    )
+    assert float(inclination_factor(0.0)) == pytest.approx(2.0, rel=1e-14)
 
 
 @pytest.mark.integration
@@ -233,18 +229,6 @@ def test_inclination_second_moment_is_the_isotropic_ratio_of_moments() -> None:
     assert second_moment / 0.8**2 == pytest.approx(INCLINATION_SECOND_MOMENT, rel=1e-13)
 
 
-@pytest.mark.parametrize("power", [2, 3, 5])
-def test_redshift_quadrature_polynomial_in_scale_factor_is_exact(power: int) -> None:
-    # dz = da / a**2, so a**power integrates as a polynomial of degree
-    # power - 2 in a, which four nodes reproduce up to degree seven.
-    minimum, maximum = 0.01, 5.0
-    redshift, weights = redshift_quadrature(minimum, maximum, 4)
-    lower, upper = 1.0 / (1.0 + maximum), 1.0 / (1.0 + minimum)
-    exact = (upper ** (power - 1) - lower ** (power - 1)) / (power - 1)
-    estimate = np.sum(weights / (1.0 + redshift) ** power)
-    assert estimate == pytest.approx(exact, rel=1e-13)
-
-
 @pytest.mark.integration
 def test_sobol_reference_catalog_stratifies_the_primary_mass(
     reference_setup: ReferenceSetup,
@@ -256,7 +240,7 @@ def test_sobol_reference_catalog_stratifies_the_primary_mass(
 
     assert not set(EXTRINSIC_SITES) & catalog.intrinsic.keys()
     assert catalog.reference_redshift == 0.1
-    np.testing.assert_array_equal(samples["inclination"], REFERENCE_INCLINATION)
+    np.testing.assert_array_equal(samples["inclination"], 0.0)
     fiducials = reference_setup.fiducials
     primary = MaxOfTwoUniformsDistribution(
         fiducials["minimum_mass"], fiducials["mass_width"]
@@ -274,7 +258,7 @@ def test_reference_catalog_rejects_reserved_intrinsic_sites(
 ) -> None:
     samples = _samples(reference_setup, realization_key(41, 0))
     with pytest.raises(ValueError, match="intrinsic_sites must exclude"):
-        reference_catalog(
+        ReferenceCatalog.from_samples(
             waveform_generator(reference_setup.waveform),
             samples,
             intrinsic_sites=(*INTRINSIC_DENSITY_SITES, site),
@@ -289,7 +273,7 @@ def test_reference_catalog_rejects_a_misshapen_proposal_log_prob(
 ) -> None:
     samples = _samples(reference_setup, realization_key(41, 0))
     with pytest.raises(ValueError, match="proposal_log_prob must have shape"):
-        reference_catalog(
+        ReferenceCatalog.from_samples(
             waveform_generator(reference_setup.waveform),
             samples,
             intrinsic_sites=INTRINSIC_DENSITY_SITES,
@@ -317,7 +301,7 @@ def _spectrum_on_nodes(
     """
     population = mock_population()
     minimum, maximum = setup.minimum_redshift, setup.maximum_redshift
-    redshift, weights = redshift_quadrature(minimum, maximum, NUM_NODES)
+    redshift, weights = _redshift_quadrature(minimum, maximum, NUM_NODES)
     fiducial_model = source_draw_model(
         *population_models(
             population,
@@ -331,7 +315,7 @@ def _spectrum_on_nodes(
         handlers.condition(
             handlers.condition(
                 fiducial_model,
-                data={"redshift": minimum, "inclination": REFERENCE_INCLINATION},
+                data={"redshift": minimum, "inclination": 0.0},
             ),
             data={name: 0.0 for name in EXTRINSIC_SITES},
         ),
@@ -348,7 +332,7 @@ def _spectrum_on_nodes(
         for name, values in samples.items()
     }
     tiled["redshift"] = np.repeat(redshift, count)
-    tiled["inclination"] = np.full(count * redshift.size, REFERENCE_INCLINATION)
+    tiled["inclination"] = np.full(count * redshift.size, 0.0)
     outputs, _ = sample_and_logprob(fiducial_model, density_sites=(), values=tiled)
     rows = {name: np.asarray(values) for name, values in outputs.items()}
     # Independent inclination integral: generate actual waveforms at each
@@ -357,10 +341,14 @@ def _spectrum_on_nodes(
     generator = waveform_generator(OBSERVED_WAVEFORM)
     powers = np.stack(
         [
-            intensity_data(
-                generator,
-                {**rows, "inclination": np.full(count * redshift.size, np.arccos(c))},
-            )["intensity"]
+            np.asarray(
+                jax.jit(generator.intensity)(
+                    {
+                        **rows,
+                        "inclination": np.full(count * redshift.size, np.arccos(c)),
+                    },
+                )
+            ).T
             for c in cosine
         ]
     ).reshape(5, -1, NUM_NODES, count)
@@ -519,7 +507,6 @@ def test_explicit_bns_weights_at_proposal_and_shifted_support(
     )
     projectors = jnp.ones((1, frequencies.size))
     narrow = {**fiducials, "mass_width": 1.0}
-    assert cached.node_moments is not None
     np.testing.assert_array_equal(weights(cached, fiducials), 0)
 
     def traced_density(params: dict[str, float]) -> jax.Array:
@@ -580,7 +567,7 @@ def test_phinney_kernel_times_the_distance_ratio_squared_is_the_rate_density(
     xi_0: float,
 ) -> None:
     """Undoing the distance factor leaves ``psi / (1 + z) dV_c/dz`` per second."""
-    redshift, _ = redshift_quadrature(0.1, 5.0, 24)
+    redshift, _ = _redshift_quadrature(0.1, 5.0, 24)
     hubble_constant, omega_m, reference_distance = 67.66, 0.3096, 700.0
     merger_rate = np.asarray(madau_dickinson_rate(redshift, 1.42, 4.62, 1.84, 770.0))
     distance_ratio = xi_0 + (1.0 - xi_0) * (1.0 + redshift) ** -2.0
@@ -741,12 +728,12 @@ def test_face_on_and_mean_inclination_waveforms_give_equivalent_moments(
         ),
         "inclination": np.full(reference_setup.num_samples, effective_inclination),
     }
-    effective = intensity_data(waveform_generator(waveform), columns)
+    effective = jax.jit(waveform_generator(waveform).intensity)(columns).T
     old_factor = 1.0 if moment == 1 else INCLINATION_SECOND_MOMENT
     new_factor = INCLINATION_MEAN if moment == 1 else INCLINATION_RAW_SECOND_MOMENT
     assert_close(
         new_factor * catalog.intensity**moment,
-        old_factor * effective["intensity"] ** moment,
+        old_factor * effective**moment,
     )
 
 

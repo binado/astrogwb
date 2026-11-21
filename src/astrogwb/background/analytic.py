@@ -477,7 +477,7 @@ def analytic_spectral_density_from_mass_moments(
 
 
 @require_x64
-def analytic_spectral_density(
+def inspiral_spectral_density(
     frequencies: jax.Array,
     hyperparameters: Mapping[str, ArrayLike],
     merger_rate_fn: PopulationFunction,
