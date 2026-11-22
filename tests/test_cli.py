@@ -62,7 +62,7 @@ def test_cli_rejects_invalid_segment_count(capsys: pytest.CaptureFixture[str]) -
                 "1",
                 "--num-segments",
                 "0",
-                "--segment-seconds",
+                "--segment-duration",
                 "1",
                 "--seed",
                 "1",
@@ -105,7 +105,7 @@ def _simulate(output: Path, inputs: dict[str, Path], *options: str) -> None:
             *("--detector-config", str(inputs["detector"])),
             *("--poisson-rate", str(8.0)),
             *("--num-segments", "2"),
-            *("--segment-seconds", "1"),
+            *("--segment-duration", "1"),
             *("--seed", "41"),
             *("--chunk-size", "8"),
             *options,
@@ -133,7 +133,7 @@ def test_a_simulate_run_writes_one_file_with_its_config(
         config.networks,
         poisson_rate=config.poisson_rate,
         num_segments=2,
-        segment_seconds=1,
+        segment_duration=1,
         chunk_size=8,
     )
     np.testing.assert_array_equal(draw.segment_counts, direct.segment_counts)

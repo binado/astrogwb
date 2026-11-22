@@ -45,7 +45,7 @@ class SimulationConfig(BaseModel):
     ``waveform`` and ``networks`` set how events are projected onto the
     networks. ``poisson_rate`` is the rate, in events per second, of the
     population the event pool represents. The observation is ``num_segments``
-    segments of ``segment_seconds`` each. With ``incoherent`` the spectra are
+    segments of ``segment_duration`` each. With ``incoherent`` the spectra are
     the noiseless sums of event powers; otherwise each segment adds coherent
     strain and detector noise (see :mod:`astrogwb.background.simulation.draw`).
 
@@ -65,7 +65,7 @@ class SimulationConfig(BaseModel):
     networks: Networks
     poisson_rate: Annotated[float, Field(ge=0.0, allow_inf_nan=False)]
     num_segments: Annotated[int, Field(ge=1)]
-    segment_seconds: Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
+    segment_duration: Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
     incoherent: bool = False
     population: str
     population_root: str = "source_parameters"
@@ -122,5 +122,5 @@ class SimulationConfig(BaseModel):
 
     @property
     def observation_seconds(self) -> float:
-        """The observed time in seconds: ``num_segments * segment_seconds``."""
-        return self.num_segments * self.segment_seconds
+        """The observed time in seconds: ``num_segments * segment_duration``."""
+        return self.num_segments * self.segment_duration

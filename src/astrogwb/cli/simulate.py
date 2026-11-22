@@ -15,7 +15,7 @@ def simulate(
     detector_config: Path,
     poisson_rate: float,
     num_segments: int,
-    segment_seconds: float,
+    segment_duration: float,
     seed: int,
     population_root: str = "source_parameters",
     incoherent: bool = False,
@@ -44,7 +44,7 @@ def simulate(
         Observer-frame event rate of the pool's population, in events per second.
     num_segments
         Number of segments.
-    segment_seconds
+    segment_duration
         Segment length in seconds.
     seed
         Random seed.
@@ -80,7 +80,7 @@ def simulate(
         networks=networks,
         poisson_rate=poisson_rate,
         num_segments=num_segments,
-        segment_seconds=segment_seconds,
+        segment_duration=segment_duration,
         incoherent=incoherent,
         population=str(population),
         population_root=population_root,
@@ -93,7 +93,7 @@ def simulate(
         config.networks,
         poisson_rate=config.poisson_rate,
         num_segments=num_segments,
-        segment_seconds=segment_seconds,
+        segment_duration=segment_duration,
         chunk_size=chunk_size,
         segment_batch_size=segment_batch_size,
         incoherent=incoherent,

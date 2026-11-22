@@ -42,7 +42,7 @@ def _config(seed: int = SEED, *, incoherent: bool = True) -> SimulationConfig:
         networks=NETWORKS,
         poisson_rate=RATE_HZ,
         num_segments=2,
-        segment_seconds=SEGMENT_SECONDS,
+        segment_duration=SEGMENT_SECONDS,
         incoherent=incoherent,
         population="pool.csv",
         seed=seed,
@@ -57,7 +57,7 @@ def _simulate(config: SimulationConfig) -> BackgroundDraw:
         config.networks,
         poisson_rate=config.poisson_rate,
         num_segments=config.num_segments,
-        segment_seconds=config.segment_seconds,
+        segment_duration=config.segment_duration,
         incoherent=config.incoherent,
         chunk_size=CHUNK,
     )
@@ -227,7 +227,7 @@ def test_coherent_joint_draw_reuses_the_shared_baseline() -> None:
 
 @pytest.mark.parametrize(
     ("field", "value"),
-    [("num_segments", 0), ("segment_seconds", 0.0), ("poisson_rate", -1.0)],
+    [("num_segments", 0), ("segment_duration", 0.0), ("poisson_rate", -1.0)],
 )
 def test_config_rejects_a_nonphysical_observation(field: str, value: float) -> None:
     fields = {**_config().model_dump(), field: value}
@@ -284,7 +284,7 @@ def test_background_boundaries_reject_invalid_networks(
             networks=networks,
             poisson_rate=0.0,
             num_segments=1,
-            segment_seconds=1.0,
+            segment_duration=1.0,
         )
 
 
@@ -303,7 +303,7 @@ def simulate_pool() -> Callable[[dict[str, np.ndarray]], BackgroundDraw]:
             NETWORKS,
             poisson_rate=RATE_HZ,
             num_segments=2,
-            segment_seconds=SEGMENT_SECONDS,
+            segment_duration=SEGMENT_SECONDS,
             incoherent=True,
             chunk_size=CHUNK,
         )

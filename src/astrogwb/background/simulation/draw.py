@@ -525,30 +525,32 @@ def _draw_events(
     sources: Mapping[str, ArrayLike],
     poisson_rate: float,
     num_segments: int,
-    segment_seconds: float,
+    segment_duration: float,
 ) -> tuple[dict[str, NDArray], NDArray[np.int64]]:
     if not np.isfinite(poisson_rate) or poisson_rate < 0:
         raise ValueError("poisson_rate must be finite and nonnegative")
     if num_segments < 1:
         raise ValueError(f"num_segments must be positive; got {num_segments}")
-    if not np.isfinite(segment_seconds) or segment_seconds <= 0:
-        raise ValueError(f"segment_seconds must be positive; got {segment_seconds}")
+    if not np.isfinite(segment_duration) or segment_duration <= 0:
+        raise ValueError(f"segment_duration must be positive; got {segment_duration}")
     pool = _event_columns(sources, required=())
     # Row selection runs on host arrays. A varying event count need not
     # compile a new random kernel for every realization.
     rng = np.random.default_rng(np.asarray(jax.random.key_data(key)))
-    counts = rng.poisson(poisson_rate * segment_seconds, num_segments)
+    counts = rng.poisson(poisson_rate * segment_duration, num_segments)
     count = int(counts.sum())
     size = len(next(iter(pool.values()), ()))
     if count > size:
         raise ValueError(
             f"event pool has {size} rows but this draw requires {count} "
-            f"(expected {poisson_rate * segment_seconds * num_segments:.1f}); "
+            f"(expected {poisson_rate * segment_duration * num_segments:.1f}); "
             "supply a larger pool or lower the rate"
         )
     indices = rng.choice(size, size=count, replace=False)
     selected = {name: col[indices] for name, col in pool.items()}
-    selected["coa_time"] = rng.uniform(-segment_seconds / 2, segment_seconds / 2, count)
+    selected["coa_time"] = rng.uniform(
+        -segment_duration / 2, segment_duration / 2, count
+    )
     return selected, counts
 
 
@@ -560,7 +562,7 @@ def simulate_background(
     *,
     poisson_rate: float,
     num_segments: int,
-    segment_seconds: float,
+    segment_duration: float,
     chunk_size: int = 1024,
     segment_batch_size: int = 1024,
     incoherent: bool = False,
@@ -593,7 +595,7 @@ def simulate_background(
         Rate in events per second of the population the pool represents.
     num_segments
         Number of segments.
-    segment_seconds
+    segment_duration
         Segment length in seconds.
     chunk_size
         Waveforms per batch; sets cost, not the result.
@@ -605,7 +607,7 @@ def simulate_background(
     Returns
     -------
     BackgroundDraw
-        The spectra, normalized by ``num_segments * segment_seconds``, with
+        The spectra, normalized by ``num_segments * segment_duration``, with
         the event count of each segment.
 
     Raises
@@ -624,14 +626,14 @@ def simulate_background(
         _event_columns(sources),
         poisson_rate,
         num_segments,
-        segment_seconds,
+        segment_duration,
     )
     if incoherent:
         result = project_background(
             columns,
             waveform,
             networks,
-            observation_seconds=num_segments * segment_seconds,
+            observation_seconds=num_segments * segment_duration,
             chunk_size=chunk_size,
         )
         return result._replace(segment_counts=counts)
@@ -646,7 +648,7 @@ def simulate_background(
         geometry,
         kernels,
         chunk_size,
-        segment_seconds,
+        segment_duration,
         segment_batch_size,
     )
     return BackgroundDraw(
@@ -735,7 +737,7 @@ def _segment_power(
     psds: jax.Array,
     first: jax.Array,
     second: jax.Array,
-    segment_seconds: jax.Array | float,
+    segment_duration: jax.Array | float,
     num_segments: jax.Array | int,
 ) -> jax.Array:
     """The cross-power of signal plus noise summed over a batch of segments, ``(P, F)``.
@@ -747,7 +749,7 @@ def _segment_power(
     (the padding of the last batch) add nothing.
     """
     amplitude = jnp.sqrt(
-        segment_seconds * jnp.where(jnp.isfinite(psds), psds, 0.0) / 4.0
+        segment_duration * jnp.where(jnp.isfinite(psds), psds, 0.0) / 4.0
     )
 
     def draw(segment: jax.Array) -> jax.Array:
