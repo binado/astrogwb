@@ -52,7 +52,6 @@ dependencies = [
 [package.optional-dependencies]
 cli = [
     { name = "h5py" },
-    { name = "typer" },
 ]
 cuda = [
     { name = "jax", extra = ["cuda12"] },
@@ -101,7 +100,6 @@ requires-dist = [
     { name = "numpyro", specifier = ">=0.21.0" },
     { name = "pydantic", specifier = ">=2.14" },
     { name = "ripplegw", specifier = ">=0.3.1" },
-    { name = "typer", marker = "extra == 'cli'", specifier = ">=0.16" },
 ]
 provides-extras = ["cuda", "io", "cli", "tpu"]
 

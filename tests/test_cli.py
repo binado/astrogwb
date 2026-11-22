@@ -13,14 +13,13 @@ import numpy as np
 import pytest
 import tomli_w
 from astrogwb_tiny_pipeline import WAVEFORM, write_population_csv
-from typer.testing import CliRunner
 
 from astrogwb.background.simulation import (
     BackgroundDraw,
     read_population_file,
     simulate_background,
 )
-from astrogwb.cli import app
+from astrogwb.cli import main
 from astrogwb.detector import load_detector, network_pairs
 from astrogwb.utils import years_to_seconds
 
@@ -29,10 +28,12 @@ def test_importing_the_cli_leaves_the_xla_backend_uninitialized() -> None:
     """A late ``set_host_device_count(2)`` still taking effect proves it."""
     command = "simulate"
     code = f"""
-from typer.testing import CliRunner
-from astrogwb.cli import app
+from astrogwb.cli import main
 
-assert CliRunner().invoke(app, ["{command}", "--help"]).exit_code == 0
+try:
+    main(["{command}", "--help"])
+except SystemExit as error:
+    assert error.code == 0
 import numpyro
 
 numpyro.set_host_device_count(2)
@@ -45,6 +46,31 @@ assert jax.device_count() == 2, f"backend initialized early: {{jax.devices()}}"
     )
 
     assert result.returncode == 0, result.stderr
+
+
+def test_cli_rejects_invalid_segment_count(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "simulate",
+                "out.h5",
+                "pool.csv",
+                "--waveform-config",
+                "waveform.toml",
+                "--detector-config",
+                "detectors.toml",
+                "--rate-per-year",
+                "1",
+                "--num-segments",
+                "0",
+                "--segment-seconds",
+                "1",
+                "--seed",
+                "1",
+            ]
+        )
+    assert error.value.code == 2
+    assert "--num-segments" in capsys.readouterr().err
 
 
 @pytest.fixture
@@ -71,8 +97,7 @@ def inputs(tmp_path: Path) -> dict[str, Path]:
 
 
 def _simulate(output: Path, inputs: dict[str, Path], *options: str) -> None:
-    result = CliRunner().invoke(
-        app,
+    main(
         [
             "simulate",
             str(output),
@@ -87,7 +112,6 @@ def _simulate(output: Path, inputs: dict[str, Path], *options: str) -> None:
             *options,
         ],
     )
-    assert result.exit_code == 0, result.output
 
 
 def test_a_simulate_run_writes_one_file_with_its_config(
