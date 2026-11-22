@@ -43,14 +43,15 @@ class SimulationConfig(BaseModel):
     """Everything that determines a simulated background, but its draw.
 
     ``waveform`` and ``networks`` set how events are projected onto the
-    networks. ``observer_rate_hz`` is the rate, in events per second, of the
+    networks. ``poisson_rate`` is the rate, in events per second, of the
     population the event pool represents. The observation is ``num_segments``
-    segments of ``segment_seconds`` each. With ``incoherent`` the spectra are
+    segments of ``segment_duration`` each. With ``incoherent`` the spectra are
     the noiseless sums of event powers; otherwise each segment adds coherent
     strain and detector noise (see :mod:`astrogwb.background.simulation.draw`).
 
-    ``population``, ``seed`` and ``index`` record where the pool came from and
-    the key the draw was made at. They are provenance: they do not change how
+    ``population``, ``population_root`` and ``seed`` record where the pool came
+    from and the key the draw was made at. The root is ignored for CSV files.
+    They are provenance: they do not change how
     the spectra are computed. Execution details such as chunk sizes change cost,
     never the result, and are not recorded.
 
@@ -62,13 +63,13 @@ class SimulationConfig(BaseModel):
 
     waveform: WaveformConfig
     networks: Networks
-    observer_rate_hz: Annotated[float, Field(ge=0.0, allow_inf_nan=False)]
+    poisson_rate: Annotated[float, Field(ge=0.0, allow_inf_nan=False)]
     num_segments: Annotated[int, Field(ge=1)]
-    segment_seconds: Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
+    segment_duration: Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
     incoherent: bool = False
     population: str
+    population_root: str = "source_parameters"
     seed: int
-    index: Annotated[int, Field(ge=0)] = 0
 
     @field_validator("networks")
     @classmethod
@@ -121,5 +122,5 @@ class SimulationConfig(BaseModel):
 
     @property
     def observation_seconds(self) -> float:
-        """The observed time in seconds: ``num_segments * segment_seconds``."""
-        return self.num_segments * self.segment_seconds
+        """The observed time in seconds: ``num_segments * segment_duration``."""
+        return self.num_segments * self.segment_duration

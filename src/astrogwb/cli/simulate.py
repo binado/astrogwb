@@ -4,80 +4,25 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
-from typing import Annotated
-
-import typer
 
 from astrogwb.runtime import configure_runtime
 
 
 def simulate(
-    output: Annotated[
-        Path, typer.Argument(dir_okay=False, help="Output HDF5 file, e.g. 41-0.h5.")
-    ],
-    population: Annotated[
-        Path,
-        typer.Argument(
-            exists=True,
-            dir_okay=False,
-            help="Event pool: a CSV catalogue, or an HDF5 catalogue under the "
-            "'source_parameters' dataset, with canonical gwmock-pop column names.",
-        ),
-    ],
-    waveform_config: Annotated[
-        Path,
-        typer.Option(
-            "--waveform-config",
-            exists=True,
-            dir_okay=False,
-            help="TOML file of the waveform settings (WaveformConfig fields).",
-        ),
-    ],
-    detector_config: Annotated[
-        Path,
-        typer.Option(
-            "--detector-config",
-            exists=True,
-            dir_okay=False,
-            help="TOML file containing detector definitions and network memberships.",
-        ),
-    ],
-    rate_per_year: Annotated[
-        float,
-        typer.Option(
-            min=0.0,
-            help="Observer-frame event rate, per year, of the population the pool "
-            "represents.",
-        ),
-    ],
-    num_segments: Annotated[
-        int, typer.Option(min=1, help="Number of observation segments.")
-    ],
-    segment_seconds: Annotated[
-        float, typer.Option(min=0.0, help="Segment length in seconds, e.g. 2048.")
-    ],
-    seed: Annotated[int, typer.Option(help="Seed of the draw.")],
-    index: Annotated[
-        int, typer.Option(min=0, help="Draw index for the given seed.")
-    ] = 0,
-    incoherent: Annotated[
-        bool,
-        typer.Option(
-            "--incoherent",
-            help="Sum event powers without detector noise or segment interference: "
-            "the noiseless signal of the same Poisson draw.",
-        ),
-    ] = False,
-    chunk_size: Annotated[int, typer.Option(min=1, help="Waveforms per chunk.")] = 1024,
-    segment_batch_size: Annotated[
-        int, typer.Option(min=1, help="Segments per batch; cost only.")
-    ] = 1024,
-    platform: Annotated[
-        str, typer.Option(help="JAX platform: auto, cpu, cuda or tpu.")
-    ] = "auto",
-    cpu_threads: Annotated[
-        int | None, typer.Option(min=1, help="Cap OMP/BLAS/XLA CPU threads.")
-    ] = None,
+    output: Path,
+    population: Path,
+    waveform_config: Path,
+    detector_config: Path,
+    poisson_rate: float,
+    num_segments: int,
+    segment_duration: float,
+    seed: int,
+    population_root: str = "source_parameters",
+    incoherent: bool = False,
+    chunk_size: int = 1024,
+    segment_batch_size: int = 1024,
+    platform: str = "auto",
+    cpu_threads: int | None = None,
 ) -> None:
     """Simulate a background from the event pool POPULATION into OUTPUT.
 
@@ -95,16 +40,16 @@ def simulate(
         Waveform settings TOML path.
     detector_config
         Complete detector configuration TOML path.
-    rate_per_year
-        Event rate of the pool's population, per year.
+    poisson_rate
+        Observer-frame event rate of the pool's population, in events per second.
     num_segments
         Number of segments.
-    segment_seconds
+    segment_duration
         Segment length in seconds.
     seed
         Random seed.
-    index
-        Draw index.
+    population_root
+        HDF5 dataset or group containing the population.
     incoherent
         Skip noise and coherent summation.
     chunk_size
@@ -116,54 +61,42 @@ def simulate(
     cpu_threads
         Number of CPU threads.
     """
-    try:
-        configure_runtime(platform=platform, cpu_threads=cpu_threads)
-    except ValueError as error:
-        raise typer.BadParameter(str(error), param_hint="--platform") from error
+    configure_runtime(platform=platform, cpu_threads=cpu_threads)
+    import jax
+
     from astrogwb.background.simulation import (
         SimulationConfig,
-        read_event_pool,
-        realization_key,
         simulate_background,
     )
     from astrogwb.detector import load_networks_from_file
-    from astrogwb.utils import years_to_seconds
+    from astrogwb.populations.io import read_population_file
     from astrogwb.waveform import WaveformConfig
 
-    try:
-        networks = load_networks_from_file(detector_config)
-    except ValueError as error:
-        raise typer.BadParameter(str(error), param_hint="--detector-config") from error
-    try:
-        with waveform_config.open("rb") as file:
-            waveform = WaveformConfig.model_validate(tomllib.load(file))
-    except ValueError as error:
-        raise typer.BadParameter(str(error), param_hint="--waveform-config") from error
-    try:
-        config = SimulationConfig(
-            waveform=waveform,
-            networks=networks,
-            observer_rate_hz=rate_per_year / years_to_seconds(1.0),
-            num_segments=num_segments,
-            segment_seconds=segment_seconds,
-            incoherent=incoherent,
-            population=str(population),
-            seed=seed,
-            index=index,
-        )
-    except ValueError as error:
-        raise typer.BadParameter(str(error)) from error
+    networks = load_networks_from_file(detector_config)
+    with waveform_config.open("rb") as file:
+        waveform = WaveformConfig.model_validate(tomllib.load(file))
+    config = SimulationConfig(
+        waveform=waveform,
+        networks=networks,
+        poisson_rate=poisson_rate,
+        num_segments=num_segments,
+        segment_duration=segment_duration,
+        incoherent=incoherent,
+        population=str(population),
+        population_root=population_root,
+        seed=seed,
+    )
     draw = simulate_background(
-        realization_key(seed, index),
-        read_event_pool(population),
+        jax.random.key(seed),
+        read_population_file(population, root=population_root),
         config.waveform,
         config.networks,
-        observer_rate_hz=config.observer_rate_hz,
+        poisson_rate=config.poisson_rate,
         num_segments=num_segments,
-        segment_seconds=segment_seconds,
+        segment_duration=segment_duration,
         chunk_size=chunk_size,
         segment_batch_size=segment_batch_size,
         incoherent=incoherent,
     )
     draw.write(output, config)
-    typer.echo(f"{int(draw.segment_counts.sum())} events -> {output}")
+    print(f"{int(draw.segment_counts.sum())} events -> {output}")

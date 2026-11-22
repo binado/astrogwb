@@ -35,7 +35,6 @@ from astrogwb.background.importance.spectrum import (
     _redshift_quadrature,
     phinney_kernel,
 )
-from astrogwb.background.simulation import realization_key
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import log_gw_em_ratio, luminosity_distance
 from astrogwb.distributions.mass import MaxOfTwoUniformsDistribution
@@ -215,7 +214,7 @@ def test_importance_path_does_not_construct_a_redshift_distribution(
     monkeypatch.setattr(
         "astrogwb.distributions.redshift.base.RedshiftDistribution.__init__", fail
     )
-    catalog = _catalog(reference_setup, realization_key(41, 0))
+    catalog = _catalog(reference_setup, jax.random.key(41))
     model = _spectrum(catalog, reference_setup, reweight_masses=False)
     assert np.all(np.isfinite(model.spectral_density(reference_setup.fiducials)))
 
@@ -234,7 +233,7 @@ def test_sobol_reference_catalog_stratifies_the_primary_mass(
     reference_setup: ReferenceSetup,
 ) -> None:
     """Pinned sites take no coordinate, so the primary mass takes the first."""
-    key = realization_key(41, 0)
+    key = jax.random.key(41)
     samples = _samples(reference_setup, key, sampling="sobol", num_samples=8)
     catalog = _catalog(reference_setup, key, samples=samples)
 
@@ -256,7 +255,7 @@ def test_sobol_reference_catalog_stratifies_the_primary_mass(
 def test_reference_catalog_rejects_reserved_intrinsic_sites(
     reference_setup: ReferenceSetup, site: str
 ) -> None:
-    samples = _samples(reference_setup, realization_key(41, 0))
+    samples = _samples(reference_setup, jax.random.key(41))
     with pytest.raises(ValueError, match="intrinsic_sites must exclude"):
         ReferenceCatalog.from_samples(
             waveform_generator(reference_setup.waveform),
@@ -271,7 +270,7 @@ def test_reference_catalog_rejects_reserved_intrinsic_sites(
 def test_reference_catalog_rejects_a_misshapen_proposal_log_prob(
     reference_setup: ReferenceSetup,
 ) -> None:
-    samples = _samples(reference_setup, realization_key(41, 0))
+    samples = _samples(reference_setup, jax.random.key(41))
     with pytest.raises(ValueError, match="proposal_log_prob must have shape"):
         ReferenceCatalog.from_samples(
             waveform_generator(reference_setup.waveform),
@@ -408,7 +407,7 @@ def _rescaled_ladder_and_oracle(
     variance: bool = False,
 ) -> tuple[list[np.ndarray], np.ndarray, list[float]]:
     """Rescaled predictions across ``CONVERGENCE_RESOLUTIONS``, brute-force oracle, and steps."""
-    key = realization_key(41, 0)
+    key = jax.random.key(41)
     oracle = np.stack(
         [
             _spectrum_on_nodes(setup, key, p, density_sites)[int(variance)]
@@ -479,7 +478,7 @@ def test_explicit_bns_weights_at_proposal_and_shifted_support(
     reference_setup: ReferenceSetup,
 ) -> None:
     fiducials = reference_setup.fiducials
-    key = realization_key(41, 0)
+    key = jax.random.key(41)
     samples = _samples(reference_setup, key, sampling="sobol", num_samples=32)
     reference = _catalog(reference_setup, key, samples=samples)
     source_model = uniform_source_model
@@ -543,7 +542,7 @@ def test_explicit_bns_weights_at_proposal_and_shifted_support(
 @pytest.fixture
 def shot_noise_model(reference_setup: ReferenceSetup) -> CatalogModel:
     """One reference catalog bound to its own proposal."""
-    catalog = _catalog(reference_setup, realization_key(41, 0))
+    catalog = _catalog(reference_setup, jax.random.key(41))
     return _spectrum(catalog, reference_setup, reweight_masses=False)
 
 
@@ -630,7 +629,7 @@ def test_low_reference_catalog_matches_one_generated_at_the_window_edge(
     reference_setup: ReferenceSetup, window_edge: float
 ) -> None:
     """Same key, hence same intrinsic draws: only the interpolation differs."""
-    key = realization_key(41, 0)
+    key = jax.random.key(41)
     spectrum_ratios: list[np.ndarray] = []
     variance_ratios: list[np.ndarray] = []
     spacings: list[float] = []
@@ -672,7 +671,7 @@ def test_reference_catalog_distance_is_at_the_reference_redshift(
 ) -> None:
     """The distance is the cosmological one at the reference, not at the window edge."""
     catalog = _catalog(
-        reference_setup, realization_key(41, 0), reference_redshift=reference
+        reference_setup, jax.random.key(41), reference_redshift=reference
     )
     fiducials = reference_setup.fiducials
 
@@ -689,7 +688,7 @@ def test_reference_catalog_distance_carries_the_modified_propagation_ratio(
     modified = {**reference_setup.fiducials, "xi_0": xi_0, "xi_n": xi_n}
     catalog = bns_reference_catalog(
         waveform_generator(reference_setup.waveform),
-        _samples(reference_setup, realization_key(41, 0)),
+        _samples(reference_setup, jax.random.key(41)),
         modified,
         reference_redshift=redshift,
     )
@@ -717,8 +716,8 @@ def test_face_on_and_mean_inclination_waveforms_give_equivalent_moments(
     reference_setup: ReferenceSetup, moment: int, approximant: str
 ) -> None:
     waveform = reference_setup.waveform.model_copy(update={"approximant": approximant})
-    samples = _samples(reference_setup, realization_key(41, 0))
-    catalog = _catalog(reference_setup, realization_key(41, 0), waveform=waveform)
+    samples = _samples(reference_setup, jax.random.key(41))
+    catalog = _catalog(reference_setup, jax.random.key(41), waveform=waveform)
     effective_inclination = float(np.arccos(np.sqrt(np.sqrt(11.2) - 3.0)))
     columns = {
         **samples,
@@ -743,7 +742,7 @@ def test_reference_conversion_rejects_higher_modes_and_precession(
 ) -> None:
     waveform = reference_setup.waveform.model_copy(update={"approximant": approximant})
     with pytest.raises(ValueError, match="dominant-quadrupole"):
-        _catalog(reference_setup, realization_key(41, 0), waveform=waveform)
+        _catalog(reference_setup, jax.random.key(41), waveform=waveform)
 
 
 @pytest.mark.integration
@@ -753,7 +752,7 @@ def test_reference_conversion_rejects_higher_modes_and_precession(
 def test_dense_covariance_matches_physical_inclination_quadrature(
     reference_setup: ReferenceSetup, density_sites: tuple[str, ...]
 ) -> None:
-    key = realization_key(41, 0)
+    key = jax.random.key(41)
     params = {**reference_setup.fiducials, "minimum_mass": 0.9, "mass_width": 1.6}
     _, expected = _spectrum_on_nodes(
         reference_setup, key, params, density_sites, covariance=True

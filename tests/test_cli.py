@@ -8,26 +8,31 @@ import sys
 from pathlib import Path
 
 import h5py
+import jax
 import numpy as np
 import pytest
 import tomli_w
 from astrogwb_tiny_pipeline import WAVEFORM, write_population_csv
-from typer.testing import CliRunner
 
-from astrogwb.background.simulation import BackgroundDraw
-from astrogwb.cli import app
+from astrogwb.background.simulation import (
+    BackgroundDraw,
+    simulate_background,
+)
+from astrogwb.cli import main
 from astrogwb.detector import load_detector, network_pairs
-from astrogwb.utils import years_to_seconds
+from astrogwb.populations.io import read_population_file
 
 
 def test_importing_the_cli_leaves_the_xla_backend_uninitialized() -> None:
     """A late ``set_host_device_count(2)`` still taking effect proves it."""
     command = "simulate"
     code = f"""
-from typer.testing import CliRunner
-from astrogwb.cli import app
+from astrogwb.cli import main
 
-assert CliRunner().invoke(app, ["{command}", "--help"]).exit_code == 0
+try:
+    main(["{command}", "--help"])
+except SystemExit as error:
+    assert error.code == 0
 import numpyro
 
 numpyro.set_host_device_count(2)
@@ -40,6 +45,31 @@ assert jax.device_count() == 2, f"backend initialized early: {{jax.devices()}}"
     )
 
     assert result.returncode == 0, result.stderr
+
+
+def test_cli_rejects_invalid_segment_count(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "simulate",
+                "out.h5",
+                "pool.csv",
+                "--waveform-config",
+                "waveform.toml",
+                "--detector-config",
+                "detectors.toml",
+                "--poisson-rate",
+                "1",
+                "--num-segments",
+                "0",
+                "--segment-duration",
+                "1",
+                "--seed",
+                "1",
+            ]
+        )
+    assert error.value.code == 2
+    assert "--num-segments" in capsys.readouterr().err
 
 
 @pytest.fixture
@@ -66,23 +96,21 @@ def inputs(tmp_path: Path) -> dict[str, Path]:
 
 
 def _simulate(output: Path, inputs: dict[str, Path], *options: str) -> None:
-    result = CliRunner().invoke(
-        app,
+    main(
         [
             "simulate",
             str(output),
             str(inputs["population"]),
             *("--waveform-config", str(inputs["waveform"])),
             *("--detector-config", str(inputs["detector"])),
-            *("--rate-per-year", str(8.0 * years_to_seconds(1.0))),
+            *("--poisson-rate", str(8.0)),
             *("--num-segments", "2"),
-            *("--segment-seconds", "1"),
+            *("--segment-duration", "1"),
             *("--seed", "41"),
             *("--chunk-size", "8"),
             *options,
         ],
     )
-    assert result.exit_code == 0, result.output
 
 
 def test_a_simulate_run_writes_one_file_with_its_config(
@@ -96,8 +124,20 @@ def test_a_simulate_run_writes_one_file_with_its_config(
     assert tuple(config.networks) == ("ET",)
     assert network_pairs(config.networks["ET"]) == (("R1", "S1"),)
     assert config.population == str(inputs["population"])
-    assert (config.seed, config.index, config.incoherent) == (41, 0, False)
-    assert config.observer_rate_hz == pytest.approx(8.0)
+    assert (config.seed, config.incoherent) == (41, False)
+    assert config.poisson_rate == pytest.approx(8.0)
+    direct = simulate_background(
+        jax.random.key(41),
+        read_population_file(inputs["population"]),
+        config.waveform,
+        config.networks,
+        poisson_rate=config.poisson_rate,
+        num_segments=2,
+        segment_duration=1,
+        chunk_size=8,
+    )
+    np.testing.assert_array_equal(draw.segment_counts, direct.segment_counts)
+    np.testing.assert_array_equal(draw.spectra["ET"], direct.spectra["ET"])
     assert draw.segment_counts.shape == (2,)
     assert draw.segment_counts.sum() > 0
     assert np.any(draw.spectra["ET"])
@@ -115,3 +155,17 @@ def test_a_simulate_run_with_incoherent_records_the_mode(
     _simulate(output, inputs, "--incoherent")
 
     assert BackgroundDraw.read(output)[1].incoherent
+
+
+def test_simulate_reads_a_custom_population_root(
+    tmp_path: Path, inputs: dict[str, Path]
+) -> None:
+    catalogue = np.genfromtxt(inputs["population"], delimiter=",", names=True)
+    inputs["population"] = tmp_path / "events.h5"
+    with h5py.File(inputs["population"], "w") as file:
+        file.create_dataset("catalogue/events", data=catalogue)
+
+    output = tmp_path / "result.h5"
+    _simulate(output, inputs, "--population-root", "catalogue/events")
+
+    assert BackgroundDraw.read(output)[0].segment_counts.sum() > 0

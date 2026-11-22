@@ -11,9 +11,4 @@ For command-line usage, see :doc:`../user_guide/simulator-pipeline`.
 
    ~cli.simulate.simulate
 
-.. py:currentmodule:: astrogwb.cli
-
-.. py:data:: app
-   :type: typer.Typer
-
-   Typer application behind the ``astrogwb`` command.
+.. autofunction:: astrogwb.cli.main

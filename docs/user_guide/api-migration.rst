@@ -56,12 +56,6 @@ Use ``inspiral_spectral_density()`` in place of ``analytic_spectral_density()``.
 Simulation, noise, and likelihoods
 ----------------------------------
 
-Replace ``network_spectra_ensemble(root, seed, count, names, start=start)``
-with ``read_background_ensemble(paths, names)``, where ``paths`` contains
-``root / f"{seed}-{i}.h5"`` for each index in ``range(start, count)``.
-Index the result by network name. Existing background files and CLI options
-use the same format and units.
-
 Observation times stay in years: the likelihoods, ``effective_psd`` noise
 scales and ``characteristic_noise()`` take ``observation_time`` in years
 (``characteristic_noise()`` by keyword), and convert with

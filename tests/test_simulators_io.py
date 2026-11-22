@@ -1,4 +1,4 @@
-"""Realization keys and the HDF5 write/load pair."""
+"""The HDF5 write/load pair."""
 
 from __future__ import annotations
 
@@ -6,13 +6,11 @@ from pathlib import Path
 from typing import Any
 
 import h5py
-import jax
 import numpy as np
 import pytest
 from pydantic import BaseModel
 
 from astrogwb.background.importance.catalog import ReferenceCatalog
-from astrogwb.background.simulation import realization_key
 from astrogwb.utils.io import atomic_h5, load, write
 
 
@@ -28,19 +26,6 @@ TREE: dict[str, Any] = {
     "counts": np.array([3, 5], dtype=np.int64),
     "nested": {"values": np.arange(6.0).reshape(2, 3)},
 }
-
-
-def test_realization_keys_are_deterministic_and_distinct() -> None:
-    keys = [
-        tuple(np.asarray(jax.random.key_data(realization_key(41, i)))) for i in range(4)
-    ]
-    assert len(set(keys)) == 4
-    np.testing.assert_array_equal(jax.random.key_data(realization_key(41, 3)), keys[3])
-
-
-def test_realization_key_rejects_a_negative_index() -> None:
-    with pytest.raises(ValueError, match="non-negative"):
-        realization_key(41, -1)
 
 
 def test_write_then_load_round_trips_data_metadata_and_attrs(tmp_path: Path) -> None:

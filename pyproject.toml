@@ -35,14 +35,14 @@ dependencies = [
 ]
 
 [project.scripts]
-astrogwb = "astrogwb.cli:app"
+astrogwb = "astrogwb.cli:main"
 
 [project.optional-dependencies]
 cuda = ["jax[cuda12]>=0.11.0"]
 # HDF5 catalog serialization is opt-in and the published wheel stays lean.
 io = ["h5py>=3.15"]
 # The `astrogwb` command line: simulator stages written to disk.
-cli = ["astrogwb[io]", "typer>=0.16"]
+cli = ["astrogwb[io]"]
 tpu = ["jax[tpu]>=0.11.0"]
 
 [project.urls]

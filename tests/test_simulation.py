@@ -9,6 +9,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 import h5py
+import jax
 import numpy as np
 import pytest
 from astrogwb_tiny_pipeline import (
@@ -24,12 +25,10 @@ from astrogwb.background.simulation import (
     BackgroundDraw,
     SimulationConfig,
     project_background,
-    read_background_ensemble,
-    read_event_pool,
-    realization_key,
     simulate_background,
 )
 from astrogwb.detector import Networks, network_pairs
+from astrogwb.populations.io import read_population_file
 
 SEED = 41
 CHUNK = 8
@@ -37,29 +36,28 @@ SEGMENT_SECONDS = 1.0
 RATE_HZ = 8.0
 
 
-def _config(index: int = 0, *, incoherent: bool = True) -> SimulationConfig:
+def _config(seed: int = SEED, *, incoherent: bool = True) -> SimulationConfig:
     return SimulationConfig(
         waveform=WAVEFORM,
         networks=NETWORKS,
-        observer_rate_hz=RATE_HZ,
+        poisson_rate=RATE_HZ,
         num_segments=2,
-        segment_seconds=SEGMENT_SECONDS,
+        segment_duration=SEGMENT_SECONDS,
         incoherent=incoherent,
         population="pool.csv",
-        seed=SEED,
-        index=index,
+        seed=seed,
     )
 
 
 def _simulate(config: SimulationConfig) -> BackgroundDraw:
     return simulate_background(
-        realization_key(config.seed, config.index),
+        jax.random.key(config.seed),
         event_pool(),
         config.waveform,
         config.networks,
-        observer_rate_hz=config.observer_rate_hz,
+        poisson_rate=config.poisson_rate,
         num_segments=config.num_segments,
-        segment_seconds=config.segment_seconds,
+        segment_duration=config.segment_duration,
         incoherent=config.incoherent,
         chunk_size=CHUNK,
     )
@@ -67,7 +65,7 @@ def _simulate(config: SimulationConfig) -> BackgroundDraw:
 
 @pytest.fixture(scope="module")
 def draw() -> BackgroundDraw:
-    """The tiny configuration simulated at ``(SEED, 0)``."""
+    """The tiny configuration simulated at ``SEED``."""
     return _simulate(_config())
 
 
@@ -227,57 +225,9 @@ def test_coherent_joint_draw_reuses_the_shared_baseline() -> None:
     )
 
 
-@pytest.fixture(scope="module")
-def ensemble(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """Two draws of ``SEED``, each recorded by every tiny network."""
-    root = tmp_path_factory.mktemp("ensemble")
-    for index in range(2):
-        config = _config(index)
-        _simulate(config).write(root / f"{SEED}-{index}.h5", config)
-    return root
-
-
-def test_read_background_ensemble_stacks_every_draws_pairs(ensemble: Path) -> None:
-    draws = read_background_ensemble(
-        [ensemble / f"{SEED}-{i}.h5" for i in range(2)], ["triangle", "pair"]
-    )
-    triangle, pair = draws["triangle"], draws["pair"]
-
-    assert triangle["pair_spectral_density"].shape[:2] == (2, 3)
-    assert triangle["n_events"].shape == (2,)
-    # Sorted pairs: the triangle's (C1, S1) is its second, the pair's only one.
-    np.testing.assert_array_equal(
-        pair["pair_spectral_density"][:, 0], triangle["pair_spectral_density"][:, 1]
-    )
-
-
-def test_read_background_ensemble_counts_the_events_of_every_segment(
-    ensemble: Path,
-) -> None:
-    stacked = read_background_ensemble(
-        [ensemble / f"{SEED}-{i}.h5" for i in range(2)], ["pair"]
-    )["pair"]
-
-    expected = [
-        BackgroundDraw.read(ensemble / f"{SEED}-{index}.h5")[0].segment_counts.sum()
-        for index in range(2)
-    ]
-    np.testing.assert_array_equal(stacked["n_events"], expected)
-
-
-def test_read_background_ensemble_respects_path_order(ensemble: Path) -> None:
-    paths = [ensemble / f"{SEED}-{i}.h5" for i in range(2)]
-    full = read_background_ensemble(paths, ["triangle"])["triangle"]
-    reverse = read_background_ensemble(paths[::-1], ["triangle"])["triangle"]
-
-    np.testing.assert_array_equal(
-        reverse["pair_spectral_density"], full["pair_spectral_density"][::-1]
-    )
-
-
 @pytest.mark.parametrize(
     ("field", "value"),
-    [("num_segments", 0), ("segment_seconds", 0.0), ("observer_rate_hz", -1.0)],
+    [("num_segments", 0), ("segment_duration", 0.0), ("poisson_rate", -1.0)],
 )
 def test_config_rejects_a_nonphysical_observation(field: str, value: float) -> None:
     fields = {**_config().model_dump(), field: value}
@@ -328,13 +278,13 @@ def test_background_boundaries_reject_invalid_networks(
         )
     with pytest.raises(ValueError, match=message):
         simulate_background(
-            realization_key(SEED, 0),
+            jax.random.key(SEED),
             event_pool(0),
             WAVEFORM,
             networks=networks,
-            observer_rate_hz=0.0,
+            poisson_rate=0.0,
             num_segments=1,
-            segment_seconds=1.0,
+            segment_duration=1.0,
         )
 
 
@@ -347,13 +297,13 @@ def pool() -> dict[str, np.ndarray]:
 def simulate_pool() -> Callable[[dict[str, np.ndarray]], BackgroundDraw]:
     def run(sources: dict[str, np.ndarray]) -> BackgroundDraw:
         return simulate_background(
-            realization_key(SEED, 0),
+            jax.random.key(SEED),
             sources,
             WAVEFORM,
             NETWORKS,
-            observer_rate_hz=RATE_HZ,
+            poisson_rate=RATE_HZ,
             num_segments=2,
-            segment_seconds=SEGMENT_SECONDS,
+            segment_duration=SEGMENT_SECONDS,
             incoherent=True,
             chunk_size=CHUNK,
         )
@@ -410,7 +360,7 @@ def test_an_event_pool_read_from_a_gwmock_catalogue_renames_the_distance(
 ) -> None:
     path = write_population_csv(tmp_path / "pool.csv")
 
-    pool = read_event_pool(path)
+    pool = read_population_file(path)
 
     assert "distance" not in pool
     np.testing.assert_array_equal(
@@ -423,7 +373,7 @@ def test_an_event_pool_without_a_distance_is_refused(tmp_path: Path) -> None:
     path.write_text("detector_frame_mass_1,detector_frame_mass_2\n1.4,1.3\n")
 
     with pytest.raises(ValueError, match="distance"):
-        read_event_pool(path)
+        read_population_file(path)
 
 
 def test_an_event_pool_read_from_an_hdf5_catalogue_renames_the_distance(
@@ -441,7 +391,7 @@ def test_an_event_pool_read_from_an_hdf5_catalogue_renames_the_distance(
     with h5py.File(path, "w") as file:
         file.create_dataset("source_parameters", data=structured)
 
-    read = read_event_pool(path)
+    read = read_population_file(path)
 
     assert "distance" not in read
     np.testing.assert_array_equal(
@@ -458,12 +408,26 @@ def test_an_event_pool_read_from_an_hdf5_group_of_datasets(tmp_path: Path) -> No
         for name, values in pool.items():
             group.create_dataset(name, data=np.asarray(values))
 
-    read = read_event_pool(path)
+    read = read_population_file(path)
 
     assert "distance" not in read
     np.testing.assert_array_equal(
         read["luminosity_distance"], event_pool()["luminosity_distance"]
     )
+
+
+def test_an_event_pool_read_from_a_custom_hdf5_root(tmp_path: Path) -> None:
+    pool = event_pool()
+    pool["distance"] = pool.pop("luminosity_distance")
+    path = tmp_path / "pool.h5"
+    with h5py.File(path, "w") as file:
+        group = file.create_group("catalogue/events")
+        for name, values in pool.items():
+            group.create_dataset(name, data=np.asarray(values))
+
+    read = read_population_file(path, root="catalogue/events")
+
+    np.testing.assert_array_equal(read["luminosity_distance"], pool["distance"])
 
 
 def test_an_event_pool_without_a_catalogue_dataset_is_refused(
@@ -474,4 +438,4 @@ def test_an_event_pool_without_a_catalogue_dataset_is_refused(
         file.create_dataset("data", data=np.arange(3))
 
     with pytest.raises(ValueError, match="source_parameters"):
-        read_event_pool(path)
+        read_population_file(path)
