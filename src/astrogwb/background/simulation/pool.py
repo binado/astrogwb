@@ -10,7 +10,7 @@ from numpy.typing import NDArray
 from astrogwb.background.simulation.draw import SKY_COLUMNS
 from astrogwb.utils.io import h5py
 
-__all__ = ["read_event_pool"]
+__all__ = ["read_population_file"]
 
 #: The two ways a catalogue gives the masses the waveform needs.
 _MASS_COLUMNS = (
@@ -77,13 +77,13 @@ def _read_hdf5_catalogue(path: Path, *, dataset: str) -> dict[str, np.ndarray]:
         return _as_catalogue(columns, source=f"{path}:{dataset}")
 
 
-def read_event_pool(
-    path: str | Path, *, hdf5_dataset: str = "source_parameters"
+def read_population_file(
+    path: str | Path, *, root: str = "source_parameters"
 ) -> dict[str, NDArray[np.float64]]:
     """Read a population catalogue as an event pool for the simulator.
 
     The file is an HDF5 or CSV catalogue with canonical gwmock-pop column
-    names. HDF5 catalogues are read from the ``hdf5_dataset`` node, a compound
+    names. HDF5 catalogues are read from the ``root`` node, a compound
     dataset or a group of 1-D datasets. Besides the waveform parameters it
     must hold ``distance`` (the luminosity distance in Mpc, renamed
     ``luminosity_distance`` here), the sky columns ``right_ascension``,
@@ -95,8 +95,8 @@ def read_event_pool(
     ----------
     path
         Catalogue path, ``.h5``, ``.hdf5`` or ``.csv``.
-    hdf5_dataset
-        Dataset or group name inside an HDF5 file.
+    root
+        Dataset or group path inside an HDF5 file. Ignored for CSV files.
 
     Returns
     -------
@@ -119,7 +119,7 @@ def read_event_pool(
             f"unsupported catalogue format for {path}: supports {supported}."
         )
     if file_format == "hdf5":
-        catalogue = _read_hdf5_catalogue(Path(path), dataset=hdf5_dataset)
+        catalogue = _read_hdf5_catalogue(Path(path), dataset=root)
     else:
         catalogue = _read_csv_catalogue(Path(path))
 

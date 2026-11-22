@@ -26,7 +26,7 @@ from astrogwb.background.simulation import (
     SimulationConfig,
     project_background,
     read_background_ensemble,
-    read_event_pool,
+    read_population_file,
     simulate_background,
 )
 from astrogwb.detector import Networks, network_pairs
@@ -409,7 +409,7 @@ def test_an_event_pool_read_from_a_gwmock_catalogue_renames_the_distance(
 ) -> None:
     path = write_population_csv(tmp_path / "pool.csv")
 
-    pool = read_event_pool(path)
+    pool = read_population_file(path)
 
     assert "distance" not in pool
     np.testing.assert_array_equal(
@@ -422,7 +422,7 @@ def test_an_event_pool_without_a_distance_is_refused(tmp_path: Path) -> None:
     path.write_text("detector_frame_mass_1,detector_frame_mass_2\n1.4,1.3\n")
 
     with pytest.raises(ValueError, match="distance"):
-        read_event_pool(path)
+        read_population_file(path)
 
 
 def test_an_event_pool_read_from_an_hdf5_catalogue_renames_the_distance(
@@ -440,7 +440,7 @@ def test_an_event_pool_read_from_an_hdf5_catalogue_renames_the_distance(
     with h5py.File(path, "w") as file:
         file.create_dataset("source_parameters", data=structured)
 
-    read = read_event_pool(path)
+    read = read_population_file(path)
 
     assert "distance" not in read
     np.testing.assert_array_equal(
@@ -457,12 +457,26 @@ def test_an_event_pool_read_from_an_hdf5_group_of_datasets(tmp_path: Path) -> No
         for name, values in pool.items():
             group.create_dataset(name, data=np.asarray(values))
 
-    read = read_event_pool(path)
+    read = read_population_file(path)
 
     assert "distance" not in read
     np.testing.assert_array_equal(
         read["luminosity_distance"], event_pool()["luminosity_distance"]
     )
+
+
+def test_an_event_pool_read_from_a_custom_hdf5_root(tmp_path: Path) -> None:
+    pool = event_pool()
+    pool["distance"] = pool.pop("luminosity_distance")
+    path = tmp_path / "pool.h5"
+    with h5py.File(path, "w") as file:
+        group = file.create_group("catalogue/events")
+        for name, values in pool.items():
+            group.create_dataset(name, data=np.asarray(values))
+
+    read = read_population_file(path, root="catalogue/events")
+
+    np.testing.assert_array_equal(read["luminosity_distance"], pool["distance"])
 
 
 def test_an_event_pool_without_a_catalogue_dataset_is_refused(
@@ -473,4 +487,4 @@ def test_an_event_pool_without_a_catalogue_dataset_is_refused(
         file.create_dataset("data", data=np.arange(3))
 
     with pytest.raises(ValueError, match="source_parameters"):
-        read_event_pool(path)
+        read_population_file(path)

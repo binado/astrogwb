@@ -17,7 +17,7 @@ from typer.testing import CliRunner
 
 from astrogwb.background.simulation import (
     BackgroundDraw,
-    read_event_pool,
+    read_population_file,
     simulate_background,
 )
 from astrogwb.cli import app
@@ -105,7 +105,7 @@ def test_a_simulate_run_writes_one_file_with_its_config(
     assert config.observer_rate_hz == pytest.approx(8.0)
     direct = simulate_background(
         jax.random.key(41),
-        read_event_pool(inputs["population"]),
+        read_population_file(inputs["population"]),
         config.waveform,
         config.networks,
         observer_rate_hz=config.observer_rate_hz,
@@ -132,3 +132,17 @@ def test_a_simulate_run_with_incoherent_records_the_mode(
     _simulate(output, inputs, "--incoherent")
 
     assert BackgroundDraw.read(output)[1].incoherent
+
+
+def test_simulate_reads_a_custom_population_root(
+    tmp_path: Path, inputs: dict[str, Path]
+) -> None:
+    catalogue = np.genfromtxt(inputs["population"], delimiter=",", names=True)
+    inputs["population"] = tmp_path / "events.h5"
+    with h5py.File(inputs["population"], "w") as file:
+        file.create_dataset("catalogue/events", data=catalogue)
+
+    output = tmp_path / "result.h5"
+    _simulate(output, inputs, "--population-root", "catalogue/events")
+
+    assert BackgroundDraw.read(output)[0].segment_counts.sum() > 0

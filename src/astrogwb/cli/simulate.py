@@ -20,8 +20,7 @@ def simulate(
         typer.Argument(
             exists=True,
             dir_okay=False,
-            help="Event pool: a CSV catalogue, or an HDF5 catalogue under the "
-            "'source_parameters' dataset, with canonical gwmock-pop column names.",
+            help="CSV or HDF5 event catalogue with canonical gwmock-pop column names.",
         ),
     ],
     waveform_config: Annotated[
@@ -57,6 +56,10 @@ def simulate(
         float, typer.Option(min=0.0, help="Segment length in seconds, e.g. 2048.")
     ],
     seed: Annotated[int, typer.Option(help="Seed of the draw.")],
+    population_root: Annotated[
+        str,
+        typer.Option(help="HDF5 population dataset or group path; ignored for CSV."),
+    ] = "source_parameters",
     incoherent: Annotated[
         bool,
         typer.Option(
@@ -100,6 +103,8 @@ def simulate(
         Segment length in seconds.
     seed
         Random seed.
+    population_root
+        HDF5 dataset or group containing the population.
     incoherent
         Skip noise and coherent summation.
     chunk_size
@@ -119,7 +124,7 @@ def simulate(
 
     from astrogwb.background.simulation import (
         SimulationConfig,
-        read_event_pool,
+        read_population_file,
         simulate_background,
     )
     from astrogwb.detector import load_networks_from_file
@@ -150,7 +155,7 @@ def simulate(
         raise typer.BadParameter(str(error)) from error
     draw = simulate_background(
         jax.random.key(seed),
-        read_event_pool(population),
+        read_population_file(population, root=population_root),
         config.waveform,
         config.networks,
         observer_rate_hz=config.observer_rate_hz,

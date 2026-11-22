@@ -41,8 +41,9 @@ Command line
 
 ``astrogwb simulate`` runs the simulator on a population catalogue (HDF5 or
 CSV, canonical gwmock-pop column names) and writes one HDF5 file. HDF5
-catalogues are read from the ``source_parameters`` dataset, a compound
-dataset or a group of one dataset per column:
+catalogues are read from ``source_parameters`` by default, a compound dataset
+or a group of one dataset per column. Use ``--population-root`` to select a
+different dataset or group path, or pass ``root`` to ``read_population_file`` in Python:
 
 ::
 
