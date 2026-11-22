@@ -25,10 +25,10 @@ from astrogwb.background.simulation import (
     BackgroundDraw,
     SimulationConfig,
     project_background,
-    read_population_file,
     simulate_background,
 )
 from astrogwb.detector import Networks, network_pairs
+from astrogwb.populations.io import read_population_file
 
 SEED = 41
 CHUNK = 8

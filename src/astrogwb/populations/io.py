@@ -7,10 +7,12 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
-from astrogwb.background.simulation.draw import SKY_COLUMNS
 from astrogwb.utils.io import h5py
 
 __all__ = ["read_population_file"]
+
+#: The sky coordinates required for event projection.
+_SKY_COLUMNS = ("right_ascension", "declination", "polarization_angle")
 
 #: The two ways a catalogue gives the masses the waveform needs.
 _MASS_COLUMNS = (
@@ -123,7 +125,7 @@ def read_population_file(
     else:
         catalogue = _read_csv_catalogue(Path(path))
 
-    required = ["distance", *SKY_COLUMNS]
+    required = ["distance", *_SKY_COLUMNS]
     missing = [name for name in required if name not in catalogue]
     if missing:
         raise ValueError(f"{path} is missing the columns {missing}")

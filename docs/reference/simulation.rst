@@ -9,7 +9,6 @@ Simulation
 
    ~background.simulation.BackgroundDraw
    ~background.simulation.project_background
-   ~background.simulation.read_population_file
    ~background.simulation.simulate_background
 
 File I/O and reproducibility

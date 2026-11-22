@@ -66,10 +66,10 @@ def simulate(
 
     from astrogwb.background.simulation import (
         SimulationConfig,
-        read_population_file,
         simulate_background,
     )
     from astrogwb.detector import load_networks_from_file
+    from astrogwb.populations.io import read_population_file
     from astrogwb.waveform import WaveformConfig
 
     networks = load_networks_from_file(detector_config)

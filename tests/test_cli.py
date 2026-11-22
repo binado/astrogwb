@@ -16,11 +16,11 @@ from astrogwb_tiny_pipeline import WAVEFORM, write_population_csv
 
 from astrogwb.background.simulation import (
     BackgroundDraw,
-    read_population_file,
     simulate_background,
 )
 from astrogwb.cli import main
 from astrogwb.detector import load_detector, network_pairs
+from astrogwb.populations.io import read_population_file
 
 
 def test_importing_the_cli_leaves_the_xla_backend_uninitialized() -> None:

@@ -88,6 +88,7 @@ from astrogwb.background.simulation.config import SimulationConfig, _network_det
 from astrogwb.detector import Networks, network_pairs
 from astrogwb.detector.projection import project_polarizations_fd
 from astrogwb.frequency import bin_widths
+from astrogwb.populations.io import _SKY_COLUMNS as SKY_COLUMNS
 from astrogwb.utils.io import atomic_h5, h5py
 from astrogwb.waveform.base import WaveformGenerator
 from astrogwb.waveform.factory import waveform_generator
@@ -110,10 +111,6 @@ _RESERVED_ATTRS = frozenset({"metadata", "version", "format_version"})
 
 #: Files written before ``format_version`` existed, which were layout 1.
 _LEGACY_VERSION = re.compile(r"0\.8\.")
-
-#: The columns every event pool must supply besides its waveform parameters.
-SKY_COLUMNS = ("right_ascension", "declination", "polarization_angle")
-
 
 #: :math:`\langle K_{ab} \rangle = I \gamma_{ab}` over this, the factor in
 #: :math:`Y_{ab} = 5 D_{ab} / T`.
