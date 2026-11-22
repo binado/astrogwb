@@ -117,8 +117,6 @@ class SimulationConfig(BaseModel):
             The resolved config, independent of any detector registration.
         """
         settings = dict(metadata)
-        if "observer_rate_hz" in settings:
-            settings["poisson_rate"] = settings.pop("observer_rate_hz")
         document = _DetectorConfigDocument.model_validate(settings.pop("detectors"))
         return cls.model_validate({**settings, "networks": document.resolve_networks()})
 
