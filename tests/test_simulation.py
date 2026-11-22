@@ -9,6 +9,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 import h5py
+import jax
 import numpy as np
 import pytest
 from astrogwb_tiny_pipeline import (
@@ -26,7 +27,6 @@ from astrogwb.background.simulation import (
     project_background,
     read_background_ensemble,
     read_event_pool,
-    realization_key,
     simulate_background,
 )
 from astrogwb.detector import Networks, network_pairs
@@ -37,7 +37,7 @@ SEGMENT_SECONDS = 1.0
 RATE_HZ = 8.0
 
 
-def _config(index: int = 0, *, incoherent: bool = True) -> SimulationConfig:
+def _config(seed: int = SEED, *, incoherent: bool = True) -> SimulationConfig:
     return SimulationConfig(
         waveform=WAVEFORM,
         networks=NETWORKS,
@@ -46,14 +46,13 @@ def _config(index: int = 0, *, incoherent: bool = True) -> SimulationConfig:
         segment_seconds=SEGMENT_SECONDS,
         incoherent=incoherent,
         population="pool.csv",
-        seed=SEED,
-        index=index,
+        seed=seed,
     )
 
 
 def _simulate(config: SimulationConfig) -> BackgroundDraw:
     return simulate_background(
-        realization_key(config.seed, config.index),
+        jax.random.key(config.seed),
         event_pool(),
         config.waveform,
         config.networks,
@@ -67,7 +66,7 @@ def _simulate(config: SimulationConfig) -> BackgroundDraw:
 
 @pytest.fixture(scope="module")
 def draw() -> BackgroundDraw:
-    """The tiny configuration simulated at ``(SEED, 0)``."""
+    """The tiny configuration simulated at ``SEED``."""
     return _simulate(_config())
 
 
@@ -229,10 +228,10 @@ def test_coherent_joint_draw_reuses_the_shared_baseline() -> None:
 
 @pytest.fixture(scope="module")
 def ensemble(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """Two draws of ``SEED``, each recorded by every tiny network."""
+    """Two draws with distinct seeds, each recorded by every tiny network."""
     root = tmp_path_factory.mktemp("ensemble")
     for index in range(2):
-        config = _config(index)
+        config = _config(SEED + index)
         _simulate(config).write(root / f"{SEED}-{index}.h5", config)
     return root
 
@@ -328,7 +327,7 @@ def test_background_boundaries_reject_invalid_networks(
         )
     with pytest.raises(ValueError, match=message):
         simulate_background(
-            realization_key(SEED, 0),
+            jax.random.key(SEED),
             event_pool(0),
             WAVEFORM,
             networks=networks,
@@ -347,7 +346,7 @@ def pool() -> dict[str, np.ndarray]:
 def simulate_pool() -> Callable[[dict[str, np.ndarray]], BackgroundDraw]:
     def run(sources: dict[str, np.ndarray]) -> BackgroundDraw:
         return simulate_background(
-            realization_key(SEED, 0),
+            jax.random.key(SEED),
             sources,
             WAVEFORM,
             NETWORKS,

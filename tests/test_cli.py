@@ -8,13 +8,18 @@ import sys
 from pathlib import Path
 
 import h5py
+import jax
 import numpy as np
 import pytest
 import tomli_w
 from astrogwb_tiny_pipeline import WAVEFORM, write_population_csv
 from typer.testing import CliRunner
 
-from astrogwb.background.simulation import BackgroundDraw
+from astrogwb.background.simulation import (
+    BackgroundDraw,
+    read_event_pool,
+    simulate_background,
+)
 from astrogwb.cli import app
 from astrogwb.detector import load_detector, network_pairs
 from astrogwb.utils import years_to_seconds
@@ -96,8 +101,20 @@ def test_a_simulate_run_writes_one_file_with_its_config(
     assert tuple(config.networks) == ("ET",)
     assert network_pairs(config.networks["ET"]) == (("R1", "S1"),)
     assert config.population == str(inputs["population"])
-    assert (config.seed, config.index, config.incoherent) == (41, 0, False)
+    assert (config.seed, config.incoherent) == (41, False)
     assert config.observer_rate_hz == pytest.approx(8.0)
+    direct = simulate_background(
+        jax.random.key(41),
+        read_event_pool(inputs["population"]),
+        config.waveform,
+        config.networks,
+        observer_rate_hz=config.observer_rate_hz,
+        num_segments=2,
+        segment_seconds=1,
+        chunk_size=8,
+    )
+    np.testing.assert_array_equal(draw.segment_counts, direct.segment_counts)
+    np.testing.assert_array_equal(draw.spectra["ET"], direct.spectra["ET"])
     assert draw.segment_counts.shape == (2,)
     assert draw.segment_counts.sum() > 0
     assert np.any(draw.spectra["ET"])

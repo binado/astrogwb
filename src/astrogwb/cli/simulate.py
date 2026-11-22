@@ -13,7 +13,7 @@ from astrogwb.runtime import configure_runtime
 
 def simulate(
     output: Annotated[
-        Path, typer.Argument(dir_okay=False, help="Output HDF5 file, e.g. 41-0.h5.")
+        Path, typer.Argument(dir_okay=False, help="Output HDF5 file, e.g. 41.h5.")
     ],
     population: Annotated[
         Path,
@@ -57,9 +57,6 @@ def simulate(
         float, typer.Option(min=0.0, help="Segment length in seconds, e.g. 2048.")
     ],
     seed: Annotated[int, typer.Option(help="Seed of the draw.")],
-    index: Annotated[
-        int, typer.Option(min=0, help="Draw index for the given seed.")
-    ] = 0,
     incoherent: Annotated[
         bool,
         typer.Option(
@@ -103,8 +100,6 @@ def simulate(
         Segment length in seconds.
     seed
         Random seed.
-    index
-        Draw index.
     incoherent
         Skip noise and coherent summation.
     chunk_size
@@ -120,10 +115,11 @@ def simulate(
         configure_runtime(platform=platform, cpu_threads=cpu_threads)
     except ValueError as error:
         raise typer.BadParameter(str(error), param_hint="--platform") from error
+    import jax
+
     from astrogwb.background.simulation import (
         SimulationConfig,
         read_event_pool,
-        realization_key,
         simulate_background,
     )
     from astrogwb.detector import load_networks_from_file
@@ -149,12 +145,11 @@ def simulate(
             incoherent=incoherent,
             population=str(population),
             seed=seed,
-            index=index,
         )
     except ValueError as error:
         raise typer.BadParameter(str(error)) from error
     draw = simulate_background(
-        realization_key(seed, index),
+        jax.random.key(seed),
         read_event_pool(population),
         config.waveform,
         config.networks,

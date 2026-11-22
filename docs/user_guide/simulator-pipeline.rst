@@ -46,9 +46,12 @@ dataset or a group of one dataset per column:
 
 ::
 
-   astrogwb simulate 41-0.h5 events.h5 \
+   astrogwb simulate 41.h5 events.h5 \
        --waveform-config waveform.toml --detector-config detectors.toml \
        --rate-per-year 1e5 --num-segments 1024 --segment-seconds 16 --seed 41
+
+The CLI passes ``jax.random.key(seed)`` directly to the simulator. Use a
+different seed for each independent draw.
 
 Pass one complete TOML file per option, with any layers and references resolved
 before invoking the CLI. The CLI runs every named network in the detector file's

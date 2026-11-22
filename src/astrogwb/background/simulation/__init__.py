@@ -1,6 +1,5 @@
 """Simulation of detector-pair background spectra from physical event pools."""
 
-from astrogwb.background.simulation._keys import realization_key
 from astrogwb.background.simulation.config import SimulationConfig
 from astrogwb.background.simulation.draw import (
     BackgroundDraw,
@@ -18,6 +17,5 @@ __all__ = [
     "project_background",
     "read_background_ensemble",
     "read_event_pool",
-    "realization_key",
     "simulate_background",
 ]

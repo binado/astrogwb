@@ -21,4 +21,3 @@ File I/O and reproducibility
    :nosignatures:
 
    ~background.simulation.SimulationConfig
-   ~background.simulation.realization_key

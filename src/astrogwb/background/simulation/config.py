@@ -49,7 +49,7 @@ class SimulationConfig(BaseModel):
     the noiseless sums of event powers; otherwise each segment adds coherent
     strain and detector noise (see :mod:`astrogwb.background.simulation.draw`).
 
-    ``population``, ``seed`` and ``index`` record where the pool came from and
+    ``population`` and ``seed`` record where the pool came from and
     the key the draw was made at. They are provenance: they do not change how
     the spectra are computed. Execution details such as chunk sizes change cost,
     never the result, and are not recorded.
@@ -68,7 +68,6 @@ class SimulationConfig(BaseModel):
     incoherent: bool = False
     population: str
     seed: int
-    index: Annotated[int, Field(ge=0)] = 0
 
     @field_validator("networks")
     @classmethod
