@@ -51,6 +51,8 @@ different dataset or group path, or pass ``root`` to ``read_population_file`` in
        --waveform-config waveform.toml --detector-config detectors.toml \
        --rate-per-year 1e5 --num-segments 1024 --segment-seconds 16 --seed 41
 
+The output configuration records both the population path and the selected root.
+
 The CLI passes ``jax.random.key(seed)`` directly to the simulator. Use a
 different seed for each independent draw.
 

@@ -84,6 +84,7 @@ def simulate(
         segment_seconds=segment_seconds,
         incoherent=incoherent,
         population=str(population),
+        population_root=population_root,
         seed=seed,
     )
     draw = simulate_background(
