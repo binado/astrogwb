@@ -26,7 +26,6 @@ WAVEFORM = WaveformConfig(
 
 TRIANGLE = {name: load_detector(name) for name in ("S1", "R1", "C1")}
 PAIR = {name: TRIANGLE[name] for name in ("S1", "C1")}
-NETWORKS = {"triangle": TRIANGLE, "pair": PAIR}
 
 
 def event_pool(size: int = 64, *, seed: int = 41) -> dict[str, np.ndarray]:

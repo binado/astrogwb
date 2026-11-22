@@ -1,10 +1,9 @@
-"""One-pass simulation: the config, the single HDF5 file and the ensemble reader."""
+"""One-pass simulation configuration, storage and input validation."""
 
 from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType
 
@@ -13,7 +12,6 @@ import jax
 import numpy as np
 import pytest
 from astrogwb_tiny_pipeline import (
-    NETWORKS,
     PAIR,
     TRIANGLE,
     WAVEFORM,
@@ -27,8 +25,9 @@ from astrogwb.background.simulation import (
     project_background,
     simulate_background,
 )
-from astrogwb.detector import Networks, network_pairs
+from astrogwb.detector import Network, network_pairs
 from astrogwb.populations.io import read_population_file
+from astrogwb.waveform import waveform_generator
 
 SEED = 41
 CHUNK = 8
@@ -36,16 +35,15 @@ SEGMENT_SECONDS = 1.0
 RATE_HZ = 8.0
 
 
-def _config(seed: int = SEED, *, incoherent: bool = True) -> SimulationConfig:
+def _config() -> SimulationConfig:
     return SimulationConfig(
         waveform=WAVEFORM,
-        networks=NETWORKS,
+        network=TRIANGLE,
         poisson_rate=RATE_HZ,
         num_segments=2,
         segment_duration=SEGMENT_SECONDS,
-        incoherent=incoherent,
         population="pool.csv",
-        seed=seed,
+        seed=SEED,
     )
 
 
@@ -53,12 +51,12 @@ def _simulate(config: SimulationConfig) -> BackgroundDraw:
     return simulate_background(
         jax.random.key(config.seed),
         event_pool(),
-        config.waveform,
-        config.networks,
+        waveform_generator(config.waveform),
+        config.network,
         poisson_rate=config.poisson_rate,
         num_segments=config.num_segments,
         segment_duration=config.segment_duration,
-        incoherent=config.incoherent,
+        simulate_detector_noise=config.simulate_detector_noise,
         chunk_size=CHUNK,
     )
 
@@ -81,31 +79,22 @@ def test_a_file_round_trips_the_draw_and_its_config(
 
     assert draw.segment_counts.sum() > 0
     assert config == _config()
-    pair, triangle = config.networks["pair"], config.networks["triangle"]
-    assert pair["C1"] is triangle["C1"]
     np.testing.assert_array_equal(reopened.frequencies, draw.frequencies)
     np.testing.assert_array_equal(reopened.segment_counts, draw.segment_counts)
-    assert reopened.spectra.keys() == draw.spectra.keys()
-    for name, spectrum in draw.spectra.items():
-        np.testing.assert_array_equal(reopened.spectra[name], spectrum)
+    np.testing.assert_array_equal(
+        reopened.pair_spectral_density, draw.pair_spectral_density
+    )
 
 
-def test_file_keeps_the_legacy_hdf5_and_detector_metadata_layout(written: Path) -> None:
+def test_file_has_single_network_layout(written: Path) -> None:
     with h5py.File(written, "r") as file:
-        assert set(file) == {"frequencies", "segment_counts", "networks"}
+        assert set(file) == {"frequencies", "segment_counts", "pair_spectral_density"}
         assert "version" in file.attrs
-        assert set(file["networks"]) == {"triangle", "pair"}
-        assert set(file["networks/triangle"]) == {"pair_spectral_density"}
-        assert set(file["networks/pair"]) == {"pair_spectral_density"}
+        assert file.attrs["format_version"] == 2
         metadata = json.loads(file.attrs["metadata"])
 
-    assert "networks" not in metadata
-    assert metadata["detectors"] == {
-        "detectors": {
-            name: detector.model_dump(mode="json", exclude={"name"})
-            for name, detector in TRIANGLE.items()
-        },
-        "networks": {"triangle": ["C1", "R1", "S1"], "pair": ["C1", "S1"]},
+    assert metadata["network"] == {
+        name: detector.model_dump(mode="json") for name, detector in TRIANGLE.items()
     }
 
 
@@ -122,49 +111,19 @@ def _edited(written: Path, tmp_path: Path, **attrs: object) -> Path:
     return copy
 
 
-def test_a_file_records_its_format_version(written: Path) -> None:
-    with h5py.File(written, "r") as file:
-        assert file.attrs["format_version"] == 1
-
-
-def test_a_legacy_0_8_file_without_a_format_version_is_read(
-    draw: BackgroundDraw, written: Path, tmp_path: Path
-) -> None:
-    legacy = _edited(written, tmp_path, format_version=None, version="0.8.0")
-
-    with h5py.File(legacy, "r+") as file:
-        metadata = json.loads(file.attrs["metadata"])
-        for members in metadata["detectors"]["networks"].values():
-            members.reverse()
-        file.attrs["metadata"] = json.dumps(metadata)
-
-    reopened, config = BackgroundDraw.read(legacy)
-
-    assert config == _config()
-    assert tuple(config.networks["triangle"]) == ("C1", "R1", "S1")
-    assert config.networks["pair"]["C1"] is config.networks["triangle"]["C1"]
-    np.testing.assert_array_equal(reopened.segment_counts, draw.segment_counts)
-
-
 def test_a_file_is_read_whatever_astrogwb_version_wrote_it(
     written: Path, tmp_path: Path
 ) -> None:
     BackgroundDraw.read(_edited(written, tmp_path, version="0.8.1.dev3"))
 
 
-def test_a_file_of_an_unknown_format_is_refused(written: Path, tmp_path: Path) -> None:
-    future = _edited(written, tmp_path, format_version=99, version="9.9.9")
-
-    with pytest.raises(ValueError, match=r"format_version 99.*9\.9\.9"):
-        BackgroundDraw.read(future)
-
-
-def test_an_unversioned_file_of_another_release_is_refused(
-    written: Path, tmp_path: Path
+@pytest.mark.parametrize("format_version", [None, 1, 99])
+def test_a_file_of_an_unsupported_format_is_refused(
+    written: Path, tmp_path: Path, format_version: int | None
 ) -> None:
-    stale = _edited(written, tmp_path, format_version=None, version="0.7.0")
+    stale = _edited(written, tmp_path, format_version=format_version)
 
-    with pytest.raises(ValueError, match=r"format_version None.*0\.7\.0"):
+    with pytest.raises(ValueError, match=f"format_version {format_version}"):
         BackgroundDraw.read(stale)
 
 
@@ -198,30 +157,29 @@ def test_observation_seconds_is_the_segments_together() -> None:
     assert _config().observation_seconds == 2 * SEGMENT_SECONDS
 
 
-def test_config_copies_and_sorts_network_mappings() -> None:
-    fields = _config().model_dump(exclude={"networks"})
+def test_config_copies_and_sorts_the_network_mapping() -> None:
+    fields = _config().model_dump(exclude={"network"})
     members = dict(TRIANGLE)
-    networks = {"triangle": MappingProxyType(members), "pair": PAIR}
     config = SimulationConfig.model_validate(
-        {**fields, "networks": MappingProxyType(networks)}
+        {**fields, "network": MappingProxyType(members)}
     )
 
-    assert tuple(config.networks) == ("pair", "triangle")
-    assert tuple(config.networks["triangle"]) == ("C1", "R1", "S1")
-    assert config.networks["triangle"]["C1"] is members["C1"]
+    assert tuple(config.network) == ("C1", "R1", "S1")
+    assert config.network["C1"] is members["C1"]
     members.clear()
-    networks.clear()
-    assert config.networks == NETWORKS
+    assert config.network == TRIANGLE
 
 
-def test_coherent_joint_draw_reuses_the_shared_baseline() -> None:
-    draw = _simulate(_config(incoherent=False))
+def test_draw_rows_follow_canonical_detector_order() -> None:
+    config = _config()
+    draw = _simulate(config)
+    pair_draw = _simulate(config.model_copy(update={"network": PAIR}))
 
     (shared,) = network_pairs(PAIR)
-    pair = draw.spectra["pair"][0]
+    pair = pair_draw.pair_spectral_density[0]
     assert np.any(pair)
     np.testing.assert_array_equal(
-        pair, draw.spectra["triangle"][network_pairs(TRIANGLE).index(shared)]
+        pair, draw.pair_spectral_density[network_pairs(TRIANGLE).index(shared)]
     )
 
 
@@ -237,51 +195,28 @@ def test_config_rejects_a_nonphysical_observation(field: str, value: float) -> N
 
 
 @pytest.mark.parametrize(
-    ("issue", "message"),
+    ("network", "message"),
     [
-        ("empty", "at least one network"),
-        ("blank", "non-blank"),
-        ("mismatch", "detector name.*mapping key"),
-        ("singleton", "at least two detectors"),
-        ("geometry", "conflicting definitions.*C1"),
-        ("psd_reference", "conflicting definitions.*C1"),
+        ({}, "at least two detectors"),
+        ({"C1": PAIR["C1"]}, "at least two detectors"),
+        ({"wrong": PAIR["C1"], "S1": PAIR["S1"]}, "detector.*is keyed by"),
     ],
 )
-def test_background_boundaries_reject_invalid_networks(
-    issue: str, message: str
+def test_background_boundaries_reject_an_invalid_network(
+    network: Network, message: str
 ) -> None:
-    detector = PAIR["C1"]
-    networks: Networks
-    if issue == "empty":
-        networks = {}
-    elif issue == "blank":
-        networks = {" ": PAIR}
-    elif issue == "mismatch":
-        networks = {"mismatch": {"wrong": detector, "S1": PAIR["S1"]}}
-    elif issue == "singleton":
-        networks = {"singleton": {"C1": detector}}
-    else:
-        update = (
-            {"geometry": replace(detector.geometry, elevation_m=1234.0)}
-            if issue == "geometry"
-            else {"psd_reference": TRIANGLE["R1"].psd_reference}
-        )
-        conflicting = {**PAIR, "C1": detector.model_copy(update=update)}
-        networks = {"triangle": TRIANGLE, "conflicting": conflicting}
-
-    fields = {**_config().model_dump(exclude={"networks"}), "networks": networks}
+    fields = {**_config().model_dump(), "network": network}
+    generator = waveform_generator(WAVEFORM)
     with pytest.raises(ValueError, match=message):
         SimulationConfig.model_validate(fields)
     with pytest.raises(ValueError, match=message):
-        project_background(
-            event_pool(0), WAVEFORM, networks=networks, observation_seconds=1.0
-        )
+        project_background(event_pool(0), generator, network, observation_seconds=1.0)
     with pytest.raises(ValueError, match=message):
         simulate_background(
             jax.random.key(SEED),
             event_pool(0),
-            WAVEFORM,
-            networks=networks,
+            generator,
+            network,
             poisson_rate=0.0,
             num_segments=1,
             segment_duration=1.0,
@@ -295,16 +230,17 @@ def pool() -> dict[str, np.ndarray]:
 
 @pytest.fixture
 def simulate_pool() -> Callable[[dict[str, np.ndarray]], BackgroundDraw]:
+    generator = waveform_generator(WAVEFORM)
+
     def run(sources: dict[str, np.ndarray]) -> BackgroundDraw:
         return simulate_background(
             jax.random.key(SEED),
             sources,
-            WAVEFORM,
-            NETWORKS,
+            generator,
+            TRIANGLE,
             poisson_rate=RATE_HZ,
             num_segments=2,
             segment_duration=SEGMENT_SECONDS,
-            incoherent=True,
             chunk_size=CHUNK,
         )
 
