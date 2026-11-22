@@ -523,12 +523,12 @@ def project_background(
 def _draw_events(
     key: jax.Array,
     sources: Mapping[str, ArrayLike],
-    observer_rate_hz: float,
+    poisson_rate: float,
     num_segments: int,
     segment_seconds: float,
 ) -> tuple[dict[str, NDArray], NDArray[np.int64]]:
-    if not np.isfinite(observer_rate_hz) or observer_rate_hz < 0:
-        raise ValueError("observer_rate_hz must be finite and nonnegative")
+    if not np.isfinite(poisson_rate) or poisson_rate < 0:
+        raise ValueError("poisson_rate must be finite and nonnegative")
     if num_segments < 1:
         raise ValueError(f"num_segments must be positive; got {num_segments}")
     if not np.isfinite(segment_seconds) or segment_seconds <= 0:
@@ -537,13 +537,13 @@ def _draw_events(
     # Row selection runs on host arrays. A varying event count need not
     # compile a new random kernel for every realization.
     rng = np.random.default_rng(np.asarray(jax.random.key_data(key)))
-    counts = rng.poisson(observer_rate_hz * segment_seconds, num_segments)
+    counts = rng.poisson(poisson_rate * segment_seconds, num_segments)
     count = int(counts.sum())
     size = len(next(iter(pool.values()), ()))
     if count > size:
         raise ValueError(
             f"event pool has {size} rows but this draw requires {count} "
-            f"(expected {observer_rate_hz * segment_seconds * num_segments:.1f}); "
+            f"(expected {poisson_rate * segment_seconds * num_segments:.1f}); "
             "supply a larger pool or lower the rate"
         )
     indices = rng.choice(size, size=count, replace=False)
@@ -558,7 +558,7 @@ def simulate_background(
     waveform: WaveformConfig,
     networks: Networks,
     *,
-    observer_rate_hz: float,
+    poisson_rate: float,
     num_segments: int,
     segment_seconds: float,
     chunk_size: int = 1024,
@@ -589,7 +589,7 @@ def simulate_background(
         Waveform generator settings.
     networks
         Networks keyed by name that share one event and detector-noise realization.
-    observer_rate_hz
+    poisson_rate
         Rate in events per second of the population the pool represents.
     num_segments
         Number of segments.
@@ -622,7 +622,7 @@ def simulate_background(
     columns, counts = _draw_events(
         event_key,
         _event_columns(sources),
-        observer_rate_hz,
+        poisson_rate,
         num_segments,
         segment_seconds,
     )

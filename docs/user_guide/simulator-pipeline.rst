@@ -15,7 +15,7 @@ pool and its rate. The pool size only controls how many distinct mergers are ava
    hl = load_network("HL")
    draw = simulate_background(
        key, sources, waveform, networks={"HL": hl},
-       observer_rate_hz=0.02, num_segments=1024, segment_seconds=16.0,
+       poisson_rate=0.02, num_segments=1024, segment_seconds=16.0,
    )
    pairs = network_pairs(hl)
    counts = draw.segment_counts
@@ -24,7 +24,7 @@ pool and its rate. The pool size only controls how many distinct mergers are ava
 The pool supplies the waveform inputs (including source-frame masses, redshift,
 luminosity distance in Mpc, inclination and coalescence phase) and the projection angles
 ``right_ascension``, ``declination`` and ``polarization_angle`` in radians. Each segment
-gets an independent Poisson count with mean ``observer_rate_hz * segment_seconds``. The
+gets an independent Poisson count with mean ``poisson_rate * segment_seconds``. The
 simulator chooses rows uniformly without replacement across all segments and draws each
 merger’s geocentric arrival time uniformly relative to its segment center. If the
 realized total exceeds capacity, enlarge the pool and repeat with the same key.
@@ -49,7 +49,7 @@ different dataset or group path, or pass ``root`` to ``read_population_file`` in
 
    astrogwb simulate 41.h5 events.h5 \
        --waveform-config waveform.toml --detector-config detectors.toml \
-       --rate-per-year 1e5 --num-segments 1024 --segment-seconds 16 --seed 41
+       --poisson-rate 0.00317 --num-segments 1024 --segment-seconds 16 --seed 41
 
 The output configuration records both the population path and the selected root.
 
@@ -65,8 +65,8 @@ that network in Python, use ``load_networks_from_file(Path("detectors.toml"))["H
 The catalogue must hold ``distance`` (luminosity distance in Mpc, renamed
 ``luminosity_distance``), the sky columns, and the detector-frame or source-frame
 masses; other columns pass through. ``--waveform-config`` is a TOML file of the
-``WaveformConfig`` fields. ``--rate-per-year`` is the observer-frame rate of the
-population the catalogue represents; it is converted to ``observer_rate_hz``.
+``WaveformConfig`` fields. ``--poisson-rate`` is the observer-frame rate of the population the catalogue
+represents, in events per second.
 ``--incoherent`` skips noise and sums event powers, the noiseless expected signal of the
 same Poisson draw. The file stores the ``BackgroundDraw`` (``frequencies``,
 ``segment_counts`` and each network’s ``pair_spectral_density``) and, as JSON in its

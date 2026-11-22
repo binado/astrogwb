@@ -85,7 +85,7 @@ def _simulate(
         networks,
         segment_seconds=segment_duration,
         num_segments=int(OBSERVATION_SECONDS // segment_duration),
-        observer_rate_hz=len(population["redshift"]) / (2 * OBSERVATION_SECONDS),
+        poisson_rate=len(population["redshift"]) / (2 * OBSERVATION_SECONDS),
         **kwargs,
     )
 
@@ -515,7 +515,7 @@ def test_incoherent_draw_projects_exactly_its_selected_rows(population: Pool) ->
         population,
         WAVEFORM,
         NETWORKS,
-        observer_rate_hz=0.2,
+        poisson_rate=0.2,
         num_segments=4,
         segment_seconds=10.0,
         incoherent=True,

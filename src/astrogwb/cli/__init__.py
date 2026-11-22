@@ -7,7 +7,7 @@ HDF5 file. ``--waveform-config`` names a TOML file of waveform settings and
 
     astrogwb simulate ensemble/41-0.h5 events.h5 \\
         --waveform-config waveform.toml --detector-config detectors.toml \\
-        --rate-per-year 1e5 --num-segments 16 --segment-seconds 2048 --seed 41
+        --poisson-rate 0.00317 --num-segments 16 --segment-seconds 2048 --seed 41
 
 The detector configuration contains [detectors.<name>] definitions and [networks]
 memberships. The file carries the configuration as JSON in its ``metadata``
@@ -64,10 +64,10 @@ def main(argv: list[str] | None = None) -> None:
         help="Detector configuration TOML file.",
     )
     command.add_argument(
-        "--rate-per-year",
+        "--poisson-rate",
         type=_nonnegative_float,
         required=True,
-        help="Observer-frame event rate per year.",
+        help="Observer-frame Poisson event rate in events per second.",
     )
     command.add_argument(
         "--num-segments",

@@ -40,7 +40,7 @@ def _config(seed: int = SEED, *, incoherent: bool = True) -> SimulationConfig:
     return SimulationConfig(
         waveform=WAVEFORM,
         networks=NETWORKS,
-        observer_rate_hz=RATE_HZ,
+        poisson_rate=RATE_HZ,
         num_segments=2,
         segment_seconds=SEGMENT_SECONDS,
         incoherent=incoherent,
@@ -55,7 +55,7 @@ def _simulate(config: SimulationConfig) -> BackgroundDraw:
         event_pool(),
         config.waveform,
         config.networks,
-        observer_rate_hz=config.observer_rate_hz,
+        poisson_rate=config.poisson_rate,
         num_segments=config.num_segments,
         segment_seconds=config.segment_seconds,
         incoherent=config.incoherent,
@@ -227,7 +227,7 @@ def test_coherent_joint_draw_reuses_the_shared_baseline() -> None:
 
 @pytest.mark.parametrize(
     ("field", "value"),
-    [("num_segments", 0), ("segment_seconds", 0.0), ("observer_rate_hz", -1.0)],
+    [("num_segments", 0), ("segment_seconds", 0.0), ("poisson_rate", -1.0)],
 )
 def test_config_rejects_a_nonphysical_observation(field: str, value: float) -> None:
     fields = {**_config().model_dump(), field: value}
@@ -282,7 +282,7 @@ def test_background_boundaries_reject_invalid_networks(
             event_pool(0),
             WAVEFORM,
             networks=networks,
-            observer_rate_hz=0.0,
+            poisson_rate=0.0,
             num_segments=1,
             segment_seconds=1.0,
         )
@@ -301,7 +301,7 @@ def simulate_pool() -> Callable[[dict[str, np.ndarray]], BackgroundDraw]:
             sources,
             WAVEFORM,
             NETWORKS,
-            observer_rate_hz=RATE_HZ,
+            poisson_rate=RATE_HZ,
             num_segments=2,
             segment_seconds=SEGMENT_SECONDS,
             incoherent=True,

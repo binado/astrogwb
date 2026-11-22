@@ -43,7 +43,7 @@ class SimulationConfig(BaseModel):
     """Everything that determines a simulated background, but its draw.
 
     ``waveform`` and ``networks`` set how events are projected onto the
-    networks. ``observer_rate_hz`` is the rate, in events per second, of the
+    networks. ``poisson_rate`` is the rate, in events per second, of the
     population the event pool represents. The observation is ``num_segments``
     segments of ``segment_seconds`` each. With ``incoherent`` the spectra are
     the noiseless sums of event powers; otherwise each segment adds coherent
@@ -63,7 +63,7 @@ class SimulationConfig(BaseModel):
 
     waveform: WaveformConfig
     networks: Networks
-    observer_rate_hz: Annotated[float, Field(ge=0.0, allow_inf_nan=False)]
+    poisson_rate: Annotated[float, Field(ge=0.0, allow_inf_nan=False)]
     num_segments: Annotated[int, Field(ge=1)]
     segment_seconds: Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
     incoherent: bool = False
@@ -117,6 +117,8 @@ class SimulationConfig(BaseModel):
             The resolved config, independent of any detector registration.
         """
         settings = dict(metadata)
+        if "observer_rate_hz" in settings:
+            settings["poisson_rate"] = settings.pop("observer_rate_hz")
         document = _DetectorConfigDocument.model_validate(settings.pop("detectors"))
         return cls.model_validate({**settings, "networks": document.resolve_networks()})
 

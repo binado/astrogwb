@@ -21,7 +21,6 @@ from astrogwb.background.simulation import (
 )
 from astrogwb.cli import main
 from astrogwb.detector import load_detector, network_pairs
-from astrogwb.utils import years_to_seconds
 
 
 def test_importing_the_cli_leaves_the_xla_backend_uninitialized() -> None:
@@ -59,7 +58,7 @@ def test_cli_rejects_invalid_segment_count(capsys: pytest.CaptureFixture[str]) -
                 "waveform.toml",
                 "--detector-config",
                 "detectors.toml",
-                "--rate-per-year",
+                "--poisson-rate",
                 "1",
                 "--num-segments",
                 "0",
@@ -104,7 +103,7 @@ def _simulate(output: Path, inputs: dict[str, Path], *options: str) -> None:
             str(inputs["population"]),
             *("--waveform-config", str(inputs["waveform"])),
             *("--detector-config", str(inputs["detector"])),
-            *("--rate-per-year", str(8.0 * years_to_seconds(1.0))),
+            *("--poisson-rate", str(8.0)),
             *("--num-segments", "2"),
             *("--segment-seconds", "1"),
             *("--seed", "41"),
@@ -126,13 +125,13 @@ def test_a_simulate_run_writes_one_file_with_its_config(
     assert network_pairs(config.networks["ET"]) == (("R1", "S1"),)
     assert config.population == str(inputs["population"])
     assert (config.seed, config.incoherent) == (41, False)
-    assert config.observer_rate_hz == pytest.approx(8.0)
+    assert config.poisson_rate == pytest.approx(8.0)
     direct = simulate_background(
         jax.random.key(41),
         read_population_file(inputs["population"]),
         config.waveform,
         config.networks,
-        observer_rate_hz=config.observer_rate_hz,
+        poisson_rate=config.poisson_rate,
         num_segments=2,
         segment_seconds=1,
         chunk_size=8,

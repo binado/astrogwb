@@ -13,7 +13,7 @@ def simulate(
     population: Path,
     waveform_config: Path,
     detector_config: Path,
-    rate_per_year: float,
+    poisson_rate: float,
     num_segments: int,
     segment_seconds: float,
     seed: int,
@@ -40,8 +40,8 @@ def simulate(
         Waveform settings TOML path.
     detector_config
         Complete detector configuration TOML path.
-    rate_per_year
-        Event rate of the pool's population, per year.
+    poisson_rate
+        Observer-frame event rate of the pool's population, in events per second.
     num_segments
         Number of segments.
     segment_seconds
@@ -70,7 +70,6 @@ def simulate(
         simulate_background,
     )
     from astrogwb.detector import load_networks_from_file
-    from astrogwb.utils import years_to_seconds
     from astrogwb.waveform import WaveformConfig
 
     networks = load_networks_from_file(detector_config)
@@ -79,7 +78,7 @@ def simulate(
     config = SimulationConfig(
         waveform=waveform,
         networks=networks,
-        observer_rate_hz=rate_per_year / years_to_seconds(1.0),
+        poisson_rate=poisson_rate,
         num_segments=num_segments,
         segment_seconds=segment_seconds,
         incoherent=incoherent,
@@ -92,7 +91,7 @@ def simulate(
         read_population_file(population, root=population_root),
         config.waveform,
         config.networks,
-        observer_rate_hz=config.observer_rate_hz,
+        poisson_rate=config.poisson_rate,
         num_segments=num_segments,
         segment_seconds=segment_seconds,
         chunk_size=chunk_size,
