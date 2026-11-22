@@ -25,7 +25,6 @@ from astrogwb.background.simulation import (
     BackgroundDraw,
     SimulationConfig,
     project_background,
-    read_background_ensemble,
     read_population_file,
     simulate_background,
 )
@@ -223,54 +222,6 @@ def test_coherent_joint_draw_reuses_the_shared_baseline() -> None:
     assert np.any(pair)
     np.testing.assert_array_equal(
         pair, draw.spectra["triangle"][network_pairs(TRIANGLE).index(shared)]
-    )
-
-
-@pytest.fixture(scope="module")
-def ensemble(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """Two draws with distinct seeds, each recorded by every tiny network."""
-    root = tmp_path_factory.mktemp("ensemble")
-    for index in range(2):
-        config = _config(SEED + index)
-        _simulate(config).write(root / f"{SEED}-{index}.h5", config)
-    return root
-
-
-def test_read_background_ensemble_stacks_every_draws_pairs(ensemble: Path) -> None:
-    draws = read_background_ensemble(
-        [ensemble / f"{SEED}-{i}.h5" for i in range(2)], ["triangle", "pair"]
-    )
-    triangle, pair = draws["triangle"], draws["pair"]
-
-    assert triangle["pair_spectral_density"].shape[:2] == (2, 3)
-    assert triangle["n_events"].shape == (2,)
-    # Sorted pairs: the triangle's (C1, S1) is its second, the pair's only one.
-    np.testing.assert_array_equal(
-        pair["pair_spectral_density"][:, 0], triangle["pair_spectral_density"][:, 1]
-    )
-
-
-def test_read_background_ensemble_counts_the_events_of_every_segment(
-    ensemble: Path,
-) -> None:
-    stacked = read_background_ensemble(
-        [ensemble / f"{SEED}-{i}.h5" for i in range(2)], ["pair"]
-    )["pair"]
-
-    expected = [
-        BackgroundDraw.read(ensemble / f"{SEED}-{index}.h5")[0].segment_counts.sum()
-        for index in range(2)
-    ]
-    np.testing.assert_array_equal(stacked["n_events"], expected)
-
-
-def test_read_background_ensemble_respects_path_order(ensemble: Path) -> None:
-    paths = [ensemble / f"{SEED}-{i}.h5" for i in range(2)]
-    full = read_background_ensemble(paths, ["triangle"])["triangle"]
-    reverse = read_background_ensemble(paths[::-1], ["triangle"])["triangle"]
-
-    np.testing.assert_array_equal(
-        reverse["pair_spectral_density"], full["pair_spectral_density"][::-1]
     )
 
 

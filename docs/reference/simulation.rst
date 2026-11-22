@@ -8,7 +8,6 @@ Simulation
    :nosignatures:
 
    ~background.simulation.BackgroundDraw
-   ~background.simulation.read_background_ensemble
    ~background.simulation.project_background
    ~background.simulation.read_population_file
    ~background.simulation.simulate_background

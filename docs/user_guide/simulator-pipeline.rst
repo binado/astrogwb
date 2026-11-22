@@ -80,10 +80,6 @@ shared detector definitions once, alongside the network memberships.
 registrations. Use the stored networks and frequency grid to evaluate
 ``effective_psd`` and ``pair_cross_power_std`` with the original observation duration.
 
-Use ``read_background_ensemble(paths, names)`` to stack draws from explicitly
-ordered paths. Index the result by network name to get its frequencies,
-pair spectral densities, and event counts.
-
 Normalization and noise
 -----------------------
 

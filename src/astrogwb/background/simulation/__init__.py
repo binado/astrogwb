@@ -6,16 +6,12 @@ from astrogwb.background.simulation.draw import (
     project_background,
     simulate_background,
 )
-from astrogwb.background.simulation.ensemble import (
-    read_background_ensemble,
-)
 from astrogwb.background.simulation.pool import read_population_file
 
 __all__ = [
     "BackgroundDraw",
     "SimulationConfig",
     "project_background",
-    "read_background_ensemble",
     "read_population_file",
     "simulate_background",
 ]
