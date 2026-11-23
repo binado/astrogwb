@@ -71,8 +71,8 @@ A background is stored with :meth:`BackgroundDraw.write` together with the
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping, Sequence
-from functools import lru_cache
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from functools import partial
 from pathlib import Path
 from typing import NamedTuple
 
@@ -83,7 +83,6 @@ from jax.typing import ArrayLike
 from numpy.typing import NDArray
 
 from astrogwb import __version__
-from astrogwb.background.simulation._chunks import iter_rows, pad_rows
 from astrogwb.background.simulation.config import SimulationConfig
 from astrogwb.detector import Network, network_pairs
 from astrogwb.detector.projection import project_polarizations_fd
@@ -98,6 +97,8 @@ __all__ = [
     "simulate_background",
 ]
 
+type Polarizations = Callable[[Mapping[str, ArrayLike]], tuple[jax.Array, jax.Array]]
+
 #: The layout version of the files :meth:`BackgroundDraw.write` writes.
 _FORMAT_VERSION = 2
 
@@ -111,129 +112,6 @@ _PAIR_RESPONSE_DENOMINATOR = 5.0
 #: Absolute slack on ``segment_duration * bin width`` being a whole number of
 #: Fourier modes, for the rounding of a grid's spacing.
 _MODE_TOLERANCE = 1e-6
-
-
-class _Geometry(NamedTuple):
-    """The detector and pair axes, as the kernels consume them.
-
-    ``tensors`` ``(D, 3, 3)`` and ``locations`` ``(D, 3)`` use detector-name
-    order. ``pairs`` indexes them in the order of
-    :func:`~astrogwb.detector.network_pairs`.
-    """
-
-    tensors: NDArray[np.float64]
-    locations: NDArray[np.float64]
-    pairs: tuple[tuple[int, int], ...]
-
-
-def _network_geometry(network: Network) -> _Geometry:
-    """Index the network pairs over the detector axis."""
-    pairs = network_pairs(network)
-    names = sorted(network)
-    detector_index = {name: index for index, name in enumerate(names)}
-    detectors = [network[name] for name in names]
-    return _Geometry(
-        tensors=np.stack([det.geometry.response_tensor for det in detectors]),
-        locations=np.stack([det.geometry.location for det in detectors]),
-        pairs=tuple(
-            (detector_index[first], detector_index[second]) for first, second in pairs
-        ),
-    )
-
-
-class _Kernels(NamedTuple):
-    """Jitted chunk kernels for one waveform generator and pair layout."""
-
-    pair_sums: Callable[..., jax.Array]
-    segment_sums: Callable[..., tuple[jax.Array, jax.Array]]
-
-
-@lru_cache(maxsize=16)
-def _kernels(
-    polarizations: Callable[[Mapping[str, ArrayLike]], tuple[jax.Array, jax.Array]],
-    pairs: tuple[tuple[int, int], ...],
-) -> _Kernels:
-    """The chunk kernels of one generator over detector pairs.
-
-    The bound polarization method keys the cache by generator instance.
-    Geometry arrays are passed as arguments to the kernels.
-    """
-
-    def strains(
-        frequencies: jax.Array,
-        sources: Mapping[str, jax.Array],
-        valid: jax.Array,
-        tensors: jax.Array,
-        locations: jax.Array,
-    ) -> jax.Array:
-        """The ``(D, n, F)`` complex detector strains of one padded chunk.
-
-        Padding rows have zero strain.
-        """
-        plus, cross = polarizations(sources)
-        real = (jnp.arange(plus.shape[0]) < valid)[:, None]
-        plus = jnp.where(real, plus, 0.0)
-        cross = jnp.where(real, cross, 0.0)
-        return jax.vmap(
-            lambda tensor, location: project_polarizations_fd(
-                tensor,
-                location,
-                frequencies,
-                plus,
-                cross,
-                0.0,
-                right_ascension=sources["right_ascension"],
-                declination=sources["declination"],
-                polarization_angle=sources["polarization_angle"],
-            )
-        )(tensors, locations)
-
-    def pair_cross(strain: jax.Array) -> jax.Array:
-        """The ``(P, F)`` real cross-powers summed over the sources."""
-        return jnp.stack(
-            [
-                jnp.real(jnp.conj(strain[first]) * strain[second]).sum(axis=0)
-                for first, second in pairs
-            ]
-        )
-
-    def pair_sums(
-        frequencies: jax.Array,
-        sources: Mapping[str, jax.Array],
-        valid: jax.Array,
-        tensors: jax.Array,
-        locations: jax.Array,
-    ) -> jax.Array:
-        """The ``(P, F)`` cross-power summed over one padded chunk's sources."""
-        return pair_cross(strains(frequencies, sources, valid, tensors, locations))
-
-    def segment_sums(
-        frequencies: jax.Array,
-        sources: Mapping[str, jax.Array],
-        valid: jax.Array,
-        local_ids: jax.Array,
-        tensors: jax.Array,
-        locations: jax.Array,
-        *,
-        num_segments: int,
-    ) -> tuple[jax.Array, jax.Array]:
-        """The individual cross-powers and per-segment strain of one padded chunk.
-
-        Returns the ``(P, F)`` real cross-powers and the
-        ``(num_segments, D, F)`` complex strain summed over the sources of each
-        segment, ``local_ids`` being the segment of each row relative to the
-        batch.
-        """
-        strain = strains(frequencies, sources, valid, tensors, locations)
-        coherent = jax.ops.segment_sum(
-            jnp.moveaxis(strain, 1, 0), local_ids, num_segments=num_segments
-        )
-        return pair_cross(strain), coherent
-
-    return _Kernels(
-        pair_sums=jax.jit(pair_sums),
-        segment_sums=jax.jit(segment_sums, static_argnames="num_segments"),
-    )
 
 
 class BackgroundDraw(NamedTuple):
@@ -409,14 +287,6 @@ def _event_columns(
     return columns
 
 
-def _projection(
-    generator: WaveformGenerator, network: Network
-) -> tuple[jax.Array, _Geometry, _Kernels]:
-    frequencies = generator.frequencies
-    geometry = _network_geometry(network)
-    return frequencies, geometry, _kernels(generator.polarizations, geometry.pairs)
-
-
 def project_background(
     sources: Mapping[str, ArrayLike],
     generator: WaveformGenerator,
@@ -461,57 +331,25 @@ def project_background(
     if chunk_size < 1:
         raise ValueError("chunk_size must be positive")
     jax.config.update("jax_enable_x64", True)
-    grid, geometry, kernels = _projection(generator, network)
     columns = _event_columns(sources)
     count = len(columns["right_ascension"])
     if count:
         generator.check_sources(columns)
-    tensors = jnp.asarray(geometry.tensors)
-    locations = jnp.asarray(geometry.locations)
-    total = jnp.zeros((len(geometry.pairs), grid.size))
-    for start, _ in iter_rows(count, chunk_size):
-        rows, valid = pad_rows(columns, start, chunk_size)
-        total += kernels.pair_sums(grid, rows, jnp.asarray(valid), tensors, locations)
-    spectrum = _PAIR_RESPONSE_DENOMINATOR * np.asarray(total) / observation_seconds
-    return BackgroundDraw(
-        np.asarray(grid),
-        spectrum,
-        np.array([count]),
-    )
+    frequencies = generator.frequencies
+    geometry = _network_geometry(network)
 
-
-def _draw_events(
-    key: jax.Array,
-    sources: Mapping[str, ArrayLike],
-    poisson_rate: float,
-    num_segments: int,
-    segment_duration: float,
-) -> tuple[dict[str, NDArray], NDArray[np.int64]]:
-    if not np.isfinite(poisson_rate) or poisson_rate < 0:
-        raise ValueError("poisson_rate must be finite and nonnegative")
-    if num_segments < 1:
-        raise ValueError(f"num_segments must be positive; got {num_segments}")
-    if not np.isfinite(segment_duration) or segment_duration <= 0:
-        raise ValueError(f"segment_duration must be positive; got {segment_duration}")
-    pool = _event_columns(sources, required=())
-    # Row selection runs on host arrays. A varying event count need not
-    # compile a new random kernel for every realization.
-    rng = np.random.default_rng(np.asarray(jax.random.key_data(key)))
-    counts = rng.poisson(poisson_rate * segment_duration, num_segments)
-    count = int(counts.sum())
-    size = len(next(iter(pool.values()), ()))
-    if count > size:
-        raise ValueError(
-            f"event pool has {size} rows but this draw requires {count} "
-            f"(expected {poisson_rate * segment_duration * num_segments:.1f}); "
-            "supply a larger pool or lower the rate"
+    incoherent = jnp.zeros((geometry.num_pairs, frequencies.shape[0]))
+    for _, chunk, num_valid in _padded_chunks(columns, chunk_size):
+        incoherent += _chunk_pair_power(
+            frequencies,
+            chunk,
+            num_valid,
+            geometry,
+            polarizations=generator.polarizations,
         )
-    indices = rng.choice(size, size=count, replace=False)
-    selected = {name: col[indices] for name, col in pool.items()}
-    selected["coa_time"] = rng.uniform(
-        -segment_duration / 2, segment_duration / 2, count
-    )
-    return selected, counts
+
+    spectrum = _PAIR_RESPONSE_DENOMINATOR * np.asarray(incoherent) / observation_seconds
+    return BackgroundDraw(np.asarray(frequencies), spectrum, np.array([count]))
 
 
 def simulate_background(
@@ -585,130 +423,252 @@ def simulate_background(
         num_segments,
         segment_duration,
     )
-    grid, geometry, kernels = _projection(generator, network)
     if counts.any():
         generator.check_sources(columns)
-    psds = None
-    if simulate_detector_noise:
-        frequencies = np.asarray(grid)
-        psds = jnp.asarray(
-            np.stack(
-                [network[name].sensitivity(frequencies) for name in sorted(network)]
-            )
-        )
-    spectrum = _segmented(
+    frequencies = generator.frequencies
+    modes = _modes_per_bin(frequencies, segment_duration)
+    geometry = _network_geometry(network)
+    psds = _network_psds(network, frequencies) if simulate_detector_noise else None
+
+    incoherent, coherent = _segmented_pair_powers(
         columns,
         counts,
-        noise_key,
-        grid,
+        frequencies,
         geometry,
-        kernels,
-        chunk_size,
-        segment_duration,
-        segment_batch_size,
-        psds,
+        generator.polarizations,
+        noise_key=noise_key,
+        psds=psds,
+        segment_duration=segment_duration,
+        chunk_size=chunk_size,
+        segment_batch_size=segment_batch_size,
     )
-    return BackgroundDraw(np.asarray(grid), spectrum, counts)
+
+    # Keep the incoherent mean and scale the zero-mean fluctuations by r_i.
+    ratio = 1.0 / np.sqrt(modes)
+    blended = (1.0 - ratio) * incoherent + ratio * coherent
+    observation_seconds = len(counts) * segment_duration
+    spectrum = _PAIR_RESPONSE_DENOMINATOR * blended / observation_seconds
+    return BackgroundDraw(np.asarray(frequencies), spectrum, counts)
 
 
-def _segmented(
-    columns: Mapping[str, NDArray],
-    counts: NDArray[np.int64],
-    noise_key: jax.Array,
-    grid: jax.Array,
-    geometry: _Geometry,
-    kernels: _Kernels,
-    chunk_size: int,
+def _draw_events(
+    key: jax.Array,
+    pool: Mapping[str, NDArray],
+    poisson_rate: float,
+    num_segments: int,
     segment_duration: float,
-    segment_batch_size: int,
-    psds: jax.Array | None,
-) -> NDArray[np.float64]:
-    """The pair spectra with per-segment sources and optional detector noise."""
-    segments = len(counts)
-    seconds = segments * segment_duration
-    widths = np.asarray(bin_widths(grid), dtype=np.float64)
-    modes = segment_duration * widths
-    if modes.min() < 1.0 or not np.allclose(
-        modes, np.round(modes), rtol=0.0, atol=_MODE_TOLERANCE
-    ):
+) -> tuple[dict[str, NDArray], NDArray[np.int64]]:
+    """Select the rows of every segment and give each an arrival time.
+
+    Returns the selected rows, ordered by segment, with a ``coa_time`` column
+    in seconds from the segment center, and the event count of each segment.
+    """
+    if not np.isfinite(poisson_rate) or poisson_rate < 0:
+        raise ValueError("poisson_rate must be finite and nonnegative")
+    if num_segments < 1:
+        raise ValueError(f"num_segments must be positive; got {num_segments}")
+    if not np.isfinite(segment_duration) or segment_duration <= 0:
+        raise ValueError(f"segment_duration must be positive; got {segment_duration}")
+    # Row selection runs on host arrays. A varying event count need not
+    # compile a new random kernel for every realization.
+    rng = np.random.default_rng(np.asarray(jax.random.key_data(key)))
+    counts = rng.poisson(poisson_rate * segment_duration, num_segments)
+    count = int(counts.sum())
+    size = len(next(iter(pool.values()), ()))
+    if count > size:
+        raise ValueError(
+            f"event pool has {size} rows but this draw requires {count} "
+            f"(expected {poisson_rate * segment_duration * num_segments:.1f}); "
+            "supply a larger pool or lower the rate"
+        )
+    indices = rng.choice(size, size=count, replace=False)
+    selected = {name: column[indices] for name, column in pool.items()}
+    selected["coa_time"] = rng.uniform(
+        -segment_duration / 2, segment_duration / 2, count
+    )
+    return selected, counts
+
+
+class _Geometry(NamedTuple):
+    """The detector axis and the pair axis over it, as the kernels consume them.
+
+    Detectors are in sorted-name order: ``tensors`` is ``(D, 3, 3)`` and
+    ``locations`` ``(D, 3)``. Pair ``p`` correlates detectors ``first[p]`` and
+    ``second[p]``, pairs following :func:`~astrogwb.detector.network_pairs`.
+    """
+
+    tensors: jax.Array
+    locations: jax.Array
+    first: jax.Array
+    second: jax.Array
+
+    @property
+    def num_pairs(self) -> int:
+        return self.first.shape[0]
+
+
+def _network_geometry(network: Network) -> _Geometry:
+    names = sorted(network)
+    index = {name: position for position, name in enumerate(names)}
+    pairs = network_pairs(network)
+    return _Geometry(
+        tensors=jnp.stack([network[name].geometry.response_tensor for name in names]),
+        locations=jnp.stack([network[name].geometry.location for name in names]),
+        first=jnp.array([index[first] for first, _ in pairs], dtype=int),
+        second=jnp.array([index[second] for _, second in pairs], dtype=int),
+    )
+
+
+def _network_psds(network: Network, frequencies: ArrayLike) -> jax.Array:
+    """The ``(D, F)`` noise PSDs in the detector order of :func:`_network_geometry`."""
+    frequencies = np.asarray(frequencies)
+    return jnp.asarray(
+        np.stack([network[name].sensitivity(frequencies) for name in sorted(network)])
+    )
+
+
+def _modes_per_bin(frequencies: ArrayLike, segment_duration: float) -> NDArray:
+    """The ``(F,)`` count of a segment's Fourier modes in each frequency bin.
+
+    Raises
+    ------
+    ValueError
+        If a bin holds fewer than one or a fractional number of modes.
+    """
+    modes = segment_duration * np.asarray(bin_widths(frequencies), dtype=np.float64)
+    whole = np.allclose(modes, np.round(modes), rtol=0.0, atol=_MODE_TOLERANCE)
+    if modes.min() < 1.0 or not whole:
         raise ValueError(
             f"every bin must hold a whole number of the {segment_duration} s "
             "segment's Fourier modes: segment_duration * bin width must be an "
             "integer of at least 1, e.g. a 1 Hz linear grid with a power-of-two "
             "segment"
         )
-    labels = np.repeat(np.arange(segments), counts)
-    first, second = (jnp.asarray(index) for index in zip(*geometry.pairs, strict=True))
-    tensors = jnp.asarray(geometry.tensors)
-    locations = jnp.asarray(geometry.locations)
-    batch = min(segment_batch_size, segments)
-    individual_power = jnp.zeros((len(geometry.pairs), grid.shape[0]))
-    segment_power = jnp.zeros_like(individual_power)
-    for low in range(0, segments, batch):
-        lo, hi = np.searchsorted(labels, [low, low + batch])
-        rows = {name: values[lo:hi] for name, values in columns.items()}
-        strain = jnp.zeros((batch, tensors.shape[0], grid.shape[0]), complex)
-        for start, _ in iter_rows(int(hi - lo), chunk_size):
-            chunk, valid = pad_rows(rows, start, chunk_size)
-            ids = np.zeros(chunk_size, dtype=np.int32)
-            ids[:valid] = labels[lo + start : lo + start + valid] - low
-            chunk_total, chunk_strain = kernels.segment_sums(
-                grid,
-                chunk,
-                jnp.asarray(valid),
-                jnp.asarray(ids),
-                tensors,
-                locations,
-                num_segments=batch,
-            )
-            individual_power = individual_power + chunk_total
-            strain = strain + chunk_strain
-        segment_power = segment_power + _segment_power(
-            noise_key,
-            jnp.arange(low, low + batch),
-            strain,
-            psds,
-            first,
-            second,
-            segment_duration,
-            segments,
+    return modes
+
+
+def _pad(values: NDArray, size: int) -> NDArray:
+    """``values`` extended to length ``size`` by repeating its first entry."""
+    return np.concatenate([values, np.repeat(values[:1], size - len(values))])
+
+
+def _padded_chunks(
+    columns: Mapping[str, NDArray], size: int
+) -> Iterator[tuple[int, dict[str, NDArray], int]]:
+    """``(start, rows, num_valid)`` for consecutive chunks of ``size`` rows.
+
+    A Poisson count differs per realization and every distinct array shape is
+    a compile, so the kernels only ever see chunks of one static ``size``: the
+    last chunk is padded. Padding repeats the chunk's first row, a physical
+    source, so its waveform stays finite; the kernels zero the strain of rows
+    from ``num_valid`` on.
+    """
+    count = len(next(iter(columns.values()), ()))
+    for start in range(0, count, size):
+        rows = {
+            name: _pad(column[start : start + size], size)
+            for name, column in columns.items()
+        }
+        yield start, rows, min(size, count - start)
+
+
+def _detector_strain(
+    polarizations: Polarizations,
+    frequencies: jax.Array,
+    sources: Mapping[str, jax.Array],
+    num_valid: jax.Array,
+    geometry: _Geometry,
+) -> jax.Array:
+    """The ``(n, D, F)`` complex strain of a padded chunk; padding rows are zero."""
+    plus, cross = polarizations(sources)
+    real = (jnp.arange(plus.shape[0]) < num_valid)[:, None]
+    plus = jnp.where(real, plus, 0.0)
+    cross = jnp.where(real, cross, 0.0)
+
+    def project(tensor: jax.Array, location: jax.Array) -> jax.Array:
+        return project_polarizations_fd(
+            tensor,
+            location,
+            frequencies,
+            plus,
+            cross,
+            0.0,
+            right_ascension=sources["right_ascension"],
+            declination=sources["declination"],
+            polarization_angle=sources["polarization_angle"],
         )
-    ratio = 1.0 / np.sqrt(modes)
-    return (
-        _PAIR_RESPONSE_DENOMINATOR
-        / seconds
-        * (
-            (1.0 - ratio) * np.asarray(individual_power, dtype=np.float64)
-            + ratio * np.asarray(segment_power, dtype=np.float64)
-        )
-    )
+
+    return jax.vmap(project, out_axes=1)(geometry.tensors, geometry.locations)
+
+
+def _pair_power(strain: jax.Array, geometry: _Geometry) -> jax.Array:
+    """The ``(P, F)`` cross-power of an ``(N, D, F)`` strain, summed over ``N``.
+
+    The real part of :math:`h_a^* h_b` for each pair :math:`(a, b)`.
+    """
+    first = strain[:, geometry.first]
+    second = strain[:, geometry.second]
+    return jnp.real(jnp.conj(first) * second).sum(axis=0)
+
+
+@partial(jax.jit, static_argnames="polarizations")
+def _chunk_pair_power(
+    frequencies: jax.Array,
+    sources: Mapping[str, jax.Array],
+    num_valid: jax.Array,
+    geometry: _Geometry,
+    *,
+    polarizations: Polarizations,
+) -> jax.Array:
+    """The ``(P, F)`` incoherent cross-power :math:`\\sum_i K_{ab,i}` of a chunk."""
+    strain = _detector_strain(polarizations, frequencies, sources, num_valid, geometry)
+    return _pair_power(strain, geometry)
+
+
+@partial(jax.jit, static_argnames=("polarizations", "num_segments"))
+def _chunk_pair_power_and_segment_strain(
+    frequencies: jax.Array,
+    sources: Mapping[str, jax.Array],
+    num_valid: jax.Array,
+    segment_ids: jax.Array,
+    geometry: _Geometry,
+    *,
+    polarizations: Polarizations,
+    num_segments: int,
+) -> tuple[jax.Array, jax.Array]:
+    """The incoherent cross-power of a chunk and its strain summed per segment.
+
+    Returns the ``(P, F)`` cross-power and the ``(num_segments, D, F)``
+    strain, ``segment_ids`` holding the segment of each row.
+    """
+    strain = _detector_strain(polarizations, frequencies, sources, num_valid, geometry)
+    per_segment = jax.ops.segment_sum(strain, segment_ids, num_segments=num_segments)
+    return _pair_power(strain, geometry), per_segment
 
 
 @jax.jit
-def _segment_power(
+def _segment_batch_power(
     noise_key: jax.Array,
     segment_ids: jax.Array,
     strain: jax.Array,
     psds: jax.Array | None,
-    first: jax.Array,
-    second: jax.Array,
+    geometry: _Geometry,
     segment_duration: jax.Array | float,
     num_segments: jax.Array | int,
 ) -> jax.Array:
-    """The cross-power of signal plus noise summed over a batch of segments, ``(P, F)``.
+    """The ``(P, F)`` cross-power of signal plus noise, summed over a batch of segments.
 
-    ``segment_ids`` are the global segment indices of the batch, which key
-    its noise, ``strain`` the ``(B, D, F)`` coherent signal strain of each,
-    ``psds`` the optional ``(D, F)`` noise curves and ``first``, ``second`` the
-    detector indices of each pair. Segments at or beyond ``num_segments``
-    (the padding of the last batch) add nothing.
+    ``segment_ids`` are the global indices of the batch, which key its noise,
+    and ``strain`` its ``(B, D, F)`` coherent signal. ``psds`` are the
+    optional ``(D, F)`` noise curves; non-finite bins get no noise. Segments
+    at or beyond ``num_segments``, the padding of the last batch, add nothing.
     """
     if psds is not None:
         amplitude = jnp.sqrt(
             segment_duration * jnp.where(jnp.isfinite(psds), psds, 0.0) / 4.0
         )
 
-        def draw(segment: jax.Array) -> jax.Array:
+        def noise(segment: jax.Array) -> jax.Array:
             real_key, imag_key = jax.random.split(
                 jax.random.fold_in(noise_key, segment)
             )
@@ -717,7 +677,70 @@ def _segment_power(
                 jax.random.normal(imag_key, amplitude.shape),
             )
 
-        strain = strain + jax.vmap(draw)(segment_ids)
-    power = jnp.real(jnp.conj(strain[:, first]) * strain[:, second])
+        strain = strain + jax.vmap(noise)(segment_ids)
     real = (segment_ids < num_segments)[:, None, None]
-    return jnp.where(real, power, 0.0).sum(axis=0)
+    return _pair_power(jnp.where(real, strain, 0.0), geometry)
+
+
+def _segmented_pair_powers(
+    columns: Mapping[str, NDArray],
+    counts: NDArray[np.int64],
+    frequencies: jax.Array,
+    geometry: _Geometry,
+    polarizations: Polarizations,
+    *,
+    noise_key: jax.Array,
+    psds: jax.Array | None,
+    segment_duration: float,
+    chunk_size: int,
+    segment_batch_size: int,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """The incoherent and coherent ``(P, F)`` cross-powers of a segmented draw.
+
+    The incoherent power is :math:`\\sum_i K_{ab,i}` and the coherent power
+    :math:`C_{ab}`, the cross-power of each segment's summed strain plus
+    noise, summed over segments. ``columns`` are ordered by segment, segment
+    ``s`` holding ``counts[s]`` consecutive rows.
+
+    Segments are processed ``segment_batch_size`` at a time, and the rows of a
+    batch ``chunk_size`` at a time, so that both kernels compile once.
+    """
+    num_segments = len(counts)
+    batch_size = min(segment_batch_size, num_segments)
+    segment_of_row = np.repeat(np.arange(num_segments), counts)
+    first_row = np.concatenate([[0], np.cumsum(counts)])
+    num_detectors = geometry.tensors.shape[0]
+    num_frequencies = frequencies.shape[0]
+
+    incoherent = jnp.zeros((geometry.num_pairs, num_frequencies))
+    coherent = jnp.zeros_like(incoherent)
+    for low in range(0, num_segments, batch_size):
+        high = min(low + batch_size, num_segments)
+        rows = slice(first_row[low], first_row[high])
+        batch_columns = {name: column[rows] for name, column in columns.items()}
+        batch_segment = segment_of_row[rows] - low
+
+        strain = jnp.zeros((batch_size, num_detectors, num_frequencies), complex)
+        for start, chunk, num_valid in _padded_chunks(batch_columns, chunk_size):
+            chunk_power, chunk_strain = _chunk_pair_power_and_segment_strain(
+                frequencies,
+                chunk,
+                num_valid,
+                _pad(batch_segment[start : start + chunk_size], chunk_size),
+                geometry,
+                polarizations=polarizations,
+                num_segments=batch_size,
+            )
+            incoherent += chunk_power
+            strain += chunk_strain
+
+        coherent += _segment_batch_power(
+            noise_key,
+            jnp.arange(low, low + batch_size),
+            strain,
+            psds,
+            geometry,
+            segment_duration,
+            num_segments,
+        )
+    return np.asarray(incoherent), np.asarray(coherent)
