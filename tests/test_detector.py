@@ -347,7 +347,7 @@ def test_native_projection_broadcasts_and_jits() -> None:
     args = (
         detector.geometry.response_tensor,
         detector.geometry.location,
-        np.array([10.0, 100.0]),
+        np.array([20.0, 4096.0]),
         np.array([1j, 1.0]),
         np.array([1.0, -1j]),
         np.array([0.0, 1.0, 2.0])[None, :],
@@ -357,9 +357,13 @@ def test_native_projection_broadcasts_and_jits() -> None:
         "declination": 0.2,
         "polarization_angle": 0.7,
     }
-    eager = project_polarizations_fd(*args, **coordinates)
-    compiled = jax.jit(project_polarizations_fd)(*args, **coordinates)
+    times = np.array([-1023.5, 731.2])[:, None]
+    untimed = project_polarizations_fd(*args, **coordinates)
+    expected = untimed * np.exp(-2j * np.pi * times[..., None] * args[2])
+    eager = project_polarizations_fd(*args, **coordinates, coa_time=times)
+    compiled = jax.jit(project_polarizations_fd)(*args, **coordinates, coa_time=times)
     assert eager.shape == (2, 3, 2)
+    assert_close(eager, expected)
     assert_close(eager, compiled)
     for i in range(2):
         for j in range(3):
@@ -371,5 +375,6 @@ def test_native_projection_broadcasts_and_jits() -> None:
                 right_ascension=coordinates["right_ascension"][i, 0],
                 declination=0.2,
                 polarization_angle=0.7,
+                coa_time=times[i, 0],
             )
             assert_close(eager[i, j], scalar)

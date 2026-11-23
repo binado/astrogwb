@@ -57,12 +57,12 @@ power-of-two :math:`\tau`; a log grid does not qualify. The model holds while
 signals are mostly shorter than :math:`\tau`. Bins where a PSD is not
 finite get no noise. Earth's rotation during a signal is not modelled.
 
-Before coherent summation, both polarizations receive the geocentric arrival
-phase :math:`\exp(-2\pi i f t_i)`, with :math:`t_i` sampled in seconds relative
-to segment center within :math:`[-\tau/2, \tau/2)`. The simulator draws these
-times independently of row selection. Detector projection applies geometric
-delays once. Signals remain complete within their assigned segment, without
-window truncation or boundary crossing.
+Before coherent summation, detector projection combines the geocentric arrival
+phase :math:`\exp(-2\pi i f t_i)` with the detector's geometric delay phase.
+The arrival time :math:`t_i` is sampled in seconds relative to segment center
+within :math:`[-\tau/2, \tau/2)`. The simulator draws these times independently
+of row selection. Signals remain complete within their assigned segment,
+without window truncation or boundary crossing.
 
 A background is stored with :meth:`BackgroundDraw.write` together with the
 :class:`~astrogwb.background.simulation.SimulationConfig` it was simulated with.
@@ -457,7 +457,9 @@ def _detector_strain(
     geometry: _Geometry,
 ) -> jax.Array:
     """The ``(n, D, F)`` complex strain of a padded chunk; padding rows are zero."""
-    plus, cross = polarizations(sources)
+    untimed_sources = dict(sources)
+    coa_time = untimed_sources.pop("coa_time", 0.0)
+    plus, cross = polarizations(untimed_sources)
     real = (jnp.arange(plus.shape[0]) < num_valid)[:, None]
     plus = jnp.where(real, plus, 0.0)
     cross = jnp.where(real, cross, 0.0)
@@ -473,6 +475,7 @@ def _detector_strain(
             right_ascension=sources["right_ascension"],
             declination=sources["declination"],
             polarization_angle=sources["polarization_angle"],
+            coa_time=coa_time,
         )
 
     return jax.vmap(project, out_axes=1)(geometry.tensors, geometry.locations)
