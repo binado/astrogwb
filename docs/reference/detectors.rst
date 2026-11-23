@@ -46,13 +46,12 @@ and keep its detector-pair keys.
    ~detector.Detector
    ~detector.DetectorGeometry
    ~detector.Network
-   ~detector.Networks
    ~detector.Sensitivity
    ~detector.effective_psd
    ~detector.isotropic_overlap_reduction_function
    ~detector.load_detector
    ~detector.load_network
-   ~detector.load_networks_from_file
+   ~detector.load_detectors_from_file
    ~detector.load_sensitivity
    ~detector.load_sensitivity_map
    ~detector.map_over_pairs

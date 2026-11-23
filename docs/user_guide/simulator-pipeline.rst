@@ -49,19 +49,19 @@ different dataset or group path, or pass ``root`` to
 ::
 
    astrogwb simulate 41.h5 events.h5 \
-       --waveform-config waveform.toml --detector-config detectors.toml --network HL \
+       --waveform-config waveform.toml --detector-config detectors.toml --network H1,L1 \
        --poisson-rate 0.00317 --num-segments 1024 --segment-duration 16 --seed 41
 
-The output configuration records the network name, population path and selected root.
+The output configuration records the population path and selected root.
 
 The CLI passes ``jax.random.key(seed)`` directly to the simulator. Use a
 different seed for each independent draw.
 
 Pass one complete TOML file per option, with any layers and references resolved
-before invoking the CLI. Use ``--network`` to select a name from the detector file's
-``[networks]`` table. For example, ``HL = ["H1", "L1"]`` requires both
-``[detectors.H1]`` and ``[detectors.L1]`` definitions in that file. To load
-that network in Python, use ``load_networks_from_file(Path("detectors.toml"))["HL"]``.
+before invoking the CLI. Use ``--network`` to list the detectors of the network by name. For example,
+``--network H1,L1`` requires both ``[detectors.H1]`` and ``[detectors.L1]``
+definitions in that file. To build that network in Python, use
+``select_network(load_detectors_from_file(Path("detectors.toml")), ["H1", "L1"])``.
 
 The catalogue must hold ``distance`` (luminosity distance in Mpc, renamed
 ``luminosity_distance``), the sky columns, and the detector-frame or source-frame

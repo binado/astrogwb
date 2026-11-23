@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tomllib
+from collections.abc import Sequence
 from pathlib import Path
 
 from astrogwb.runtime import configure_runtime
@@ -13,7 +14,7 @@ def simulate(
     population: Path,
     waveform_config: Path,
     detector_config: Path,
-    network: str,
+    network: Sequence[str],
     poisson_rate: float,
     num_segments: int,
     segment_duration: float,
@@ -42,7 +43,7 @@ def simulate(
     detector_config
         Complete detector configuration TOML path.
     network
-        Name of the network to simulate from the detector configuration.
+        Names of the detectors in the network, defined in the detector configuration.
     poisson_rate
         Observer-frame event rate of the pool's population, in events per second.
     num_segments
@@ -71,22 +72,16 @@ def simulate(
         SimulationConfig,
         simulate_background,
     )
-    from astrogwb.detector import load_networks_from_file
+    from astrogwb.detector import load_detectors_from_file, select_network
     from astrogwb.populations.io import read_population_file
     from astrogwb.waveform import WaveformConfig, waveform_generator
 
-    networks = load_networks_from_file(detector_config)
-    if network not in networks:
-        available = ", ".join(networks) or "(none)"
-        raise ValueError(
-            f"unknown network {network!r}. Available networks: {available}"
-        )
+    selected = select_network(load_detectors_from_file(detector_config), network)
     with waveform_config.open("rb") as file:
         waveform = WaveformConfig.model_validate(tomllib.load(file))
     config = SimulationConfig(
         waveform=waveform,
-        network=networks[network],
-        network_name=network,
+        network=selected,
         poisson_rate=poisson_rate,
         num_segments=num_segments,
         segment_duration=segment_duration,

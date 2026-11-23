@@ -14,11 +14,12 @@ import tomli_w
 from astrogwb.detector import (
     Detector,
     load_detector,
+    load_detectors_from_file,
     load_network,
-    load_networks_from_file,
     network_pairs,
     register_detector,
     register_network,
+    select_network,
 )
 
 
@@ -29,17 +30,20 @@ def test_loading_core_detector_config_does_not_initialize_xla(tmp_path: Path) ->
         name: load_detector(name).model_dump(mode="json", exclude_none=True)
         for name in names
     }
-    path.write_bytes(
-        tomli_w.dumps({"detectors": detectors, "networks": {"local": names}}).encode()
-    )
+    path.write_bytes(tomli_w.dumps({"detectors": detectors}).encode())
     code = """
 import sys
 from pathlib import Path
-from astrogwb.detector import load_network, load_networks_from_file, register_network
+from astrogwb.detector import (
+    load_detectors_from_file,
+    load_network,
+    register_network,
+    select_network,
+)
 
 register_network("test-xla", {"H1", "L1"})
 network = load_network("test-xla")
-local = load_networks_from_file(Path(sys.argv[1]))["local"]
+local = select_network(load_detectors_from_file(Path(sys.argv[1])), ["H1", "L1"])
 for detector in (*network.values(), *local.values()):
     detector.geometry.location
     detector.geometry.response_tensor
@@ -116,29 +120,38 @@ def test_toml_and_process_catalog_are_isolated(tmp_path: Path) -> None:
         for detector in ("S1", "C1")
     }
     detectors["S1"]["geometry"]["xarm_azimuth_rad"] = 0.5
-    path.write_bytes(
-        tomli_w.dumps(
-            {"detectors": detectors, "networks": {name: ["S1", "C1"]}}
-        ).encode()
-    )
+    path.write_bytes(tomli_w.dumps({"detectors": detectors}).encode())
 
-    local = load_networks_from_file(path)[name]
+    local = select_network(load_detectors_from_file(path), ["S1", "C1"])
     assert network_pairs(local) == (("C1", "S1"),)
     assert local["S1"].geometry.xarm_azimuth_rad == 0.5
     snapshot = load_network(name)
     assert network_pairs(snapshot) == (("S1", extension),)
     assert snapshot["S1"].geometry == catalog_s1.geometry
 
-    path.write_bytes(
-        tomli_w.dumps(
-            {
-                "detectors": detectors,
-                "networks": {name: ["S1", extension]},
-            }
-        ).encode()
-    )
-    with pytest.raises(ValueError, match=f"undefined detectors.*{extension}"):
-        load_networks_from_file(path)
+    with pytest.raises(ValueError, match=f"unknown detectors.*{extension}"):
+        select_network(load_detectors_from_file(path), ["S1", extension])
+
+
+def test_select_network_returns_sorted_detectors() -> None:
+    detectors = {name: load_detector(name) for name in ("L1", "H1", "V1")}
+
+    network = select_network(detectors, ["V1", "H1"])
+
+    assert tuple(network) == ("H1", "V1")
+    assert network["H1"] is detectors["H1"]
+
+
+def test_select_network_rejects_unknown_detectors() -> None:
+    detectors = {name: load_detector(name) for name in ("H1", "L1")}
+    with pytest.raises(ValueError, match=r"unknown detectors.*X9.*Available.*H1, L1"):
+        select_network(detectors, ["H1", "X9"])
+
+
+def test_select_network_rejects_duplicate_detectors() -> None:
+    detectors = {name: load_detector(name) for name in ("H1", "L1")}
+    with pytest.raises(ValueError, match="duplicate detector names"):
+        select_network(detectors, ["H1", "H1"])
 
 
 def test_standalone_detector_dump_and_lazy_psd_copy(tmp_path: Path) -> None:

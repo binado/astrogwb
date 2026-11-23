@@ -72,7 +72,7 @@ optimal cross-correlation weights.
 
 For simulation and deterministic projection, pass a live waveform generator
 and one detector network. Pair spectra are available in
-``draw.pair_spectral_density``. Use ``--network NAME`` to select a network in
+``draw.pair_spectral_density``. Use ``--network H1,L1`` to select a network's detectors in
 the CLI and ``--simulate-detector-noise`` to enable optional detector noise.
 Regenerate older HDF5 draws to use the single-network format.
 

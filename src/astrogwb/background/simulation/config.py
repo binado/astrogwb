@@ -22,8 +22,8 @@ class SimulationConfig(BaseModel):
     Each segment sums coherent strain and adds detector noise when
     ``simulate_detector_noise`` is set.
 
-    ``network_name``, ``population``, ``population_root`` and ``seed`` record
-    the selected network name, the pool location and the draw's seed.
+    ``population``, ``population_root`` and ``seed`` record the pool location
+    and the draw's seed.
     The root is ignored for CSV files. Chunk and batch sizes are execution
     settings and omitted from the file.
     ``network`` is stored in detector-name order.
@@ -33,7 +33,6 @@ class SimulationConfig(BaseModel):
 
     waveform: WaveformConfig
     network: Network
-    network_name: str | None = None
     poisson_rate: Annotated[float, Field(ge=0.0, allow_inf_nan=False)]
     num_segments: Annotated[int, Field(ge=1)]
     segment_duration: Annotated[float, Field(gt=0.0, allow_inf_nan=False)]

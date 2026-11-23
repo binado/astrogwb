@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -60,7 +61,7 @@ def test_cli_rejects_invalid_segment_count(capsys: pytest.CaptureFixture[str]) -
                 "--detector-config",
                 "detectors.toml",
                 "--network",
-                "ET",
+                "R1,S1",
                 "--poisson-rate",
                 "1",
                 "--num-segments",
@@ -77,7 +78,7 @@ def test_cli_rejects_invalid_segment_count(capsys: pytest.CaptureFixture[str]) -
 
 @pytest.fixture
 def inputs(tmp_path: Path) -> dict[str, Path]:
-    """A gwmock-pop catalogue, waveform settings and two network definitions."""
+    """A gwmock-pop catalogue, waveform settings and three detector definitions."""
     waveform = tmp_path / "waveform.toml"
     waveform.write_bytes(
         tomli_w.dumps(WAVEFORM.model_dump(mode="json", exclude_none=True)).encode()
@@ -88,11 +89,7 @@ def inputs(tmp_path: Path) -> dict[str, Path]:
         name: load_detector(name).model_dump(mode="json", exclude_none=True)
         for name in names
     }
-    detector.write_bytes(
-        tomli_w.dumps(
-            {"detectors": detectors, "networks": {"ET": names[:2], "triangle": names}}
-        ).encode()
-    )
+    detector.write_bytes(tomli_w.dumps({"detectors": detectors}).encode())
     return {
         "population": write_population_csv(tmp_path / "events.csv"),
         "waveform": waveform,
@@ -101,7 +98,7 @@ def inputs(tmp_path: Path) -> dict[str, Path]:
 
 
 def _simulate(
-    output: Path, inputs: dict[str, Path], *options: str, network: str = "ET"
+    output: Path, inputs: dict[str, Path], *options: str, network: str = "R1,S1"
 ) -> None:
     main(
         [
@@ -131,7 +128,6 @@ def test_a_simulate_run_writes_one_file_with_its_config(
     _simulate(output, inputs, *flags)
 
     draw, config = BackgroundDraw.read(output)
-    assert config.network_name == "ET"
     assert network_pairs(config.network) == (("R1", "S1"),)
     assert config.population == str(inputs["population"])
     assert config.seed == 41
@@ -161,17 +157,41 @@ def test_a_simulate_run_writes_one_file_with_its_config(
     assert [path.name for path in tmp_path.glob("*.h5")] == ["41-0.h5"]
 
 
-def test_a_simulate_run_rejects_an_unknown_network(
-    tmp_path: Path, inputs: dict[str, Path], capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize(
+    ("network", "message"),
+    [
+        ("R1,X9", "unknown detectors.*X9"),
+        ("R1,R1", "duplicate detector names"),
+        ("R1", "at least two detectors"),
+        ("R1,,S1", "comma-separated detector names"),
+    ],
+)
+def test_a_simulate_run_rejects_an_invalid_network(
+    tmp_path: Path,
+    inputs: dict[str, Path],
+    capsys: pytest.CaptureFixture[str],
+    network: str,
+    message: str,
 ) -> None:
     output = tmp_path / "41-0.h5"
 
     with pytest.raises(SystemExit) as error:
-        _simulate(output, inputs, network="unknown")
+        _simulate(output, inputs, network=network)
 
     assert error.value.code == 2
-    assert "unknown network 'unknown'" in capsys.readouterr().err
+    assert re.search(message, capsys.readouterr().err)
     assert not output.exists()
+
+
+def test_a_simulate_run_selects_a_subset_of_the_detectors(
+    tmp_path: Path, inputs: dict[str, Path]
+) -> None:
+    output = tmp_path / "41-0.h5"
+
+    _simulate(output, inputs, network="S1,C1")
+
+    config = BackgroundDraw.read(output)[1]
+    assert tuple(config.network) == ("C1", "S1")
 
 
 def test_simulate_reads_a_custom_population_root(

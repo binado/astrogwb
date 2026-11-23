@@ -1,4 +1,4 @@
-"""Detector definitions and named network settings.
+"""Detector definitions and network selection.
 
 Angles use radians (azimuths clockwise from North); elevations use
 metres. Importing this module loads the detector package, including JAX.
@@ -8,7 +8,7 @@ Validating settings leaves the XLA backend uninitialized.
 from __future__ import annotations
 
 import tomllib
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from collections.abc import Set as AbstractSet
 from functools import cache
 from itertools import combinations
@@ -22,7 +22,6 @@ from pydantic import (
     Field,
     SerializerFunctionWrapHandler,
     WrapSerializer,
-    model_validator,
 )
 
 from .geometry import Detector
@@ -72,7 +71,6 @@ _Detectors = Annotated[
 
 #: Detectors keyed by their own name.
 Network = Mapping[str, Detector]
-Networks = Mapping[str, Network]
 
 
 def network_pairs(network: Network) -> tuple[tuple[str, str], ...]:
@@ -128,46 +126,60 @@ def map_over_pairs[T](
 
 
 class _DetectorConfigDocument(BaseModel):
-    """Shared detector definitions and named memberships in TOML and metadata."""
+    """Shared detector definitions in TOML and metadata."""
 
     model_config = _STRICT
 
     detectors: _Detectors
-    networks: dict[_Name, tuple[str, ...]] = Field(default_factory=dict)
-
-    @model_validator(mode="after")
-    def _validate_networks(self) -> _DetectorConfigDocument:
-        for name, members in self.networks.items():
-            if not members or len(set(members)) != len(members):
-                raise ValueError(
-                    f"network {name!r} must contain distinct detectors and be non-empty"
-                )
-            missing = sorted(set(members) - self.detectors.keys())
-            if missing:
-                raise ValueError(
-                    f"network {name!r} contains undefined detectors: {missing}"
-                )
-        return self
-
-    def resolve_networks(self) -> Networks:
-        return {
-            name: {member: self.detectors[member] for member in sorted(members)}
-            for name, members in sorted(self.networks.items())
-        }
 
 
-def load_networks_from_file(path: Path) -> Networks:
-    """Resolve all named networks from a complete TOML document.
+def load_detectors_from_file(path: Path) -> dict[str, Detector]:
+    """Load every detector definition from a complete TOML document.
 
     Parameters
     ----------
     path
-        Path to a TOML file containing the network memberships and all detector
-        definitions they reference.
+        Path to a TOML file with one ``[detectors.<name>]`` table per detector.
+
+    Returns
+    -------
+    dict
+        Detectors keyed by name.
     """
     with path.open("rb") as file:
         document = _DetectorConfigDocument.model_validate(tomllib.load(file))
-    return document.resolve_networks()
+    return document.detectors
+
+
+def select_network(detectors: Mapping[str, Detector], names: Sequence[str]) -> Network:
+    """Select the detectors that form a network.
+
+    Parameters
+    ----------
+    detectors
+        Available detectors keyed by name.
+    names
+        Names of the detectors in the network, in any order.
+
+    Returns
+    -------
+    Network
+        The selected detectors keyed by name, in sorted name order.
+
+    Raises
+    ------
+    ValueError
+        If a name is repeated or is not among the available detectors.
+    """
+    if len(set(names)) != len(names):
+        raise ValueError(f"duplicate detector names in network: {list(names)}")
+    missing = sorted(set(names) - detectors.keys())
+    if missing:
+        available = ", ".join(sorted(detectors)) or "(none)"
+        raise ValueError(
+            f"unknown detectors {missing}. Available detectors: {available}"
+        )
+    return {name: detectors[name] for name in sorted(names)}
 
 
 _NETWORKS: dict[str, frozenset[str]] = {}
