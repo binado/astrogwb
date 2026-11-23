@@ -5,8 +5,8 @@ Detector networks
 -----------------
 
 Pass a mapping from detector names to ``Detector`` instances to the response,
-noise, estimation, and likelihood APIs. Use ``load_network(name)`` to resolve
-a registered network. ``network_pairs(network)`` replaces ``pair_names()`` and
+noise, estimation, and likelihood APIs. Build one from the
+packaged catalog with ``{name: load_detector(name) for name in names}``. ``network_pairs(network)`` replaces ``pair_names()`` and
 gives the canonical order of pair rows.
 
 If you stored a pair array from an unsorted detector sequence, use the detector
@@ -70,8 +70,14 @@ detector's name. Use ``network_overlap_reduction_function()`` for the isotropic
 ORF of every pair, ``(pairs, frequencies)``, and ``pair_weights()`` for the
 optimal cross-correlation weights.
 
-Recover the four fields previously returned by ``network_noise()`` per network
-from a saved draw and its configuration as follows.
+For simulation and deterministic projection, pass a live waveform generator
+and one detector network. Pair spectra are available in
+``draw.pair_spectral_density``. Use ``--network H1,L1`` to select a network's detectors in
+the CLI and ``--simulate-detector-noise`` to enable optional detector noise.
+Regenerate older HDF5 draws to use the single-network format.
+
+Recover the four fields previously returned by ``network_noise()`` from a saved
+draw and its configuration as follows.
 
 .. code-block:: python
 
@@ -87,7 +93,7 @@ from a saved draw and its configuration as follows.
    from astrogwb.utils import stack_pairs, years_to_seconds
 
    frequencies = draw.frequencies
-   network = config.networks[name]
+   network = config.network
    years = config.observation_seconds / years_to_seconds(1.0)
    pair_overlap = stack_pairs(
        map_over_pairs(

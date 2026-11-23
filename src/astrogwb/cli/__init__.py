@@ -6,15 +6,15 @@ HDF5 file. ``--waveform-config`` names a TOML file of waveform settings and
 ``--detector-config`` names a complete detector configuration TOML file. For example::
 
     astrogwb simulate ensemble/41-0.h5 events.h5 \\
-        --waveform-config waveform.toml --detector-config detectors.toml \\
+        --waveform-config waveform.toml --detector-config detectors.toml --network H1,L1 \\
         --poisson-rate 0.00317 --num-segments 16 --segment-duration 2048 --seed 41
 
-The detector configuration contains [detectors.<name>] definitions and [networks]
-memberships. The file carries the configuration as JSON in its ``metadata``
-attribute, with the astrogwb ``version`` that wrote it. ``--incoherent`` sums
-the events' powers without detector noise.
+The detector configuration contains [detectors.<name>] definitions, and
+``--network`` lists the comma-separated names of the detectors to simulate. The file carries the configuration as JSON in its ``metadata``
+attribute, with the astrogwb ``version`` that wrote it. Each segment includes
+source interference. ``--simulate-detector-noise`` also adds detector noise.
 
-A reader refuses a file written by another astrogwb version. Runtime settings
+A reader checks the file's format version. Runtime settings
 (--platform, --cpu-threads) are applied before the JAX backend initializes.
 """
 
@@ -31,6 +31,13 @@ def _positive_int(value: str) -> int:
     if number < 1:
         raise argparse.ArgumentTypeError("must be at least 1")
     return number
+
+
+def _detector_names(value: str) -> tuple[str, ...]:
+    names = tuple(name.strip() for name in value.split(","))
+    if not all(names):
+        raise argparse.ArgumentTypeError("must be comma-separated detector names")
+    return names
 
 
 def _nonnegative_float(value: str) -> float:
@@ -64,6 +71,13 @@ def main(argv: list[str] | None = None) -> None:
         help="Detector configuration TOML file.",
     )
     command.add_argument(
+        "--network",
+        type=_detector_names,
+        required=True,
+        metavar="NAMES",
+        help="Comma-separated detectors of the network, such as H1,L1.",
+    )
+    command.add_argument(
         "--poisson-rate",
         type=_nonnegative_float,
         required=True,
@@ -88,9 +102,9 @@ def main(argv: list[str] | None = None) -> None:
         help="HDF5 population dataset or group path; ignored for CSV.",
     )
     command.add_argument(
-        "--incoherent",
+        "--simulate-detector-noise",
         action="store_true",
-        help="Sum event powers without detector noise or segment interference.",
+        help="Add independent detector noise to every segment.",
     )
     command.add_argument(
         "--chunk-size", type=_positive_int, default=1024, help="Waveforms per chunk."

@@ -13,9 +13,9 @@ in the pair :math:`(a, b)` the real cross-power
 
     K_{ab,i} = \mathrm{Re}\left[e^{i\phi_{ab,i}} H_{a,i}^* H_{b,i}\right],
 
-:math:`\phi_{ab,i}` the inter-site delay phase. Sources are summed without
-cross terms (no source interference), :math:`D_{ab} = \sum_i K_{ab,i}`, and
-normalized by the observation time :math:`T` as
+:math:`\phi_{ab,i}` the inter-site delay phase. The deterministic projection
+sums the individual powers, :math:`D_{ab} = \sum_i K_{ab,i}`, and normalizes
+by the observation time :math:`T` as
 
 .. math::
 
@@ -28,17 +28,18 @@ reduction function of the native geometry. For an isotropic, unpolarized
 population this gives :math:`E[Y_{ab}] = \gamma_{ab} S_h`. The sum is never
 divided by the realized count.
 
-Each pair requested by at least one network is projected once per chunk in
-one fused kernel, and each network keeps its own rows, ``(P_n, F)``.
+Each pair in the network is projected once per chunk in one fused kernel,
+giving an array of shape ``(pairs, frequencies)``.
 :func:`~astrogwb.statistics.cross_correlation_estimator` weights them into a network
 spectrum ``(F,)`` on demand.
 
 The simulator draws independent Poisson counts in segments of exactly
 :math:`\tau` seconds and selects distinct rows from the supplied pool. Each
 selected merger belongs to one segment; each segment holds its own
-coherent strain :math:`h_a^s = \sum_{i \in s} H_{a,i}` and fresh independent
-noise :math:`n_a^s \sim \mathcal{CN}(0, \tau S_a / 2)` in each
-detector and bin; empty segments still carry noise. With the segment
+coherent strain :math:`h_a^s = \sum_{i \in s} H_{a,i}`. When detector noise
+is enabled, each segment, including empty ones, adds independent noise
+:math:`n_a^s \sim \mathcal{CN}(0, \tau S_a / 2)` in each detector and bin.
+The noise is zero by default. With the segment
 cross-power :math:`C_{ab} = \sum_s \mathrm{Re}[(h_a^s + n_a^s)^* (h_b^s + n_b^s)]`
 and :math:`r_i = 1 / \sqrt{\tau \Delta f_i}`, the pair spectrum is
 
@@ -70,9 +71,8 @@ A background is stored with :meth:`BackgroundDraw.write` together with the
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Callable, Mapping, Sequence
-from functools import cache
+from functools import lru_cache
 from pathlib import Path
 from typing import NamedTuple
 
@@ -84,15 +84,13 @@ from numpy.typing import NDArray
 
 from astrogwb import __version__
 from astrogwb.background.simulation._chunks import iter_rows, pad_rows
-from astrogwb.background.simulation.config import SimulationConfig, _network_detectors
-from astrogwb.detector import Networks, network_pairs
+from astrogwb.background.simulation.config import SimulationConfig
+from astrogwb.detector import Network, network_pairs
 from astrogwb.detector.projection import project_polarizations_fd
 from astrogwb.frequency import bin_widths
 from astrogwb.populations.io import _SKY_COLUMNS as SKY_COLUMNS
 from astrogwb.utils.io import atomic_h5, h5py
 from astrogwb.waveform.base import WaveformGenerator
-from astrogwb.waveform.factory import waveform_generator
-from astrogwb.waveform.metadata import WaveformConfig
 
 __all__ = [
     "BackgroundDraw",
@@ -101,16 +99,10 @@ __all__ = [
 ]
 
 #: The layout version of the files :meth:`BackgroundDraw.write` writes.
-_FORMAT_VERSION = 1
-
-#: The layout versions :meth:`BackgroundDraw.read` reads.
-_READABLE_FORMATS = frozenset({_FORMAT_VERSION})
+_FORMAT_VERSION = 2
 
 #: Root attributes :meth:`BackgroundDraw.write` owns.
 _RESERVED_ATTRS = frozenset({"metadata", "version", "format_version"})
-
-#: Files written before ``format_version`` existed, which were layout 1.
-_LEGACY_VERSION = re.compile(r"0\.8\.")
 
 #: :math:`\langle K_{ab} \rangle = I \gamma_{ab}` over this, the factor in
 #: :math:`Y_{ab} = 5 D_{ab} / T`.
@@ -122,65 +114,50 @@ _MODE_TOLERANCE = 1e-6
 
 
 class _Geometry(NamedTuple):
-    """The joint detector and pair axes, as the kernels consume them.
+    """The detector and pair axes, as the kernels consume them.
 
-    ``tensors`` ``(D, 3, 3)``, ``locations`` ``(D, 3)`` and ``psds`` ``(D, F)``
-    cover the union of the networks' detectors. ``pairs`` indexes only pairs
-    requested by a network; ``rows[name]`` selects the rows for network ``name``
-    in the order of :func:`~astrogwb.detector.network_pairs`.
+    ``tensors`` ``(D, 3, 3)`` and ``locations`` ``(D, 3)`` use detector-name
+    order. ``pairs`` indexes them in the order of
+    :func:`~astrogwb.detector.network_pairs`.
     """
 
     tensors: NDArray[np.float64]
     locations: NDArray[np.float64]
-    psds: NDArray[np.float64]
     pairs: tuple[tuple[int, int], ...]
-    rows: dict[str, list[int]]
 
 
-def _network_geometry(
-    networks: Networks, frequencies: NDArray[np.float64]
-) -> _Geometry:
-    """Index the requested pairs over the shared detector axis."""
-    definitions = _network_detectors(networks)
-    names = sorted(definitions)
+def _network_geometry(network: Network) -> _Geometry:
+    """Index the network pairs over the detector axis."""
+    pairs = network_pairs(network)
+    names = sorted(network)
     detector_index = {name: index for index, name in enumerate(names)}
-    detectors = tuple(definitions[name] for name in names)
-    pairs_by_network = {
-        name: network_pairs(network) for name, network in sorted(networks.items())
-    }
-    pairs = sorted({pair for members in pairs_by_network.values() for pair in members})
-    rows = {pair: row for row, pair in enumerate(pairs)}
+    detectors = [network[name] for name in names]
     return _Geometry(
         tensors=np.stack([det.geometry.response_tensor for det in detectors]),
         locations=np.stack([det.geometry.location for det in detectors]),
-        psds=np.stack([np.asarray(det.sensitivity(frequencies)) for det in detectors]),
         pairs=tuple(
             (detector_index[first], detector_index[second]) for first, second in pairs
         ),
-        rows={
-            name: [rows[pair] for pair in members]
-            for name, members in pairs_by_network.items()
-        },
     )
 
 
 class _Kernels(NamedTuple):
-    """The generator of a waveform and the jitted chunk kernels built on it."""
+    """Jitted chunk kernels for one waveform generator and pair layout."""
 
-    generator: WaveformGenerator
     pair_sums: Callable[..., jax.Array]
     segment_sums: Callable[..., tuple[jax.Array, jax.Array]]
 
 
-@cache
-def _kernels(waveform: WaveformConfig, pairs: tuple[tuple[int, int], ...]) -> _Kernels:
-    """The chunk kernels of ``waveform`` over detector ``pairs``.
+@lru_cache(maxsize=16)
+def _kernels(
+    polarizations: Callable[[Mapping[str, ArrayLike]], tuple[jax.Array, jax.Array]],
+    pairs: tuple[tuple[int, int], ...],
+) -> _Kernels:
+    """The chunk kernels of one generator over detector pairs.
 
-    Cached on its hashable arguments, so every background of one waveform and
-    pair layout shares one compile per chunk shape. The geometry is an
-    argument of the kernels, not a constant of them.
+    The bound polarization method keys the cache by generator instance.
+    Geometry arrays are passed as arguments to the kernels.
     """
-    generator = waveform_generator(waveform)
 
     def strains(
         frequencies: jax.Array,
@@ -193,7 +170,7 @@ def _kernels(waveform: WaveformConfig, pairs: tuple[tuple[int, int], ...]) -> _K
 
         Padding rows have zero strain.
         """
-        plus, cross = generator.polarizations(sources)
+        plus, cross = polarizations(sources)
         real = (jnp.arange(plus.shape[0]) < valid)[:, None]
         plus = jnp.where(real, plus, 0.0)
         cross = jnp.where(real, cross, 0.0)
@@ -212,7 +189,7 @@ def _kernels(waveform: WaveformConfig, pairs: tuple[tuple[int, int], ...]) -> _K
         )(tensors, locations)
 
     def pair_cross(strain: jax.Array) -> jax.Array:
-        """The ``(P_union, F)`` real cross-powers summed over the sources."""
+        """The ``(P, F)`` real cross-powers summed over the sources."""
         return jnp.stack(
             [
                 jnp.real(jnp.conj(strain[first]) * strain[second]).sum(axis=0)
@@ -227,7 +204,7 @@ def _kernels(waveform: WaveformConfig, pairs: tuple[tuple[int, int], ...]) -> _K
         tensors: jax.Array,
         locations: jax.Array,
     ) -> jax.Array:
-        """The ``(P_union, F)`` cross-power summed over one padded chunk's sources."""
+        """The ``(P, F)`` cross-power summed over one padded chunk's sources."""
         return pair_cross(strains(frequencies, sources, valid, tensors, locations))
 
     def segment_sums(
@@ -240,9 +217,9 @@ def _kernels(waveform: WaveformConfig, pairs: tuple[tuple[int, int], ...]) -> _K
         *,
         num_segments: int,
     ) -> tuple[jax.Array, jax.Array]:
-        """The incoherent cross-power and per-segment strain of one padded chunk.
+        """The individual cross-powers and per-segment strain of one padded chunk.
 
-        Returns the ``(P_union, F)`` real cross-powers and the
+        Returns the ``(P, F)`` real cross-powers and the
         ``(num_segments, D, F)`` complex strain summed over the sources of each
         segment, ``local_ids`` being the segment of each row relative to the
         batch.
@@ -254,22 +231,21 @@ def _kernels(waveform: WaveformConfig, pairs: tuple[tuple[int, int], ...]) -> _K
         return pair_cross(strain), coherent
 
     return _Kernels(
-        generator=generator,
         pair_sums=jax.jit(pair_sums),
         segment_sums=jax.jit(segment_sums, static_argnames="num_segments"),
     )
 
 
 class BackgroundDraw(NamedTuple):
-    """One realized background projected onto the requested networks.
+    """One realized background projected onto a detector network.
 
     Attributes
     ----------
     frequencies
         The frequency grid in Hz, ``(F,)``.
-    spectra
-        Each network's pair spectra :math:`Y_{ab}` in :math:`\\mathrm{Hz}^{-1}`,
-        ``(P_n, F)``, keyed by network name. The pair axis follows
+    pair_spectral_density
+        Pair spectra :math:`Y_{ab}` in :math:`\\mathrm{Hz}^{-1}`, with shape
+        ``(pairs, frequencies)``. The pair axis follows
         :func:`~astrogwb.detector.network_pairs`.
     segment_counts
         The number of events in each segment, ``(num_segments,)``. The
@@ -278,7 +254,7 @@ class BackgroundDraw(NamedTuple):
     """
 
     frequencies: NDArray[np.float64]
-    spectra: dict[str, NDArray[np.float64]]
+    pair_spectral_density: NDArray[np.float64]
     segment_counts: NDArray[np.int64]
 
     def write(
@@ -290,8 +266,8 @@ class BackgroundDraw(NamedTuple):
     ) -> Path:
         """Write the background and the configuration it was simulated with, atomically.
 
-        The file holds the datasets ``frequencies``, ``segment_counts`` and, per
-        network, ``networks/<name>/pair_spectral_density``. Its root attributes
+        The file holds the datasets ``frequencies``, ``segment_counts`` and
+        ``pair_spectral_density``. Its root attributes
         are ``metadata``, the configuration as JSON, ``format_version``, the
         integer layout version :meth:`read` keys on, and ``version``, the
         astrogwb version that wrote it (informational), plus any ``attrs``.
@@ -328,9 +304,9 @@ class BackgroundDraw(NamedTuple):
                 file.attrs[name] = value
             file.create_dataset("frequencies", data=self.frequencies)
             file.create_dataset("segment_counts", data=self.segment_counts)
-            for name, spectrum in self.spectra.items():
-                group = file.create_group(f"networks/{name}")
-                group.create_dataset("pair_spectral_density", data=spectrum)
+            file.create_dataset(
+                "pair_spectral_density", data=self.pair_spectral_density
+            )
         return Path(path)
 
     @classmethod
@@ -345,30 +321,21 @@ class BackgroundDraw(NamedTuple):
         Returns
         -------
         BackgroundDraw
-            The background, networks in sorted order.
+            The background's pair spectra in canonical order.
         SimulationConfig
             The configuration it was simulated with.
 
         Raises
         ------
         ValueError
-            If the file's ``format_version`` is not one this version reads. A
-            file without ``format_version`` is read as format 1 when its
-            ``version`` is ``0.8.*``, as written before format versions were
-            recorded.
+            If the file's ``format_version`` is missing or unsupported.
         """
         with h5py.File(path, "r") as file:
             _check_format(path, file.attrs)
             config = SimulationConfig.from_metadata(json.loads(file.attrs["metadata"]))
-            stored = file["networks"]
             draw = cls(
                 np.asarray(file["frequencies"][()], dtype=np.float64),
-                {
-                    name: np.asarray(
-                        stored[name]["pair_spectral_density"][()], dtype=np.float64
-                    )
-                    for name in sorted(stored)
-                },
+                np.asarray(file["pair_spectral_density"][()], dtype=np.float64),
                 np.asarray(file["segment_counts"][()], dtype=np.int64),
             )
         return draw, config
@@ -406,15 +373,11 @@ def _check_format(path: str | Path, attrs: Mapping[str, object]) -> None:
     """Raise unless the file's layout is one this version can read."""
     version = attrs.get("version")
     format_version = attrs.get("format_version")
-    if format_version is None and isinstance(version, str):
-        if _LEGACY_VERSION.match(version):
-            return
-    elif format_version in _READABLE_FORMATS:
+    if format_version == _FORMAT_VERSION:
         return
     raise ValueError(
         f"{path} has format_version {format_version} (written by astrogwb "
-        f"{version}); astrogwb {__version__} reads format versions "
-        f"{sorted(_READABLE_FORMATS)} and files written by astrogwb 0.8.*; "
+        f"{version}); astrogwb {__version__} reads format version {_FORMAT_VERSION}; "
         "regenerate the background"
     )
 
@@ -447,18 +410,17 @@ def _event_columns(
 
 
 def _projection(
-    waveform: WaveformConfig, networks: Networks
+    generator: WaveformGenerator, network: Network
 ) -> tuple[jax.Array, _Geometry, _Kernels]:
-    jax.config.update("jax_enable_x64", True)
-    frequencies = np.asarray(waveform_generator(waveform).frequencies)
-    geometry = _network_geometry(networks, frequencies)
-    return jnp.asarray(frequencies), geometry, _kernels(waveform, geometry.pairs)
+    frequencies = generator.frequencies
+    geometry = _network_geometry(network)
+    return frequencies, geometry, _kernels(generator.polarizations, geometry.pairs)
 
 
 def project_background(
     sources: Mapping[str, ArrayLike],
-    waveform: WaveformConfig,
-    networks: Networks,
+    generator: WaveformGenerator,
+    network: Network,
     *,
     observation_seconds: float,
     chunk_size: int = 1024,
@@ -474,10 +436,10 @@ def project_background(
         The events, one column per waveform parameter plus the sky columns
         ``right_ascension``, ``declination`` and ``polarization_angle``, all
         one-dimensional and of the same length.
-    waveform
-        Waveform generator settings.
-    networks
-        Networks keyed by name, each mapping detector names to detectors.
+    generator
+        Waveform generator for the supplied sources.
+    network
+        Detectors keyed by name.
     observation_seconds
         The normalization, in seconds.
     chunk_size
@@ -498,21 +460,22 @@ def project_background(
         raise ValueError("observation_seconds must be positive")
     if chunk_size < 1:
         raise ValueError("chunk_size must be positive")
-    grid, geometry, kernels = _projection(waveform, networks)
+    jax.config.update("jax_enable_x64", True)
+    grid, geometry, kernels = _projection(generator, network)
     columns = _event_columns(sources)
     count = len(columns["right_ascension"])
     if count:
-        kernels.generator.check_sources(columns)
+        generator.check_sources(columns)
     tensors = jnp.asarray(geometry.tensors)
     locations = jnp.asarray(geometry.locations)
     total = jnp.zeros((len(geometry.pairs), grid.size))
     for start, _ in iter_rows(count, chunk_size):
         rows, valid = pad_rows(columns, start, chunk_size)
         total += kernels.pair_sums(grid, rows, jnp.asarray(valid), tensors, locations)
-    union = _PAIR_RESPONSE_DENOMINATOR * np.asarray(total) / observation_seconds
+    spectrum = _PAIR_RESPONSE_DENOMINATOR * np.asarray(total) / observation_seconds
     return BackgroundDraw(
         np.asarray(grid),
-        {k: union[v] for k, v in geometry.rows.items()},
+        spectrum,
         np.array([count]),
     )
 
@@ -554,15 +517,15 @@ def _draw_events(
 def simulate_background(
     key: jax.Array,
     sources: Mapping[str, ArrayLike],
-    waveform: WaveformConfig,
-    networks: Networks,
+    generator: WaveformGenerator,
+    network: Network,
     *,
     poisson_rate: float,
     num_segments: int,
     segment_duration: float,
     chunk_size: int = 1024,
     segment_batch_size: int = 1024,
-    incoherent: bool = False,
+    simulate_detector_noise: bool = False,
 ) -> BackgroundDraw:
     """Draw independent Poisson segment counts from a fixed physical event pool.
 
@@ -571,12 +534,9 @@ def simulate_background(
     across the entire draw. Arrival times are drawn uniformly within each
     segment; any catalog coalescence times are replaced.
 
-    The default sums coherent strain and detector noise in each segment.
-    With ``incoherent=True``, it sums individual event powers over the same
-    observation: the noiseless expected-signal spectrum of the same selection,
-    with no segment interference and no whole-mode requirement on the grid.
-    Each network has one row per detector pair in canonical order. The same key
-    gives the same draw.
+    The strain is summed coherently in each segment. Detector noise is added
+    to each segment when requested. The same key selects the same events and
+    arrival times in either mode. Rows follow canonical detector pair order.
 
     Parameters
     ----------
@@ -584,10 +544,10 @@ def simulate_background(
         Typed PRNG key of the draw.
     sources
         The event pool; see :func:`project_background` for its columns.
-    waveform
-        Waveform generator settings.
-    networks
-        Networks keyed by name that share one event and detector-noise realization.
+    generator
+        Waveform generator for the selected sources.
+    network
+        Detectors keyed by name.
     poisson_rate
         Rate in events per second of the population the pool represents.
     num_segments
@@ -597,9 +557,9 @@ def simulate_background(
     chunk_size
         Waveforms per batch; sets cost, not the result.
     segment_batch_size
-        Segments per batch in the coherent path; sets cost, not the result.
-    incoherent
-        Skip noise and coherent summation.
+        Segments per batch; sets cost, not the result.
+    simulate_detector_noise
+        Add independent detector noise to every segment.
 
     Returns
     -------
@@ -611,8 +571,8 @@ def simulate_background(
     ------
     ValueError
         If a count, duration, rate or batch size is not valid, the pool is
-        invalid, the draw needs more rows than the pool holds, or (coherent
-        path) a bin is not a whole number of the segment's Fourier modes.
+        invalid, the draw needs more rows than the pool holds, or a bin is not
+        a whole number of the segment's Fourier modes.
     """
     if min(chunk_size, segment_batch_size) < 1:
         raise ValueError("chunk and segment batch sizes must be positive")
@@ -625,19 +585,18 @@ def simulate_background(
         num_segments,
         segment_duration,
     )
-    if incoherent:
-        result = project_background(
-            columns,
-            waveform,
-            networks,
-            observation_seconds=num_segments * segment_duration,
-            chunk_size=chunk_size,
-        )
-        return result._replace(segment_counts=counts)
-    grid, geometry, kernels = _projection(waveform, networks)
+    grid, geometry, kernels = _projection(generator, network)
     if counts.any():
-        kernels.generator.check_sources(columns)
-    union = _segmented(
+        generator.check_sources(columns)
+    psds = None
+    if simulate_detector_noise:
+        frequencies = np.asarray(grid)
+        psds = jnp.asarray(
+            np.stack(
+                [network[name].sensitivity(frequencies) for name in sorted(network)]
+            )
+        )
+    spectrum = _segmented(
         columns,
         counts,
         noise_key,
@@ -647,10 +606,9 @@ def simulate_background(
         chunk_size,
         segment_duration,
         segment_batch_size,
+        psds,
     )
-    return BackgroundDraw(
-        np.asarray(grid), {k: union[v] for k, v in geometry.rows.items()}, counts
-    )
+    return BackgroundDraw(np.asarray(grid), spectrum, counts)
 
 
 def _segmented(
@@ -663,8 +621,9 @@ def _segmented(
     chunk_size: int,
     segment_duration: float,
     segment_batch_size: int,
+    psds: jax.Array | None,
 ) -> NDArray[np.float64]:
-    """The pair spectra with per-segment sources and detector noise."""
+    """The pair spectra with per-segment sources and optional detector noise."""
     segments = len(counts)
     seconds = segments * segment_duration
     widths = np.asarray(bin_widths(grid), dtype=np.float64)
@@ -680,16 +639,15 @@ def _segmented(
         )
     labels = np.repeat(np.arange(segments), counts)
     first, second = (jnp.asarray(index) for index in zip(*geometry.pairs, strict=True))
-    psds = jnp.asarray(geometry.psds)
     tensors = jnp.asarray(geometry.tensors)
     locations = jnp.asarray(geometry.locations)
     batch = min(segment_batch_size, segments)
-    incoherent = jnp.zeros((len(geometry.pairs), grid.shape[0]))
-    coherent = jnp.zeros((len(geometry.pairs), grid.shape[0]))
+    individual_power = jnp.zeros((len(geometry.pairs), grid.shape[0]))
+    segment_power = jnp.zeros_like(individual_power)
     for low in range(0, segments, batch):
         lo, hi = np.searchsorted(labels, [low, low + batch])
         rows = {name: values[lo:hi] for name, values in columns.items()}
-        strain = jnp.zeros((batch, geometry.psds.shape[0], grid.shape[0]), complex)
+        strain = jnp.zeros((batch, tensors.shape[0], grid.shape[0]), complex)
         for start, _ in iter_rows(int(hi - lo), chunk_size):
             chunk, valid = pad_rows(rows, start, chunk_size)
             ids = np.zeros(chunk_size, dtype=np.int32)
@@ -703,9 +661,9 @@ def _segmented(
                 locations,
                 num_segments=batch,
             )
-            incoherent = incoherent + chunk_total
+            individual_power = individual_power + chunk_total
             strain = strain + chunk_strain
-        coherent = coherent + _segment_power(
+        segment_power = segment_power + _segment_power(
             noise_key,
             jnp.arange(low, low + batch),
             strain,
@@ -720,8 +678,8 @@ def _segmented(
         _PAIR_RESPONSE_DENOMINATOR
         / seconds
         * (
-            (1.0 - ratio) * np.asarray(incoherent, dtype=np.float64)
-            + ratio * np.asarray(coherent, dtype=np.float64)
+            (1.0 - ratio) * np.asarray(individual_power, dtype=np.float64)
+            + ratio * np.asarray(segment_power, dtype=np.float64)
         )
     )
 
@@ -731,7 +689,7 @@ def _segment_power(
     noise_key: jax.Array,
     segment_ids: jax.Array,
     strain: jax.Array,
-    psds: jax.Array,
+    psds: jax.Array | None,
     first: jax.Array,
     second: jax.Array,
     segment_duration: jax.Array | float,
@@ -741,22 +699,25 @@ def _segment_power(
 
     ``segment_ids`` are the global segment indices of the batch, which key
     its noise, ``strain`` the ``(B, D, F)`` coherent signal strain of each,
-    ``psds`` the ``(D, F)`` noise curves and ``first``, ``second`` the
+    ``psds`` the optional ``(D, F)`` noise curves and ``first``, ``second`` the
     detector indices of each pair. Segments at or beyond ``num_segments``
     (the padding of the last batch) add nothing.
     """
-    amplitude = jnp.sqrt(
-        segment_duration * jnp.where(jnp.isfinite(psds), psds, 0.0) / 4.0
-    )
-
-    def draw(segment: jax.Array) -> jax.Array:
-        real_key, imag_key = jax.random.split(jax.random.fold_in(noise_key, segment))
-        return amplitude * jax.lax.complex(
-            jax.random.normal(real_key, psds.shape),
-            jax.random.normal(imag_key, psds.shape),
+    if psds is not None:
+        amplitude = jnp.sqrt(
+            segment_duration * jnp.where(jnp.isfinite(psds), psds, 0.0) / 4.0
         )
 
-    total = strain + jax.vmap(draw)(segment_ids)
-    power = jnp.real(jnp.conj(total[:, first]) * total[:, second])
+        def draw(segment: jax.Array) -> jax.Array:
+            real_key, imag_key = jax.random.split(
+                jax.random.fold_in(noise_key, segment)
+            )
+            return amplitude * jax.lax.complex(
+                jax.random.normal(real_key, amplitude.shape),
+                jax.random.normal(imag_key, amplitude.shape),
+            )
+
+        strain = strain + jax.vmap(draw)(segment_ids)
+    power = jnp.real(jnp.conj(strain[:, first]) * strain[:, second])
     real = (segment_ids < num_segments)[:, None, None]
     return jnp.where(real, power, 0.0).sum(axis=0)

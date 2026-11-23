@@ -8,18 +8,18 @@ sample's own standard error, so it holds for any seed.
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Mapping
 
 import jax
 import numpy as np
 import pytest
 from astrogwb_tiny_pipeline import (
-    NETWORKS,
     PAIR,
     TRIANGLE,
     WAVEFORM,
     event_pool,
 )
-from numpy.typing import NDArray
+from jax.typing import ArrayLike
 from tolerances import assert_close
 
 from astrogwb.background.simulation import (
@@ -30,7 +30,6 @@ from astrogwb.background.simulation import (
 from astrogwb.background.simulation import draw as background_module
 from astrogwb.detector import (
     Network,
-    Networks,
     isotropic_overlap_reduction_function,
     load_detector,
     network_pairs,
@@ -39,7 +38,13 @@ from astrogwb.detector import (
 from astrogwb.detector.projection import project_polarizations_fd
 from astrogwb.statistics import cross_correlation_estimator
 from astrogwb.utils import years_to_seconds
-from astrogwb.waveform import WaveformConfig, intensity, waveform_generator
+from astrogwb.waveform import (
+    WaveformConfig,
+    WaveformGenerator,
+    intensity,
+    waveform_generator,
+)
+from astrogwb.waveform.analytical import AnalyticInspiralGenerator
 
 #: Standard errors a Monte Carlo mean may sit from its expectation.
 MAX_STANDARD_ERRORS = 5.0
@@ -54,16 +59,21 @@ def population() -> Pool:
     return event_pool()
 
 
+@pytest.fixture(scope="module")
+def generator() -> WaveformGenerator:
+    return waveform_generator(WAVEFORM)
+
+
 def _project(
     population: Pool,
-    waveform: WaveformConfig,
-    networks: Networks,
+    generator: WaveformGenerator,
+    network: Network,
     **kwargs,
 ) -> BackgroundDraw:
     return project_background(
         population,
-        waveform,
-        networks,
+        generator,
+        network,
         observation_seconds=OBSERVATION_SECONDS,
         **kwargs,
     )
@@ -71,8 +81,8 @@ def _project(
 
 def _simulate(
     population: Pool,
-    waveform: WaveformConfig,
-    networks: Networks,
+    generator: WaveformGenerator,
+    network: Network,
     *,
     segment_duration: float,
     seed: int = 0,
@@ -81,8 +91,8 @@ def _simulate(
     return simulate_background(
         jax.random.key(seed),
         population,
-        waveform,
-        networks,
+        generator,
+        network,
         segment_duration=segment_duration,
         num_segments=int(OBSERVATION_SECONDS // segment_duration),
         poisson_rate=len(population["redshift"]) / (2 * OBSERVATION_SECONDS),
@@ -98,11 +108,18 @@ def _simulate(
     ],
     ids=["fractional-modes", "log-grid"],
 )
-def test_segmented_noise_needs_whole_fourier_modes_per_bin(
-    population: Pool, waveform: WaveformConfig
+@pytest.mark.parametrize("noise", [False, True])
+def test_segmented_simulation_needs_whole_fourier_modes_per_bin(
+    population: Pool, waveform: WaveformConfig, noise: bool
 ) -> None:
     with pytest.raises(ValueError, match="whole number"):
-        _simulate(population, waveform, NETWORKS, segment_duration=0.5)
+        _simulate(
+            population,
+            waveform_generator(waveform),
+            TRIANGLE,
+            segment_duration=0.5,
+            simulate_detector_noise=noise,
+        )
 
 
 @pytest.mark.parametrize(
@@ -189,7 +206,9 @@ def test_polarizations_reduce_to_the_generators_intensity(
     assert_close(intensity(plus, cross).T, generated)
 
 
-def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum() -> None:
+def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum(
+    generator: WaveformGenerator,
+) -> None:
     r"""Over isotropic sources, :math:`E[Y_{ab}] = \gamma_{ab} S_h`.
 
     One realization is split into groups; in each, the ratio of every pair
@@ -197,7 +216,6 @@ def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum() -> No
     isolates the response, and its mean over groups is :math:`\gamma_{ab}`.
     """
     realization = event_pool(4096, seed=7)
-    generator = waveform_generator(WAVEFORM)
     group = 16
     ratios = []
     for start in range(0, len(realization["redshift"]) - group + 1, group):
@@ -206,8 +224,8 @@ def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum() -> No
         }
         generated = np.asarray(generator.intensity(sources)).sum(axis=0)
         spectra = _project(
-            sources, WAVEFORM, {"triangle": TRIANGLE}, chunk_size=8
-        ).spectra["triangle"]
+            sources, generator, TRIANGLE, chunk_size=8
+        ).pair_spectral_density
         ratios.append(spectra / (generated / OBSERVATION_SECONDS))
     ratios = np.asarray(ratios)
     expected = np.stack(
@@ -224,45 +242,37 @@ def test_pair_spectra_average_to_the_orf_times_the_sky_averaged_spectrum() -> No
     assert np.all(np.abs(ratios.mean(axis=0) - expected) < MAX_STANDARD_ERRORS * errors)
 
 
-def test_an_empty_realization_has_zero_spectra() -> None:
-    empty = event_pool(0)
-
-    background = _project(empty, WAVEFORM, NETWORKS)
-
-    assert all(values.shape == (0,) for values in empty.values())
-    for name, network in NETWORKS.items():
-        pairs = background.spectra[name]
-        assert pairs.shape == (len(network_pairs(network)), background.frequencies.size)
+def test_an_empty_realization_has_zero_spectra(
+    empty: Pool, generator: WaveformGenerator
+) -> None:
+    backgrounds = (
+        _project(empty, generator, TRIANGLE),
+        _simulate(empty, generator, TRIANGLE, segment_duration=60.0),
+    )
+    for background in backgrounds:
+        pairs = background.pair_spectral_density
+        assert pairs.shape == (
+            len(network_pairs(TRIANGLE)),
+            background.frequencies.size,
+        )
         assert not np.any(pairs)
 
 
 @pytest.fixture(scope="module")
-def projected(population: Pool) -> BackgroundDraw:
-    """The tiny population projected onto both networks."""
-    return _project(population, WAVEFORM, NETWORKS, chunk_size=8)
+def projected(population: Pool, generator: WaveformGenerator) -> BackgroundDraw:
+    return _project(population, generator, PAIR, chunk_size=8)
 
 
-@pytest.mark.parametrize("name,network", NETWORKS.items(), ids=NETWORKS)
-def test_each_network_holds_its_rows_of_a_single_network_projection(
-    projected: BackgroundDraw,
-    population: Pool,
-    name: str,
-    network: Network,
-) -> None:
-    alone = _project(population, WAVEFORM, {name: network}, chunk_size=8)
-
-    np.testing.assert_array_equal(projected.spectra[name], alone.spectra[name])
-
-
-@pytest.mark.parametrize("name,network", NETWORKS.items(), ids=NETWORKS)
+@pytest.mark.parametrize("network", [PAIR, TRIANGLE], ids=["pair", "triangle"])
 def test_combining_pair_spectra_of_a_pure_signal_recovers_its_spectrum(
-    projected: BackgroundDraw, name: str, network: Network
+    generator: WaveformGenerator, network: Network
 ) -> None:
-    spectrum = 1e-47 * (1.0 + np.arange(projected.frequencies.size))
+    frequencies = generator.frequencies
+    spectrum = 1e-47 * (1.0 + np.arange(frequencies.size))
     overlap = np.stack(
         [
             isotropic_overlap_reduction_function(
-                projected.frequencies, network[first], network[second]
+                frequencies, network[first], network[second]
             )
             for first, second in network_pairs(network)
         ]
@@ -270,22 +280,20 @@ def test_combining_pair_spectra_of_a_pure_signal_recovers_its_spectrum(
 
     combined = cross_correlation_estimator(
         overlap * spectrum,
-        projected.frequencies,
+        frequencies,
         network,
     )
 
     reordered = dict(reversed(tuple(network.items())))
     assert_close(
-        cross_correlation_estimator(
-            overlap * spectrum, projected.frequencies, reordered
-        ),
+        cross_correlation_estimator(overlap * spectrum, frequencies, reordered),
         combined,
     )
     assert_close(combined, spectrum)
 
 
 def test_custom_detector_geometry_is_used_for_projection(
-    population: Pool,
+    population: Pool, generator: WaveformGenerator
 ) -> None:
     first = load_detector("E1").model_copy(update={"name": "X1"})
     second = load_detector("E2")
@@ -296,13 +304,15 @@ def test_custom_detector_geometry_is_used_for_projection(
             )
         }
     )
-    moved = _project(population, WAVEFORM, {"custom": {"X1": custom, "E2": second}})
-    original = _project(population, WAVEFORM, {"custom": {"X1": first, "E2": second}})
-    assert not np.array_equal(moved.spectra["custom"], original.spectra["custom"])
+    moved = _project(population, generator, {"X1": custom, "E2": second})
+    original = _project(population, generator, {"X1": first, "E2": second})
+    assert not np.array_equal(
+        moved.pair_spectral_density, original.pair_spectral_density
+    )
 
 
 def test_psd_override_preserves_pair_spectra_and_changes_combination(
-    population: Pool,
+    population: Pool, generator: WaveformGenerator
 ) -> None:
     changed = {
         **TRIANGLE,
@@ -310,20 +320,20 @@ def test_psd_override_preserves_pair_spectra_and_changes_combination(
             update={"psd_reference": "ET_COBA_15km_psd.txt"}
         ),
     }
-    baseline = _project(population, WAVEFORM, {"triangle": TRIANGLE})
-    overridden = _project(population, WAVEFORM, {"triangle": changed})
+    baseline = _project(population, generator, TRIANGLE)
+    overridden = _project(population, generator, changed)
     np.testing.assert_array_equal(
-        baseline.spectra["triangle"], overridden.spectra["triangle"]
+        baseline.pair_spectral_density, overridden.pair_spectral_density
     )
     frequencies = baseline.frequencies
     assert not np.array_equal(
         cross_correlation_estimator(
-            baseline.spectra["triangle"],
+            baseline.pair_spectral_density,
             frequencies,
             TRIANGLE,
         ),
         cross_correlation_estimator(
-            overridden.spectra["triangle"],
+            overridden.pair_spectral_density,
             frequencies,
             changed,
         ),
@@ -336,29 +346,29 @@ def empty(population: Pool) -> Pool:
     return {k: v[:0] for k, v in population.items()}
 
 
-def test_pure_noise_matches_the_pair_scale(empty: Pool) -> None:
+def test_pure_noise_matches_the_pair_scale(
+    empty: Pool, generator: WaveformGenerator
+) -> None:
     segment_duration = 600.0
     residuals = []
     for draw in range(120):
         background = _simulate(
             empty,
-            WAVEFORM,
-            NETWORKS,
+            generator,
+            TRIANGLE,
             chunk_size=8,
             seed=draw,
             segment_duration=segment_duration,
+            simulate_detector_noise=True,
         )
-        for name, network in NETWORKS.items():
-            scale = np.asarray(
-                pair_cross_power_std(
-                    background.frequencies,
-                    network,
-                    int(OBSERVATION_SECONDS // segment_duration)
-                    * segment_duration
-                    / years_to_seconds(1.0),
-                )
+        scale = np.asarray(
+            pair_cross_power_std(
+                background.frequencies,
+                TRIANGLE,
+                OBSERVATION_SECONDS / years_to_seconds(1.0),
             )
-            residuals.append((background.spectra[name] / scale).ravel())
+        )
+        residuals.append((background.pair_spectral_density / scale).ravel())
     residuals = np.concatenate(residuals)
     segments = int(OBSERVATION_SECONDS // segment_duration)
     size = residuals.size
@@ -372,79 +382,78 @@ def test_pure_noise_matches_the_pair_scale(empty: Pool) -> None:
 
 
 @pytest.mark.parametrize("chunk_size,batch_size", [(8, 7), (3, 11), (128, 64)])
+@pytest.mark.parametrize("noise", [False, True])
 def test_spectra_do_not_depend_on_the_segment_batch_size(
     population: Pool,
+    generator: WaveformGenerator,
     chunk_size: int,
     batch_size: int,
+    noise: bool,
 ) -> None:
     reference = _simulate(
         population,
-        WAVEFORM,
-        NETWORKS,
+        generator,
+        TRIANGLE,
         chunk_size=8,
         segment_duration=60.0,
         segment_batch_size=64,
+        simulate_detector_noise=noise,
     )
     batched = _simulate(
         population,
-        WAVEFORM,
-        NETWORKS,
+        generator,
+        TRIANGLE,
         chunk_size=chunk_size,
         segment_duration=60.0,
         segment_batch_size=batch_size,
+        simulate_detector_noise=noise,
     )
 
-    for name, spectrum in reference.spectra.items():
-        assert_close(batched.spectra[name], spectrum)
+    np.testing.assert_array_equal(batched.segment_counts, reference.segment_counts)
+    assert_close(batched.pair_spectral_density, reference.pair_spectral_density)
 
 
 @pytest.mark.parametrize("opposite_phase", [False, True])
-def test_segment_sums_use_sampled_coa_times_without_rescaling(
+def test_source_arrival_times_set_interference_without_detector_noise(
     population: Pool,
+    generator: WaveformGenerator,
     monkeypatch: pytest.MonkeyPatch,
     opposite_phase: bool,
 ) -> None:
     # With detector noise disabled, two identical sources interfere either
     # constructively or destructively at the first frequency.
-    geometry = background_module._network_geometry
-
-    def without_noise(
-        networks: Networks, frequencies: NDArray[np.float64]
-    ) -> background_module._Geometry:
-        result = geometry(networks, frequencies)
-        return result._replace(psds=np.full_like(result.psds, np.inf))
-
-    monkeypatch.setattr(background_module, "_network_geometry", without_noise)
     # One segment of 0.2 s, two Fourier modes per 10 Hz bin.
     seconds = 0.2
     sources = {name: np.repeat(values[:1], 2) for name, values in population.items()}
     sources["coa_time"] = np.array(
         [0.0, 1 / (2 * WAVEFORM.minimum_frequency) if opposite_phase else 0.0]
     )
+    monkeypatch.setattr(
+        background_module, "_draw_events", lambda *_: (sources, np.array([2]))
+    )
     baseline = project_background(
-        sources, WAVEFORM, NETWORKS, observation_seconds=seconds
+        sources, generator, TRIANGLE, observation_seconds=seconds
     )
-    grid, geometry_arrays, kernels = background_module._projection(WAVEFORM, NETWORKS)
-    union = background_module._segmented(
-        sources,
-        np.array([2]),
+    draw = simulate_background(
         jax.random.key(0),
-        grid,
-        geometry_arrays,
-        kernels,
-        1,
-        seconds,
-        1,
+        sources,
+        generator,
+        TRIANGLE,
+        poisson_rate=10.0,
+        num_segments=1,
+        segment_duration=seconds,
+        chunk_size=1,
     )
-    ratio = 1 / np.sqrt(0.2 * WAVEFORM.frequency_resolution)
-    for name, spectrum in baseline.spectra.items():
-        measured = (union[geometry_arrays.rows[name], 0] / spectrum[:, 0] - 1) / ratio
-        assert_close(measured, np.full(measured.shape, -1.0 if opposite_phase else 1.0))
+    ratio = 1 / np.sqrt(seconds * WAVEFORM.frequency_resolution)
+    expected = 1 - ratio if opposite_phase else 1 + ratio
+    measured = draw.pair_spectral_density[:, 0] / baseline.pair_spectral_density[:, 0]
+    assert_close(measured, np.full(measured.shape, expected))
 
 
 def test_noisy_background_averages_to_the_incoherent_signal(
     population: Pool,
     projected: BackgroundDraw,
+    generator: WaveformGenerator,
 ) -> None:
     """A half-pool expected count gives half its full incoherent projection."""
     segment_duration = 60.0
@@ -452,16 +461,17 @@ def test_noisy_background_averages_to_the_incoherent_signal(
         [
             _simulate(
                 population,
-                WAVEFORM,
-                NETWORKS,
+                generator,
+                PAIR,
                 chunk_size=8,
                 seed=draw,
                 segment_duration=segment_duration,
-            ).spectra["pair"]
+                simulate_detector_noise=True,
+            ).pair_spectral_density
             for draw in range(150)
         ]
     )
-    expected = projected.spectra["pair"] / 2
+    expected = projected.pair_spectral_density / 2
     error = draws.std(axis=0, ddof=1) / np.sqrt(len(draws))
 
     assert np.all(abs(draws.mean(axis=0) - expected) < MAX_STANDARD_ERRORS * error)
@@ -503,23 +513,44 @@ def test_segment_counts_have_poisson_mean_and_variance() -> None:
     )
 
 
-def test_incoherent_draw_projects_exactly_its_selected_rows(population: Pool) -> None:
-    key = jax.random.key(4)
-    event_key, _ = jax.random.split(key)
-    sources, counts = background_module._draw_events(
-        event_key, population, 0.2, 4, 10.0
+def test_noise_toggle_preserves_the_chosen_sources_and_arrival_times(
+    population: Pool,
+    generator: WaveformGenerator,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Zero PSDs let the two paths be compared at fixed source strain.
+    monkeypatch.setattr(
+        "astrogwb.detector.sensitivity.Sensitivity.__call__",
+        lambda self, frequencies: np.zeros_like(frequencies),
     )
-    expected = project_background(sources, WAVEFORM, NETWORKS, observation_seconds=40.0)
-    draw = simulate_background(
-        key,
+    quiet = _simulate(population, generator, PAIR, segment_duration=60.0, chunk_size=8)
+    with_noise = _simulate(
         population,
-        WAVEFORM,
-        NETWORKS,
-        poisson_rate=0.2,
-        num_segments=4,
-        segment_duration=10.0,
-        incoherent=True,
+        generator,
+        PAIR,
+        segment_duration=60.0,
+        chunk_size=8,
+        simulate_detector_noise=True,
     )
-    np.testing.assert_array_equal(draw.segment_counts, counts)
-    for name, spectrum in expected.spectra.items():
-        np.testing.assert_array_equal(draw.spectra[name], spectrum)
+    np.testing.assert_array_equal(quiet.segment_counts, with_noise.segment_counts)
+    assert_close(quiet.pair_spectral_density, with_noise.pair_spectral_density)
+
+
+def test_simulation_uses_the_supplied_generator_instance(population: Pool) -> None:
+    @dataclasses.dataclass(frozen=True)
+    class ScaledGenerator(AnalyticInspiralGenerator):
+        amplitude: float = dataclasses.field(compare=False)
+
+        def polarizations(
+            self, sources: Mapping[str, ArrayLike]
+        ) -> tuple[jax.Array, jax.Array]:
+            plus, cross = super().polarizations(sources)
+            return self.amplitude * plus, self.amplitude * cross
+
+    first = ScaledGenerator(WAVEFORM, amplitude=1.0)
+    second = ScaledGenerator(WAVEFORM, amplitude=2.0)
+    assert first == second
+    reference = _simulate(population, first, PAIR, segment_duration=60.0, chunk_size=8)
+    scaled = _simulate(population, second, PAIR, segment_duration=60.0, chunk_size=8)
+    assert np.any(reference.pair_spectral_density)
+    assert_close(scaled.pair_spectral_density, 4 * reference.pair_spectral_density)
