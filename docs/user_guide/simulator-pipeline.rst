@@ -5,6 +5,9 @@ Supply a fixed pool of physical events as a mapping of column names to arrays. E
 must describe one merger from the population whose **observer-frame rate**, in events
 per second, is passed to the simulator. Apply any redshift or selection cuts to both the
 pool and its rate. The pool size only controls how many distinct mergers are available.
+The simulation functions require JAX x64 mode: call
+:func:`~astrogwb.runtime.configure_runtime`, or set ``JAX_ENABLE_X64=1`` before starting
+Python.
 
 .. code:: python
 
