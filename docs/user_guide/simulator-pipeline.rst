@@ -12,10 +12,10 @@ Python.
 .. code:: python
 
    from astrogwb.background.simulation import simulate_background
-   from astrogwb.detector import load_detector, network_pairs
+   from astrogwb.detector import network_pairs, select_network
    from astrogwb.waveform import waveform_generator
 
-   hl = {name: load_detector(name) for name in ("H1", "L1")}
+   hl = select_network(None, ["H1", "L1"])
    generator = waveform_generator(waveform_config)
    draw = simulate_background(
        key, sources, generator, hl,
@@ -36,7 +36,11 @@ realized total exceeds capacity, enlarge the pool and repeat with the same key.
 Each detector receives both polarizations with its antenna response and geometric delay.
 The code uses fixed sidereal geometry (GMST zero) and places the complete waveform in
 the assigned segment. The output contains one row per detector pair in
-``network_pairs(hl)`` order. Source chunks and segment batches bound working memory.
+``network_pairs(hl)`` order. ``waveform_batch_size`` limits waveforms per kernel call
+and ``segment_batch_size`` limits the consecutive segments whose coherent strain
+is held in memory at once; both default to 1024 and set cost, not the result.
+Noise is added to a segment batch after its waveform calls finish. For a fixed
+seed, each segment receives the same noise for any batch sizes.
 
 Command line
 ------------
@@ -51,7 +55,7 @@ different dataset or group path, or pass ``root`` to
 ::
 
    astrogwb simulate 41.h5 events.h5 \
-       --waveform-config waveform.toml --detector-config detectors.toml --network H1,L1 \
+       --waveform-config waveform.toml --network H1,L1 \
        --poisson-rate 0.00317 --num-segments 1024 --segment-duration 16 --seed 41
 
 The output configuration records the population path and selected root.
@@ -59,11 +63,13 @@ The output configuration records the population path and selected root.
 The CLI passes ``jax.random.key(seed)`` directly to the simulator. Use a
 different seed for each independent draw.
 
-Pass one complete TOML file per option, with any layers and references resolved
-before invoking the CLI. Use ``--network`` to list the detectors of the network by name. For example,
-``--network H1,L1`` requires both ``[detectors.H1]`` and ``[detectors.L1]``
-definitions in that file. To build that network in Python, use
+Use ``--network`` to list the detector names. By default, the CLI resolves them
+from the bundled catalog. If you pass ``--detector-config detectors.toml`` with
+``--network H1,L1``, the TOML file must define both ``[detectors.H1]`` and
+``[detectors.L1]``. To select from that file in Python, use
 ``select_network(load_detectors_from_file(Path("detectors.toml")), ["H1", "L1"])``.
+Use ``--waveform-batch-size`` and ``--segment-batch-size`` to set the waveform limit per
+kernel call and the segment limit per memory batch.
 
 The catalogue must hold ``distance`` (luminosity distance in Mpc, renamed
 ``luminosity_distance``), the sky columns, and the detector-frame or source-frame

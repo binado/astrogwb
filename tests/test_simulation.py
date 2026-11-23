@@ -30,7 +30,7 @@ from astrogwb.populations.io import read_population_file
 from astrogwb.waveform import waveform_generator
 
 SEED = 41
-CHUNK = 8
+BATCH_SIZE = 8
 SEGMENT_SECONDS = 1.0
 RATE_HZ = 8.0
 
@@ -57,7 +57,7 @@ def _simulate(config: SimulationConfig) -> BackgroundDraw:
         num_segments=config.num_segments,
         segment_duration=config.segment_duration,
         simulate_detector_noise=config.simulate_detector_noise,
-        chunk_size=CHUNK,
+        waveform_batch_size=BATCH_SIZE,
     )
 
 
@@ -241,7 +241,7 @@ def simulate_pool() -> Callable[[dict[str, np.ndarray]], BackgroundDraw]:
             poisson_rate=RATE_HZ,
             num_segments=2,
             segment_duration=SEGMENT_SECONDS,
-            chunk_size=CHUNK,
+            waveform_batch_size=BATCH_SIZE,
         )
 
     return run

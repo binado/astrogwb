@@ -91,8 +91,9 @@ def project_polarizations_fd(
     right_ascension: ArrayLike,
     declination: ArrayLike,
     polarization_angle: ArrayLike,
+    coa_time: ArrayLike = 0.0,
 ) -> jax.Array:
-    """Project as (F_plus plus + F_cross cross) exp(-2 pi i f delay).
+    """Project polarizations with the combined arrival time and detector delay.
 
     Parameters
     ----------
@@ -114,6 +115,10 @@ def project_polarizations_fd(
         Source declination in radians.
     polarization_angle
         Polarization angle in radians.
+    coa_time
+        Geocentric arrival time in seconds relative to the waveform's time
+        origin, broadcastable with the sky coordinates. Leave at zero for
+        polarizations that already include the arrival phase.
     """
     fp, fc = antenna_pattern(
         response_tensor,
@@ -125,6 +130,7 @@ def project_polarizations_fd(
     delay = time_delay_from_geocenter(
         location, gmst, right_ascension=right_ascension, declination=declination
     )
+    arrival_time = jnp.asarray(coa_time) + delay
     return (
         fp[..., None] * jnp.asarray(plus) + fc[..., None] * jnp.asarray(cross)
-    ) * jnp.exp(-2j * jnp.pi * jnp.asarray(frequencies) * delay[..., None])
+    ) * jnp.exp(-2j * jnp.pi * jnp.asarray(frequencies) * arrival_time[..., None])

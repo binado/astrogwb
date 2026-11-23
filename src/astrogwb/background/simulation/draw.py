@@ -57,12 +57,12 @@ power-of-two :math:`\tau`; a log grid does not qualify. The model holds while
 signals are mostly shorter than :math:`\tau`. Bins where a PSD is not
 finite get no noise. Earth's rotation during a signal is not modelled.
 
-Before coherent summation, both polarizations receive the geocentric arrival
-phase :math:`\exp(-2\pi i f t_i)`, with :math:`t_i` sampled in seconds relative
-to segment center within :math:`[-\tau/2, \tau/2)`. The simulator draws these
-times independently of row selection. Detector projection applies geometric
-delays once. Signals remain complete within their assigned segment, without
-window truncation or boundary crossing.
+Before coherent summation, detector projection combines the geocentric arrival
+phase :math:`\exp(-2\pi i f t_i)` with the detector's geometric delay phase.
+The arrival time :math:`t_i` is sampled in seconds relative to segment center
+within :math:`[-\tau/2, \tau/2)`. The simulator draws these times independently
+of row selection. Signals remain complete within their assigned segment,
+without window truncation or boundary crossing.
 
 A background is stored with :meth:`BackgroundDraw.write` together with the
 :class:`~astrogwb.background.simulation.SimulationConfig` it was simulated with.
@@ -206,7 +206,7 @@ def simulate_background(
     poisson_rate: float,
     num_segments: int,
     segment_duration: float,
-    chunk_size: int = 1024,
+    waveform_batch_size: int = 1024,
     segment_batch_size: int = 1024,
     simulate_detector_noise: bool = False,
 ) -> BackgroundDraw:
@@ -237,10 +237,11 @@ def simulate_background(
         Number of segments.
     segment_duration
         Segment length in seconds.
-    chunk_size
-        Waveforms per batch; sets cost, not the result.
+    waveform_batch_size
+        Maximum waveforms per kernel call; sets cost, not the result.
     segment_batch_size
-        Segments per batch; sets cost, not the result.
+        Maximum segments whose coherent strain is held in memory at once; sets
+        cost, not the result.
     simulate_detector_noise
         Add independent detector noise to every segment.
 
@@ -257,8 +258,8 @@ def simulate_background(
         invalid, the draw needs more rows than the pool holds, or a bin is not
         a whole number of the segment's Fourier modes.
     """
-    if min(chunk_size, segment_batch_size) < 1:
-        raise ValueError("chunk and segment batch sizes must be positive")
+    if min(waveform_batch_size, segment_batch_size) < 1:
+        raise ValueError("waveform_batch_size and segment_batch_size must be positive")
     event_key, noise_key = jax.random.split(key)
     columns, counts = _draw_events(
         event_key,
@@ -274,41 +275,44 @@ def simulate_background(
     geometry = _Geometry.from_network(network)
     psds = _network_psds(network, frequencies) if simulate_detector_noise else None
 
-    # Segments are processed segment_batch_size at a time and the rows of a
-    # batch chunk_size at a time, so each kernel compiles once. The row
-    # bookkeeping stays in NumPy: its lengths vary with the draw, and every
-    # new length would compile a new jax operation.
-    batch_size = min(segment_batch_size, num_segments)
+    # Keep segment and waveform shapes fixed across draws. Variable-length
+    # row indexing stays on the host to avoid shape-dependent compilation.
+    segment_batch_size = min(segment_batch_size, num_segments)
     segment_of_row = np.repeat(np.arange(num_segments), counts)
     first_row = np.concatenate([[0], np.cumsum(counts)])
     num_frequencies = frequencies.shape[0]
     incoherent = jnp.zeros((geometry.num_pairs, num_frequencies))
     coherent = jnp.zeros_like(incoherent)
-    for low in range(0, num_segments, batch_size):
-        high = min(low + batch_size, num_segments)
+    for low in range(0, num_segments, segment_batch_size):
+        high = min(low + segment_batch_size, num_segments)
         rows = slice(first_row[low], first_row[high])
         batch_columns = {name: column[rows] for name, column in columns.items()}
         batch_segment = segment_of_row[rows] - low
 
         strain = jnp.zeros(
-            (batch_size, geometry.num_detectors, num_frequencies), complex
+            (segment_batch_size, geometry.num_detectors, num_frequencies), complex
         )
-        for start, chunk, num_valid in _padded_chunks(batch_columns, chunk_size):
+        for start, chunk, num_valid in _padded_chunks(
+            batch_columns, waveform_batch_size
+        ):
             chunk_power, chunk_strain = _chunk_pair_power_and_segment_strain(
                 frequencies,
                 chunk,
                 num_valid,
-                _pad(batch_segment[start : start + chunk_size], chunk_size),
+                _pad(
+                    batch_segment[start : start + waveform_batch_size],
+                    waveform_batch_size,
+                ),
                 geometry,
                 polarizations=generator.polarizations,
-                num_segments=batch_size,
+                num_segments=segment_batch_size,
             )
             incoherent += chunk_power
             strain += chunk_strain
 
         coherent += _segment_batch_power(
             noise_key,
-            jnp.arange(low, low + batch_size),
+            jnp.arange(low, low + segment_batch_size),
             strain,
             psds,
             geometry,
@@ -460,7 +464,9 @@ def _detector_strain(
     geometry: _Geometry,
 ) -> jax.Array:
     """The ``(n, D, F)`` complex strain of a padded chunk; padding rows are zero."""
-    plus, cross = polarizations(sources)
+    untimed_sources = dict(sources)
+    coa_time = untimed_sources.pop("coa_time", 0.0)
+    plus, cross = polarizations(untimed_sources)
     real = (jnp.arange(plus.shape[0]) < num_valid)[:, None]
     plus = jnp.where(real, plus, 0.0)
     cross = jnp.where(real, cross, 0.0)
@@ -476,6 +482,7 @@ def _detector_strain(
             right_ascension=sources["right_ascension"],
             declination=sources["declination"],
             polarization_angle=sources["polarization_angle"],
+            coa_time=coa_time,
         )
 
     return jax.vmap(project, out_axes=1)(geometry.tensors, geometry.locations)

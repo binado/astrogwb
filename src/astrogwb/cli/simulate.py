@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import tomllib
 from collections.abc import Sequence
 from pathlib import Path
@@ -9,19 +10,111 @@ from pathlib import Path
 from astrogwb.runtime import configure_runtime
 
 
+def _positive_int(value: str) -> int:
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return number
+
+
+def _detector_names(value: str) -> tuple[str, ...]:
+    names = tuple(name.strip() for name in value.split(","))
+    if not all(names):
+        raise argparse.ArgumentTypeError("must be comma-separated detector names")
+    return names
+
+
+def _nonnegative_float(value: str) -> float:
+    number = float(value)
+    if number < 0:
+        raise argparse.ArgumentTypeError("must be non-negative")
+    return number
+
+
+def configure_parser(command: argparse.ArgumentParser) -> None:
+    """Configure arguments for the simulate command."""
+    command.add_argument("output", type=Path, help="Output HDF5 file.")
+    command.add_argument("population", type=Path, help="CSV or HDF5 event catalogue.")
+    command.add_argument(
+        "--waveform-config",
+        type=Path,
+        required=True,
+        help="Waveform settings TOML file.",
+    )
+    command.add_argument(
+        "--detector-config",
+        type=Path,
+        help="Detector definitions TOML file. Defaults to the bundled catalog.",
+    )
+    command.add_argument(
+        "--network",
+        type=_detector_names,
+        required=True,
+        metavar="NAMES",
+        help="Comma-separated detectors of the network, such as H1,L1.",
+    )
+    command.add_argument(
+        "--poisson-rate",
+        type=_nonnegative_float,
+        required=True,
+        help="Observer-frame Poisson event rate in events per second.",
+    )
+    command.add_argument(
+        "--num-segments",
+        type=_positive_int,
+        required=True,
+        help="Number of observation segments.",
+    )
+    command.add_argument(
+        "--segment-duration",
+        type=_nonnegative_float,
+        required=True,
+        help="Segment length in seconds.",
+    )
+    command.add_argument("--seed", type=int, required=True, help="Seed of the draw.")
+    command.add_argument(
+        "--population-root",
+        default="source_parameters",
+        help="HDF5 population dataset or group path; ignored for CSV.",
+    )
+    command.add_argument(
+        "--simulate-detector-noise",
+        action="store_true",
+        help="Add independent detector noise to every segment.",
+    )
+    command.add_argument(
+        "--waveform-batch-size",
+        type=_positive_int,
+        default=1024,
+        help="Maximum waveforms per kernel call (default: %(default)s).",
+    )
+    command.add_argument(
+        "--segment-batch-size",
+        type=_positive_int,
+        default=1024,
+        help="Maximum segments held in memory at once (default: %(default)s).",
+    )
+    command.add_argument(
+        "--platform", default="auto", help="JAX platform: auto, cpu, cuda or tpu."
+    )
+    command.add_argument(
+        "--cpu-threads", type=_positive_int, help="Cap OMP/BLAS/XLA CPU threads."
+    )
+
+
 def simulate(
     output: Path,
     population: Path,
     waveform_config: Path,
-    detector_config: Path,
     network: Sequence[str],
     poisson_rate: float,
     num_segments: int,
     segment_duration: float,
     seed: int,
+    detector_config: Path | None = None,
     population_root: str = "source_parameters",
     simulate_detector_noise: bool = False,
-    chunk_size: int = 1024,
+    waveform_batch_size: int = 1024,
     segment_batch_size: int = 1024,
     platform: str = "auto",
     cpu_threads: int | None = None,
@@ -40,10 +133,8 @@ def simulate(
         Event pool path.
     waveform_config
         Waveform settings TOML path.
-    detector_config
-        Complete detector configuration TOML path.
     network
-        Names of the detectors in the network, defined in the detector configuration.
+        Names of the detectors in the network.
     poisson_rate
         Observer-frame event rate of the pool's population, in events per second.
     num_segments
@@ -52,14 +143,16 @@ def simulate(
         Segment length in seconds.
     seed
         Random seed.
+    detector_config
+        TOML path defining all requested detectors. None uses the bundled catalog.
     population_root
         HDF5 dataset or group containing the population.
     simulate_detector_noise
         Add independent detector noise to every segment.
-    chunk_size
-        Number of sources per chunk.
+    waveform_batch_size
+        Maximum waveforms per kernel call.
     segment_batch_size
-        Number of segments per batch.
+        Maximum segments whose coherent strain is held in memory at once.
     platform
         JAX execution platform.
     cpu_threads
@@ -76,7 +169,12 @@ def simulate(
     from astrogwb.populations.io import read_population_file
     from astrogwb.waveform import WaveformConfig, waveform_generator
 
-    selected = select_network(load_detectors_from_file(detector_config), network)
+    detectors = (
+        load_detectors_from_file(detector_config)
+        if detector_config is not None
+        else None
+    )
+    selected = select_network(detectors, network)
     with waveform_config.open("rb") as file:
         waveform = WaveformConfig.model_validate(tomllib.load(file))
     config = SimulationConfig(
@@ -98,7 +196,7 @@ def simulate(
         poisson_rate=config.poisson_rate,
         num_segments=config.num_segments,
         segment_duration=config.segment_duration,
-        chunk_size=chunk_size,
+        waveform_batch_size=waveform_batch_size,
         segment_batch_size=segment_batch_size,
         simulate_detector_noise=config.simulate_detector_noise,
     )

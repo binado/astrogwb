@@ -150,13 +150,15 @@ def load_detectors_from_file(path: Path) -> dict[str, Detector]:
     return document.detectors
 
 
-def select_network(detectors: Mapping[str, Detector], names: Sequence[str]) -> Network:
+def select_network(
+    detectors: Mapping[str, Detector] | None, names: Sequence[str]
+) -> Network:
     """Select the detectors that form a network.
 
     Parameters
     ----------
     detectors
-        Available detectors keyed by name.
+        Available detectors keyed by name, or None to use the detector catalog.
     names
         Names of the detectors in the network, in any order.
 
@@ -172,6 +174,8 @@ def select_network(detectors: Mapping[str, Detector], names: Sequence[str]) -> N
     """
     if len(set(names)) != len(names):
         raise ValueError(f"duplicate detector names in network: {list(names)}")
+    if detectors is None:
+        detectors = _detector_catalog()
     missing = sorted(set(names) - detectors.keys())
     if missing:
         available = ", ".join(sorted(detectors)) or "(none)"

@@ -182,6 +182,7 @@ class Detector(BaseModel):
         right_ascension: ArrayLike,
         declination: ArrayLike,
         polarization_angle: ArrayLike,
+        coa_time: ArrayLike = 0.0,
     ) -> jax.Array:
         """Project radiation-frame polarizations, with a final frequency axis.
 
@@ -201,6 +202,9 @@ class Detector(BaseModel):
             Source declination in radians.
         polarization_angle
             Polarization angle in radians.
+        coa_time
+            Geocentric arrival time in seconds relative to the waveform's time
+            origin. Leave at zero if the polarizations include the arrival phase.
         """
         return projection.project_polarizations_fd(
             self.geometry.response_tensor,
@@ -212,4 +216,5 @@ class Detector(BaseModel):
             right_ascension=right_ascension,
             declination=declination,
             polarization_angle=polarization_angle,
+            coa_time=coa_time,
         )

@@ -356,7 +356,7 @@ def test_pure_noise_matches_the_pair_scale(
             empty,
             generator,
             TRIANGLE,
-            chunk_size=8,
+            waveform_batch_size=8,
             seed=draw,
             segment_duration=segment_duration,
             simulate_detector_noise=True,
@@ -381,35 +381,36 @@ def test_pure_noise_matches_the_pair_scale(
     assert abs(residuals.var() - 1.0) < variance_bound
 
 
-@pytest.mark.parametrize("chunk_size,batch_size", [(8, 7), (3, 11), (128, 64)])
 @pytest.mark.parametrize("noise", [False, True])
-def test_spectra_do_not_depend_on_the_segment_batch_size(
+def test_spectra_do_not_depend_on_the_batch_size(
     population: Pool,
     generator: WaveformGenerator,
-    chunk_size: int,
-    batch_size: int,
+    monkeypatch: pytest.MonkeyPatch,
     noise: bool,
 ) -> None:
-    reference = _simulate(
-        population,
-        generator,
-        TRIANGLE,
-        chunk_size=8,
-        segment_duration=60.0,
-        segment_batch_size=64,
-        simulate_detector_noise=noise,
-    )
-    batched = _simulate(
-        population,
-        generator,
-        TRIANGLE,
-        chunk_size=chunk_size,
-        segment_duration=60.0,
-        segment_batch_size=batch_size,
-        simulate_detector_noise=noise,
-    )
+    counts = np.array([0, 2, 7, 0, 3, 0, 1, 0, 0])
+    total = counts.sum()
+    sources = {name: column[:total] for name, column in population.items()}
+    sources["coa_time"] = np.linspace(-12.0, 12.0, total)
+    monkeypatch.setattr(background_module, "_draw_events", lambda *_: (sources, counts))
+    draws = [
+        simulate_background(
+            jax.random.key(0),
+            sources,
+            generator,
+            TRIANGLE,
+            poisson_rate=0.05,
+            num_segments=len(counts),
+            segment_duration=60.0,
+            waveform_batch_size=size,
+            simulate_detector_noise=noise,
+        )
+        for size in (128, 4)
+    ]
+    reference, batched = draws
 
-    np.testing.assert_array_equal(batched.segment_counts, reference.segment_counts)
+    np.testing.assert_array_equal(batched.segment_counts, counts)
+    np.testing.assert_array_equal(counts, reference.segment_counts)
     assert_close(batched.pair_spectral_density, reference.pair_spectral_density)
 
 
@@ -442,7 +443,7 @@ def test_source_arrival_times_set_interference_without_detector_noise(
         poisson_rate=10.0,
         num_segments=1,
         segment_duration=seconds,
-        chunk_size=1,
+        waveform_batch_size=1,
     )
     ratio = 1 / np.sqrt(seconds * WAVEFORM.frequency_resolution)
     expected = 1 - ratio if opposite_phase else 1 + ratio
@@ -463,7 +464,7 @@ def test_noisy_background_averages_to_the_incoherent_signal(
                 population,
                 generator,
                 PAIR,
-                chunk_size=8,
+                waveform_batch_size=8,
                 seed=draw,
                 segment_duration=segment_duration,
                 simulate_detector_noise=True,
@@ -523,13 +524,15 @@ def test_noise_toggle_preserves_the_chosen_sources_and_arrival_times(
         "astrogwb.detector.sensitivity.Sensitivity.__call__",
         lambda self, frequencies: np.zeros_like(frequencies),
     )
-    quiet = _simulate(population, generator, PAIR, segment_duration=60.0, chunk_size=8)
+    quiet = _simulate(
+        population, generator, PAIR, segment_duration=60.0, waveform_batch_size=8
+    )
     with_noise = _simulate(
         population,
         generator,
         PAIR,
         segment_duration=60.0,
-        chunk_size=8,
+        waveform_batch_size=8,
         simulate_detector_noise=True,
     )
     np.testing.assert_array_equal(quiet.segment_counts, with_noise.segment_counts)
@@ -550,7 +553,11 @@ def test_simulation_uses_the_supplied_generator_instance(population: Pool) -> No
     first = ScaledGenerator(WAVEFORM, amplitude=1.0)
     second = ScaledGenerator(WAVEFORM, amplitude=2.0)
     assert first == second
-    reference = _simulate(population, first, PAIR, segment_duration=60.0, chunk_size=8)
-    scaled = _simulate(population, second, PAIR, segment_duration=60.0, chunk_size=8)
+    reference = _simulate(
+        population, first, PAIR, segment_duration=60.0, waveform_batch_size=8
+    )
+    scaled = _simulate(
+        population, second, PAIR, segment_duration=60.0, waveform_batch_size=8
+    )
     assert np.any(reference.pair_spectral_density)
     assert_close(scaled.pair_spectral_density, 4 * reference.pair_spectral_density)
