@@ -9,11 +9,10 @@ pool and its rate. The pool size only controls how many distinct mergers are ava
 .. code:: python
 
    from astrogwb.background.simulation import simulate_background
-   from astrogwb.detector import load_network, network_pairs, register_network
+   from astrogwb.detector import load_detector, network_pairs
    from astrogwb.waveform import waveform_generator
 
-   register_network("HL", {"H1", "L1"})
-   hl = load_network("HL")
+   hl = {name: load_detector(name) for name in ("H1", "L1")}
    generator = waveform_generator(waveform_config)
    draw = simulate_background(
        key, sources, generator, hl,

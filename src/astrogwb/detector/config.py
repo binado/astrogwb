@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import tomllib
 from collections.abc import Callable, Mapping, Sequence
-from collections.abc import Set as AbstractSet
 from functools import cache
 from itertools import combinations
 from pathlib import Path
@@ -182,9 +181,6 @@ def select_network(detectors: Mapping[str, Detector], names: Sequence[str]) -> N
     return {name: detectors[name] for name in sorted(names)}
 
 
-_NETWORKS: dict[str, frozenset[str]] = {}
-
-
 @cache
 def _detector_catalog() -> dict[str, Detector]:
     with (_DETECTOR_DATA / "geometry.toml").open("rb") as file:
@@ -210,28 +206,6 @@ def register_detector(detector: Detector) -> None:
     catalog[name] = detector
 
 
-def register_network(name: str, members: AbstractSet[str]) -> None:
-    """Register a non-empty set of detector names without replacing an existing network.
-
-    Parameters
-    ----------
-    name
-        Non-blank network name.
-    members
-        Names of already registered detectors.
-    """
-    if not name.strip():
-        raise ValueError("network names must be non-empty")
-    if name in _NETWORKS:
-        raise ValueError(f"network {name!r} is already registered")
-    if not members:
-        raise ValueError(f"network {name!r} must be non-empty")
-    missing = sorted(members - _detector_catalog().keys())
-    if missing:
-        raise ValueError(f"network {name!r} contains undefined detectors: {missing}")
-    _NETWORKS[name] = frozenset(members)
-
-
 def load_detector(name: str) -> Detector:
     """Load a registered detector without reading its PSD curve.
 
@@ -241,14 +215,3 @@ def load_detector(name: str) -> Detector:
         Name to look up.
     """
     return _detector_catalog()[name]
-
-
-def load_network(name: str) -> Network:
-    """Return a fresh mapping of registered detectors keyed by sorted name.
-
-    Parameters
-    ----------
-    name
-        Name of a registered network.
-    """
-    return {member: load_detector(member) for member in sorted(_NETWORKS[name])}

@@ -5,8 +5,8 @@ Detector networks
 -----------------
 
 Pass a mapping from detector names to ``Detector`` instances to the response,
-noise, estimation, and likelihood APIs. Use ``load_network(name)`` to resolve
-a registered network. ``network_pairs(network)`` replaces ``pair_names()`` and
+noise, estimation, and likelihood APIs. Build one from the
+packaged catalog with ``{name: load_detector(name) for name in names}``. ``network_pairs(network)`` replaces ``pair_names()`` and
 gives the canonical order of pair rows.
 
 If you stored a pair array from an unsorted detector sequence, use the detector

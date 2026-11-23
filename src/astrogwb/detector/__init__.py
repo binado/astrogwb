@@ -2,11 +2,9 @@ from .config import (
     Network,
     load_detector,
     load_detectors_from_file,
-    load_network,
     map_over_pairs,
     network_pairs,
     register_detector,
-    register_network,
     select_network,
 )
 from .effective_psd import (
@@ -50,7 +48,6 @@ __all__ = [
     "isotropic_overlap_reduction_function",
     "load_detector",
     "load_detectors_from_file",
-    "load_network",
     "load_sensitivity",
     "load_sensitivity_map",
     "map_over_pairs",
@@ -62,7 +59,6 @@ __all__ = [
     "pair_weights",
     "point_source_overlap_reduction_function",
     "register_detector",
-    "register_network",
     "relative_orientation",
     "resolve_psd_path",
     "select_network",
