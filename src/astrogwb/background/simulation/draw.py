@@ -70,10 +70,8 @@ A background is stored with :meth:`BackgroundDraw.write` together with the
 
 from __future__ import annotations
 
-import json
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping
 from functools import partial
-from pathlib import Path
 from typing import NamedTuple
 
 import jax
@@ -82,28 +80,20 @@ import numpy as np
 from jax.typing import ArrayLike
 from numpy.typing import NDArray
 
-from astrogwb import __version__
-from astrogwb.background.simulation.config import SimulationConfig
+from astrogwb.background.simulation.result import BackgroundDraw
 from astrogwb.detector import Network, network_pairs
 from astrogwb.detector.projection import project_polarizations_fd
 from astrogwb.frequency import bin_widths
 from astrogwb.populations.io import _SKY_COLUMNS as SKY_COLUMNS
-from astrogwb.utils.io import atomic_h5, h5py
+from astrogwb.utils import require_x64
 from astrogwb.waveform.base import WaveformGenerator
 
 __all__ = [
-    "BackgroundDraw",
     "project_background",
     "simulate_background",
 ]
 
 type Polarizations = Callable[[Mapping[str, ArrayLike]], tuple[jax.Array, jax.Array]]
-
-#: The layout version of the files :meth:`BackgroundDraw.write` writes.
-_FORMAT_VERSION = 2
-
-#: Root attributes :meth:`BackgroundDraw.write` owns.
-_RESERVED_ATTRS = frozenset({"metadata", "version", "format_version"})
 
 #: :math:`\langle K_{ab} \rangle = I \gamma_{ab}` over this, the factor in
 #: :math:`Y_{ab} = 5 D_{ab} / T`.
@@ -114,165 +104,17 @@ _PAIR_RESPONSE_DENOMINATOR = 5.0
 _MODE_TOLERANCE = 1e-6
 
 
-class BackgroundDraw(NamedTuple):
-    """One realized background projected onto a detector network.
-
-    Attributes
-    ----------
-    frequencies
-        The frequency grid in Hz, ``(F,)``.
-    pair_spectral_density
-        Pair spectra :math:`Y_{ab}` in :math:`\\mathrm{Hz}^{-1}`, with shape
-        ``(pairs, frequencies)``. The pair axis follows
-        :func:`~astrogwb.detector.network_pairs`.
-    segment_counts
-        The number of events in each segment, ``(num_segments,)``. The
-        projection of :func:`project_background` has one entry for the whole
-        observation.
-    """
-
-    frequencies: NDArray[np.float64]
-    pair_spectral_density: NDArray[np.float64]
-    segment_counts: NDArray[np.int64]
-
-    def write(
-        self,
-        path: str | Path,
-        config: SimulationConfig,
-        /,
-        **attrs: str | float,
-    ) -> Path:
-        """Write the background and the configuration it was simulated with, atomically.
-
-        The file holds the datasets ``frequencies``, ``segment_counts`` and
-        ``pair_spectral_density``. Its root attributes
-        are ``metadata``, the configuration as JSON, ``format_version``, the
-        integer layout version :meth:`read` keys on, and ``version``, the
-        astrogwb version that wrote it (informational), plus any ``attrs``.
-
-        Parameters
-        ----------
-        path
-            File path.
-        config
-            The configuration the background was simulated with.
-        **attrs
-            Extra root attributes, written in the same atomic write and read
-            back by :meth:`read_attrs`.
-
-        Returns
-        -------
-        pathlib.Path
-            The file written.
-
-        Raises
-        ------
-        ValueError
-            If ``attrs`` uses a reserved key (``metadata``, ``version`` or
-            ``format_version``). Nothing is written.
-        """
-        clashes = sorted(_RESERVED_ATTRS.intersection(attrs))
-        if clashes:
-            raise ValueError(f"attrs may not use the reserved keys {clashes}")
-        with atomic_h5(path) as file:
-            file.attrs["metadata"] = json.dumps(config.to_metadata())
-            file.attrs["version"] = __version__
-            file.attrs["format_version"] = _FORMAT_VERSION
-            for name, value in attrs.items():
-                file.attrs[name] = value
-            file.create_dataset("frequencies", data=self.frequencies)
-            file.create_dataset("segment_counts", data=self.segment_counts)
-            file.create_dataset(
-                "pair_spectral_density", data=self.pair_spectral_density
-            )
-        return Path(path)
-
-    @classmethod
-    def read(cls, path: str | Path) -> tuple[BackgroundDraw, SimulationConfig]:
-        """Read a background and its configuration written by :meth:`write`.
-
-        Parameters
-        ----------
-        path
-            File path.
-
-        Returns
-        -------
-        BackgroundDraw
-            The background's pair spectra in canonical order.
-        SimulationConfig
-            The configuration it was simulated with.
-
-        Raises
-        ------
-        ValueError
-            If the file's ``format_version`` is missing or unsupported.
-        """
-        with h5py.File(path, "r") as file:
-            _check_format(path, file.attrs)
-            config = SimulationConfig.from_metadata(json.loads(file.attrs["metadata"]))
-            draw = cls(
-                np.asarray(file["frequencies"][()], dtype=np.float64),
-                np.asarray(file["pair_spectral_density"][()], dtype=np.float64),
-                np.asarray(file["segment_counts"][()], dtype=np.int64),
-            )
-        return draw, config
-
-    @staticmethod
-    def read_attrs(path: str | Path) -> dict[str, str | float | int]:
-        """The extra root attributes :meth:`write` stored as ``attrs``.
-
-        Parameters
-        ----------
-        path
-            File path.
-
-        Returns
-        -------
-        dict
-            The attributes other than the reserved ``metadata``, ``version``
-            and ``format_version``, as Python scalars.
-
-        Raises
-        ------
-        ValueError
-            As for :meth:`read`, if the file's format is not readable.
-        """
-        with h5py.File(path, "r") as file:
-            _check_format(path, file.attrs)
-            return {
-                name: value.item() if isinstance(value, np.generic) else value
-                for name, value in file.attrs.items()
-                if name not in _RESERVED_ATTRS
-            }
-
-
-def _check_format(path: str | Path, attrs: Mapping[str, object]) -> None:
-    """Raise unless the file's layout is one this version can read."""
-    version = attrs.get("version")
-    format_version = attrs.get("format_version")
-    if format_version == _FORMAT_VERSION:
-        return
-    raise ValueError(
-        f"{path} has format_version {format_version} (written by astrogwb "
-        f"{version}); astrogwb {__version__} reads format version {_FORMAT_VERSION}; "
-        "regenerate the background"
-    )
-
-
-def _event_columns(
-    sources: Mapping[str, ArrayLike], required: Sequence[str] = SKY_COLUMNS
-) -> dict[str, NDArray]:
+def _event_columns(sources: Mapping[str, ArrayLike]) -> dict[str, NDArray]:
     """The columns of an event pool as host arrays, validated.
 
     Raises
     ------
     ValueError
-        If a ``required`` column is missing, a column is not one-dimensional
+        If a sky column is missing, a column is not one-dimensional
         or the columns differ in length, or a column holds a non-finite value.
     """
     columns = {name: np.asarray(values) for name, values in sources.items()}
-    missing = [name for name in required if name not in columns]
+    missing = [name for name in SKY_COLUMNS if name not in columns]
     if missing:
         raise ValueError(f"event pool is missing the columns {missing}")
     size = len(next(iter(columns.values()), ()))
@@ -287,6 +129,7 @@ def _event_columns(
     return columns
 
 
+@require_x64
 def project_background(
     sources: Mapping[str, ArrayLike],
     generator: WaveformGenerator,
@@ -330,13 +173,12 @@ def project_background(
         raise ValueError("observation_seconds must be positive")
     if chunk_size < 1:
         raise ValueError("chunk_size must be positive")
-    jax.config.update("jax_enable_x64", True)
     columns = _event_columns(sources)
     count = len(columns["right_ascension"])
     if count:
         generator.check_sources(columns)
     frequencies = generator.frequencies
-    geometry = _network_geometry(network)
+    geometry = _Geometry.from_network(network)
 
     incoherent = jnp.zeros((geometry.num_pairs, frequencies.shape[0]))
     for _, chunk, num_valid in _padded_chunks(columns, chunk_size):
@@ -354,6 +196,7 @@ def project_background(
     )
 
 
+@require_x64
 def simulate_background(
     key: jax.Array,
     sources: Mapping[str, ArrayLike],
@@ -416,7 +259,6 @@ def simulate_background(
     """
     if min(chunk_size, segment_batch_size) < 1:
         raise ValueError("chunk and segment batch sizes must be positive")
-    jax.config.update("jax_enable_x64", True)
     event_key, noise_key = jax.random.split(key)
     columns, counts = _draw_events(
         event_key,
@@ -428,27 +270,55 @@ def simulate_background(
     if counts.any():
         generator.check_sources(columns)
     frequencies = generator.frequencies
-    modes = _modes_per_bin(frequencies, segment_duration)
-    geometry = _network_geometry(network)
+    ratio = _fluctuation_scale(frequencies, segment_duration)
+    geometry = _Geometry.from_network(network)
     psds = _network_psds(network, frequencies) if simulate_detector_noise else None
 
-    incoherent, coherent = _segmented_pair_powers(
-        columns,
-        counts,
-        frequencies,
-        geometry,
-        generator.polarizations,
-        noise_key=noise_key,
-        psds=psds,
-        segment_duration=segment_duration,
-        chunk_size=chunk_size,
-        segment_batch_size=segment_batch_size,
-    )
+    # Segments are processed segment_batch_size at a time and the rows of a
+    # batch chunk_size at a time, so each kernel compiles once. The row
+    # bookkeeping stays in NumPy: its lengths vary with the draw, and every
+    # new length would compile a new jax operation.
+    batch_size = min(segment_batch_size, num_segments)
+    segment_of_row = np.repeat(np.arange(num_segments), counts)
+    first_row = np.concatenate([[0], np.cumsum(counts)])
+    num_frequencies = frequencies.shape[0]
+    incoherent = jnp.zeros((geometry.num_pairs, num_frequencies))
+    coherent = jnp.zeros_like(incoherent)
+    for low in range(0, num_segments, batch_size):
+        high = min(low + batch_size, num_segments)
+        rows = slice(first_row[low], first_row[high])
+        batch_columns = {name: column[rows] for name, column in columns.items()}
+        batch_segment = segment_of_row[rows] - low
+
+        strain = jnp.zeros(
+            (batch_size, geometry.num_detectors, num_frequencies), complex
+        )
+        for start, chunk, num_valid in _padded_chunks(batch_columns, chunk_size):
+            chunk_power, chunk_strain = _chunk_pair_power_and_segment_strain(
+                frequencies,
+                chunk,
+                num_valid,
+                _pad(batch_segment[start : start + chunk_size], chunk_size),
+                geometry,
+                polarizations=generator.polarizations,
+                num_segments=batch_size,
+            )
+            incoherent += chunk_power
+            strain += chunk_strain
+
+        coherent += _segment_batch_power(
+            noise_key,
+            jnp.arange(low, low + batch_size),
+            strain,
+            psds,
+            geometry,
+            segment_duration,
+            num_segments,
+        )
 
     # Keep the incoherent mean and scale the zero-mean fluctuations by r_i.
-    ratio = 1.0 / jnp.sqrt(modes)
     blended = (1.0 - ratio) * incoherent + ratio * coherent
-    observation_seconds = len(counts) * segment_duration
+    observation_seconds = num_segments * segment_duration
     spectrum = _PAIR_RESPONSE_DENOMINATOR * blended / observation_seconds
     return BackgroundDraw(np.asarray(frequencies), np.asarray(spectrum), counts)
 
@@ -504,32 +374,41 @@ class _Geometry(NamedTuple):
     first: jax.Array
     second: jax.Array
 
+    @classmethod
+    def from_network(cls, network: Network) -> _Geometry:
+        names = sorted(network)
+        index = {name: position for position, name in enumerate(names)}
+        pairs = network_pairs(network)
+        return cls(
+            tensors=jnp.stack(
+                [network[name].geometry.response_tensor for name in names]
+            ),
+            locations=jnp.stack([network[name].geometry.location for name in names]),
+            first=jnp.array([index[first] for first, _ in pairs], dtype=int),
+            second=jnp.array([index[second] for _, second in pairs], dtype=int),
+        )
+
+    @property
+    def num_detectors(self) -> int:
+        return self.tensors.shape[0]
+
     @property
     def num_pairs(self) -> int:
         return self.first.shape[0]
 
 
-def _network_geometry(network: Network) -> _Geometry:
-    names = sorted(network)
-    index = {name: position for position, name in enumerate(names)}
-    pairs = network_pairs(network)
-    return _Geometry(
-        tensors=jnp.stack([network[name].geometry.response_tensor for name in names]),
-        locations=jnp.stack([network[name].geometry.location for name in names]),
-        first=jnp.array([index[first] for first, _ in pairs], dtype=int),
-        second=jnp.array([index[second] for _, second in pairs], dtype=int),
-    )
-
-
 def _network_psds(network: Network, frequencies: ArrayLike) -> jax.Array:
-    """The ``(D, F)`` noise PSDs in the detector order of :func:`_network_geometry`."""
+    """The ``(D, F)`` noise PSDs in the detector order of :class:`_Geometry`."""
     return jnp.stack(
         [network[name].sensitivity(frequencies) for name in sorted(network)]
     )
 
 
-def _modes_per_bin(frequencies: ArrayLike, segment_duration: float) -> jax.Array:
-    """The ``(F,)`` count of a segment's Fourier modes in each frequency bin.
+def _fluctuation_scale(frequencies: ArrayLike, segment_duration: float) -> jax.Array:
+    """The ``(F,)`` scale :math:`r_i = 1 / \\sqrt{\\tau \\Delta f_i}` of each bin.
+
+    :math:`\\tau \\Delta f_i` is the count of a segment's Fourier modes in bin
+    :math:`i`.
 
     Raises
     ------
@@ -545,7 +424,7 @@ def _modes_per_bin(frequencies: ArrayLike, segment_duration: float) -> jax.Array
             "integer of at least 1, e.g. a 1 Hz linear grid with a power-of-two "
             "segment"
         )
-    return modes
+    return 1.0 / jnp.sqrt(modes)
 
 
 def _pad(values: NDArray, size: int) -> NDArray:
@@ -681,69 +560,3 @@ def _segment_batch_power(
         strain = strain + jax.vmap(noise)(segment_ids)
     real = (segment_ids < num_segments)[:, None, None]
     return _pair_power(jnp.where(real, strain, 0.0), geometry)
-
-
-def _segmented_pair_powers(
-    columns: Mapping[str, NDArray],
-    counts: NDArray[np.int64],
-    frequencies: jax.Array,
-    geometry: _Geometry,
-    polarizations: Polarizations,
-    *,
-    noise_key: jax.Array,
-    psds: jax.Array | None,
-    segment_duration: float,
-    chunk_size: int,
-    segment_batch_size: int,
-) -> tuple[jax.Array, jax.Array]:
-    """The incoherent and coherent ``(P, F)`` cross-powers of a segmented draw.
-
-    The incoherent power is :math:`\\sum_i K_{ab,i}` and the coherent power
-    :math:`C_{ab}`, the cross-power of each segment's summed strain plus
-    noise, summed over segments. ``columns`` are ordered by segment, segment
-    ``s`` holding ``counts[s]`` consecutive rows.
-
-    Segments are processed ``segment_batch_size`` at a time, and the rows of a
-    batch ``chunk_size`` at a time, so that both kernels compile once. The row
-    bookkeeping stays in NumPy: its lengths vary with the draw, and every new
-    length would compile a new jax operation.
-    """
-    num_segments = len(counts)
-    batch_size = min(segment_batch_size, num_segments)
-    segment_of_row = np.repeat(np.arange(num_segments), counts)
-    first_row = np.concatenate([[0], np.cumsum(counts)])
-    num_detectors = geometry.tensors.shape[0]
-    num_frequencies = frequencies.shape[0]
-
-    incoherent = jnp.zeros((geometry.num_pairs, num_frequencies))
-    coherent = jnp.zeros_like(incoherent)
-    for low in range(0, num_segments, batch_size):
-        high = min(low + batch_size, num_segments)
-        rows = slice(first_row[low], first_row[high])
-        batch_columns = {name: column[rows] for name, column in columns.items()}
-        batch_segment = segment_of_row[rows] - low
-
-        strain = jnp.zeros((batch_size, num_detectors, num_frequencies), complex)
-        for start, chunk, num_valid in _padded_chunks(batch_columns, chunk_size):
-            chunk_power, chunk_strain = _chunk_pair_power_and_segment_strain(
-                frequencies,
-                chunk,
-                num_valid,
-                _pad(batch_segment[start : start + chunk_size], chunk_size),
-                geometry,
-                polarizations=polarizations,
-                num_segments=batch_size,
-            )
-            incoherent += chunk_power
-            strain += chunk_strain
-
-        coherent += _segment_batch_power(
-            noise_key,
-            jnp.arange(low, low + batch_size),
-            strain,
-            psds,
-            geometry,
-            segment_duration,
-            num_segments,
-        )
-    return incoherent, coherent
