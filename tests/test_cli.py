@@ -49,7 +49,13 @@ assert jax.device_count() == 2, f"backend initialized early: {{jax.devices()}}"
     assert result.returncode == 0, result.stderr
 
 
-def test_cli_rejects_invalid_segment_count(capsys: pytest.CaptureFixture[str]) -> None:
+@pytest.mark.parametrize(
+    ("option", "value"),
+    [("--num-segments", "0"), ("--batch-size", "0"), ("--batch-size", "-1")],
+)
+def test_cli_rejects_nonpositive_sizes(
+    capsys: pytest.CaptureFixture[str], option: str, value: str
+) -> None:
     with pytest.raises(SystemExit) as error:
         main(
             [
@@ -58,22 +64,22 @@ def test_cli_rejects_invalid_segment_count(capsys: pytest.CaptureFixture[str]) -
                 "pool.csv",
                 "--waveform-config",
                 "waveform.toml",
-                "--detector-config",
-                "detectors.toml",
                 "--network",
                 "R1,S1",
                 "--poisson-rate",
                 "1",
                 "--num-segments",
-                "0",
+                "2",
                 "--segment-duration",
                 "1",
+                option,
+                value,
                 "--seed",
                 "1",
             ]
         )
     assert error.value.code == 2
-    assert "--num-segments" in capsys.readouterr().err
+    assert f"argument {option}: must be at least 1" in capsys.readouterr().err
 
 
 @pytest.fixture
@@ -89,6 +95,7 @@ def inputs(tmp_path: Path) -> dict[str, Path]:
         name: load_detector(name).model_dump(mode="json", exclude_none=True)
         for name in names
     }
+    detectors["S1"]["label"] = "S1 from the TOML"
     detector.write_bytes(tomli_w.dumps({"detectors": detectors}).encode())
     return {
         "population": write_population_csv(tmp_path / "events.csv"),
@@ -98,21 +105,26 @@ def inputs(tmp_path: Path) -> dict[str, Path]:
 
 
 def _simulate(
-    output: Path, inputs: dict[str, Path], *options: str, network: str = "R1,S1"
+    output: Path,
+    inputs: dict[str, Path],
+    *options: str,
+    network: str = "R1,S1",
+    custom_detectors: bool = True,
 ) -> None:
+    detector_options = ["--detector-config", str(inputs["detector"])]
     main(
         [
             "simulate",
             str(output),
             str(inputs["population"]),
             *("--waveform-config", str(inputs["waveform"])),
-            *("--detector-config", str(inputs["detector"])),
+            *(detector_options if custom_detectors else []),
             *("--network", network),
             *("--poisson-rate", str(8.0)),
             *("--num-segments", "2"),
             *("--segment-duration", "1"),
             *("--seed", "41"),
-            *("--chunk-size", "8"),
+            *("--batch-size", "8"),
             *options,
         ],
     )
@@ -141,7 +153,7 @@ def test_a_simulate_run_writes_one_file_with_its_config(
         poisson_rate=config.poisson_rate,
         num_segments=2,
         segment_duration=1,
-        chunk_size=8,
+        batch_size=8,
         simulate_detector_noise=noise,
     )
     np.testing.assert_array_equal(draw.segment_counts, direct.segment_counts)
@@ -154,13 +166,27 @@ def test_a_simulate_run_writes_one_file_with_its_config(
     with h5py.File(output, "r") as file:
         metadata = json.loads(file.attrs["metadata"])
     assert set(metadata["network"]) == {"R1", "S1"}
+    assert metadata["network"]["S1"]["label"] == "S1 from the TOML"
     assert [path.name for path in tmp_path.glob("*.h5")] == ["41-0.h5"]
+
+
+def test_simulate_uses_the_detector_catalog_by_default(
+    tmp_path: Path, inputs: dict[str, Path]
+) -> None:
+    output = tmp_path / "41-0.h5"
+
+    _simulate(output, inputs, network="L1,H1", custom_detectors=False)
+
+    _, config = BackgroundDraw.read(output)
+    assert tuple(config.network) == ("H1", "L1")
+    assert config.network == {name: load_detector(name) for name in ("H1", "L1")}
 
 
 @pytest.mark.parametrize(
     ("network", "message"),
     [
         ("R1,X9", "unknown detectors.*X9"),
+        ("R1,H1", "unknown detectors.*H1"),
         ("R1,R1", "duplicate detector names"),
         ("R1", "at least two detectors"),
         ("R1,,S1", "comma-separated detector names"),
