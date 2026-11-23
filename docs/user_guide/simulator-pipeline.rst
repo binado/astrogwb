@@ -37,9 +37,10 @@ Each detector receives both polarizations with its antenna response and geometri
 The code uses fixed sidereal geometry (GMST zero) and places the complete waveform in
 the assigned segment. The output contains one row per detector pair in
 ``network_pairs(hl)`` order. ``batch_size`` limits waveforms per kernel call
-and defaults to 1024. The simulator accumulates coherent strain for groups of up
-to 1024 consecutive segments and adds noise after their waveform calls finish.
-For a fixed seed, each segment receives the same noise across waveform batch sizes.
+and ``segment_batch_size`` limits the consecutive segments whose coherent strain
+is held in memory at once; both default to 1024 and set cost, not the result.
+Noise is added to a segment batch after its waveform calls finish. For a fixed
+seed, each segment receives the same noise for any batch sizes.
 
 Command line
 ------------
@@ -67,7 +68,8 @@ from the bundled catalog. If you pass ``--detector-config detectors.toml`` with
 ``--network H1,L1``, the TOML file must define both ``[detectors.H1]`` and
 ``[detectors.L1]``. To select from that file in Python, use
 ``select_network(load_detectors_from_file(Path("detectors.toml")), ["H1", "L1"])``.
-Use ``--batch-size`` to set the waveform limit per kernel call.
+Use ``--batch-size`` and ``--segment-batch-size`` to set the waveform limit per
+kernel call and the segment limit per memory batch.
 
 The catalogue must hold ``distance`` (luminosity distance in Mpc, renamed
 ``luminosity_distance``), the sky columns, and the detector-frame or source-frame

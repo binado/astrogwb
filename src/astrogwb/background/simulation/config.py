@@ -24,8 +24,8 @@ class SimulationConfig(BaseModel):
 
     ``population``, ``population_root`` and ``seed`` record the pool location
     and the draw's seed.
-    The root is ignored for CSV files. Chunk and batch sizes are execution
-    settings and omitted from the file.
+    The root is ignored for CSV files. The waveform and segment batch sizes are
+    execution settings and omitted from the file.
     ``network`` is stored in detector-name order.
     """
 

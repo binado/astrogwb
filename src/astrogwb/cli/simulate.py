@@ -89,6 +89,12 @@ def configure_parser(command: argparse.ArgumentParser) -> None:
         help="Maximum waveforms per kernel call (default: %(default)s).",
     )
     command.add_argument(
+        "--segment-batch-size",
+        type=_positive_int,
+        default=1024,
+        help="Maximum segments held in memory at once (default: %(default)s).",
+    )
+    command.add_argument(
         "--platform", default="auto", help="JAX platform: auto, cpu, cuda or tpu."
     )
     command.add_argument(
@@ -109,6 +115,7 @@ def simulate(
     population_root: str = "source_parameters",
     simulate_detector_noise: bool = False,
     batch_size: int = 1024,
+    segment_batch_size: int = 1024,
     platform: str = "auto",
     cpu_threads: int | None = None,
 ) -> None:
@@ -144,6 +151,8 @@ def simulate(
         Add independent detector noise to every segment.
     batch_size
         Maximum waveforms per kernel call.
+    segment_batch_size
+        Maximum segments whose coherent strain is held in memory at once.
     platform
         JAX execution platform.
     cpu_threads
@@ -188,6 +197,7 @@ def simulate(
         num_segments=config.num_segments,
         segment_duration=config.segment_duration,
         batch_size=batch_size,
+        segment_batch_size=segment_batch_size,
         simulate_detector_noise=config.simulate_detector_noise,
     )
     draw.write(output, config)

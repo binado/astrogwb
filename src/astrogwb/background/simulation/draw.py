@@ -103,8 +103,6 @@ _PAIR_RESPONSE_DENOMINATOR = 5.0
 #: Fourier modes, for the rounding of a grid's spacing.
 _MODE_TOLERANCE = 1e-6
 
-_SEGMENTS_PER_BATCH = 1024
-
 
 def _event_columns(sources: Mapping[str, ArrayLike]) -> dict[str, NDArray]:
     """The columns of an event pool as host arrays, validated.
@@ -209,6 +207,7 @@ def simulate_background(
     num_segments: int,
     segment_duration: float,
     batch_size: int = 1024,
+    segment_batch_size: int = 1024,
     simulate_detector_noise: bool = False,
 ) -> BackgroundDraw:
     """Draw independent Poisson segment counts from a fixed physical event pool.
@@ -239,7 +238,10 @@ def simulate_background(
     segment_duration
         Segment length in seconds.
     batch_size
-        Maximum waveforms per kernel call.
+        Maximum waveforms per kernel call; sets cost, not the result.
+    segment_batch_size
+        Maximum segments whose coherent strain is held in memory at once; sets
+        cost, not the result.
     simulate_detector_noise
         Add independent detector noise to every segment.
 
@@ -256,8 +258,8 @@ def simulate_background(
         invalid, the draw needs more rows than the pool holds, or a bin is not
         a whole number of the segment's Fourier modes.
     """
-    if batch_size < 1:
-        raise ValueError("batch_size must be positive")
+    if min(batch_size, segment_batch_size) < 1:
+        raise ValueError("batch_size and segment_batch_size must be positive")
     event_key, noise_key = jax.random.split(key)
     columns, counts = _draw_events(
         event_key,
@@ -275,7 +277,7 @@ def simulate_background(
 
     # Keep segment and waveform shapes fixed across draws. Variable-length
     # row indexing stays on the host to avoid shape-dependent compilation.
-    segment_batch_size = min(_SEGMENTS_PER_BATCH, num_segments)
+    segment_batch_size = min(segment_batch_size, num_segments)
     segment_of_row = np.repeat(np.arange(num_segments), counts)
     first_row = np.concatenate([[0], np.cumsum(counts)])
     num_frequencies = frequencies.shape[0]
