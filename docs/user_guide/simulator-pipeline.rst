@@ -37,9 +37,9 @@ Each detector receives both polarizations with its antenna response and geometri
 The code uses fixed sidereal geometry (GMST zero) and places the complete waveform in
 the assigned segment. The output contains one row per detector pair in
 ``network_pairs(hl)`` order. ``batch_size`` limits waveforms per kernel call
-and defaults to 1024. The simulator packs whole segments together when they fit
-and accumulates the coherent strain of larger segments across multiple calls.
-For a fixed seed, each segment receives the same noise across batch sizes.
+and defaults to 1024. The simulator accumulates coherent strain for groups of up
+to 1024 consecutive segments and adds noise after their waveform calls finish.
+For a fixed seed, each segment receives the same noise across waveform batch sizes.
 
 Command line
 ------------

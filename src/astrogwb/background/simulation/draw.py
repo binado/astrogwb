@@ -103,6 +103,8 @@ _PAIR_RESPONSE_DENOMINATOR = 5.0
 #: Fourier modes, for the rounding of a grid's spacing.
 _MODE_TOLERANCE = 1e-6
 
+_SEGMENTS_PER_BATCH = 1024
+
 
 def _event_columns(sources: Mapping[str, ArrayLike]) -> dict[str, NDArray]:
     """The columns of an event pool as host arrays, validated.
@@ -181,7 +183,7 @@ def project_background(
     geometry = _Geometry.from_network(network)
 
     incoherent = jnp.zeros((geometry.num_pairs, frequencies.shape[0]))
-    for chunk, num_valid in _padded_chunks(columns, chunk_size):
+    for _, chunk, num_valid in _padded_chunks(columns, chunk_size):
         incoherent += _chunk_pair_power(
             frequencies,
             chunk,
@@ -237,8 +239,7 @@ def simulate_background(
     segment_duration
         Segment length in seconds.
     batch_size
-        Maximum waveforms per kernel call. Segments that fit are kept whole;
-        larger segments span multiple calls.
+        Maximum waveforms per kernel call.
     simulate_detector_noise
         Add independent detector noise to every segment.
 
@@ -272,60 +273,39 @@ def simulate_background(
     geometry = _Geometry.from_network(network)
     psds = _network_psds(network, frequencies) if simulate_detector_noise else None
 
-    packed, oversized, empty = _pack_segments(counts, batch_size)
+    # Keep segment and waveform shapes fixed across draws. Variable-length
+    # row indexing stays on the host to avoid shape-dependent compilation.
+    segment_batch_size = min(_SEGMENTS_PER_BATCH, num_segments)
+    segment_of_row = np.repeat(np.arange(num_segments), counts)
     first_row = np.concatenate([[0], np.cumsum(counts)])
-    segment_limit = min(batch_size, num_segments)
     num_frequencies = frequencies.shape[0]
     incoherent = jnp.zeros((geometry.num_pairs, num_frequencies))
     coherent = jnp.zeros_like(incoherent)
+    for low in range(0, num_segments, segment_batch_size):
+        high = min(low + segment_batch_size, num_segments)
+        rows = slice(first_row[low], first_row[high])
+        batch_columns = {name: column[rows] for name, column in columns.items()}
+        batch_segment = segment_of_row[rows] - low
 
-    for segments in packed:
-        chunk, num_valid, local_ids = _packed_rows(
-            columns, first_row, segments, batch_size
+        strain = jnp.zeros(
+            (segment_batch_size, geometry.num_detectors, num_frequencies), complex
         )
-        power, strain = _chunk_pair_power_and_segment_strain(
-            frequencies,
-            chunk,
-            num_valid,
-            local_ids,
-            geometry,
-            polarizations=generator.polarizations,
-            num_segments=segment_limit,
-        )
-        incoherent += power
-        coherent += _segment_batch_power(
-            noise_key,
-            _padded_segment_ids(segments, segment_limit, num_segments),
-            strain,
-            psds,
-            geometry,
-            segment_duration,
-            num_segments,
-        )
-
-    single_segment_ids = np.zeros(batch_size, dtype=int)
-    for segment in oversized:
-        rows = slice(first_row[segment], first_row[segment + 1])
-        segment_columns = {name: column[rows] for name, column in columns.items()}
-        strain = jnp.zeros((1, geometry.num_detectors, num_frequencies), complex)
-        # Sum the full segment strain before adding noise or taking cross-power
-        # so that events in different chunks still interfere.
-        for chunk, num_valid in _padded_chunks(segment_columns, batch_size):
+        for start, chunk, num_valid in _padded_chunks(batch_columns, batch_size):
             chunk_power, chunk_strain = _chunk_pair_power_and_segment_strain(
                 frequencies,
                 chunk,
                 num_valid,
-                single_segment_ids,
+                _pad(batch_segment[start : start + batch_size], batch_size),
                 geometry,
                 polarizations=generator.polarizations,
-                num_segments=1,
+                num_segments=segment_batch_size,
             )
             incoherent += chunk_power
             strain += chunk_strain
 
         coherent += _segment_batch_power(
             noise_key,
-            np.asarray([segment]),
+            jnp.arange(low, low + segment_batch_size),
             strain,
             psds,
             geometry,
@@ -333,75 +313,11 @@ def simulate_background(
             num_segments,
         )
 
-    if psds is not None and empty:
-        strain = jnp.zeros(
-            (segment_limit, geometry.num_detectors, num_frequencies), complex
-        )
-        for start in range(0, len(empty), segment_limit):
-            segments = empty[start : start + segment_limit]
-            coherent += _segment_batch_power(
-                noise_key,
-                _padded_segment_ids(segments, segment_limit, num_segments),
-                strain,
-                psds,
-                geometry,
-                segment_duration,
-                num_segments,
-            )
-
     # Keep the incoherent mean and scale the zero-mean fluctuations by r_i.
     blended = (1.0 - ratio) * incoherent + ratio * coherent
     observation_seconds = num_segments * segment_duration
     spectrum = _PAIR_RESPONSE_DENOMINATOR * blended / observation_seconds
     return BackgroundDraw(np.asarray(frequencies), np.asarray(spectrum), counts)
-
-
-def _pack_segments(
-    counts: NDArray[np.int64], batch_size: int
-) -> tuple[list[list[int]], list[int], list[int]]:
-    """Return first-fit decreasing batches, oversized IDs and empty IDs."""
-    ordinary = np.flatnonzero((counts > 0) & (counts <= batch_size))
-    order = np.argsort(-counts[ordinary], kind="stable")
-    batches: list[list[int]] = []
-    remaining: list[int] = []
-    for segment in ordinary[order].tolist():
-        count = int(counts[segment])
-        for batch, room in enumerate(remaining):
-            if count <= room:
-                batches[batch].append(segment)
-                remaining[batch] -= count
-                break
-        else:
-            batches.append([segment])
-            remaining.append(batch_size - count)
-    return (
-        batches,
-        np.flatnonzero(counts > batch_size).tolist(),
-        np.flatnonzero(counts == 0).tolist(),
-    )
-
-
-def _packed_rows(
-    columns: Mapping[str, NDArray],
-    first_row: NDArray,
-    segments: list[int],
-    batch_size: int,
-) -> tuple[dict[str, NDArray], int, NDArray]:
-    """Gather and pad a packed batch on the host to keep JAX shapes fixed."""
-    starts = first_row[segments]
-    ends = first_row[np.asarray(segments) + 1]
-    rows = np.concatenate([np.arange(start, end) for start, end in zip(starts, ends)])
-    local_ids = np.repeat(np.arange(len(segments)), ends - starts)
-    padded_rows = _pad(rows, batch_size)
-    return (
-        {name: column[padded_rows] for name, column in columns.items()},
-        len(rows),
-        _pad(local_ids, batch_size),
-    )
-
-
-def _padded_segment_ids(segments: list[int], size: int, num_segments: int) -> NDArray:
-    return np.pad(segments, (0, size - len(segments)), constant_values=num_segments)
 
 
 def _draw_events(
@@ -515,8 +431,8 @@ def _pad(values: NDArray, size: int) -> NDArray:
 
 def _padded_chunks(
     columns: Mapping[str, NDArray], size: int
-) -> Iterator[tuple[dict[str, NDArray], int]]:
-    """``(rows, num_valid)`` for consecutive chunks of ``size`` rows.
+) -> Iterator[tuple[int, dict[str, NDArray], int]]:
+    """``(start, rows, num_valid)`` for consecutive chunks of ``size`` rows.
 
     A Poisson count differs per realization and every distinct array shape is
     a compile, so the kernels only ever see chunks of one static ``size``: the
@@ -530,7 +446,7 @@ def _padded_chunks(
             name: _pad(column[start : start + size], size)
             for name, column in columns.items()
         }
-        yield rows, min(size, count - start)
+        yield start, rows, min(size, count - start)
 
 
 def _detector_strain(
@@ -639,6 +555,5 @@ def _segment_batch_power(
             )
 
         strain = strain + jax.vmap(noise)(segment_ids)
-    # Padding has a sentinel ID and must contribute zero even with noise on.
     real = (segment_ids < num_segments)[:, None, None]
     return _pair_power(jnp.where(real, strain, 0.0), geometry)

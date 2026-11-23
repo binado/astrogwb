@@ -381,15 +381,6 @@ def test_pure_noise_matches_the_pair_scale(
     assert abs(residuals.var() - 1.0) < variance_bound
 
 
-def test_first_fit_packs_whole_segments() -> None:
-    packed, oversized, empty = background_module._pack_segments(
-        np.array([6, 5, 3, 2]), 8
-    )
-
-    assert packed == [[0, 3], [1, 2]]
-    assert oversized == empty == []
-
-
 @pytest.mark.parametrize("noise", [False, True])
 def test_spectra_do_not_depend_on_the_batch_size(
     population: Pool,
