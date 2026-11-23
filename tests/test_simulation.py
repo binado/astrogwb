@@ -57,7 +57,7 @@ def _simulate(config: SimulationConfig) -> BackgroundDraw:
         num_segments=config.num_segments,
         segment_duration=config.segment_duration,
         simulate_detector_noise=config.simulate_detector_noise,
-        batch_size=BATCH_SIZE,
+        waveform_batch_size=BATCH_SIZE,
     )
 
 
@@ -241,7 +241,7 @@ def simulate_pool() -> Callable[[dict[str, np.ndarray]], BackgroundDraw]:
             poisson_rate=RATE_HZ,
             num_segments=2,
             segment_duration=SEGMENT_SECONDS,
-            batch_size=BATCH_SIZE,
+            waveform_batch_size=BATCH_SIZE,
         )
 
     return run

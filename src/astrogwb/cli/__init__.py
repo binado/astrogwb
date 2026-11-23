@@ -14,7 +14,7 @@ in ``[detectors.<name>]`` tables. The file carries the configuration, including
 the resolved detector definitions, as JSON in its ``metadata`` attribute,
 along with the astrogwb ``version`` that wrote it. Each segment includes source
 interference. ``--simulate-detector-noise`` also adds detector noise.
-``--batch-size`` limits the number of waveforms per kernel call.
+``--waveform-batch-size`` limits the number of waveforms per kernel call.
 
 A reader checks the file's format version. Runtime settings
 (--platform, --cpu-threads) are applied before the JAX backend initializes.

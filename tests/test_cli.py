@@ -51,7 +51,11 @@ assert jax.device_count() == 2, f"backend initialized early: {{jax.devices()}}"
 
 @pytest.mark.parametrize(
     ("option", "value"),
-    [("--num-segments", "0"), ("--batch-size", "0"), ("--batch-size", "-1")],
+    [
+        ("--num-segments", "0"),
+        ("--waveform-batch-size", "0"),
+        ("--waveform-batch-size", "-1"),
+    ],
 )
 def test_cli_rejects_nonpositive_sizes(
     capsys: pytest.CaptureFixture[str], option: str, value: str
@@ -124,7 +128,7 @@ def _simulate(
             *("--num-segments", "2"),
             *("--segment-duration", "1"),
             *("--seed", "41"),
-            *("--batch-size", "8"),
+            *("--waveform-batch-size", "8"),
             *options,
         ],
     )
@@ -153,7 +157,7 @@ def test_a_simulate_run_writes_one_file_with_its_config(
         poisson_rate=config.poisson_rate,
         num_segments=2,
         segment_duration=1,
-        batch_size=8,
+        waveform_batch_size=8,
         simulate_detector_noise=noise,
     )
     np.testing.assert_array_equal(draw.segment_counts, direct.segment_counts)

@@ -206,7 +206,7 @@ def simulate_background(
     poisson_rate: float,
     num_segments: int,
     segment_duration: float,
-    batch_size: int = 1024,
+    waveform_batch_size: int = 1024,
     segment_batch_size: int = 1024,
     simulate_detector_noise: bool = False,
 ) -> BackgroundDraw:
@@ -237,7 +237,7 @@ def simulate_background(
         Number of segments.
     segment_duration
         Segment length in seconds.
-    batch_size
+    waveform_batch_size
         Maximum waveforms per kernel call; sets cost, not the result.
     segment_batch_size
         Maximum segments whose coherent strain is held in memory at once; sets
@@ -258,8 +258,8 @@ def simulate_background(
         invalid, the draw needs more rows than the pool holds, or a bin is not
         a whole number of the segment's Fourier modes.
     """
-    if min(batch_size, segment_batch_size) < 1:
-        raise ValueError("batch_size and segment_batch_size must be positive")
+    if min(waveform_batch_size, segment_batch_size) < 1:
+        raise ValueError("waveform_batch_size and segment_batch_size must be positive")
     event_key, noise_key = jax.random.split(key)
     columns, counts = _draw_events(
         event_key,
@@ -292,12 +292,17 @@ def simulate_background(
         strain = jnp.zeros(
             (segment_batch_size, geometry.num_detectors, num_frequencies), complex
         )
-        for start, chunk, num_valid in _padded_chunks(batch_columns, batch_size):
+        for start, chunk, num_valid in _padded_chunks(
+            batch_columns, waveform_batch_size
+        ):
             chunk_power, chunk_strain = _chunk_pair_power_and_segment_strain(
                 frequencies,
                 chunk,
                 num_valid,
-                _pad(batch_segment[start : start + batch_size], batch_size),
+                _pad(
+                    batch_segment[start : start + waveform_batch_size],
+                    waveform_batch_size,
+                ),
                 geometry,
                 polarizations=generator.polarizations,
                 num_segments=segment_batch_size,
