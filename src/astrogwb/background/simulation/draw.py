@@ -348,8 +348,10 @@ def project_background(
             polarizations=generator.polarizations,
         )
 
-    spectrum = _PAIR_RESPONSE_DENOMINATOR * np.asarray(incoherent) / observation_seconds
-    return BackgroundDraw(np.asarray(frequencies), spectrum, np.array([count]))
+    spectrum = _PAIR_RESPONSE_DENOMINATOR * incoherent / observation_seconds
+    return BackgroundDraw(
+        np.asarray(frequencies), np.asarray(spectrum), np.array([count])
+    )
 
 
 def simulate_background(
@@ -444,11 +446,11 @@ def simulate_background(
     )
 
     # Keep the incoherent mean and scale the zero-mean fluctuations by r_i.
-    ratio = 1.0 / np.sqrt(modes)
+    ratio = 1.0 / jnp.sqrt(modes)
     blended = (1.0 - ratio) * incoherent + ratio * coherent
     observation_seconds = len(counts) * segment_duration
     spectrum = _PAIR_RESPONSE_DENOMINATOR * blended / observation_seconds
-    return BackgroundDraw(np.asarray(frequencies), spectrum, counts)
+    return BackgroundDraw(np.asarray(frequencies), np.asarray(spectrum), counts)
 
 
 def _draw_events(
@@ -521,13 +523,12 @@ def _network_geometry(network: Network) -> _Geometry:
 
 def _network_psds(network: Network, frequencies: ArrayLike) -> jax.Array:
     """The ``(D, F)`` noise PSDs in the detector order of :func:`_network_geometry`."""
-    frequencies = np.asarray(frequencies)
-    return jnp.asarray(
-        np.stack([network[name].sensitivity(frequencies) for name in sorted(network)])
+    return jnp.stack(
+        [network[name].sensitivity(frequencies) for name in sorted(network)]
     )
 
 
-def _modes_per_bin(frequencies: ArrayLike, segment_duration: float) -> NDArray:
+def _modes_per_bin(frequencies: ArrayLike, segment_duration: float) -> jax.Array:
     """The ``(F,)`` count of a segment's Fourier modes in each frequency bin.
 
     Raises
@@ -535,8 +536,8 @@ def _modes_per_bin(frequencies: ArrayLike, segment_duration: float) -> NDArray:
     ValueError
         If a bin holds fewer than one or a fractional number of modes.
     """
-    modes = segment_duration * np.asarray(bin_widths(frequencies), dtype=np.float64)
-    whole = np.allclose(modes, np.round(modes), rtol=0.0, atol=_MODE_TOLERANCE)
+    modes = segment_duration * bin_widths(frequencies)
+    whole = jnp.allclose(modes, jnp.round(modes), rtol=0.0, atol=_MODE_TOLERANCE)
     if modes.min() < 1.0 or not whole:
         raise ValueError(
             f"every bin must hold a whole number of the {segment_duration} s "
@@ -694,7 +695,7 @@ def _segmented_pair_powers(
     segment_duration: float,
     chunk_size: int,
     segment_batch_size: int,
-) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+) -> tuple[jax.Array, jax.Array]:
     """The incoherent and coherent ``(P, F)`` cross-powers of a segmented draw.
 
     The incoherent power is :math:`\\sum_i K_{ab,i}` and the coherent power
@@ -703,7 +704,9 @@ def _segmented_pair_powers(
     ``s`` holding ``counts[s]`` consecutive rows.
 
     Segments are processed ``segment_batch_size`` at a time, and the rows of a
-    batch ``chunk_size`` at a time, so that both kernels compile once.
+    batch ``chunk_size`` at a time, so that both kernels compile once. The row
+    bookkeeping stays in NumPy: its lengths vary with the draw, and every new
+    length would compile a new jax operation.
     """
     num_segments = len(counts)
     batch_size = min(segment_batch_size, num_segments)
@@ -743,4 +746,4 @@ def _segmented_pair_powers(
             segment_duration,
             num_segments,
         )
-    return np.asarray(incoherent), np.asarray(coherent)
+    return incoherent, coherent
